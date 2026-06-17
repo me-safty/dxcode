@@ -169,7 +169,7 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
-import { PanelLayoutControls } from "./chat/PanelLayoutControls";
+import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
@@ -1331,9 +1331,8 @@ function ChatViewContent(props: ChatViewProps) {
   const planSidebarOpen = activeRightPanelKind === "plan";
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
-  const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized =
-    canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
+    rightPanelOpen && !shouldUsePlanSidebarSheet && maximizedRightPanelThreadKey === routeThreadKey;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
 
   useEffect(() => {
@@ -3114,7 +3113,7 @@ function ChatViewContent(props: ChatViewProps) {
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
   }, [activeThreadRef, closePlanSidebar, closePreviewPanel, planSidebarOpen, rightPanelOpen]);
   const toggleRightPanelMaximized = () => {
-    if (!canMaximizeRightPanel) return;
+    if (!rightPanelOpen || shouldUsePlanSidebarSheet) return;
     setMaximizedRightPanelThreadKey((threadKey) =>
       threadKey === routeThreadKey ? null : routeThreadKey,
     );
@@ -4589,7 +4588,7 @@ function ChatViewContent(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
-  const panelLayoutControls = (
+  const panelToggleControls = (
     <PanelLayoutControls
       terminalAvailable={Boolean(activeProject)}
       terminalOpen={Boolean(terminalUiState.terminalOpen)}
@@ -4597,28 +4596,20 @@ function ChatViewContent(props: ChatViewProps) {
       rightPanelAvailable={Boolean(activeProject)}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={rightPanelToggleShortcutLabel}
-      rightPanelMaximized={rightPanelMaximized}
-      canMaximizeRightPanel={canMaximizeRightPanel}
       onToggleTerminal={toggleTerminalVisibility}
       onToggleRightPanel={toggleRightPanel}
-      onToggleRightPanelMaximized={toggleRightPanelMaximized}
     />
   );
-  const sheetPanelLayoutControls = (
-    <PanelLayoutControls
-      placement="panel-header"
-      terminalAvailable={Boolean(activeProject)}
-      terminalOpen={Boolean(terminalUiState.terminalOpen)}
-      terminalShortcutLabel={terminalToggleShortcutLabel}
-      rightPanelAvailable={Boolean(activeProject)}
-      rightPanelOpen={rightPanelOpen}
-      rightPanelShortcutLabel={rightPanelToggleShortcutLabel}
-      rightPanelMaximized={rightPanelMaximized}
-      canMaximizeRightPanel={canMaximizeRightPanel}
-      onToggleTerminal={toggleTerminalVisibility}
-      onToggleRightPanel={toggleRightPanel}
-      onToggleRightPanelMaximized={toggleRightPanelMaximized}
-    />
+  const panelLayoutControls = (
+    <div className="workspace-titlebar-controls z-50 gap-1 [-webkit-app-region:no-drag]">
+      {rightPanelOpen && !shouldUsePlanSidebarSheet ? (
+        <RightPanelMaximizeControl
+          maximized={rightPanelMaximized}
+          onToggle={toggleRightPanelMaximized}
+        />
+      ) : null}
+      {panelToggleControls}
+    </div>
   );
   const rightPanelContent = activeThreadRef ? (
     activeRightPanelSurface?.kind === "preview" ? (
@@ -4689,7 +4680,7 @@ function ChatViewContent(props: ChatViewProps) {
       {isElectron && activeThreadRef ? (
         <PreviewAutomationOwner threadRef={activeThreadRef} visible={previewPanelOpen} />
       ) : null}
-      {rightPanelOpen ? panelLayoutControls : null}
+      {rightPanelOpen && !shouldUsePlanSidebarSheet ? panelLayoutControls : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-hidden",
@@ -4962,7 +4953,7 @@ function ChatViewContent(props: ChatViewProps) {
         <RightPanelSheet open onClose={planSidebarOpen ? closePlanSidebar : closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"
-            headerControls={sheetPanelLayoutControls}
+            layoutControls={panelToggleControls}
             surfaces={rightPanelState.surfaces}
             activeSurfaceId={activeRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}

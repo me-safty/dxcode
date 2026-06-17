@@ -2110,6 +2110,48 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the compact chat header on one row", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-compact-header" as MessageId,
+        targetText: "keep the compact header aligned",
+      }),
+    });
+
+    try {
+      const chatHeader = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-chat-header]"),
+        "Unable to find chat header.",
+      );
+      const threadTitle = await waitForElement(
+        () => chatHeader.querySelector<HTMLElement>("h2"),
+        "Unable to find thread title.",
+      );
+      const headerActions = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-chat-header-actions]"),
+        "Unable to find chat header actions.",
+      );
+
+      const headerRect = chatHeader.getBoundingClientRect();
+      const titleRect = threadTitle.getBoundingClientRect();
+      const actionsRect = headerActions.getBoundingClientRect();
+      const headerCenter = headerRect.top + headerRect.height / 2;
+
+      expect(headerRect.height).toBe(52);
+      expect(titleRect.top).toBeGreaterThanOrEqual(headerRect.top);
+      expect(titleRect.bottom).toBeLessThanOrEqual(headerRect.bottom);
+      expect(actionsRect.top).toBeGreaterThanOrEqual(headerRect.top);
+      expect(actionsRect.bottom).toBeLessThanOrEqual(headerRect.bottom);
+      expect(Math.abs(titleRect.top + titleRect.height / 2 - headerCenter)).toBeLessThanOrEqual(1);
+      expect(Math.abs(actionsRect.top + actionsRect.height / 2 - headerCenter)).toBeLessThanOrEqual(
+        1,
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps panel toggles fixed and can maximize the right panel", async () => {
     const mounted = await mountChatView({
       viewport: WIDE_FOOTER_VIEWPORT,
@@ -2353,12 +2395,34 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => sheet.querySelector<HTMLElement>("[data-panel-layout-controls]"),
         "Unable to find shared controls in the responsive right-panel sheet.",
       );
+      const tabbar = await waitForElement(
+        () => sheet.querySelector<HTMLElement>("[data-right-panel-tabbar]"),
+        "Unable to find responsive right-panel tabbar.",
+      );
+      const controlButtons = Array.from(controls.querySelectorAll<HTMLButtonElement>("button"));
+      const tabbarRect = tabbar.getBoundingClientRect();
+      const controlsRect = controls.getBoundingClientRect();
 
+      expect(controlButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
+        "Toggle terminal drawer",
+        "Toggle right panel",
+      ]);
+      expect(tabbarRect.height).toBe(52);
+      expect(controlsRect.height).toBe(52);
+      expect(controlsRect.top).toBe(tabbarRect.top);
+      expect(window.innerWidth - controlsRect.right).toBe(12);
+      for (const button of controlButtons) {
+        const rect = button.getBoundingClientRect();
+        const buttonCenter = rect.top + rect.height / 2;
+        const tabbarCenter = tabbarRect.top + tabbarRect.height / 2;
+        expect(rect.width).toBe(32);
+        expect(rect.height).toBe(32);
+        expect(Math.abs(buttonCenter - tabbarCenter)).toBeLessThanOrEqual(1);
+      }
       expect(
-        Array.from(controls.querySelectorAll<HTMLButtonElement>("button")).map((button) =>
-          button.getAttribute("aria-label"),
-        ),
-      ).toEqual(["Toggle terminal drawer", "Toggle right panel"]);
+        controlButtons[1]!.getBoundingClientRect().left -
+          controlButtons[0]!.getBoundingClientRect().right,
+      ).toBe(4);
       expect(sheet.querySelector('button[aria-label="Maximize panel"]')).toBeNull();
       expect(sheet.querySelector('button[aria-label="Close tasks sidebar"]')).toBeNull();
 
