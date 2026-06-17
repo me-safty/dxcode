@@ -499,6 +499,11 @@ const make = Effect.gen(function* () {
         return;
       }
 
+      const hasGit = yield* checkpointStore.isGitRepository(checkpointCwd);
+      if (!hasGit) {
+        return;
+      }
+
       const currentTurnCount = thread.checkpoints.reduce(
         (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
         0,
@@ -578,6 +583,11 @@ const make = Effect.gen(function* () {
       preferSessionRuntime: false,
     });
     if (!checkpointCwd) {
+      return;
+    }
+
+    const hasGit = yield* checkpointStore.isGitRepository(checkpointCwd);
+    if (!hasGit) {
       return;
     }
 

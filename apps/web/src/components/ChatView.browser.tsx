@@ -5511,6 +5511,108 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("updates the draft thread model selection when picking a model before send", async () => {
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-draft-model-picker-target" as MessageId,
+      targetText: "draft model picker thread",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...baseSnapshot,
+        projects: baseSnapshot.projects.map((project) =>
+          project.id === PROJECT_ID
+            ? {
+                ...project,
+                defaultModelSelection: {
+                  instanceId: ProviderInstanceId.make("codex"),
+                  model: "gpt-5.3-codex",
+                },
+              }
+            : project,
+        ),
+        threads: baseSnapshot.threads.map((thread) =>
+          thread.id === THREAD_ID
+            ? Object.assign({}, thread, {
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("codex"),
+                  model: "gpt-5.3-codex",
+                },
+              })
+            : thread,
+        ),
+      },
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            {
+              ...nextFixture.serverConfig.providers[0]!,
+              models: [
+                {
+                  slug: "gpt-5.3-codex",
+                  name: "GPT-5.3 Codex",
+                  isCustom: false,
+                  capabilities: createModelCapabilities({
+                    optionDescriptors: [
+                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                    ],
+                  }),
+                },
+                {
+                  slug: "gpt-5.4",
+                  name: "GPT-5.4",
+                  isCustom: false,
+                  capabilities: createModelCapabilities({
+                    optionDescriptors: [
+                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                    ],
+                  }),
+                },
+              ],
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await waitForComposerEditor();
+
+      const newThreadButton = page.getByTestId("new-thread-button");
+      await expect.element(newThreadButton).toBeInTheDocument();
+      await newThreadButton.click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a draft thread UUID.",
+      );
+      const draftId = draftIdFromPath(newThreadPath);
+
+      await vi.waitFor(() => {
+        expect(findComposerProviderModelPicker()).not.toBeNull();
+      });
+      await findComposerProviderModelPicker()!.click();
+      await page.getByText("GPT-5.4").first().click();
+
+      await vi.waitFor(() => {
+        expect(composerDraftFor(draftId)).toMatchObject({
+          modelSelectionByProvider: {
+            codex: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5.4",
+            },
+          },
+          activeProvider: "codex",
+        });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("creates a new thread from the global chat.new shortcut", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

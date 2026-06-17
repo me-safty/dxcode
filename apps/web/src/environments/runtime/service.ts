@@ -674,7 +674,8 @@ function isDesktopSshTargetEqual(
     left.alias === right.alias &&
     left.hostname === right.hostname &&
     left.username === right.username &&
-    left.port === right.port
+    left.port === right.port &&
+    left.identityFile === right.identityFile
   );
 }
 

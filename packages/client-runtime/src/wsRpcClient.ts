@@ -179,6 +179,19 @@ export interface WsRpcClient {
       onProgress?: (event: RelayClientInstallProgressEvent) => void,
     ) => Promise<RelayClientStatus>;
   };
+  readonly speechToText: {
+    readonly transcribe: RpcUnaryMethod<typeof WS_METHODS.speechToTextTranscribe>;
+  };
+  readonly antigravity: {
+    readonly listAccounts: RpcUnaryNoArgMethod<typeof WS_METHODS.antigravityListAccounts>;
+    readonly detectAccount: RpcUnaryNoArgMethod<typeof WS_METHODS.antigravityDetectAccount>;
+    readonly saveAccount: RpcUnaryMethod<typeof WS_METHODS.antigravitySaveAccount>;
+    readonly switchAccount: RpcUnaryMethod<typeof WS_METHODS.antigravitySwitchAccount>;
+    readonly removeAccount: RpcUnaryMethod<typeof WS_METHODS.antigravityRemoveAccount>;
+    readonly dismissDetectedAccount: RpcUnaryMethod<
+      typeof WS_METHODS.antigravityDismissDetectedAccount
+    >;
+  };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
@@ -411,6 +424,24 @@ export function createWsRpcClient(
         }
         throw new Error("Relay client install stream completed without a final status.");
       },
+    },
+    speechToText: {
+      transcribe: (input) =>
+        transport.request((client) => client[WS_METHODS.speechToTextTranscribe](input)),
+    },
+    antigravity: {
+      listAccounts: () =>
+        transport.request((client) => client[WS_METHODS.antigravityListAccounts]({})),
+      detectAccount: () =>
+        transport.request((client) => client[WS_METHODS.antigravityDetectAccount]({})),
+      saveAccount: (input) =>
+        transport.request((client) => client[WS_METHODS.antigravitySaveAccount](input)),
+      switchAccount: (input) =>
+        transport.request((client) => client[WS_METHODS.antigravitySwitchAccount](input)),
+      removeAccount: (input) =>
+        transport.request((client) => client[WS_METHODS.antigravityRemoveAccount](input)),
+      dismissDetectedAccount: (input) =>
+        transport.request((client) => client[WS_METHODS.antigravityDismissDetectedAccount](input)),
     },
     orchestration: {
       dispatchCommand: (input) =>

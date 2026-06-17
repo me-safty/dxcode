@@ -73,6 +73,7 @@ describe("sshEnvironment", () => {
           hostname: "bastion.example.com",
           username: null,
           port: null,
+          identityFile: null,
           source: "known-hosts",
         },
         {
@@ -80,6 +81,7 @@ describe("sshEnvironment", () => {
           hostname: "devbox",
           username: null,
           port: null,
+          identityFile: null,
           source: "ssh-config",
         },
         {
@@ -87,6 +89,7 @@ describe("sshEnvironment", () => {
           hostname: "known.example.com",
           username: null,
           port: null,
+          identityFile: null,
           source: "known-hosts",
         },
         {
@@ -94,6 +97,7 @@ describe("sshEnvironment", () => {
           hostname: "staging",
           username: null,
           port: null,
+          identityFile: null,
           source: "ssh-config",
         },
       ]);

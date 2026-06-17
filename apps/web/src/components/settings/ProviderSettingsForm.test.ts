@@ -36,6 +36,19 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("exposes Antigravity daemon settings", () => {
+    const antigravity = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("antigravity")];
+    expect(antigravity).toBeDefined();
+
+    expect(deriveProviderSettingsFields(antigravity!).map((field) => field.key)).toEqual([
+      "binaryPath",
+      "brainPath",
+      "settingsPath",
+      "languageServerAddress",
+      "csrfToken",
+    ]);
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

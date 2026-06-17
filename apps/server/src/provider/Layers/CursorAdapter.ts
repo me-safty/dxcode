@@ -1125,6 +1125,15 @@ export function makeCursorAdapter(
         return { threadId, turns: ctx.turns };
       });
 
+    const compactThread: CursorAdapterShape["compactThread"] = (threadId) =>
+      Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "compactThread",
+          detail: `Provider '${PROVIDER}' does not support explicit context compaction yet for thread '${threadId}'.`,
+        }),
+      );
+
     const stopSession: CursorAdapterShape["stopSession"] = (threadId) =>
       withThreadLock(
         threadId,
@@ -1166,6 +1175,7 @@ export function makeCursorAdapter(
       interruptTurn,
       readThread,
       rollbackThread,
+      compactThread,
       respondToRequest,
       respondToUserInput,
       stopSession,

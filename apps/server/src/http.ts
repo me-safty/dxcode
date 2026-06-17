@@ -43,6 +43,9 @@ import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./ht
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const STATIC_APP_HEADERS = {
+  "Permissions-Policy": "microphone=(self)",
+} as const;
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -282,6 +285,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.uint8Array(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
+        headers: STATIC_APP_HEADERS,
       });
     }
 
@@ -294,6 +298,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     return HttpServerResponse.uint8Array(data, {
       status: 200,
       contentType,
+      headers: STATIC_APP_HEADERS,
     });
   }),
 );

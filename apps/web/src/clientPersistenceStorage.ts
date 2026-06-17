@@ -25,6 +25,7 @@ const BrowserSavedEnvironmentRecordSchema = Schema.Struct({
       hostname: Schema.String,
       username: Schema.NullOr(Schema.String),
       port: Schema.NullOr(Schema.Number),
+      identityFile: Schema.NullOr(Schema.String),
     }),
   ),
   relayManaged: Schema.optionalKey(Schema.Struct({ relayUrl: Schema.String })),

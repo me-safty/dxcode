@@ -33,11 +33,13 @@ import {
   buildSshHostSpecEffect,
   collectProcessOutput,
   getLastNonEmptyOutputLine,
+  normalizeSshIdentityFilePath,
   remoteStateKey,
   resolveSshCommand,
   resolveSshTarget,
   runSshCommand,
   targetConnectionKey,
+  targetUsesSshIdentityFile,
 } from "./command.ts";
 import {
   SshCommandError,
@@ -54,8 +56,11 @@ const REMOTE_PORT_SCAN_WINDOW = 200;
 const SSH_READY_TIMEOUT_MS = 20_000;
 const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
-const REMOTE_READY_TIMEOUT_MS = 15_000;
-const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
+// Cold SSH launches often run `npx --yes t3@version serve`, which can take minutes on
+// first install for slow VPS hosts before the server starts listening.
+const REMOTE_READY_TIMEOUT_MS = 180_000;
+const REMOTE_REUSE_READY_TIMEOUT_MS = 20_000;
+const REMOTE_LAUNCH_SSH_COMMAND_TIMEOUT_MS = REMOTE_READY_TIMEOUT_MS + 60_000;
 
 export interface RemoteT3RunnerOptions {
   readonly packageSpec?: string;
@@ -112,8 +117,46 @@ function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
     hostname: target.hostname,
     username: target.username,
     port: target.port,
+    hasIdentityFile: targetUsesSshIdentityFile(target),
   };
 }
+
+function mergeManualSshTargetOverrides(
+  baseResolved: DesktopSshEnvironmentTarget,
+  target: DesktopSshEnvironmentTarget,
+): DesktopSshEnvironmentTarget {
+  const identityFile = normalizeSshIdentityFilePath(target.identityFile);
+  return {
+    ...baseResolved,
+    ...(target.username !== null ? { username: target.username } : {}),
+    ...(target.port !== null ? { port: target.port } : {}),
+    ...(identityFile ? { identityFile } : {}),
+  };
+}
+
+const validateSshIdentityFile = Effect.fn("ssh/tunnel.validateSshIdentityFile")(function* (
+  target: DesktopSshEnvironmentTarget,
+): Effect.fn.Return<void, SshInvalidTargetError, FileSystem.FileSystem> {
+  const identityFile = normalizeSshIdentityFilePath(target.identityFile);
+  if (identityFile === null) {
+    return;
+  }
+
+  const fs = yield* FileSystem.FileSystem;
+  const exists = yield* fs.exists(identityFile).pipe(
+    Effect.mapError(
+      () =>
+        new SshInvalidTargetError({
+          message: `Failed to access SSH identity file: ${identityFile}`,
+        }),
+    ),
+  );
+  if (!exists) {
+    return yield* new SshInvalidTargetError({
+      message: `SSH identity file not found: ${identityFile}`,
+    });
+  }
+});
 
 function sshRunnerLogFields(runner: RemoteT3RunnerOptions | undefined) {
   if (runner?.nodeScriptPath?.trim()) {
@@ -603,6 +646,9 @@ if [ -z "$REMOTE_PORT" ]; then
   printf 'managed\\n' >"$MANAGED_FILE"
   if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
     printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
+    if [ ! -s "$LOG_FILE" ]; then
+      printf 'The remote server log is still empty. First-time installs via npx can take several minutes on slow hosts; retry once the package cache warms up.\\n' >&2
+    fi
     tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
     kill "$REMOTE_PID" 2>/dev/null || true
     wait_for_pid_exit "$REMOTE_PID"
@@ -728,6 +774,7 @@ export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemo
     const result = yield* runSshCommand(target, {
       remoteCommandArgs: ["sh", "-s", "--", remoteStateKey(target)],
       stdin: buildRemoteLaunchScript(runner),
+      timeoutMs: REMOTE_LAUNCH_SSH_COMMAND_TIMEOUT_MS,
       ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
       ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
       ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
@@ -1346,7 +1393,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         cause: input.error,
       });
       const promptService = yield* SshPasswordPrompt;
-      if (!promptService.isAvailable) {
+      if (!promptService.isAvailable || targetUsesSshIdentityFile(input.target)) {
         return yield* input.error;
       }
       if (input.authSecret !== null) {
@@ -1371,8 +1418,12 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     input: SshAuthAttemptInput<T>,
   ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
     const promptService = yield* SshPasswordPrompt;
-    const authOptions =
-      input.authSecret === null
+    const authOptions = targetUsesSshIdentityFile(input.target)
+      ? {
+          batchMode: "yes" as const,
+          interactiveAuth: false,
+        }
+      : input.authSecret === null
         ? {
             batchMode: promptService.isAvailable ? ("yes" as const) : ("no" as const),
             interactiveAuth: !promptService.isAvailable,
@@ -1596,11 +1647,8 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       issuePairingToken: requestOptions?.issuePairingToken === true,
     });
     const baseResolved = yield* resolveSshTarget(target.alias || target.hostname);
-    const resolvedTarget: DesktopSshEnvironmentTarget = {
-      ...baseResolved,
-      ...(target.username !== null ? { username: target.username } : {}),
-      ...(target.port !== null ? { port: target.port } : {}),
-    };
+    const resolvedTarget = mergeManualSshTargetOverrides(baseResolved, target);
+    yield* validateSshIdentityFile(resolvedTarget);
     const key = targetConnectionKey(resolvedTarget);
     yield* Effect.logDebug("ssh.environment.target.resolved", {
       ...sshTargetLogFields(resolvedTarget),
@@ -1652,11 +1700,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
   ): Effect.fn.Return<void, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
     yield* Effect.logInfo("ssh.environment.disconnect.start", sshTargetLogFields(target));
     const baseResolved = yield* resolveSshTarget(target.alias || target.hostname);
-    const resolvedTarget: DesktopSshEnvironmentTarget = {
-      ...baseResolved,
-      ...(target.username !== null ? { username: target.username } : {}),
-      ...(target.port !== null ? { port: target.port } : {}),
-    };
+    const resolvedTarget = mergeManualSshTargetOverrides(baseResolved, target);
     const key = targetConnectionKey(resolvedTarget);
     const entry = tunnels.get(key) ?? null;
     yield* Effect.logDebug("ssh.environment.disconnect.targetResolved", {

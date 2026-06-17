@@ -110,6 +110,16 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type { SpeechToTextTranscribeInput, SpeechToTextTranscribeResult } from "./speech.ts";
+import type {
+  AntigravityAccountDismissInput,
+  AntigravityAccountRemoveInput,
+  AntigravityAccountSaveInput,
+  AntigravityAccountSwitchInput,
+  AntigravityAccountsListResult,
+  AntigravityAccountDetection,
+  AntigravityAccountsRegistry,
+} from "./antigravityAccounts.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -276,6 +286,7 @@ export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
   hostname: Schema.String,
   username: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
+  identityFile: Schema.NullOr(Schema.String),
 });
 export type DesktopSshEnvironmentTarget = typeof DesktopSshEnvironmentTargetSchema.Type;
 
@@ -291,6 +302,7 @@ export const DesktopDiscoveredSshHostSchema = Schema.Struct({
   hostname: Schema.String,
   username: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
+  identityFile: Schema.NullOr(Schema.String),
   source: DesktopSshHostSourceSchema,
 });
 
@@ -1079,6 +1091,19 @@ export interface LocalApi {
       input: ServerProcessResourceHistoryInput,
     ) => Promise<ServerProcessResourceHistoryResult>;
     signalProcess: (input: ServerSignalProcessInput) => Promise<ServerSignalProcessResult>;
+  };
+  speechToText: {
+    transcribe: (input: SpeechToTextTranscribeInput) => Promise<SpeechToTextTranscribeResult>;
+  };
+  antigravity: {
+    listAccounts: () => Promise<AntigravityAccountsListResult>;
+    detectAccount: () => Promise<AntigravityAccountDetection>;
+    saveAccount: (input: AntigravityAccountSaveInput) => Promise<AntigravityAccountsRegistry>;
+    switchAccount: (input: AntigravityAccountSwitchInput) => Promise<AntigravityAccountsRegistry>;
+    removeAccount: (input: AntigravityAccountRemoveInput) => Promise<AntigravityAccountsRegistry>;
+    dismissDetectedAccount: (
+      input: AntigravityAccountDismissInput,
+    ) => Promise<AntigravityAccountsRegistry>;
   };
 }
 

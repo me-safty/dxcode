@@ -164,6 +164,38 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
           ? rpcClient.server.signalProcess(input)
           : Promise.reject(unavailableLocalBackendError()),
     },
+    speechToText: {
+      transcribe: (input) =>
+        rpcClient
+          ? rpcClient.speechToText.transcribe(input)
+          : Promise.reject(unavailableLocalBackendError()),
+    },
+    antigravity: {
+      listAccounts: () =>
+        rpcClient
+          ? rpcClient.antigravity.listAccounts()
+          : Promise.reject(unavailableLocalBackendError()),
+      detectAccount: () =>
+        rpcClient
+          ? rpcClient.antigravity.detectAccount()
+          : Promise.reject(unavailableLocalBackendError()),
+      saveAccount: (input) =>
+        rpcClient
+          ? rpcClient.antigravity.saveAccount(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      switchAccount: (input) =>
+        rpcClient
+          ? rpcClient.antigravity.switchAccount(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      removeAccount: (input) =>
+        rpcClient
+          ? rpcClient.antigravity.removeAccount(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      dismissDetectedAccount: (input) =>
+        rpcClient
+          ? rpcClient.antigravity.dismissDetectedAccount(input)
+          : Promise.reject(unavailableLocalBackendError()),
+    },
   };
 }
 

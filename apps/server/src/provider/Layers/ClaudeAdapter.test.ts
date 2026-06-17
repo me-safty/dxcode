@@ -2628,6 +2628,69 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("promotes rejected Claude rate limits to runtime errors", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hit the limit",
+        attachments: [],
+      });
+      yield* Stream.take(adapter.streamEvents, 1).pipe(Stream.runDrain);
+
+      harness.query.emit({
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "rejected",
+          rateLimitType: "five_hour",
+          resetsAt: 1_787_968_800,
+          overageStatus: "rejected",
+          overageDisabledReason: "out_of_credits",
+        },
+        uuid: "rate-limit-rejected-1",
+        session_id: "sdk-session-rate-limit-1",
+      } as unknown as SDKMessage);
+
+      const events = Array.from(
+        yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runCollect),
+      );
+      const limitEvents = events.filter(
+        (event) =>
+          event.type === "account.rate-limits.updated" ||
+          event.type === "runtime.error" ||
+          event.type === "turn.completed",
+      );
+      assert.deepEqual(
+        limitEvents.map((event) => event.type),
+        ["account.rate-limits.updated", "runtime.error", "turn.completed"],
+      );
+      const runtimeError = limitEvents[1];
+      assert.equal(runtimeError?.type, "runtime.error");
+      if (runtimeError?.type === "runtime.error") {
+        assert.match(runtimeError.payload.message, /five hour limit has been exhausted/);
+        assert.match(runtimeError.payload.message, /out of credits/);
+      }
+      const completed = limitEvents[2];
+      assert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        assert.equal(completed.payload.state, "failed");
+        assert.match(completed.payload.errorMessage ?? "", /five hour limit has been exhausted/);
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("classifies Agent tools and read-only Claude tools correctly for approvals", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

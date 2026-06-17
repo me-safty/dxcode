@@ -73,6 +73,19 @@ const decodeElicitationComplete = Schema.decodeUnknownEffect(
 );
 const parserFactory = RpcSerialization.ndJsonRpc();
 
+/** Effect RPC request ids must be bigint-coercible; some agents use string extension ids. */
+function isEffectRpcRequestId(requestId: string): boolean {
+  if (requestId.length === 0) {
+    return false;
+  }
+  try {
+    BigInt(requestId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(function* (
   options: AcpPatchedProtocolOptions,
 ): Effect.fn.Return<AcpPatchedProtocol, never, Scope.Scope> {
@@ -312,6 +325,14 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     Ref.get(extPending).pipe(
       Effect.flatMap((pending) => {
         if (!pending.has(message.requestId)) {
+          if (!isEffectRpcRequestId(message.requestId)) {
+            return Effect.logDebug(
+              "Ignoring ACP exit for non-numeric request id (agent extension protocol)",
+            ).pipe(
+              Effect.annotateLogs({ requestId: message.requestId }),
+              Effect.asVoid,
+            );
+          }
           return Queue.offer(clientQueue, message).pipe(Effect.asVoid);
         }
         if (message.exit._tag === "Success") {
@@ -349,7 +370,14 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
                     "Streaming extension responses are not supported",
                   ),
                 )
-              : Queue.offer(clientQueue, message).pipe(Effect.asVoid),
+              : isEffectRpcRequestId(message.requestId)
+                ? Queue.offer(clientQueue, message).pipe(Effect.asVoid)
+                : Effect.logDebug(
+                    "Ignoring ACP chunk for non-numeric request id (agent extension protocol)",
+                  ).pipe(
+                    Effect.annotateLogs({ requestId: message.requestId }),
+                    Effect.asVoid,
+                  ),
           ),
         );
       case "Defect":

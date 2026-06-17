@@ -483,6 +483,9 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       });
     };
 
+    const compactThread: ProviderAdapterShape<ProviderAdapterError>["compactThread"] = () =>
+      Effect.void;
+
     const stopAll: ProviderAdapterShape<ProviderAdapterError>["stopAll"] = () =>
       Effect.sync(() => {
         sessions.clear();
@@ -503,6 +506,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       hasSession,
       readThread,
       rollbackThread,
+      compactThread,
       stopAll,
       streamEvents: Stream.fromQueue(runtimeEvents),
     };

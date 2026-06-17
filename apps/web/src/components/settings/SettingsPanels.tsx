@@ -672,6 +672,98 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Voice input"
+          description="Use Groq Whisper to transcribe microphone recordings in the composer."
+          resetAction={
+            settings.speechToText.groqModel !== DEFAULT_UNIFIED_SETTINGS.speechToText.groqModel ? (
+              <SettingResetButton
+                label="voice input model"
+                onClick={() =>
+                  updateSettings({
+                    speechToText: {
+                      ...settings.speechToText,
+                      groqModel: DEFAULT_UNIFIED_SETTINGS.speechToText.groqModel,
+                    },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto">
+              <DraftInput
+                className="w-full sm:w-72"
+                type="password"
+                value=""
+                onCommit={(next) => {
+                  const groqApiKey = next.trim();
+                  if (!groqApiKey) return;
+                  updateSettings({
+                    speechToText: {
+                      ...settings.speechToText,
+                      groqApiKey,
+                      groqApiKeyRedacted: false,
+                    },
+                  });
+                }}
+                placeholder={
+                  settings.speechToText.groqApiKeyRedacted ? "Stored Groq API key" : "Groq API key"
+                }
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="Groq API key"
+              />
+              {settings.speechToText.groqApiKeyRedacted ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    updateSettings({
+                      speechToText: {
+                        ...settings.speechToText,
+                        groqApiKey: "",
+                        groqApiKeyRedacted: false,
+                      },
+                    })
+                  }
+                >
+                  Clear
+                </Button>
+              ) : null}
+              <Select
+                value={settings.speechToText.groqModel}
+                onValueChange={(value) => {
+                  if (value === "whisper-large-v3" || value === "whisper-large-v3-turbo") {
+                    updateSettings({
+                      speechToText: {
+                        ...settings.speechToText,
+                        groqModel: value,
+                      },
+                    });
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-48" aria-label="Voice input model">
+                  <SelectValue>
+                    {settings.speechToText.groqModel === "whisper-large-v3-turbo"
+                      ? "Whisper Large v3 Turbo"
+                      : "Whisper Large v3"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="whisper-large-v3">
+                    Whisper Large v3
+                  </SelectItem>
+                  <SelectItem hideIndicator value="whisper-large-v3-turbo">
+                    Whisper Large v3 Turbo
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            </div>
+          }
+        />
+
+        <SettingsRow
           title="Auto-open task panel"
           description="Open the right-side plan and task panel automatically when steps appear."
           resetAction={
