@@ -291,7 +291,13 @@ interface StagePackageJson {
 }
 
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
-export const DESKTOP_ASAR_UNPACK = ["node_modules/@ff-labs/fff-bin-*/**/*"] as const;
+export const DESKTOP_ASAR_UNPACK = [
+  "node_modules/@ff-labs/fff-bin-*/**/*",
+  // ffi-rs (used by @ff-labs/fff-node) loads its prebuilt native addon from a
+  // platform-specific @yuuang/ffi-rs-* package. The `.node` must live outside
+  // the asar archive so Electron can dlopen it at runtime.
+  "node_modules/@yuuang/ffi-rs-*/**/*",
+] as const;
 
 export function resolveFffNativeDependencies(
   platform: typeof BuildPlatform.Type,
@@ -318,6 +324,88 @@ export function resolveFffNativeDependencies(
     ),
   );
 }
+
+export function resolveFfiRsNativeDependencies(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+  version: string,
+): Record<string, string> {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+
+  if (platform === "mac") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-darwin-${architecture}`, version]),
+    );
+  }
+
+  if (platform === "win") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-win32-${architecture}-msvc`, version]),
+    );
+  }
+
+  return Object.fromEntries(
+    architectures.flatMap((architecture) =>
+      ["gnu", "musl"].map((libc) => [`@yuuang/ffi-rs-linux-${architecture}-${libc}`, version]),
+    ),
+  );
+}
+
+// ffi-rs is a transitive dependency (via @ff-labs/fff-node), so its version is
+// not declared in any package.json. Its prebuilt @yuuang/ffi-rs-* bindings are
+// published in lockstep with ffi-rs, so we read the resolved version from the
+// lockfile to pin the binding we promote into the staged install.
+export function parseFfiRsLockfileVersion(lockfileContents: string): string {
+  const versions = new Set<string>();
+  const pattern = /(?:^|\n) {2}ffi-rs@([^:\s(]+):/g;
+  for (const match of lockfileContents.matchAll(pattern)) {
+    const version = match[1];
+    if (version !== undefined) {
+      versions.add(version);
+    }
+  }
+
+  const uniqueVersions = [...versions];
+  if (uniqueVersions.length > 1) {
+    throw new Error(
+      `Expected a single ffi-rs version in pnpm-lock.yaml but found: ${uniqueVersions.sort().join(", ")}.`,
+    );
+  }
+
+  const [version] = uniqueVersions;
+  if (version === undefined) {
+    throw new Error("Could not find ffi-rs in pnpm-lock.yaml.");
+  }
+
+  return version;
+}
+
+const resolveFfiRsBindingVersion = Effect.fn("resolveFfiRsBindingVersion")(function* (
+  repoRoot: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const lockfileContents = yield* fs
+    .readFileString(path.join(repoRoot, "pnpm-lock.yaml"))
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new BuildScriptError({
+            message: "Could not read pnpm-lock.yaml to resolve ffi-rs native bindings.",
+            cause,
+          }),
+      ),
+    );
+
+  return yield* Effect.try({
+    try: () => parseFfiRsLockfileVersion(lockfileContents),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: "Could not resolve the ffi-rs native binding version from pnpm-lock.yaml.",
+        cause,
+      }),
+  });
+});
 
 export function createStageWorkspaceConfig(
   platform: typeof BuildPlatform.Type,
@@ -956,14 +1044,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
 
+  const fffNodeVersion = serverPackageJson.dependencies["@ff-labs/fff-node"];
+  const ffiRsNativeDependencies = fffNodeVersion
+    ? resolveFfiRsNativeDependencies(
+        options.platform,
+        options.arch,
+        yield* resolveFfiRsBindingVersion(repoRoot),
+      )
+    : {};
   const stageDependencies = {
     ...resolvedServerDependencies,
     ...resolvedDesktopRuntimeDependencies,
-    ...resolveFffNativeDependencies(
-      options.platform,
-      options.arch,
-      serverPackageJson.dependencies["@ff-labs/fff-node"],
-    ),
+    ...resolveFffNativeDependencies(options.platform, options.arch, fffNodeVersion),
+    ...ffiRsNativeDependencies,
   };
   const stagePnpmConfig = createStagePnpmConfig(workspacePatchedDependencies, stageDependencies);
   const stagePackageJson: StagePackageJson = {

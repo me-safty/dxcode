@@ -9,7 +9,9 @@ import {
   createStageWorkspaceConfig,
   createStagePnpmConfig,
   DESKTOP_ASAR_UNPACK,
+  parseFfiRsLockfileVersion,
   resolveDesktopRuntimeDependencies,
+  resolveFfiRsNativeDependencies,
   resolveFffNativeDependencies,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
@@ -171,8 +173,55 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
   });
 
-  it("unpacks the fff shared library for filesystem and FFI access", () => {
-    assert.deepStrictEqual(DESKTOP_ASAR_UNPACK, ["node_modules/@ff-labs/fff-bin-*/**/*"]);
+  it("unpacks the fff shared library and ffi-rs native bindings for FFI access", () => {
+    assert.deepStrictEqual(DESKTOP_ASAR_UNPACK, [
+      "node_modules/@ff-labs/fff-bin-*/**/*",
+      "node_modules/@yuuang/ffi-rs-*/**/*",
+    ]);
+  });
+
+  it("promotes the target ffi-rs native binding to a direct staged dependency", () => {
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("mac", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("mac", "universal", "1.3.2"), {
+      "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
+      "@yuuang/ffi-rs-darwin-x64": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("win", "x64", "1.3.2"), {
+      "@yuuang/ffi-rs-win32-x64-msvc": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("win", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-win32-arm64-msvc": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("linux", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-linux-arm64-gnu": "1.3.2",
+      "@yuuang/ffi-rs-linux-arm64-musl": "1.3.2",
+    });
+  });
+
+  it("reads the single resolved ffi-rs version from the lockfile", () => {
+    const lockfile = [
+      "packages:",
+      "  fetch-nodeshim@0.4.10: {}",
+      "  ffi-rs@1.3.2:",
+      "    resolution: {integrity: sha512-deadbeef==}",
+      "  fill-range@7.1.1:",
+      "snapshots:",
+      "  ffi-rs@1.3.2:",
+      "    optionalDependencies:",
+      "      '@yuuang/ffi-rs-win32-x64-msvc': 1.3.2",
+      "",
+    ].join("\n");
+    assert.equal(parseFfiRsLockfileVersion(lockfile), "1.3.2");
+  });
+
+  it("fails when ffi-rs is absent or resolves to multiple versions", () => {
+    assert.throws(() => parseFfiRsLockfileVersion("packages:\n  effect@4.0.0: {}\n"), /Could not find ffi-rs/);
+    assert.throws(
+      () => parseFfiRsLockfileVersion("packages:\n  ffi-rs@1.3.2:\n  ffi-rs@1.4.0:\n"),
+      /single ffi-rs version/,
+    );
   });
 
   it("promotes target fff binaries to direct staged dependencies", () => {
