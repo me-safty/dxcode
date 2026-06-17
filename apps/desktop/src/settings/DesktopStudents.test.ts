@@ -14,7 +14,7 @@ const testStudent: Student = {
   id: StudentId.make("student-1"),
   name: "John Doe",
   phone: {
-    country: "+65",
+    country: "SG",
     number: "98765432",
   },
   parents: [
@@ -22,7 +22,7 @@ const testStudent: Student = {
       name: "Jane Doe",
       relationship: "Mother",
       phone: {
-        country: "+65",
+        country: "SG",
         number: "91234567",
       },
     },

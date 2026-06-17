@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { StudentId, type Student } from "@t3tools/contracts";
+import { StudentId, type Student, type CountryCode } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -29,7 +29,7 @@ interface FormState {
 }
 
 function phoneValueFromContract(
-  phone: { country: string; number: string } | undefined,
+  phone: { country: CountryCode; number: string } | undefined,
 ): PhoneValue | undefined {
   if (!phone) return undefined;
   return {
@@ -42,13 +42,13 @@ function phoneValueToContract(
   phone: PhoneValue | undefined,
 ):
   | {
-      readonly country: string;
+      readonly country: CountryCode;
       readonly number: string;
     }
   | undefined {
   if (!phone || !phone.number.trim()) return undefined;
   return {
-    country: phone.countryCode,
+    country: phone.countryCode as CountryCode,
     number: phone.number.trim(),
   };
 }
@@ -116,7 +116,7 @@ function parentsFromContract(
     | ReadonlyArray<{
         readonly name?: string;
         readonly relationship?: string;
-        readonly phone?: { readonly country: string; readonly number: string };
+        readonly phone?: { readonly country: CountryCode; readonly number: string };
       }>
     | undefined,
 ): ReadonlyArray<ParentInfo> {
@@ -134,7 +134,7 @@ function parentsToContract(
   | ReadonlyArray<{
       readonly name?: string;
       readonly relationship?: string;
-      readonly phone?: { readonly country: string; readonly number: string };
+      readonly phone?: { readonly country: CountryCode; readonly number: string };
     }>
   | undefined {
   const cleaned = parents.filter((parent) => {
@@ -149,7 +149,7 @@ function parentsToContract(
     const result: {
       name?: string;
       relationship?: string;
-      phone?: { country: string; number: string };
+      phone?: { country: CountryCode; number: string };
     } = {};
 
     if (parent.name.trim()) result.name = parent.name.trim();

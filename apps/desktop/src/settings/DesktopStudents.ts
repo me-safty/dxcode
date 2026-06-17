@@ -1,4 +1,4 @@
-import { Student, StudentId, StudentRegistryDocument } from "@t3tools/contracts";
+import { Student, StudentId, StudentRegistryDocument, CountryCode } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -20,7 +20,7 @@ interface StudentRegistryStorageDocument {
 }
 
 const PhoneNumberSchema = Schema.Struct({
-  country: Schema.String,
+  country: CountryCode,
   number: Schema.String,
 });
 

@@ -11,8 +11,15 @@ const makeEntityId = <Brand extends string>(brand: Brand) => {
 export const StudentId = makeEntityId("StudentId");
 export type StudentId = typeof StudentId.Type;
 
+export const CountryCode = Schema.Union([
+  Schema.Literal("SG"),
+  Schema.Literal("MY"),
+  Schema.Literal("CN"),
+]);
+export type CountryCode = typeof CountryCode.Type;
+
 export const PhoneNumber = Schema.Struct({
-  country: TrimmedNonEmptyString,
+  country: CountryCode,
   number: TrimmedNonEmptyString,
 });
 export type PhoneNumber = typeof PhoneNumber.Type;

@@ -64,7 +64,7 @@ export function StudentDetail({ student, onEdit, onDelete }: StudentDetailProps)
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">
-                  +{student.phone.country === "SG" ? "65" : student.phone.country === "MY" ? "60" : student.phone.country === "CN" ? "86" : student.phone.country} {student.phone.number}
+                  {student.phone.country === "SG" ? "+65" : student.phone.country === "MY" ? "+60" : student.phone.country === "CN" ? "+86" : ""} {student.phone.number}
                 </span>
                 <div className="flex gap-1">
                   {studentWhatsAppUrl && (
@@ -182,7 +182,7 @@ export function StudentDetail({ student, onEdit, onDelete }: StudentDetailProps)
                       {parent.phone && (
                         <div className="mt-1.5 flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">
-                            +{parent.phone.country === "SG" ? "65" : parent.phone.country === "MY" ? "60" : parent.phone.country === "CN" ? "86" : parent.phone.country} {parent.phone.number}
+                            {parent.phone.country === "SG" ? "+65" : parent.phone.country === "MY" ? "+60" : parent.phone.country === "CN" ? "+86" : ""} {parent.phone.number}
                           </span>
                           <div className="flex gap-1">
                             {parentWhatsAppUrl && (

@@ -60,10 +60,10 @@ describe("Students Schema", () => {
       }),
     );
 
-    it.effect("trims whitespace from country and number", () =>
+    it.effect("trims whitespace from number", () =>
       Effect.gen(function* () {
         const phone = yield* decodePhoneNumber({
-          country: "  SG  ",
+          country: "SG",
           number: "  91234567  ",
         });
 
@@ -71,6 +71,19 @@ describe("Students Schema", () => {
           country: "SG",
           number: "91234567",
         });
+      }),
+    );
+
+    it.effect("rejects country with whitespace", () =>
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(
+          decodePhoneNumber({
+            country: "  SG  ",
+            number: "91234567",
+          }),
+        );
+
+        assert.equal(Exit.isFailure(exit), true);
       }),
     );
 

@@ -27,7 +27,7 @@ export interface PhoneFieldProps {
 }
 
 export function PhoneField({ value, onChange, placeholder }: PhoneFieldProps) {
-  const countryCode = value?.countryCode ?? "+65";
+  const countryCode = value?.countryCode ?? "SG";
   const number = value?.number ?? "";
 
   return (
@@ -48,7 +48,7 @@ export function PhoneField({ value, onChange, placeholder }: PhoneFieldProps) {
         </SelectTrigger>
         <SelectPopup>
           {COUNTRIES.map((country) => (
-            <SelectItem key={country.code} value={country.dialCode}>
+            <SelectItem key={country.code} value={country.code}>
               {country.code} {country.dialCode}
             </SelectItem>
           ))}
