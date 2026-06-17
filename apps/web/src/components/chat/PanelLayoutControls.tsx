@@ -7,6 +7,7 @@ import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PanelLayoutControlsProps {
+  placement?: "titlebar" | "panel-header";
   terminalAvailable: boolean;
   terminalOpen: boolean;
   terminalShortcutLabel: string | null;
@@ -21,6 +22,7 @@ interface PanelLayoutControlsProps {
 }
 
 export const PanelLayoutControls = memo(function PanelLayoutControls({
+  placement = "titlebar",
   terminalAvailable,
   terminalOpen,
   terminalShortcutLabel,
@@ -35,10 +37,13 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
 }: PanelLayoutControlsProps) {
   return (
     <div
-      className={cn("workspace-titlebar-controls z-50 gap-1 [-webkit-app-region:no-drag]")}
+      className={cn(
+        "z-50 flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]",
+        placement === "titlebar" ? "workspace-titlebar-controls" : "h-full",
+      )}
       data-panel-layout-controls
     >
-      {rightPanelOpen ? (
+      {rightPanelOpen && canMaximizeRightPanel ? (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -49,7 +54,6 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
                 aria-label={rightPanelMaximized ? "Restore panel size" : "Maximize panel"}
                 variant="ghost"
                 size="sm"
-                disabled={!canMaximizeRightPanel}
               >
                 {rightPanelMaximized ? (
                   <Minimize2Icon className="size-3.5" />
@@ -60,11 +64,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
             }
           />
           <TooltipPopup side="bottom">
-            {canMaximizeRightPanel
-              ? rightPanelMaximized
-                ? "Restore panel size"
-                : "Maximize panel"
-              : "Panel maximization is unavailable at this width"}
+            {rightPanelMaximized ? "Restore panel size" : "Maximize panel"}
           </TooltipPopup>
         </Tooltip>
       ) : null}

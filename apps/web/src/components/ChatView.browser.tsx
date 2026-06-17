@@ -2305,6 +2305,100 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("renders the shared panel toggles in the responsive right-panel sheet", async () => {
+    useRightPanelStore.getState().open(THREAD_REF, "plan");
+    useRightPanelStore.getState().openTerminal(THREAD_REF, DEFAULT_TERMINAL_ID);
+    useRightPanelStore.getState().activateSurface(THREAD_REF, "plan");
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-responsive-plan-panel-controls" as MessageId,
+      targetText: "show responsive plan panel controls",
+    });
+    const snapshot: OrchestrationReadModel = {
+      ...baseSnapshot,
+      threads: baseSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              activities: [
+                {
+                  id: EventId.make("activity-responsive-panel-plan"),
+                  tone: "info",
+                  kind: "turn.plan.updated",
+                  summary: "Plan updated",
+                  payload: {
+                    explanation: "Claude Tasks",
+                    plan: [{ step: "Keep terminal navigation available", status: "inProgress" }],
+                  },
+                  turnId: null,
+                  sequence: 1,
+                  createdAt: isoAt(1_000),
+                },
+              ],
+            }
+          : thread,
+      ),
+    };
+
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      const sheet = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="sheet-popup"]'),
+        "Unable to find responsive right-panel sheet.",
+      );
+      const controls = await waitForElement(
+        () => sheet.querySelector<HTMLElement>("[data-panel-layout-controls]"),
+        "Unable to find shared controls in the responsive right-panel sheet.",
+      );
+
+      expect(
+        Array.from(controls.querySelectorAll<HTMLButtonElement>("button")).map((button) =>
+          button.getAttribute("aria-label"),
+        ),
+      ).toEqual(["Toggle terminal drawer", "Toggle right panel"]);
+      expect(sheet.querySelector('button[aria-label="Maximize panel"]')).toBeNull();
+      expect(sheet.querySelector('button[aria-label="Close tasks sidebar"]')).toBeNull();
+
+      const terminalTab = Array.from(
+        sheet.querySelectorAll<HTMLButtonElement>("[data-right-panel-tab-list] button"),
+      ).find((button) => button.textContent?.includes("Terminal"));
+      terminalTab?.click();
+
+      await vi.waitFor(() => {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF)
+            .activeSurfaceId,
+        ).toBe(`terminal:${DEFAULT_TERMINAL_ID}`);
+        expect(sheet.querySelector('[data-terminal-owner="right-panel"]')).not.toBeNull();
+        expect(sheet.textContent).not.toContain("Claude Tasks");
+      });
+
+      sheet.querySelector<HTMLButtonElement>('button[aria-label="Close Plan"]')?.click();
+
+      await vi.waitFor(() => {
+        const panelState = selectThreadRightPanelState(
+          useRightPanelStore.getState().byThreadKey,
+          THREAD_REF,
+        );
+        expect(panelState.surfaces.some((surface) => surface.kind === "plan")).toBe(false);
+        expect(panelState.activeSurfaceId).toBe(`terminal:${DEFAULT_TERMINAL_ID}`);
+      });
+
+      controls.querySelector<HTMLButtonElement>('button[aria-label="Toggle right panel"]')?.click();
+
+      await vi.waitFor(() => {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF).isOpen,
+        ).toBe(false);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("loads file previews from the active thread worktree", async () => {
     const worktreePath = "/repo/worktrees/file-preview-thread";
     const snapshot = createSnapshotForTargetUser({
