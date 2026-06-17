@@ -18,7 +18,8 @@ import {
 } from "../environments/runtime";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
-interface GitStatusState {
+export interface GitStatusState {
+  readonly targetKey?: string | null;
   readonly data: VcsStatusResult | null;
   readonly error: GitManagerServiceError | null;
   readonly cause: Cause.Cause<GitManagerServiceError> | null;
@@ -36,21 +37,29 @@ interface WatchedGitStatus {
   unsubscribe: () => void;
 }
 
-interface GitStatusTarget {
+export interface GitStatusTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
 }
 
 const EMPTY_GIT_STATUS_STATE = Object.freeze<GitStatusState>({
+  targetKey: null,
   data: null,
   error: null,
   cause: null,
   isPending: false,
 });
-const INITIAL_GIT_STATUS_STATE = Object.freeze<GitStatusState>({
-  ...EMPTY_GIT_STATUS_STATE,
-  isPending: true,
-});
+
+function initialGitStatusState(targetKey: string): GitStatusState {
+  return {
+    targetKey,
+    data: null,
+    error: null,
+    cause: null,
+    isPending: true,
+  };
+}
+
 const EMPTY_GIT_STATUS_ATOM = Atom.make(EMPTY_GIT_STATUS_STATE).pipe(
   Atom.keepAlive,
   Atom.withLabel("git-status:null"),
@@ -70,18 +79,26 @@ const GIT_STATUS_REFRESH_DEBOUNCE_MS = 1_000;
 
 const gitStatusStateAtom = Atom.family((key: string) => {
   knownGitStatusKeys.add(key);
-  return Atom.make(INITIAL_GIT_STATUS_STATE).pipe(
+  return Atom.make(initialGitStatusState(key)).pipe(
     Atom.keepAlive,
     Atom.withLabel(`git-status:${key}`),
   );
 });
 
-function getGitStatusTargetKey(target: GitStatusTarget): string | null {
+export function getGitStatusTargetKey(target: GitStatusTarget): string | null {
   if (target.environmentId === null || target.cwd === null) {
     return null;
   }
 
   return `${target.environmentId}:${target.cwd}`;
+}
+
+export function getGitStatusDataForTarget(
+  state: GitStatusState,
+  target: GitStatusTarget,
+): VcsStatusResult | null {
+  const targetKey = getGitStatusTargetKey(target);
+  return targetKey !== null && state.targetKey === targetKey ? state.data : null;
 }
 
 function readResolvedGitStatusClient(target: GitStatusTarget): ResolvedGitStatusClient | null {
@@ -125,6 +142,7 @@ export function watchGitStatus(target: GitStatusTarget, client?: GitStatusClient
 
 function writeGitStatus(targetKey: string, status: VcsStatusResult): void {
   appAtomRegistry.set(gitStatusStateAtom(targetKey), {
+    targetKey,
     data: status,
     error: null,
     cause: null,
@@ -157,7 +175,7 @@ export function applyGitStatusLocalUpdate(
     return null;
   }
 
-  const current = getGitStatusSnapshot(target).data;
+  const current = getGitStatusDataForTarget(getGitStatusSnapshot(target), target);
   const status = mergeGitStatusParts(local, current ? remoteStatusPartFromStatus(current) : null);
   // Mutation RPCs return a freshly read local status. Bump the token so an
   // older in-flight refresh started before the mutation cannot write stale
@@ -179,7 +197,7 @@ export function refreshGitStatus(
   const force = options?.force ?? false;
   const resolvedClient = options?.client ?? readResolvedGitStatusClient(target)?.client;
   if (!resolvedClient) {
-    return Promise.resolve(getGitStatusSnapshot(target).data);
+    return Promise.resolve(getGitStatusDataForTarget(getGitStatusSnapshot(target), target));
   }
 
   if (!force) {
@@ -190,7 +208,7 @@ export function refreshGitStatus(
 
     const lastRequestedAt = gitStatusLastRefreshAtByKey.get(targetKey) ?? 0;
     if (Date.now() - lastRequestedAt < GIT_STATUS_REFRESH_DEBOUNCE_MS) {
-      return Promise.resolve(getGitStatusSnapshot(target).data);
+      return Promise.resolve(getGitStatusDataForTarget(getGitStatusSnapshot(target), target));
     }
   }
 
@@ -228,7 +246,7 @@ export function resetGitStatusStateForTests(): void {
   gitStatusRefreshTokenByKey.clear();
 
   for (const key of knownGitStatusKeys) {
-    appAtomRegistry.set(gitStatusStateAtom(key), INITIAL_GIT_STATUS_STATE);
+    appAtomRegistry.set(gitStatusStateAtom(key), initialGitStatusState(key));
   }
   knownGitStatusKeys.clear();
 }
@@ -243,7 +261,11 @@ export function useGitStatus(target: GitStatusTarget): GitStatusState {
   const state = useAtomValue(
     targetKey !== null ? gitStatusStateAtom(targetKey) : EMPTY_GIT_STATUS_ATOM,
   );
-  return targetKey === null ? EMPTY_GIT_STATUS_STATE : state;
+  if (targetKey === null) {
+    return EMPTY_GIT_STATUS_STATE;
+  }
+
+  return state.targetKey === targetKey ? state : initialGitStatusState(targetKey);
 }
 
 function unwatchGitStatus(targetKey: string): void {
@@ -318,6 +340,7 @@ function subscribeToGitStatus(targetKey: string, cwd: string, client: GitStatusC
     { cwd },
     (status: VcsStatusResult) => {
       appAtomRegistry.set(gitStatusStateAtom(targetKey), {
+        targetKey,
         data: status,
         error: null,
         cause: null,
@@ -337,7 +360,7 @@ function markGitStatusPending(targetKey: string): void {
   const current = appAtomRegistry.get(atom);
   const next =
     current.data === null
-      ? INITIAL_GIT_STATUS_STATE
+      ? initialGitStatusState(targetKey)
       : {
           ...current,
           error: null,
@@ -346,6 +369,7 @@ function markGitStatusPending(targetKey: string): void {
         };
 
   if (
+    current.targetKey === next.targetKey &&
     current.data === next.data &&
     current.error === next.error &&
     current.cause === next.cause &&

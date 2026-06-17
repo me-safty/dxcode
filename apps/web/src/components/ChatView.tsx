@@ -49,6 +49,7 @@ import { readLocalApi } from "../localApi";
 import {
   buildClosedDiffSearch,
   buildOpenDiffSearch,
+  type DiffRouteSource,
   parseDiffRouteSearch,
   stripDiffSearchParams,
 } from "../diffRouteSearch";
@@ -467,6 +468,13 @@ interface TerminalLaunchContext {
 }
 
 type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
+
+interface LastDiffRouteTarget {
+  readonly threadKey: string;
+  readonly source?: DiffRouteSource;
+  readonly turnId?: TurnId;
+  readonly filePath?: string;
+}
 
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
@@ -970,6 +978,25 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const lastDiffRouteTargetRef = useRef<LastDiffRouteTarget | null>(null);
+  useEffect(() => {
+    if (!diffOpen || !activeThreadKey) {
+      return;
+    }
+
+    lastDiffRouteTargetRef.current = {
+      threadKey: activeThreadKey,
+      ...(rawSearch.diffSource ? { source: rawSearch.diffSource } : {}),
+      ...(rawSearch.diffTurnId ? { turnId: rawSearch.diffTurnId } : {}),
+      ...(rawSearch.diffFilePath ? { filePath: rawSearch.diffFilePath } : {}),
+    };
+  }, [
+    activeThreadKey,
+    diffOpen,
+    rawSearch.diffFilePath,
+    rawSearch.diffSource,
+    rawSearch.diffTurnId,
+  ]);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -2020,10 +2047,33 @@ export default function ChatView(props: ChatViewProps) {
       routeKind === "draft" || (isServerThread && activeThread && !threadHasStarted(activeThread))
         ? "unstaged"
         : undefined;
-    const search = (previous: Record<string, unknown>) =>
-      diffOpen
-        ? buildClosedDiffSearch(previous)
-        : buildOpenDiffSearch(previous, { source: openDiffSource });
+    const search = (previous: Record<string, unknown>) => {
+      if (diffOpen) {
+        return buildClosedDiffSearch(previous);
+      }
+
+      const lastDiffTarget =
+        activeThreadKey && lastDiffRouteTargetRef.current?.threadKey === activeThreadKey
+          ? lastDiffRouteTargetRef.current
+          : null;
+      if (lastDiffTarget?.source) {
+        return {
+          ...buildOpenDiffSearch(previous, { source: lastDiffTarget.source }),
+          ...(lastDiffTarget.filePath ? { diffFilePath: lastDiffTarget.filePath } : {}),
+        };
+      }
+      if (lastDiffTarget?.turnId) {
+        const rest = stripDiffSearchParams(previous);
+        return {
+          ...rest,
+          diff: "1" as const,
+          diffTurnId: lastDiffTarget.turnId,
+          ...(lastDiffTarget.filePath ? { diffFilePath: lastDiffTarget.filePath } : {}),
+        };
+      }
+
+      return buildOpenDiffSearch(previous, { source: openDiffSource });
+    };
 
     if (routeKind === "draft" && draftId) {
       void navigate({
@@ -2046,6 +2096,7 @@ export default function ChatView(props: ChatViewProps) {
     });
   }, [
     activeThread,
+    activeThreadKey,
     diffOpen,
     draftId,
     environmentId,
