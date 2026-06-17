@@ -728,6 +728,31 @@ export function openWorkspaceSourceControlPanel(): void {
   useWorkspaceFilePreviewStore.getState().openSourceControl();
 }
 
+export function openPathInWorkspaceFilePreview(input: {
+  targetPath: string;
+  environmentId?: EnvironmentId | undefined;
+  cwd?: string | undefined;
+  displayPath?: string | undefined;
+  returnTarget?: WorkspaceFilePreviewReturnTarget | null | undefined;
+}): boolean {
+  if (!input.environmentId || !input.cwd) {
+    return false;
+  }
+
+  const target = resolveWorkspaceFilePreviewTarget({
+    environmentId: input.environmentId,
+    cwd: input.cwd,
+    targetPath: input.targetPath,
+    ...(input.displayPath ? { displayPath: input.displayPath } : {}),
+  });
+  if (!target) {
+    return false;
+  }
+
+  openWorkspaceFilePreview(target, { returnTarget: input.returnTarget ?? null });
+  return true;
+}
+
 export async function openPathInPreferredEditorOrFilePreview(input: {
   targetPath: string;
   environmentId?: EnvironmentId | undefined;
@@ -747,17 +772,8 @@ export async function openPathInPreferredEditorOrFilePreview(input: {
     }
   }
 
-  if (input.environmentId && input.cwd) {
-    const target = resolveWorkspaceFilePreviewTarget({
-      environmentId: input.environmentId,
-      cwd: input.cwd,
-      targetPath: input.targetPath,
-      ...(input.displayPath ? { displayPath: input.displayPath } : {}),
-    });
-    if (target) {
-      openWorkspaceFilePreview(target, { returnTarget: input.returnTarget ?? null });
-      return "preview";
-    }
+  if (openPathInWorkspaceFilePreview(input)) {
+    return "preview";
   }
 
   throw new Error(api ? "No available editors found." : "Local API not found");

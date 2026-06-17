@@ -41,12 +41,12 @@ import {
   type WorkspaceEntryChangeDecoration,
 } from "../workspace-file-status";
 import { DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
-import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
+import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { toastManager } from "./ui/toast";
 
-const EXPLORER_ROW_HEIGHT_CLASS_NAME = "h-7";
+const EXPLORER_ROW_HEIGHT_CLASS_NAME = "py-1";
 const EXPLORER_DIRECTORY_ENTRY_LIMIT = 500;
 const EXPLORER_SEARCH_ENTRY_LIMIT = 120;
 const EMPTY_CHANGED_FILES: ReadonlyArray<WorkspaceChangedFile> = [];
@@ -100,19 +100,16 @@ const WorkspaceExplorerLoadingRows = memo(function WorkspaceExplorerLoadingRows(
 }) {
   return (
     <div className="py-1">
-      {Array.from({ length: 4 }, (_, index) => (
-        <div
-          key={index}
-          className={cn(
-            EXPLORER_ROW_HEIGHT_CLASS_NAME,
-            "flex items-center gap-2 px-2 text-muted-foreground/50",
-          )}
-          style={{ paddingLeft: 10 + props.depth * 14 }}
-        >
-          <LoaderIcon className="size-3 animate-spin" />
-          <div className="h-2.5 w-24 rounded-full bg-muted/60" />
-        </div>
-      ))}
+      <div
+        className={cn(
+          EXPLORER_ROW_HEIGHT_CLASS_NAME,
+          "flex items-center gap-2 px-2 text-muted-foreground/50",
+        )}
+        style={{ paddingLeft: 10 + props.depth * 14 }}
+      >
+        <LoaderIcon className="size-4 animate-spin" />
+        <div className="h-3.5 w-32 rounded-full bg-muted/60" />
+      </div>
     </div>
   );
 });
@@ -246,13 +243,13 @@ const WorkspaceExplorerEntryRow = memo(function WorkspaceExplorerEntryRow(props:
     <div
       className={cn(
         EXPLORER_ROW_HEIGHT_CLASS_NAME,
-        "group flex w-full min-w-0 select-none items-center pr-2 text-[15px] transition-colors [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none] hover:bg-accent/70 focus-within:bg-accent focus-within:ring-2 focus-within:ring-ring md:text-[13px]",
+        "group flex w-full min-w-0 select-none items-center pr-2 text-base transition-colors [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none] hover:bg-accent/70 focus-within:bg-accent focus-within:ring-2 focus-within:ring-ring",
       )}
       style={{ paddingLeft: 8 + depth * 14 }}
     >
       <button
         type="button"
-        className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 text-left outline-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none]"
+        className="flex h-full min-w-0 flex-1 select-none items-center gap-2 text-left outline-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none]"
         title={entry.path}
         onClick={onClick}
         onClickCapture={handleLongPressClickCapture}
@@ -265,24 +262,24 @@ const WorkspaceExplorerEntryRow = memo(function WorkspaceExplorerEntryRow(props:
       >
         <span
           className={cn(
-            "flex size-4 shrink-0 items-center justify-center",
+            "flex size-5 shrink-0 items-center justify-center",
             isIgnored ? "text-muted-foreground/45" : "text-muted-foreground/65",
           )}
         >
           {isDirectory ? (
             <ChevronRightIcon
               className={cn(
-                "size-3.5 transition-transform",
+                "size-4 transition-transform",
                 expanded && mode === "tree" && "rotate-90",
               )}
             />
           ) : null}
         </span>
-        <VscodeEntryIcon
+        <PierreEntryIcon
           pathValue={entry.path}
           kind={entry.kind}
           theme={resolvedTheme}
-          className={cn("size-4 shrink-0", isIgnored && "opacity-45 grayscale")}
+          className={cn("size-5 shrink-0", isIgnored && "opacity-45 grayscale")}
         />
         <span
           className={cn(
@@ -302,7 +299,7 @@ const WorkspaceExplorerEntryRow = memo(function WorkspaceExplorerEntryRow(props:
           aria-label={statusBadgeLabel}
           title={statusBadgeTitle}
           className={cn(
-            "ml-1 flex w-4 shrink-0 justify-center font-mono text-[10px] font-semibold",
+            "ml-1 flex w-6 shrink-0 justify-center font-mono text-sm font-semibold",
             statusBadge.className,
           )}
         >

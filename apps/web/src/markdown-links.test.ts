@@ -86,6 +86,15 @@ describe("resolveMarkdownFileLinkTarget", () => {
     });
   });
 
+  it("exposes workspace relative paths for in-workspace links", () => {
+    expect(
+      resolveMarkdownFileLinkMeta("apps/web/src/ChatMarkdown.tsx", "/repo/project"),
+    ).toMatchObject({
+      filePath: "/repo/project/apps/web/src/ChatMarkdown.tsx",
+      workspaceRelativePath: "apps/web/src/ChatMarkdown.tsx",
+    });
+  });
+
   it("formats tooltip display paths relative to the cwd for slash-prefixed windows paths", () => {
     expect(
       resolveMarkdownFileLinkMeta(

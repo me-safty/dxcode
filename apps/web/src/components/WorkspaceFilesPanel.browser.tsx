@@ -30,12 +30,21 @@ import { projectQueryKeys } from "../lib/projectReactQuery";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 
 const {
+  EditorMock,
   localConfirmMock,
   localContextMenuShowMock,
   refreshGitStatusMock,
   toastAddMock,
   useGitStatusMock,
 } = vi.hoisted(() => ({
+  EditorMock: class EditorMock {
+    readonly cleanUp = vi.fn();
+    constructor(
+      readonly options: {
+        onChange?: (file: { contents: string; name?: string; cacheKey?: string }) => void;
+      } = {},
+    ) {}
+  },
   localConfirmMock: vi.fn(async () => true),
   localContextMenuShowMock: vi.fn(async () => "add-to-input" as string | null),
   refreshGitStatusMock: vi.fn<typeof import("../lib/gitStatusState").refreshGitStatus>(
@@ -104,6 +113,10 @@ vi.mock("./ui/toast", () => ({
   },
 }));
 
+vi.mock("@pierre/diffs/editor", () => ({
+  Editor: EditorMock,
+}));
+
 vi.mock("./SourceControlPanel", async () => {
   const React = await import("react");
   return {
@@ -115,6 +128,8 @@ vi.mock("@pierre/diffs/react", async () => {
   const React = await import("react");
 
   return {
+    EditorProvider: ({ children }: { children: ReactNode }) =>
+      React.createElement(React.Fragment, null, children),
     FileDiff: (props: { fileDiff: { cacheKey?: string; name: string } }) =>
       React.createElement("div", {
         "data-cache-key": props.fileDiff.cacheKey,
@@ -382,6 +397,11 @@ describe("WorkspaceFilesPanel", () => {
       });
       const srcDirectoryButton = document.querySelector<HTMLButtonElement>('button[title="src"]');
       expect(srcDirectoryButton?.className).toContain("select-none");
+      const readmeButton = document.querySelector<HTMLButtonElement>('button[title="README.md"]');
+      const readmeRow = readmeButton?.parentElement;
+      expect(Math.round(readmeRow?.getBoundingClientRect().height ?? 0)).toBe(44);
+      expect(getComputedStyle(readmeButton!).fontSize).toBe("16px");
+      expect(readmeButton?.querySelector("svg,img")?.getAttribute("class")).toContain("size-5");
       srcDirectoryButton?.dispatchEvent(
         new MouseEvent("contextmenu", {
           bubbles: true,

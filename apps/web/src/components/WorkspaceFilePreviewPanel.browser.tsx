@@ -20,15 +20,26 @@ import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { WorkspaceFilePreviewPanel } from "./WorkspaceFilePreviewPanel";
 
 const {
+  EditorMock,
   fileRenderCalls,
   getWorkingTreeDiffMock,
   gitStatusMockState,
+  refreshGitStatusMock,
   resolveEnvironmentHttpUrlMock,
   useGitStatusMock,
   virtualizerMounts,
 } = vi.hoisted(() => ({
+  EditorMock: class EditorMock {
+    readonly cleanUp = vi.fn();
+    constructor(
+      readonly options: {
+        onChange?: (file: { contents: string; name?: string; cacheKey?: string }) => void;
+      } = {},
+    ) {}
+  },
   fileRenderCalls: [] as Array<{
-    file: { contents: string; lang?: string; cacheKey?: string };
+    file: { contents: string; name?: string; lang?: string; cacheKey?: string };
+    contentEditable?: boolean;
     lineAnnotations?: Array<{ lineNumber: number; metadata?: { hunkId: string } }>;
     options?: {
       lineHoverHighlight?: string;
@@ -45,6 +56,7 @@ const {
     style?: CSSProperties;
   }>,
   getWorkingTreeDiffMock: vi.fn(async () => ({ diff: "" })),
+  refreshGitStatusMock: vi.fn(async () => null),
   gitStatusMockState: (() => {
     const state: {
       current: {
@@ -81,6 +93,10 @@ const {
 
 useGitStatusMock.mockImplementation(() => gitStatusMockState.current);
 
+vi.mock("@pierre/diffs/editor", () => ({
+  Editor: EditorMock,
+}));
+
 vi.mock("../environments/runtime", () => ({
   addSavedEnvironment: vi.fn(),
   connectDesktopSshEnvironment: vi.fn(),
@@ -111,8 +127,16 @@ vi.mock("../environments/runtime", () => ({
 
 vi.mock("@pierre/diffs/react", async () => {
   const React = await import("react");
+  const EditorContext = React.createContext<InstanceType<typeof EditorMock> | undefined>(undefined);
 
   return {
+    EditorProvider: ({
+      children,
+      editor,
+    }: {
+      children: ReactNode;
+      editor: InstanceType<typeof EditorMock>;
+    }) => React.createElement(EditorContext.Provider, { value: editor }, children),
     FileDiff: (props: { fileDiff: { cacheKey?: string; name: string } }) =>
       React.createElement("div", {
         "data-cache-key": props.fileDiff.cacheKey,
@@ -150,7 +174,7 @@ vi.mock("@pierre/diffs/react", async () => {
       );
     },
     File: (props: {
-      file: { contents: string; lang?: string; cacheKey?: string };
+      file: { contents: string; name?: string; lang?: string; cacheKey?: string };
       lineAnnotations?: Array<{ lineNumber: number; metadata?: { hunkId: string } }>;
       options?: {
         lineHoverHighlight?: string;
@@ -165,18 +189,37 @@ vi.mock("@pierre/diffs/react", async () => {
       }) => ReactNode;
       selectedLines?: { start: number; end: number } | null;
       style?: CSSProperties;
+      contentEditable?: boolean;
     }) => {
       fileRenderCalls.push(props);
+      const editor = React.useContext(EditorContext);
+      const [editableContents, setEditableContents] = React.useState(props.file.contents);
+      React.useEffect(() => {
+        setEditableContents(props.file.contents);
+      }, [props.file.contents]);
+      const renderedContents = props.contentEditable ? editableContents : props.file.contents;
       return React.createElement(
         "div",
         {
+          "data-content-editable": props.contentEditable ? "true" : undefined,
           "data-cache-key": props.file.cacheKey,
           "data-lang": props.file.lang,
           "data-overflow": props.options?.overflow,
           "data-testid": "workspace-file-render",
           style: props.style,
         },
-        props.file.contents.split("\n").flatMap((line, index) => {
+        props.contentEditable
+          ? React.createElement("textarea", {
+              "aria-label": `Edit ${props.file.name ?? "file"}`,
+              onChange: (event: { currentTarget: HTMLTextAreaElement }) => {
+                const nextContents = event.currentTarget.value;
+                setEditableContents(nextContents);
+                editor?.options.onChange?.({ ...props.file, contents: nextContents });
+              },
+              value: editableContents,
+            })
+          : null,
+        renderedContents.split("\n").flatMap((line, index) => {
           const lineNumber = index + 1;
           const selected =
             props.selectedLines !== null &&
@@ -233,6 +276,7 @@ vi.mock("@pierre/diffs/react", async () => {
 
 vi.mock("../lib/gitStatusState", () => ({
   applyGitStatusLocalUpdate: () => undefined,
+  refreshGitStatus: refreshGitStatusMock,
   resetGitStatusStateForTests: () => undefined,
   useGitStatus: useGitStatusMock,
 }));
@@ -335,13 +379,16 @@ function setGitStatusMock(
 
 function createMockEnvironmentApi(
   readFile: EnvironmentApi["projects"]["readFile"],
+  writeFile: EnvironmentApi["projects"]["writeFile"] = vi.fn(async (input) => ({
+    relativePath: input.relativePath,
+  })),
 ): EnvironmentApi {
   return {
     projects: {
       readFile,
       searchEntries: vi.fn(),
       listDirectoryEntries: vi.fn(),
-      writeFile: vi.fn(),
+      writeFile,
     },
     vcs: {
       getWorkingTreeDiff: getWorkingTreeDiffMock,
@@ -371,6 +418,7 @@ async function renderPreview(input: {
   showExplorerButton?: boolean;
   sizeBytes?: number;
   truncated?: boolean;
+  writeFile?: EnvironmentApi["projects"]["writeFile"];
 }) {
   const contents = input.contents ?? DEFAULT_CONTENTS;
   const relativePath = input.relativePath ?? "src/App.tsx";
@@ -380,7 +428,15 @@ async function renderPreview(input: {
     sizeBytes: input.sizeBytes ?? new TextEncoder().encode(contents).byteLength,
     truncated: input.truncated ?? false,
   }));
-  __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, createMockEnvironmentApi(readFile));
+  const writeFile =
+    input.writeFile ??
+    vi.fn(async (writeInput) => ({
+      relativePath: writeInput.relativePath,
+    }));
+  __setEnvironmentApiOverrideForTests(
+    ENVIRONMENT_ID,
+    createMockEnvironmentApi(readFile, writeFile),
+  );
 
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -430,6 +486,7 @@ async function renderPreview(input: {
 
   return {
     readFile,
+    writeFile,
     rerenderPanel: async (nextProps: Partial<ComponentProps<typeof WorkspaceFilePreviewPanel>>) => {
       await screen.rerender(renderPanel({ ...panelProps, ...nextProps }));
     },
@@ -538,6 +595,8 @@ describe("WorkspaceFilePreviewPanel", () => {
     fileRenderCalls.length = 0;
     virtualizerMounts.length = 0;
     getWorkingTreeDiffMock.mockReset();
+    refreshGitStatusMock.mockReset();
+    refreshGitStatusMock.mockResolvedValue(null);
     resetGitStatusMock();
     resolveEnvironmentHttpUrlMock.mockClear();
     window.localStorage.removeItem(FILE_PREVIEW_WORD_WRAP_STORAGE_KEY);
@@ -551,7 +610,7 @@ describe("WorkspaceFilePreviewPanel", () => {
       const rendered = document.querySelector<HTMLElement>("[data-testid='workspace-file-render']");
       expect(rendered?.dataset.lang).toBe("tsx");
       expect(rendered?.dataset.cacheKey).toContain("file-preview");
-      await expect.element(page.getByText("export const value = 1;")).toBeInTheDocument();
+      expect(document.querySelector("code")?.textContent).toBe("export const value = 1;");
       expect(document.querySelector('[data-column-number="1"]')?.textContent).toBe("1");
     } finally {
       await mounted.cleanup();
@@ -986,6 +1045,53 @@ describe("WorkspaceFilePreviewPanel", () => {
     }
   });
 
+  it("edits full file previews with a debounced workspace write", async () => {
+    vi.useFakeTimers();
+    const writeFile = vi.fn(
+      async (input: Parameters<EnvironmentApi["projects"]["writeFile"]>[0]) => ({
+        relativePath: input.relativePath,
+      }),
+    );
+    const mounted = await renderPreview({ contents: DEFAULT_CONTENTS, writeFile });
+    try {
+      expect(fileRenderCalls.at(-1)?.contentEditable).toBe(true);
+      await page
+        .getByRole("textbox", { name: "Edit src/App.tsx" })
+        .fill("export const value = 2;\nconsole.log(value);\n");
+
+      expect(writeFile).not.toHaveBeenCalled();
+      await expect.element(page.getByRole("status", { name: "Saving file" })).toBeVisible();
+
+      await vi.advanceTimersByTimeAsync(499);
+      expect(writeFile).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => {
+        expect(writeFile).toHaveBeenCalledWith({
+          cwd: "/repo/project",
+          relativePath: "src/App.tsx",
+          contents: "export const value = 2;\nconsole.log(value);\n",
+        });
+      });
+      expect(refreshGitStatusMock).toHaveBeenCalledWith(
+        {
+          environmentId: ENVIRONMENT_ID,
+          cwd: "/repo/project",
+        },
+        { force: true },
+      );
+
+      await vi.waitFor(() => {
+        expect(fileRenderCalls.at(-1)?.file.contents).toBe(
+          "export const value = 2;\nconsole.log(value);\n",
+        );
+      });
+    } finally {
+      vi.useRealTimers();
+      await mounted.cleanup();
+    }
+  });
+
   it("persists the selected word wrap mode between preview mounts", async () => {
     {
       const mounted = await renderPreview({ contents: DEFAULT_CONTENTS });
@@ -1105,7 +1211,7 @@ describe("WorkspaceFilePreviewPanel", () => {
       const backButton = document.querySelector<HTMLButtonElement>(
         'button[aria-label="Back to explorer"]',
       );
-      const fileIcon = document.querySelector<HTMLImageElement>('img[aria-hidden="true"]');
+      const fileIcon = document.querySelector<SVGSVGElement>("svg[data-pierre-icon]");
       expect(backButton).not.toBeNull();
       expect(fileIcon).not.toBeNull();
       expect(

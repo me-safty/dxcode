@@ -11,6 +11,7 @@ export const MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX = 18;
 export const MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO = 1.25;
 export const MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS = 350;
 export const MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE = "data-mobile-edge-swipe-panel";
+export const MOBILE_EDGE_SWIPE_ALLOW_EDITABLE_ATTRIBUTE = "data-mobile-edge-swipe-allow-editable";
 // Mark a subtree where a horizontal drag should scroll content (e.g. markdown
 // code blocks and inline code) instead of opening or dismissing a panel. The
 // swipe is only suppressed while the marked element can actually scroll
@@ -247,15 +248,26 @@ function isHorizontalScrollOwnerInScope(
   return elementPath.some((el) => el.matches(scope.ancestorSelector));
 }
 
+function allowsEditablePanelSwipe(elementPath: readonly Element[]): boolean {
+  return elementPath.some(
+    (el) => el.getAttribute(MOBILE_EDGE_SWIPE_ALLOW_EDITABLE_ATTRIBUTE) === "true",
+  );
+}
+
 export function resolveMobileEdgeSwipeBlocker(
   target: EventTarget | null,
   composedPath?: readonly EventTarget[],
   horizontalScrollOwnerScope: MobileEdgeSwipeHorizontalScrollOwnerScope = "all",
 ): MobileEdgeSwipeBlocker {
   const elementPath = getElementPath(target, composedPath);
+  const editablePanelSwipeAllowed = allowsEditablePanelSwipe(elementPath);
   for (const el of elementPath) {
-    // Inputs, terminals, and editable regions always swallow a horizontal drag.
-    if (el.matches("input, textarea, select, [contenteditable='true'], .xterm")) {
+    // Inputs and terminals always swallow horizontal drags. Editable regions do
+    // too unless a panel surface explicitly opts into edge-swipe handling.
+    if (
+      el.matches("input, textarea, select, .xterm") ||
+      (el.matches("[contenteditable='true']") && !editablePanelSwipeAllowed)
+    ) {
       return { element: el, kind: "hard-block" };
     }
     // Anything that can scroll horizontally (diffs, code blocks, chip strips,

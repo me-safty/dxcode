@@ -59,7 +59,7 @@ import {
   type GitActionMenuItem,
 } from "./GitActionsControl.logic";
 import { SourceControlPublishDialog } from "./SourceControlPublishDialog";
-import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
+import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import {
   buildSourceControlTree,
   flattenSourceControlTreeRows,
@@ -1544,7 +1544,7 @@ function SourceControlTreeRow({
           ) : (
             <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
           )}
-          <VscodeEntryIcon
+          <PierreEntryIcon
             pathValue={node.path}
             kind="directory"
             theme={resolvedTheme}
@@ -1576,7 +1576,7 @@ function SourceControlTreeRow({
       >
         {/* Spacer matching the directory chevron so file icons align with sibling folder icons. */}
         {viewMode === "tree" ? <span className="size-3.5 shrink-0" aria-hidden="true" /> : null}
-        <VscodeEntryIcon
+        <PierreEntryIcon
           pathValue={node.path}
           kind="file"
           theme={resolvedTheme}

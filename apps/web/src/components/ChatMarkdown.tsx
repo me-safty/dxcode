@@ -32,12 +32,8 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
-import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
-import {
-  getVscodeIconUrlForEntry,
-  hasSpecificVscodeIconForFileName,
-  syntheticFileNameForLanguageId,
-} from "../vscode-icons";
+import { PierreEntryIcon } from "./chat/PierreEntryIcon";
+import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
@@ -59,8 +55,11 @@ import {
 import { readLocalApi } from "../localApi";
 import { MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE } from "../hooks/useMobileEdgeSwipe";
 import { cn } from "../lib/utils";
-import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
-import { resolveWorkspaceFilePreviewTarget } from "../workspaceFilePreview";
+import {
+  openPathInPreferredEditorOrFilePreview,
+  openPathInWorkspaceFilePreview,
+  resolveWorkspaceFilePreviewTarget,
+} from "../workspaceFilePreview";
 import { resolveEnvironmentHttpUrl } from "../environments/runtime";
 import {
   isWorkspaceImagePreviewPath,
@@ -427,7 +426,7 @@ function MarkdownDetails({
 /**
  * Filename titles render icon + text; language-only titles render just the
  * icon (redundant next to its own name) and fall back to the language text
- * when no specific icon exists or it fails to load.
+ * when no specific icon exists.
  */
 function MarkdownCodeBlockTitleContent({
   fenceTitle,
@@ -438,22 +437,17 @@ function MarkdownCodeBlockTitleContent({
   language: string;
   theme: "light" | "dark";
 }) {
-  const [failedIconUrl, setFailedIconUrl] = useState<string | null>(null);
-
   if (fenceTitle) {
     return (
       <>
-        <VscodeEntryIcon pathValue={fenceTitle} kind="file" theme={theme} className="size-3.5" />
+        <PierreEntryIcon pathValue={fenceTitle} kind="file" theme={theme} className="size-3.5" />
         <span className="truncate">{fenceTitle}</span>
       </>
     );
   }
 
   const fileName = syntheticFileNameForLanguageId(language);
-  const iconUrl = hasSpecificVscodeIconForFileName(fileName, theme)
-    ? getVscodeIconUrlForEntry(fileName, "file", theme)
-    : null;
-  if (!iconUrl || failedIconUrl === iconUrl) {
+  if (!hasSpecificPierreIconForFileName(fileName)) {
     return <span className="truncate">{language}</span>;
   }
   return (
@@ -463,15 +457,7 @@ function MarkdownCodeBlockTitleContent({
           <span className="inline-flex shrink-0 rounded-sm" aria-label={`Language: ${language}`} />
         }
       >
-        <img
-          src={iconUrl}
-          alt=""
-          aria-hidden
-          className="size-3.5 shrink-0"
-          loading="lazy"
-          draggable={false}
-          onError={() => setFailedIconUrl(iconUrl)}
-        />
+        <PierreEntryIcon pathValue={fileName} kind="file" theme={theme} className="size-3.5" />
       </TooltipTrigger>
       <TooltipPopup side="top">{language}</TooltipPopup>
     </Tooltip>
@@ -730,6 +716,7 @@ interface MarkdownFileLinkProps {
   targetPath: string;
   iconPath: string;
   displayPath: string;
+  workspaceRelativePath: string | null;
   label: string;
   copyMarkdown: string;
   theme: "light" | "dark";
@@ -1101,6 +1088,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   targetPath,
   iconPath,
   displayPath,
+  workspaceRelativePath,
   label,
   copyMarkdown,
   theme,
@@ -1109,6 +1097,18 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   className,
 }: MarkdownFileLinkProps) {
   const handleOpen = useCallback(() => {
+    if (
+      workspaceRelativePath !== null &&
+      openPathInWorkspaceFilePreview({
+        targetPath,
+        cwd,
+        environmentId,
+        displayPath,
+      })
+    ) {
+      return;
+    }
+
     void openPathInPreferredEditorOrFilePreview({
       targetPath,
       cwd,
@@ -1123,7 +1123,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         }),
       );
     });
-  }, [cwd, displayPath, environmentId, targetPath]);
+  }, [cwd, displayPath, environmentId, targetPath, workspaceRelativePath]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -1229,6 +1229,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.targetPath === next.targetPath &&
     previous.iconPath === next.iconPath &&
     previous.displayPath === next.displayPath &&
+    previous.workspaceRelativePath === next.workspaceRelativePath &&
     previous.label === next.label &&
     previous.copyMarkdown === next.copyMarkdown &&
     previous.theme === next.theme &&
@@ -1353,6 +1354,7 @@ function ChatMarkdown({
             targetPath={fileLinkMeta.targetPath}
             iconPath={fileLinkMeta.filePath}
             displayPath={fileLinkMeta.displayPath}
+            workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
             label={labelParts.join(" · ")}
             copyMarkdown={`[${fileLinkMeta.basename}](${normalizedHref})`}
             theme={resolvedTheme}
