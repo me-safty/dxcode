@@ -14,12 +14,23 @@ export function useT3ConnectAuthPrompt() {
       setDesktopAuthOpen(true);
       return;
     }
-    clerk.openWaitlist();
+    clerk.openWaitlist({
+      appearance: {
+        elements: {
+          rootBox: "outline-none",
+          cardBox: "outline-none",
+          card: "outline-none",
+        },
+      },
+    });
   };
 
   const authPrompt = isElectron ? (
     <Dialog open={desktopAuthOpen} onOpenChange={setDesktopAuthOpen}>
-      <DialogPopup className="max-w-md border-0 bg-transparent shadow-none" showCloseButton={false}>
+      <DialogPopup
+        className="max-w-[25rem] border-0 bg-transparent shadow-none outline-none before:hidden"
+        showCloseButton={false}
+      >
         <DesktopClerkWaitlist />
       </DialogPopup>
     </Dialog>
