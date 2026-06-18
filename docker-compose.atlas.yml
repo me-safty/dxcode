@@ -1,0 +1,70 @@
+name: atlas-vector
+
+# One compose for the Atlas Vector local stack (see AGENTS.md "Architecture —
+# two backends, one compose"):
+#   - T3 agent server (this repo): serves the web UI + the WebSocket agent loop.
+#   - Vector's FastAPI domain backend + datastores, REUSED from ../vector via
+#     `extends` (never redefined here).
+# The T3 server and FastAPI share the `workspaces` volume — the seam where the
+# agent runs in the same per-deal directory FastAPI syncs the dataroom into.
+
+services:
+  # --- Vector domain backend + datastores (reused from ../vector) ---
+  db:
+    extends:
+      file: ../vector/docker-compose.yml
+      service: db
+
+  es:
+    extends:
+      file: ../vector/docker-compose.yml
+      service: es
+
+  redis:
+    extends:
+      file: ../vector/docker-compose.yml
+      service: redis
+
+  api:
+    extends:
+      file: ../vector/docker-compose.yml
+      service: api
+    # `extends` intentionally does NOT copy depends_on — re-declare so the API
+    # waits for its datastores to be healthy.
+    depends_on:
+      db:
+        condition: service_healthy
+      es:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # --- T3 agent server (this repo) ---
+  t3:
+    build:
+      context: .
+      dockerfile: docker/atlas/t3.Dockerfile
+      args:
+        # Browser-facing URL of the FastAPI (baked into the web build because the
+        # browser runs on the host). Override via .env.atlas / the environment.
+        VITE_ATLAS_API_URL: ${VITE_ATLAS_API_URL:-http://localhost:8000}
+    environment:
+      T3CODE_HOST: 0.0.0.0
+      T3CODE_PORT: "3773"
+      # Shared-workspace seam: the agent runs where FastAPI syncs each deal.
+      WORKSPACES_ROOT: /workspaces
+    ports:
+      - "3773:3773"
+    volumes:
+      - workspaces:/workspaces
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  # Named volumes used by the services extended from ../vector. `extends` copies
+  # volume references but not their top-level definitions, so declare them here.
+  pgdata:
+  esdata:
+  # Shared by `api` (from ../vector) and `t3` — the agent's per-deal workspace seam.
+  workspaces:

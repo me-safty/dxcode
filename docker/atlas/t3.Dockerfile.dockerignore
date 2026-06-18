@@ -1,0 +1,12 @@
+# Scoped ignore for docker/atlas/t3.Dockerfile (BuildKit honors <dockerfile>.dockerignore).
+# Build context is the repo root; keep it lean. Source + every workspace
+# package.json must stay (pnpm --frozen-lockfile needs them); only drop heavy,
+# regenerable, or irrelevant paths.
+**/node_modules
+**/dist
+**/dist-electron
+**/.vite-plus
+**/.turbo
+.git
+.repos
+*.log
