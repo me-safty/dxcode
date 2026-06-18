@@ -9,7 +9,7 @@ import {
   ProviderDriverKind,
   type ToolLifecycleItemType,
   type UserInputQuestion,
-  type ThreadId,
+  ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 
@@ -68,7 +68,10 @@ export interface WorkLogEntry {
   detail?: string;
   command?: string;
   rawCommand?: string;
+  output?: string;
   changedFiles?: ReadonlyArray<string>;
+  subagentPrompt?: string;
+  subagentChildren?: ReadonlyArray<SubagentWorkLogChild>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   toolData?: unknown;
@@ -78,6 +81,11 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+}
+
+export interface SubagentWorkLogChild {
+  threadId: ThreadId;
+  titleSeed?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -638,7 +646,9 @@ export function deriveWorkLogEntries(
     if (isPlanBoundaryToolActivity(activity)) continue;
     entries.push(toDerivedWorkLogEntry(activity));
   }
-  return collapseDerivedWorkLogEntries(entries).map((entry) => {
+  return dedupeSubagentChildWorkEntries(
+    collapseDerivedWorkLogEntries(entries.filter((entry) => !isEmptySubagentWorkLogEntry(entry))),
+  ).map((entry) => {
     const { activityKind, collapseKey: _collapseKey, ...rest } = entry;
     return Object.assign(rest, { sourceActivityKind: activityKind });
   });
@@ -720,6 +730,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
+  const subagentOutput =
+    itemType === "collab_agent_tool_call" ? extractSubagentOutput(payload) : null;
+  const subagentPrompt =
+    itemType === "collab_agent_tool_call" ? extractSubagentPrompt(payload, detail) : null;
+  const subagentChildren =
+    itemType === "collab_agent_tool_call" ? extractSubagentChildren(payload) : [];
   if (detail) {
     entry.detail = detail;
   }
@@ -729,8 +745,17 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (commandPreview.rawCommand) {
     entry.rawCommand = commandPreview.rawCommand;
   }
+  if (subagentOutput) {
+    entry.output = subagentOutput;
+  }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
+  }
+  if (subagentPrompt) {
+    entry.subagentPrompt = subagentPrompt;
+  }
+  if (subagentChildren.length > 0) {
+    entry.subagentChildren = subagentChildren;
   }
   if (title) {
     entry.toolTitle = title;
@@ -779,6 +804,48 @@ function collapseDerivedWorkLogEntries(
   return collapsed;
 }
 
+function dedupeSubagentChildWorkEntries(
+  entries: ReadonlyArray<DerivedWorkLogEntry>,
+): DerivedWorkLogEntry[] {
+  const seenChildThreadIds = new Set<string>();
+  const deduped: DerivedWorkLogEntry[] = [];
+  for (const entry of entries) {
+    if (entry.itemType !== "collab_agent_tool_call" || !entry.subagentChildren?.length) {
+      deduped.push(entry);
+      continue;
+    }
+    const unseenChildren = entry.subagentChildren.filter((child) => {
+      if (seenChildThreadIds.has(child.threadId)) {
+        return false;
+      }
+      seenChildThreadIds.add(child.threadId);
+      return true;
+    });
+    if (unseenChildren.length === 0) {
+      continue;
+    }
+    deduped.push(
+      unseenChildren.length === entry.subagentChildren.length
+        ? entry
+        : {
+            ...entry,
+            subagentChildren: unseenChildren,
+          },
+    );
+  }
+  return deduped;
+}
+
+function isEmptySubagentWorkLogEntry(entry: DerivedWorkLogEntry): boolean {
+  return (
+    entry.itemType === "collab_agent_tool_call" &&
+    !entry.detail &&
+    !entry.subagentPrompt &&
+    !entry.output &&
+    (entry.subagentChildren?.length ?? 0) === 0
+  );
+}
+
 function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
@@ -789,7 +856,14 @@ function shouldCollapseToolLifecycleEntries(
   if (next.activityKind !== "tool.updated" && next.activityKind !== "tool.completed") {
     return false;
   }
-  if (previous.activityKind === "tool.completed") {
+  if (
+    previous.activityKind === "tool.completed" &&
+    !(
+      next.activityKind === "tool.updated" &&
+      previous.toolCallId !== undefined &&
+      previous.toolCallId === next.toolCallId
+    )
+  ) {
     return false;
   }
   if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
@@ -809,23 +883,43 @@ function mergeDerivedWorkLogEntries(
   next: DerivedWorkLogEntry,
 ): DerivedWorkLogEntry {
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
-  const detail = next.detail ?? previous.detail;
+  const itemType = next.itemType ?? previous.itemType;
+  const detail =
+    itemType === "collab_agent_tool_call"
+      ? (previous.detail ?? next.detail)
+      : (next.detail ?? previous.detail);
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
+  const output =
+    itemType === "collab_agent_tool_call"
+      ? mergeTextOutputChunk(previous.output, next.output)
+      : mergeTextOutput(previous.output, next.output);
+  const subagentPrompt =
+    itemType === "collab_agent_tool_call"
+      ? (previous.subagentPrompt ?? next.subagentPrompt)
+      : (next.subagentPrompt ?? previous.subagentPrompt);
+  const subagentChildren =
+    itemType === "collab_agent_tool_call"
+      ? mergeSubagentChildren(previous.subagentChildren, next.subagentChildren)
+      : (next.subagentChildren ?? previous.subagentChildren);
   const toolTitle = next.toolTitle ?? previous.toolTitle;
-  const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
-  const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const collapseKey = toolCallId
+    ? `tool:${toolCallId}`
+    : (next.collapseKey ?? previous.collapseKey);
   return {
     ...previous,
     ...next,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
+    ...(output ? { output } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
+    ...(subagentPrompt ? { subagentPrompt } : {}),
+    ...(subagentChildren && subagentChildren.length > 0 ? { subagentChildren } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
@@ -834,6 +928,52 @@ function mergeDerivedWorkLogEntries(
     ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
     ...(toolData !== undefined ? { toolData } : {}),
   };
+}
+
+function mergeSubagentChildren(
+  previous: ReadonlyArray<SubagentWorkLogChild> | undefined,
+  next: ReadonlyArray<SubagentWorkLogChild> | undefined,
+): ReadonlyArray<SubagentWorkLogChild> | undefined {
+  const merged = [...(previous ?? []), ...(next ?? [])];
+  if (merged.length === 0) {
+    return undefined;
+  }
+  const byThreadId = new Map<ThreadId, SubagentWorkLogChild>();
+  for (const child of merged) {
+    const existing = byThreadId.get(child.threadId);
+    const titleSeed = existing?.titleSeed ?? child.titleSeed;
+    byThreadId.set(child.threadId, {
+      threadId: child.threadId,
+      ...(titleSeed ? { titleSeed } : {}),
+    });
+  }
+  return [...byThreadId.values()];
+}
+
+function mergeTextOutput(
+  previous: string | undefined,
+  next: string | undefined,
+): string | undefined {
+  if (!previous) {
+    return next;
+  }
+  if (!next) {
+    return previous;
+  }
+  return `${previous}${next}`;
+}
+
+function mergeTextOutputChunk(
+  previous: string | undefined,
+  next: string | undefined,
+): string | undefined {
+  if (!previous) {
+    return next;
+  }
+  if (!next) {
+    return previous;
+  }
+  return `${previous}${next}`;
 }
 
 function mergeChangedFiles(
@@ -1084,7 +1224,14 @@ function extractToolTitle(payload: Record<string, unknown> | null): string | nul
 
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
-  return asTrimmedString(data?.toolCallId);
+  const item = asRecord(data?.item);
+  const parentCollab = asRecord(data?.parentCollab);
+  return (
+    asTrimmedString(data?.toolCallId) ??
+    asTrimmedString(parentCollab?.itemId) ??
+    asTrimmedString(data?.itemId) ??
+    asTrimmedString(item?.id)
+  );
 }
 
 function normalizeInlinePreview(value: string): string {
@@ -1211,6 +1358,85 @@ function stripTrailingExitCode(value: string): {
   };
 }
 
+function firstStringFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = asTrimmedString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function firstRawStringFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function extractSubagentOutput(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const rawOutput = asRecord(data?.rawOutput);
+  return firstRawStringFromRecord(rawOutput, ["content", "output", "text", "stdout", "result"]);
+}
+
+function extractSubagentPrompt(
+  payload: Record<string, unknown> | null,
+  fallbackDetail: string | null,
+): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemInput = asRecord(item?.input);
+  const rawInput = asRecord(data?.rawInput);
+  const parentCollab = asRecord(data?.parentCollab);
+  return (
+    asTrimmedString(parentCollab?.detail) ??
+    firstStringFromRecord(itemInput, ["prompt", "message", "description", "task"]) ??
+    firstStringFromRecord(rawInput, ["prompt", "message", "description", "task"]) ??
+    firstStringFromRecord(item, ["prompt", "message", "description", "task"]) ??
+    fallbackDetail
+  );
+}
+
+function extractSubagentChildren(
+  payload: Record<string, unknown> | null,
+): ReadonlyArray<SubagentWorkLogChild> {
+  const data = asRecord(payload?.data);
+  const children = Array.isArray(data?.subagentChildren) ? data.subagentChildren : [];
+  const result: SubagentWorkLogChild[] = [];
+  const seen = new Set<string>();
+  for (const value of children) {
+    const record = asRecord(value);
+    const rawThreadId = asTrimmedString(record?.childThreadId) ?? asTrimmedString(record?.threadId);
+    if (!rawThreadId || seen.has(rawThreadId)) {
+      continue;
+    }
+    seen.add(rawThreadId);
+    const titleSeed = asTrimmedString(record?.titleSeed);
+    result.push({
+      threadId: ThreadId.make(rawThreadId),
+      ...(titleSeed ? { titleSeed } : {}),
+    });
+  }
+  return result;
+}
+
 function extractWorkLogItemType(
   payload: Record<string, unknown> | null,
 ): WorkLogEntry["itemType"] | undefined {
@@ -1322,7 +1548,10 @@ function compareActivitiesByOrder(
     return lifecycleRankComparison;
   }
 
-  return left.id.localeCompare(right.id);
+  // Stable sort preserves arrival order for unsequenced same-timestamp events.
+  // Streaming text chunks can share millisecond timestamps; sorting those by
+  // random event ids can scramble the reconstructed output.
+  return 0;
 }
 
 function compareActivityLifecycleRank(kind: string): number {

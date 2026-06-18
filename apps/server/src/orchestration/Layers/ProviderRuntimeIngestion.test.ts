@@ -49,6 +49,7 @@ import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeInge
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { TextGeneration, type TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
@@ -217,7 +218,10 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
-  async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
+  async function createHarness(options?: {
+    serverSettings?: Partial<ServerSettings>;
+    textGeneration?: Partial<TextGenerationShape>;
+  }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
@@ -239,6 +243,16 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
+      Layer.provideMerge(
+        Layer.succeed(TextGeneration, {
+          generateCommitMessage: () => Effect.die("generateCommitMessage should not be called"),
+          generatePrContent: () => Effect.die("generatePrContent should not be called"),
+          generateBranchName: () => Effect.die("generateBranchName should not be called"),
+          generateThreadTitle:
+            options?.textGeneration?.generateThreadTitle ??
+            (() => Effect.succeed({ title: "Generated subagent title" })),
+        }),
+      ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -2529,6 +2543,256 @@ describe("ProviderRuntimeIngestion", () => {
         (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
       ),
     ).toBe(true);
+  });
+
+  it("generates a concise title for projected subagent child threads", async () => {
+    const rawPrompt =
+      "You are Child Alpha. Do not edit any files. Run exactly this harmless shell command.";
+    const harness = await createHarness({
+      textGeneration: {
+        generateThreadTitle: (input) => {
+          expect(input.message).toBe(rawPrompt);
+          return Effect.succeed({ title: "Run harmless command" });
+        },
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const childThreadId = asThreadId("subagent-title-test");
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-subagent-title-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-title-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "in_progress",
+        title: "Subagent",
+        detail: rawPrompt,
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-title-test",
+              childThreadId,
+              parentItemId: "parent-item-title-test",
+              titleSeed: rawPrompt,
+            },
+          ],
+        },
+      },
+    });
+
+    const childThread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.title === "Run harmless command",
+      2000,
+      childThreadId,
+    );
+
+    expect(childThread.title).toBe("Run harmless command");
+    expect(childThread.parentRelation).toMatchObject({
+      kind: "subagent",
+      titleSeed: rawPrompt,
+    });
+  });
+
+  it("projects the subagent launch prompt as the child thread's initial user message", async () => {
+    const rawPrompt =
+      "CHILD_INITIAL_PROMPT_MARKER_TEST: Do not edit files. Return CHILD_OUTPUT_MARKER_TEST.";
+    const harness = await createHarness({
+      textGeneration: {
+        generateThreadTitle: () => Effect.succeed({ title: "Marker test" }),
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const childThreadId = asThreadId("subagent-prompt-test");
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-subagent-prompt-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-prompt-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "in_progress",
+        title: "Subagent",
+        detail: rawPrompt,
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-prompt-test",
+              childThreadId,
+              parentItemId: "parent-item-prompt-test",
+              titleSeed: rawPrompt,
+            },
+          ],
+        },
+      },
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (entry) => entry.parentRelation?.kind === "subagent",
+      2000,
+      childThreadId,
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-prompt-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-prompt-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "completed",
+        title: "Subagent",
+        detail: rawPrompt,
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-prompt-test",
+              childThreadId,
+              parentItemId: "parent-item-prompt-test",
+              rawPrompt,
+              titleSeed: rawPrompt,
+            },
+          ],
+        },
+      },
+    });
+
+    const childThread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.role === "user" && message.text === rawPrompt,
+        ),
+      2000,
+      childThreadId,
+    );
+
+    expect(childThread.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "subagent-prompt:subagent-prompt-test:parent-item-prompt-test",
+          role: "user",
+          text: rawPrompt,
+          turnId: null,
+          streaming: false,
+        }),
+      ]),
+    );
+  });
+
+  it("does not project a whitespace-only subagent prompt", async () => {
+    const harness = await createHarness({
+      textGeneration: {
+        generateThreadTitle: () => Effect.succeed({ title: "Whitespace child task" }),
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const childThreadId = asThreadId("subagent-whitespace-prompt-test");
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-whitespace-prompt-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-whitespace-prompt-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "completed",
+        title: "Subagent",
+        detail: "Whitespace child task",
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-whitespace-prompt-test",
+              childThreadId,
+              parentItemId: "parent-item-whitespace-prompt-test",
+              rawPrompt: "\n  ",
+              titleSeed: "Whitespace child task",
+            },
+          ],
+        },
+      },
+    });
+
+    const childThread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.title === "Whitespace child task",
+      2000,
+      childThreadId,
+    );
+    expect(childThread.messages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "subagent-prompt:subagent-whitespace-prompt-test:parent-item-whitespace-prompt-test",
+        }),
+      ]),
+    );
+  });
+
+  it("does not fabricate a child prompt from title metadata", async () => {
+    const harness = await createHarness({
+      textGeneration: {
+        generateThreadTitle: () => Effect.succeed({ title: "Summarized child task" }),
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const childThreadId = asThreadId("subagent-title-only-prompt-test");
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-title-only-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-title-only-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "completed",
+        title: "Subagent",
+        detail: "Summarized child task",
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-title-only-test",
+              childThreadId,
+              parentItemId: "parent-item-title-only-test",
+              titleSeed: "Summarized child task",
+            },
+          ],
+        },
+      },
+    });
+
+    const childThread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.title === "Summarized child task",
+      2000,
+      childThreadId,
+    );
+    expect(childThread.messages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "subagent-prompt:subagent-title-only-prompt-test:parent-item-title-only-test",
+        }),
+      ]),
+    );
   });
 
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {

@@ -252,6 +252,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
   };
@@ -281,6 +282,7 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -300,6 +302,7 @@ function mapThreadShell(
     latestTurn: thread.latestTurn,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
     latestUserMessageAt: thread.latestUserMessageAt,
     hasPendingApprovals: thread.hasPendingApprovals,
     hasPendingUserInput: thread.hasPendingUserInput,
@@ -329,6 +332,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
   };
 }
 
@@ -367,6 +371,28 @@ function latestTurnsEqual(
   );
 }
 
+function threadParentRelationsEqual(
+  left: ThreadShell["parentRelation"] | undefined,
+  right: ThreadShell["parentRelation"] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.kind !== right.kind || left.rootThreadId !== right.rootThreadId) return false;
+  if (left.kind === "root" || right.kind === "root") return left.kind === right.kind;
+  return (
+    left.parentThreadId === right.parentThreadId &&
+    left.parentTurnId === right.parentTurnId &&
+    left.parentItemId === right.parentItemId &&
+    left.parentActivitySequence === right.parentActivitySequence &&
+    left.providerThreadId === right.providerThreadId &&
+    left.titleSeed === right.titleSeed &&
+    left.depth === right.depth &&
+    left.startedAt === right.startedAt &&
+    left.completedAt === right.completedAt &&
+    left.status === right.status
+  );
+}
+
 function threadSessionsEqual(
   left: ThreadSession | null | undefined,
   right: ThreadSession | null | undefined,
@@ -401,6 +427,7 @@ function sidebarThreadSummariesEqual(
     latestTurnsEqual(left.latestTurn, right.latestTurn) &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
+    threadParentRelationsEqual(left.parentRelation, right.parentRelation) &&
     left.latestUserMessageAt === right.latestUserMessageAt &&
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
@@ -424,7 +451,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.archivedAt === right.archivedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
-    left.worktreePath === right.worktreePath
+    left.worktreePath === right.worktreePath &&
+    threadParentRelationsEqual(left.parentRelation, right.parentRelation)
   );
 }
 
@@ -853,6 +881,147 @@ function compareActivities(
   }
 
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function extractSubagentToolCallId(activity: OrchestrationThreadActivity): string | null {
+  if (activity.kind !== "tool.updated") {
+    return null;
+  }
+
+  const payload = asRecord(activity.payload);
+  if (payload?.itemType !== "collab_agent_tool_call") {
+    return null;
+  }
+
+  const data = asRecord(payload.data);
+  const parentCollab = asRecord(data?.parentCollab);
+  return asNonEmptyString(data?.toolCallId) ?? asNonEmptyString(parentCollab?.itemId);
+}
+
+function extractSubagentRawOutputContent(activity: OrchestrationThreadActivity): string | null {
+  const payload = asRecord(activity.payload);
+  const data = asRecord(payload?.data);
+  const rawOutput = asRecord(data?.rawOutput);
+  return typeof rawOutput?.content === "string" ? rawOutput.content : null;
+}
+
+function sameNullableTurnId(
+  left: OrchestrationThreadActivity["turnId"],
+  right: OrchestrationThreadActivity["turnId"],
+): boolean {
+  return left === right;
+}
+
+function mergeSubagentOutputActivity(input: {
+  baseActivity: OrchestrationThreadActivity;
+  nextActivity: OrchestrationThreadActivity;
+  content: string;
+}): OrchestrationThreadActivity {
+  const basePayload = asRecord(input.baseActivity.payload) ?? {};
+  const nextPayload = asRecord(input.nextActivity.payload) ?? {};
+  const baseData = asRecord(basePayload.data) ?? {};
+  const nextData = asRecord(nextPayload.data) ?? {};
+  const baseRawOutput = asRecord(baseData.rawOutput) ?? {};
+  const nextRawOutput = asRecord(nextData.rawOutput) ?? {};
+
+  return {
+    ...input.baseActivity,
+    tone: input.nextActivity.tone,
+    kind: input.nextActivity.kind,
+    summary: input.nextActivity.summary,
+    payload: {
+      ...basePayload,
+      ...nextPayload,
+      detail: basePayload.detail ?? nextPayload.detail,
+      data: {
+        ...baseData,
+        ...nextData,
+        rawOutput: {
+          ...baseRawOutput,
+          ...nextRawOutput,
+          content: input.content,
+        },
+      },
+    },
+  };
+}
+
+function mergeLiveSubagentOutputActivity(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  nextActivity: OrchestrationThreadActivity,
+): OrchestrationThreadActivity[] | null {
+  const nextToolCallId = extractSubagentToolCallId(nextActivity);
+  const nextContent = extractSubagentRawOutputContent(nextActivity);
+  if (!nextToolCallId || nextContent === null || nextContent.length === 0) {
+    return null;
+  }
+
+  let baseActivity: OrchestrationThreadActivity | null = null;
+  let insertIndex = -1;
+  let content = "";
+  const retained: OrchestrationThreadActivity[] = [];
+
+  for (const activity of activities) {
+    if (activity.id === nextActivity.id) {
+      return null;
+    }
+
+    const activityToolCallId = extractSubagentToolCallId(activity);
+    if (
+      activityToolCallId === nextToolCallId &&
+      sameNullableTurnId(activity.turnId, nextActivity.turnId)
+    ) {
+      baseActivity ??= activity;
+      if (insertIndex === -1) {
+        insertIndex = retained.length;
+      }
+      content += extractSubagentRawOutputContent(activity) ?? "";
+      continue;
+    }
+
+    retained.push(activity);
+  }
+
+  if (!baseActivity) {
+    return null;
+  }
+
+  const mergedActivity = mergeSubagentOutputActivity({
+    baseActivity,
+    nextActivity,
+    content: `${content}${nextContent}`,
+  });
+
+  return [...retained.slice(0, insertIndex), mergedActivity, ...retained.slice(insertIndex)];
+}
+
+function appendLiveThreadActivity(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  nextActivity: OrchestrationThreadActivity,
+): OrchestrationThreadActivity[] {
+  const mergedActivities = mergeLiveSubagentOutputActivity(activities, nextActivity);
+  if (mergedActivities) {
+    return mergedActivities;
+  }
+
+  return [...activities.filter((activity) => activity.id !== nextActivity.id), { ...nextActivity }];
 }
 
 function buildLatestTurn(params: {
@@ -1329,6 +1498,9 @@ function applyEnvironmentOrchestrationEvent(
         ...(event.payload.worktreePath !== undefined
           ? { worktreePath: event.payload.worktreePath }
           : {}),
+        ...(event.payload.parentRelation !== undefined
+          ? { parentRelation: event.payload.parentRelation }
+          : {}),
         updatedAt: event.payload.updatedAt,
       }));
 
@@ -1677,10 +1849,7 @@ function applyEnvironmentOrchestrationEvent(
 
     case "thread.activity-appended":
       return updateThreadState(state, event.payload.threadId, (thread) => {
-        const activities = [
-          ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
-          { ...event.payload.activity },
-        ]
+        const activities = appendLiveThreadActivity(thread.activities, event.payload.activity)
           .toSorted(compareActivities)
           .slice(-MAX_THREAD_ACTIVITIES);
         return {
@@ -1826,11 +1995,71 @@ export function selectThreadShellsAcrossEnvironments(state: AppState): ThreadShe
   );
 }
 
+function sidebarThreadSummaryKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id">) {
+  return `${thread.environmentId}:${thread.id}`;
+}
+
+function collectActiveSubagentSidebarPathKeys(
+  state: AppState,
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): ReadonlySet<string> {
+  if (!activeThreadRef) {
+    return new Set();
+  }
+
+  const activeEnvironmentState = selectEnvironmentState(state, activeThreadRef.environmentId);
+  let current = activeEnvironmentState.sidebarThreadSummaryById[activeThreadRef.threadId] ?? null;
+  const pathKeys = new Set<string>();
+  const visitedKeys = new Set<string>();
+
+  while (current?.parentRelation?.kind === "subagent") {
+    const currentKey = sidebarThreadSummaryKey(current);
+    if (visitedKeys.has(currentKey)) {
+      break;
+    }
+    visitedKeys.add(currentKey);
+    pathKeys.add(currentKey);
+
+    const parent = selectEnvironmentState(state, current.environmentId).sidebarThreadSummaryById[
+      current.parentRelation.parentThreadId
+    ];
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+
+  return pathKeys;
+}
+
+function shouldShowThreadInSidebar(
+  thread: SidebarThreadSummary,
+  activeSubagentPathKeys: ReadonlySet<string> = new Set(),
+): boolean {
+  return (
+    thread.parentRelation?.kind !== "subagent" ||
+    thread.parentRelation.status === "running" ||
+    activeSubagentPathKeys.has(sidebarThreadSummaryKey(thread))
+  );
+}
+
 export function selectSidebarThreadsAcrossEnvironments(state: AppState): SidebarThreadSummary[] {
+  return selectSidebarThreadsAcrossEnvironmentsForRoute(state, null);
+}
+
+export function selectSidebarThreadsAcrossEnvironmentsForRoute(
+  state: AppState,
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): SidebarThreadSummary[] {
+  const activeSubagentPathKeys = collectActiveSubagentSidebarPathKeys(state, activeThreadRef);
   return getEnvironmentEntries(state).flatMap(([environmentId, environmentState]) =>
     environmentState.threadIds.flatMap((threadId) => {
       const thread = environmentState.sidebarThreadSummaryById[threadId];
-      return thread && thread.environmentId === environmentId ? [thread] : [];
+      return thread &&
+        thread.environmentId === environmentId &&
+        shouldShowThreadInSidebar(thread, activeSubagentPathKeys)
+        ? [thread]
+        : [];
     }),
   );
 }
@@ -1839,15 +2068,24 @@ export function selectSidebarThreadsForProjectRef(
   state: AppState,
   ref: ScopedProjectRef | null | undefined,
 ): SidebarThreadSummary[] {
+  return selectSidebarThreadsForProjectRefForRoute(state, ref, null);
+}
+
+export function selectSidebarThreadsForProjectRefForRoute(
+  state: AppState,
+  ref: ScopedProjectRef | null | undefined,
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): SidebarThreadSummary[] {
   if (!ref) {
     return [];
   }
 
+  const activeSubagentPathKeys = collectActiveSubagentSidebarPathKeys(state, activeThreadRef);
   const environmentState = selectEnvironmentState(state, ref.environmentId);
   const threadIds = environmentState.threadIdsByProjectId[ref.projectId] ?? EMPTY_THREAD_IDS;
   return threadIds.flatMap((threadId) => {
     const thread = environmentState.sidebarThreadSummaryById[threadId];
-    return thread ? [thread] : [];
+    return thread && shouldShowThreadInSidebar(thread, activeSubagentPathKeys) ? [thread] : [];
   });
 }
 
@@ -1855,9 +2093,21 @@ export function selectSidebarThreadsForProjectRefs(
   state: AppState,
   refs: readonly ScopedProjectRef[],
 ): SidebarThreadSummary[] {
+  return selectSidebarThreadsForProjectRefsForRoute(state, refs, null);
+}
+
+export function selectSidebarThreadsForProjectRefsForRoute(
+  state: AppState,
+  refs: readonly ScopedProjectRef[],
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): SidebarThreadSummary[] {
   if (refs.length === 0) return [];
-  if (refs.length === 1) return selectSidebarThreadsForProjectRef(state, refs[0]);
-  return refs.flatMap((ref) => selectSidebarThreadsForProjectRef(state, ref));
+  if (refs.length === 1) {
+    return selectSidebarThreadsForProjectRefForRoute(state, refs[0], activeThreadRef);
+  }
+  return refs.flatMap((ref) =>
+    selectSidebarThreadsForProjectRefForRoute(state, ref, activeThreadRef),
+  );
 }
 
 export function selectBootstrapCompleteForActiveEnvironment(state: AppState): boolean {

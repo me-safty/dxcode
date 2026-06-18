@@ -83,6 +83,8 @@ beforeAll(() => {
     documentElement: {
       classList,
       offsetHeight: 0,
+      removeAttribute: () => {},
+      setAttribute: () => {},
     },
   });
 });
@@ -357,5 +359,37 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("lucide-x");
     expect(markup).toContain('aria-label="Tool call failed"');
+  });
+
+  it("renders expandable subagent rows without status labels", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Subagent",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              subagentPrompt: "Create one original haiku in English. Return only the haiku text.",
+              output:
+                "Rain lifts from the wires\nA window gathers pale dawn\nFootsteps bloom below",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Subagent");
+    expect(markup).toContain("Create one original haiku in English");
+    expect(markup).not.toContain("Done");
+    expect(markup).not.toContain("Running");
+    expect(markup).toContain('aria-label="Subagent - Create one original haiku');
   });
 });

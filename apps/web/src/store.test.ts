@@ -10,6 +10,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationEvent,
+  type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -19,6 +20,8 @@ import {
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironmentsForRoute,
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
@@ -26,7 +29,12 @@ import {
   type AppState,
   type EnvironmentState,
 } from "./store";
-import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
+import {
+  DEFAULT_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
+  type SidebarThreadSummary,
+  type Thread,
+} from "./types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");
@@ -83,6 +91,29 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    ...overrides,
+  };
+}
+
+function makeSidebarThreadSummary(
+  overrides: Partial<SidebarThreadSummary> = {},
+): SidebarThreadSummary {
+  return {
+    id: ThreadId.make("thread-1"),
+    environmentId: localEnvironmentId,
+    projectId: ProjectId.make("project-1"),
+    title: "Thread",
+    interactionMode: DEFAULT_INTERACTION_MODE,
+    session: null,
+    createdAt: "2026-02-13T00:00:00.000Z",
+    archivedAt: null,
+    latestTurn: null,
+    branch: null,
+    worktreePath: null,
+    latestUserMessageAt: "2026-02-13T00:00:00.000Z",
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
     ...overrides,
   };
 }
@@ -220,6 +251,120 @@ function threadsOf(state: AppState) {
   return selectThreadsAcrossEnvironments(state);
 }
 
+function makeSidebarState(summaries: readonly SidebarThreadSummary[]): AppState {
+  const projectId = ProjectId.make("project-1");
+  return makeEmptyState({
+    projectIds: [projectId],
+    projectById: {
+      [projectId]: {
+        id: projectId,
+        environmentId: localEnvironmentId,
+        name: "Project",
+        cwd: "/tmp/project",
+        defaultModelSelection: null,
+        scripts: [],
+      },
+    },
+    threadIds: summaries.map((thread) => thread.id),
+    threadIdsByProjectId: {
+      [projectId]: summaries.map((thread) => thread.id),
+    },
+    sidebarThreadSummaryById: Object.fromEntries(
+      summaries.map((thread) => [thread.id, thread] as const),
+    ),
+  });
+}
+
+function makeSubagentParentRelation(input: {
+  rootThreadId: ThreadId;
+  parentThreadId: ThreadId;
+  status: "running" | "completed" | "errored" | "interrupted" | "stopped";
+  depth?: number;
+}) {
+  return {
+    kind: "subagent",
+    rootThreadId: input.rootThreadId,
+    parentThreadId: input.parentThreadId,
+    parentTurnId: null,
+    parentItemId: "item-subagent" as never,
+    parentActivitySequence: 1,
+    providerThreadId: `provider-${input.parentThreadId}`,
+    titleSeed: null,
+    depth: input.depth ?? 1,
+    startedAt: "2026-02-13T00:01:00.000Z",
+    completedAt: input.status === "running" ? null : "2026-02-13T00:02:00.000Z",
+    status: input.status,
+  } satisfies NonNullable<SidebarThreadSummary["parentRelation"]>;
+}
+
+describe("selectSidebarThreadsAcrossEnvironmentsForRoute", () => {
+  it("hides completed subagent children outside the active route path", () => {
+    const parent = makeSidebarThreadSummary({ id: ThreadId.make("parent") });
+    const child = makeSidebarThreadSummary({
+      id: ThreadId.make("child"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: parent.id,
+        status: "completed",
+      }),
+    });
+    const state = makeSidebarState([parent, child]);
+
+    expect(selectSidebarThreadsAcrossEnvironments(state).map((thread) => thread.id)).toEqual([
+      parent.id,
+    ]);
+  });
+
+  it("includes a completed child while that child route is active", () => {
+    const parent = makeSidebarThreadSummary({ id: ThreadId.make("parent") });
+    const child = makeSidebarThreadSummary({
+      id: ThreadId.make("child"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: parent.id,
+        status: "completed",
+      }),
+    });
+    const state = makeSidebarState([parent, child]);
+
+    expect(
+      selectSidebarThreadsAcrossEnvironmentsForRoute(
+        state,
+        scopeThreadRef(localEnvironmentId, child.id),
+      ).map((thread) => thread.id),
+    ).toEqual([parent.id, child.id]);
+  });
+
+  it("includes intermediate completed children for nested active subagents", () => {
+    const parent = makeSidebarThreadSummary({ id: ThreadId.make("parent") });
+    const child = makeSidebarThreadSummary({
+      id: ThreadId.make("child"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: parent.id,
+        status: "completed",
+      }),
+    });
+    const grandchild = makeSidebarThreadSummary({
+      id: ThreadId.make("grandchild"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: child.id,
+        status: "completed",
+        depth: 2,
+      }),
+    });
+    const state = makeSidebarState([parent, child, grandchild]);
+
+    expect(
+      selectSidebarThreadsAcrossEnvironmentsForRoute(
+        state,
+        scopeThreadRef(localEnvironmentId, grandchild.id),
+      ).map((thread) => thread.id),
+    ).toEqual([parent.id, child.id, grandchild.id]);
+  });
+});
+
 function makeEvent<T extends OrchestrationEvent["type"]>(
   type: T,
   payload: Extract<OrchestrationEvent, { type: T }>["payload"],
@@ -245,6 +390,47 @@ function makeEvent<T extends OrchestrationEvent["type"]>(
     payload,
     ...overrides,
   } as Extract<OrchestrationEvent, { type: T }>;
+}
+
+function makeActivity(
+  overrides: Partial<OrchestrationThreadActivity> = {},
+): OrchestrationThreadActivity {
+  return {
+    id: EventId.make("activity-1"),
+    tone: "info",
+    kind: "step",
+    summary: "Activity",
+    payload: {},
+    turnId: TurnId.make("turn-1"),
+    createdAt: "2026-02-27T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeSubagentOutputActivity(input: {
+  readonly id: string;
+  readonly sequence: number;
+  readonly content: string;
+}): OrchestrationThreadActivity {
+  return makeActivity({
+    id: EventId.make(input.id),
+    tone: "tool",
+    kind: "tool.updated",
+    summary: "Subagent",
+    turnId: TurnId.make("turn-1"),
+    sequence: input.sequence,
+    createdAt: `2026-02-27T00:00:00.${String(input.sequence).padStart(3, "0")}Z`,
+    payload: {
+      itemType: "collab_agent_tool_call",
+      detail: "Create a haiku",
+      data: {
+        toolCallId: "collab-1",
+        rawOutput: {
+          content: input.content,
+        },
+      },
+    },
+  });
 }
 
 describe("environment state removal", () => {
@@ -484,6 +670,62 @@ describe("incremental orchestration updates", () => {
 
     expect(nextAfterProjectDelete).toBe(state);
     expect(nextAfterThreadDelete).toBe(state);
+  });
+
+  it("merges live subagent output chunks before applying the activity retention cap", () => {
+    const firstSubagentChunk = makeSubagentOutputActivity({
+      id: "subagent-output-1",
+      sequence: 1,
+      content: "Rain lifts ",
+    });
+    const fillerActivities = Array.from({ length: 499 }, (_, index) => {
+      const sequence = index + 2;
+      return makeActivity({
+        id: EventId.make(`activity-${sequence}`),
+        sequence,
+        createdAt: `2026-02-27T00:00:00.${String(sequence).padStart(3, "0")}Z`,
+      });
+    });
+    const state = makeState(
+      makeThread({
+        activities: [firstSubagentChunk, ...fillerActivities],
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent(
+        "thread.activity-appended",
+        {
+          threadId: ThreadId.make("thread-1"),
+          activity: makeSubagentOutputActivity({
+            id: "subagent-output-2",
+            sequence: 501,
+            content: "from wires",
+          }),
+        },
+        { sequence: 501, occurredAt: "2026-02-27T00:08:21.000Z" },
+      ),
+      localEnvironmentId,
+    );
+
+    const activities = threadsOf(next)[0]?.activities ?? [];
+    const mergedActivity = activities.find((activity) => activity.id === firstSubagentChunk.id);
+    const mergedPayload = mergedActivity?.payload as
+      | {
+          data?: {
+            rawOutput?: {
+              content?: string;
+            };
+          };
+        }
+      | undefined;
+
+    expect(activities).toHaveLength(500);
+    expect(activities.some((activity) => activity.id === EventId.make("subagent-output-2"))).toBe(
+      false,
+    );
+    expect(mergedPayload?.data?.rawOutput?.content).toBe("Rain lifts from wires");
   });
 
   it("reuses an existing project row when project.created arrives with a new id for the same cwd", () => {

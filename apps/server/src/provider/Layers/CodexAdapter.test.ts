@@ -628,6 +628,160 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("buffers child subagent deltas until the parent collab tool completes", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      yield* runtime.emit({
+        id: asEventId("evt-subagent-started"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/started",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("collab-1"),
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          startedAtMs: 1_767_225_600_000,
+          item: {
+            id: "collab-1",
+            type: "collabAgentToolCall",
+            tool: "spawnAgent",
+            status: "inProgress",
+            prompt: "Inspect routing",
+            senderThreadId: "thread-1",
+            receiverThreadIds: ["child-thread-1"],
+            agentsStates: {
+              "child-thread-1": {
+                status: "running",
+              },
+            },
+          },
+        },
+      } satisfies ProviderEvent);
+
+      yield* runtime.emit({
+        id: asEventId("evt-subagent-delta-1"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/agentMessage/delta",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("child-msg-1"),
+        textDelta: "Subagent ",
+        payload: {
+          threadId: "child-thread-1",
+          turnId: "child-turn-1",
+          itemId: "child-msg-1",
+          delta: "Subagent ",
+          parentCollab: {
+            itemId: "collab-1",
+            detail: "Inspect routing",
+          },
+        },
+      } satisfies ProviderEvent);
+      yield* runtime.emit({
+        id: asEventId("evt-subagent-delta-2"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/agentMessage/delta",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("child-msg-1"),
+        textDelta: "result",
+        payload: {
+          threadId: "child-thread-1",
+          turnId: "child-turn-1",
+          itemId: "child-msg-1",
+          delta: "result",
+          parentCollab: {
+            itemId: "collab-1",
+            detail: "Inspect routing",
+          },
+        },
+      } satisfies ProviderEvent);
+      yield* runtime.emit({
+        id: asEventId("evt-subagent-completed"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("collab-1"),
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          completedAtMs: 1_767_225_601_000,
+          item: {
+            id: "collab-1",
+            type: "collabAgentToolCall",
+            tool: "spawnAgent",
+            status: "completed",
+            prompt: "Inspect routing",
+            senderThreadId: "thread-1",
+            receiverThreadIds: ["child-thread-1"],
+            agentsStates: {
+              "child-thread-1": {
+                status: "completed",
+              },
+            },
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.equal(events.length, 2);
+      const runningEvent = events[0];
+      assert.equal(runningEvent?.type, "item.updated");
+      if (runningEvent?.type === "item.updated") {
+        assert.equal(runningEvent.payload.itemType, "collab_agent_tool_call");
+        assert.equal(runningEvent.payload.status, "inProgress");
+        assert.equal(runningEvent.payload.title, "Subagent");
+        assert.equal(runningEvent.payload.detail, "Inspect routing");
+      }
+
+      const completedEvent = events[1];
+      assert.equal(completedEvent?.type, "item.completed");
+      if (completedEvent?.type !== "item.completed") {
+        return;
+      }
+      assert.equal(completedEvent.payload.itemType, "collab_agent_tool_call");
+      assert.equal(completedEvent.payload.detail, "Inspect routing");
+      const completedData = completedEvent.payload.data as Record<string, unknown>;
+      assert.deepEqual(completedData.parentCollab, {
+        itemId: "collab-1",
+        detail: "Inspect routing",
+      });
+      assert.equal(completedData.toolCallId, "collab-1");
+      assert.deepEqual(completedData.rawOutput, {
+        content: "Subagent result",
+      });
+      assert.deepEqual(completedData.item, {
+        id: "collab-1",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "completed",
+        prompt: "Inspect routing",
+        senderThreadId: "thread-1",
+        receiverThreadIds: ["child-thread-1"],
+        agentsStates: {
+          "child-thread-1": {
+            status: "completed",
+          },
+        },
+      });
+    }),
+  );
+
   it.effect("maps session/closed lifecycle events to canonical session.exited runtime events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

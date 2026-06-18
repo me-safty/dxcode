@@ -6,6 +6,7 @@ import type {
   RepositoryIdentity,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
+  OrchestrationThreadParentRelation,
   ProjectScript as ContractProjectScript,
   ThreadId,
   ProjectId,
@@ -114,6 +115,7 @@ export interface Thread {
   pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
   branch: string | null;
   worktreePath: string | null;
+  parentRelation?: OrchestrationThreadParentRelation | undefined;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
 }
@@ -133,6 +135,7 @@ export interface ThreadShell {
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  parentRelation?: OrchestrationThreadParentRelation | undefined;
 }
 
 export interface ThreadTurnState {
@@ -153,6 +156,7 @@ export interface SidebarThreadSummary {
   latestTurn: OrchestrationLatestTurn | null;
   branch: string | null;
   worktreePath: string | null;
+  parentRelation?: OrchestrationThreadParentRelation | undefined;
   latestUserMessageAt: string | null;
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
