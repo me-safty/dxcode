@@ -6,6 +6,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -810,6 +811,76 @@ describe("incremental orchestration updates", () => {
     // Leaving the running session status is the turn-end signal.
     expect(threadsOf(settled)[0]?.latestTurn?.state).toBe("completed");
     expect(threadsOf(settled)[0]?.latestTurn?.completedAt).toBe("2026-02-27T00:00:04.000Z");
+  });
+
+  it("settles the running latest turn when an interrupt event has no turn id", () => {
+    const thread = makeThread({
+      session: {
+        status: "running",
+        provider: ProviderDriverKind.make("codex"),
+        orchestrationStatus: "running",
+        activeTurnId: TurnId.make("turn-1"),
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      },
+      latestTurn: {
+        turnId: TurnId.make("turn-1"),
+        state: "running",
+        requestedAt: "2026-02-27T00:00:00.000Z",
+        startedAt: "2026-02-27T00:00:00.000Z",
+        completedAt: null,
+        assistantMessageId: null,
+      },
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-interrupt-requested", {
+        threadId: thread.id,
+        createdAt: "2026-02-27T00:00:02.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(next)[0]?.latestTurn?.state).toBe("interrupted");
+    expect(threadsOf(next)[0]?.latestTurn?.completedAt).toBe("2026-02-27T00:00:02.000Z");
+  });
+
+  it("settles the running latest turn when session stop is requested", () => {
+    const thread = makeThread({
+      session: {
+        status: "running",
+        provider: ProviderDriverKind.make("codex"),
+        orchestrationStatus: "running",
+        activeTurnId: TurnId.make("turn-1"),
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      },
+      latestTurn: {
+        turnId: TurnId.make("turn-1"),
+        state: "running",
+        requestedAt: "2026-02-27T00:00:00.000Z",
+        startedAt: "2026-02-27T00:00:00.000Z",
+        completedAt: null,
+        assistantMessageId: null,
+      },
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.session-stop-requested", {
+        threadId: thread.id,
+        createdAt: "2026-02-27T00:00:02.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    const nextThread = threadsOf(next)[0];
+    expect(nextThread?.session?.orchestrationStatus).toBe("stopped");
+    expect(nextThread?.latestTurn?.state).toBe("interrupted");
+    expect(nextThread?.latestTurn?.completedAt).toBe("2026-02-27T00:00:02.000Z");
   });
 
   it("does not regress latestTurn when an older turn diff completes late", () => {

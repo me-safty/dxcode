@@ -1375,19 +1375,18 @@ function applyEnvironmentOrchestrationEvent(
       }));
 
     case "thread.turn-interrupt-requested": {
-      if (event.payload.turnId === undefined) {
-        return state;
-      }
       return updateThreadState(state, event.payload.threadId, (thread) => {
         const latestTurn = thread.latestTurn;
-        if (latestTurn === null || latestTurn.turnId !== event.payload.turnId) {
+        const turnId =
+          event.payload.turnId ?? (latestTurn?.state === "running" ? latestTurn.turnId : undefined);
+        if (latestTurn === null || turnId === undefined || latestTurn.turnId !== turnId) {
           return thread;
         }
         return {
           ...thread,
           latestTurn: buildLatestTurn({
             previous: latestTurn,
-            turnId: event.payload.turnId,
+            turnId,
             state: "interrupted",
             requestedAt: latestTurn.requestedAt,
             startedAt: latestTurn.startedAt ?? event.payload.createdAt,
@@ -1563,6 +1562,18 @@ function applyEnvironmentOrchestrationEvent(
                 activeTurnId: undefined,
                 updatedAt: event.payload.createdAt,
               },
+              latestTurn:
+                thread.latestTurn !== null && thread.latestTurn.state === "running"
+                  ? buildLatestTurn({
+                      previous: thread.latestTurn,
+                      turnId: thread.latestTurn.turnId,
+                      state: "interrupted",
+                      requestedAt: thread.latestTurn.requestedAt,
+                      startedAt: thread.latestTurn.startedAt ?? event.payload.createdAt,
+                      completedAt: thread.latestTurn.completedAt ?? event.payload.createdAt,
+                      assistantMessageId: thread.latestTurn.assistantMessageId,
+                    })
+                  : thread.latestTurn,
               updatedAt: event.occurredAt,
             },
       );

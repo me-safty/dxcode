@@ -3195,16 +3195,39 @@ export default function ChatView(props: ChatViewProps) {
     sendTurnSubmission,
   ]);
 
-  const onInterrupt = useCallback(async () => {
-    const api = readEnvironmentApi(environmentId);
-    if (!api || !activeThread) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.turn.interrupt",
-      commandId: newCommandId(),
-      threadId: activeThread.id,
-      createdAt: new Date().toISOString(),
-    });
-  }, [activeThread, environmentId]);
+  const onInterrupt = useCallback(
+    async (options?: { readonly stopSession?: boolean }) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api || !activeThread) return;
+      const turnId = activeThread.session?.activeTurnId ?? activeLatestTurn?.turnId ?? undefined;
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.interrupt",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        ...(turnId !== undefined ? { turnId } : {}),
+        createdAt: new Date().toISOString(),
+      });
+      if (options?.stopSession !== true) {
+        return;
+      }
+      await api.orchestration.dispatchCommand({
+        type: "thread.session.stop",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [
+      activeLatestTurn?.turnId,
+      activeThread?.id,
+      activeThread?.session?.activeTurnId,
+      environmentId,
+    ],
+  );
+
+  const onStopGeneration = useCallback(() => {
+    void onInterrupt({ stopSession: true });
+  }, [onInterrupt]);
 
   // Providers without live steering (everything except Codex) interrupt the
   // running turn and send ONLY the clicked message next — never the rest of the
@@ -4110,7 +4133,7 @@ export default function ChatView(props: ChatViewProps) {
                             shouldAutoScrollRef={isAtEndRef}
                             scheduleStickToBottom={scrollToEnd}
                             onSend={onSend}
-                            onInterrupt={onInterrupt}
+                            onInterrupt={onStopGeneration}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={
