@@ -164,3 +164,231 @@ it.effect("rejects unknown editors through the service API", () =>
     assert.equal(result._tag, "Failure");
   }).pipe(Effect.provide(testLayer({ platform: "linux", env: { PATH: "" } }))),
 );
+
+const emptyExternal = { osxExec: "", linuxExec: "", windowsExec: "" } as const;
+
+it.effect("opens the configured macOS terminal at the workspace path", () => {
+  let spawned: ChildProcess.StandardCommand | undefined;
+  let didUnref = false;
+  return Effect.gen(function* () {
+    const launcher = yield* ExternalLauncher;
+    yield* launcher.launchTerminal({
+      cwd: "/Users/me/workspace",
+      external: { ...emptyExternal, osxExec: "Ghostty" },
+    });
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "open");
+    assert.deepEqual(spawned.args, ["-a", "Ghostty", "/Users/me/workspace"]);
+    assert.equal(spawned.options.detached, true);
+    assert.equal(didUnref, true);
+  }).pipe(
+    Effect.provide(
+      testLayer({
+        platform: "darwin",
+        onSpawn: (command) => {
+          spawned = command;
+        },
+        onUnref: () => {
+          didUnref = true;
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("prefers an explicit exec override over the configured terminal", () => {
+  let spawned: ChildProcess.StandardCommand | undefined;
+  return Effect.gen(function* () {
+    const launcher = yield* ExternalLauncher;
+    yield* launcher.launchTerminal({
+      cwd: "/Users/me/workspace",
+      external: { ...emptyExternal, osxExec: "Ghostty" },
+      exec: "iTerm",
+    });
+
+    assert.ok(spawned);
+    assert.deepEqual(spawned.args, ["-a", "iTerm", "/Users/me/workspace"]);
+  }).pipe(
+    Effect.provide(
+      testLayer({
+        platform: "darwin",
+        onSpawn: (command) => {
+          spawned = command;
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("writes a run script and opens it on macOS when given a command", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    let spawned: ChildProcess.StandardCommand | undefined;
+
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher;
+      yield* launcher.launchTerminal({
+        cwd: "/Users/me/work space",
+        external: { ...emptyExternal, osxExec: "Ghostty" },
+        command: "npm run dev",
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "darwin",
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "open");
+    assert.equal(spawned.args[0], "-a");
+    assert.equal(spawned.args[1], "Ghostty");
+    const scriptPath = spawned.args[2];
+    assert.ok(scriptPath?.endsWith(".command"));
+    const contents = yield* fileSystem.readFileString(scriptPath ?? "");
+    assert.equal(contents.includes("cd '/Users/me/work space'"), true);
+    assert.equal(contents.includes("npm run dev"), true);
+    assert.equal(contents.includes(`exec "${"${SHELL:-/bin/sh}"}" -il`), true);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("runs a command through a run script on Linux terminals", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-terminals-" });
+    yield* fileSystem.writeFileString(path.join(binDir, "alacritty"), "#!/bin/sh\n");
+    yield* fileSystem.chmod(path.join(binDir, "alacritty"), 0o755);
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher;
+      yield* launcher.launchTerminal({
+        cwd: "/home/me/workspace",
+        external: { ...emptyExternal, linuxExec: "alacritty" },
+        command: "make build",
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "linux",
+          env: { PATH: binDir },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "alacritty");
+    assert.equal(spawned.args[0], "-e");
+    assert.ok(spawned.args[1]?.endsWith(".sh"));
+    const contents = yield* fileSystem.readFileString(spawned.args[1] ?? "");
+    assert.equal(contents.includes("make build"), true);
+    assert.equal(spawned.options.cwd, "/home/me/workspace");
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("opens Windows Terminal with the run script in the working directory", () =>
+  Effect.gen(function* () {
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher;
+      yield* launcher.launchTerminal({
+        cwd: "C:\\workspace",
+        external: { ...emptyExternal, windowsExec: "wt.exe" },
+        command: "npm test",
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "win32",
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "wt.exe");
+    assert.equal(spawned.args[0], "-d");
+    assert.equal(spawned.args[1], "C:\\workspace");
+    assert.equal(spawned.args[2], "cmd.exe");
+    assert.equal(spawned.args[3], "/k");
+    assert.ok(spawned.args[4]?.endsWith(".cmd"));
+    assert.equal(spawned.options.cwd, "C:\\workspace");
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("falls back to cmd.exe start for non-Windows-Terminal executables", () =>
+  Effect.gen(function* () {
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher;
+      yield* launcher.launchTerminal({
+        cwd: "C:\\workspace",
+        external: { ...emptyExternal, windowsExec: "pwsh.exe" },
+        command: "npm test",
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "win32",
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "cmd.exe");
+    assert.equal(spawned.args[0], "/c");
+    assert.equal(spawned.args[1], "start");
+    assert.equal(spawned.args[2], "");
+    assert.equal(spawned.args[3], "cmd.exe");
+    assert.equal(spawned.args[4], "/k");
+    assert.ok(spawned.args[5]?.endsWith(".cmd"));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("fails when no terminal command is available on Linux", () =>
+  Effect.gen(function* () {
+    const launcher = yield* ExternalLauncher;
+    const result = yield* launcher
+      .launchTerminal({
+        cwd: "/home/me/workspace",
+        external: { ...emptyExternal, linuxExec: "definitely-missing-term" },
+      })
+      .pipe(Effect.result);
+    assert.equal(result._tag, "Failure");
+  }).pipe(Effect.provide(testLayer({ platform: "linux", env: { PATH: "" } }))),
+);
+
+it.effect("discovers installed Linux terminals through the service API", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-terminals-" });
+    yield* fileSystem.writeFileString(path.join(binDir, "xterm"), "#!/bin/sh\n");
+    yield* fileSystem.chmod(path.join(binDir, "xterm"), 0o755);
+    yield* fileSystem.writeFileString(path.join(binDir, "kitty"), "#!/bin/sh\n");
+    yield* fileSystem.chmod(path.join(binDir, "kitty"), 0o755);
+
+    const terminals = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher;
+      return yield* launcher.resolveAvailableTerminals();
+    }).pipe(Effect.provide(testLayer({ platform: "linux", env: { PATH: binDir } })));
+
+    assert.equal(terminals.includes("xterm"), true);
+    assert.equal(terminals.includes("kitty"), true);
+    assert.equal(terminals.includes("gnome-terminal"), false);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
