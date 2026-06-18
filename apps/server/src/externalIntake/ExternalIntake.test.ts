@@ -15,14 +15,11 @@ describe("modelSelectionFromIntakeTags", () => {
     });
   });
 
-  it("routes [claude] to Opus 4.8 with the 1M context window", () => {
+  it("routes [claude] to Opus 4.8 at extra-high effort", () => {
     expect(modelSelectionFromIntakeTags("[claude] refactor the parser")).toEqual({
       instanceId: "claudeAgent",
       model: "claude-opus-4-8",
-      options: [
-        { id: "effort", value: "xhigh" },
-        { id: "contextWindow", value: "1m" },
-      ],
+      options: [{ id: "effort", value: "xhigh" }],
     });
   });
 

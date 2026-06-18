@@ -118,14 +118,11 @@ export class ExternalIntake extends Context.Service<ExternalIntake, ExternalInta
   "t3/externalIntake/ExternalIntake",
 ) {}
 
-/** Claude Opus 4.8 with the 1M context window — the [claude] routing target. */
-const CLAUDE_OPUS_1M_MODEL_SELECTION = {
+/** Claude Opus 4.8 at extra-high effort — the [claude] routing target. */
+const CLAUDE_OPUS_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("claudeAgent"),
   model: "claude-opus-4-8",
-  options: [
-    { id: "effort", value: "xhigh" },
-    { id: "contextWindow", value: "1m" },
-  ],
+  options: [{ id: "effort", value: "xhigh" }],
 } as const satisfies ModelSelection;
 
 /** GPT-5.5 on the fast service tier — the [codex] routing target. */
@@ -135,13 +132,20 @@ const CODEX_FAST_MODEL_SELECTION = {
   options: [{ id: "serviceTier", value: "fast" }],
 } as const satisfies ModelSelection;
 
-const DEFAULT_MODEL_SELECTION = CLAUDE_OPUS_1M_MODEL_SELECTION;
+const DEFAULT_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("claudeAgent"),
+  model: "claude-opus-4-8",
+  options: [
+    { id: "effort", value: "xhigh" },
+    { id: "contextWindow", value: "1m" },
+  ],
+} as const satisfies ModelSelection;
 
 /**
  * Inline routing tags an intake requester can drop into their message to force
  * the model the new thread runs on:
  *   - `[codex]`  → GPT-5.5 fast
- *   - `[claude]` → Claude Opus 4.8 (1M context)
+ *   - `[claude]` → Claude Opus 4.8 (extra-high effort)
  *
  * Returns `undefined` when no tag is present so callers fall back to the
  * profile/project default selection. When both tags appear, the one that
@@ -153,8 +157,8 @@ export function modelSelectionFromIntakeTags(text: string): ModelSelection | und
   const claudeIndex = haystack.indexOf("[claude]");
   if (codexIndex === -1 && claudeIndex === -1) return undefined;
   if (claudeIndex === -1) return CODEX_FAST_MODEL_SELECTION;
-  if (codexIndex === -1) return CLAUDE_OPUS_1M_MODEL_SELECTION;
-  return codexIndex < claudeIndex ? CODEX_FAST_MODEL_SELECTION : CLAUDE_OPUS_1M_MODEL_SELECTION;
+  if (codexIndex === -1) return CLAUDE_OPUS_MODEL_SELECTION;
+  return codexIndex < claudeIndex ? CODEX_FAST_MODEL_SELECTION : CLAUDE_OPUS_MODEL_SELECTION;
 }
 
 const EXTERNAL_INTAKE_AGENT_PROMPT = [
