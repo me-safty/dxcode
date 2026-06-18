@@ -118,7 +118,8 @@ export class ExternalIntake extends Context.Service<ExternalIntake, ExternalInta
   "t3/externalIntake/ExternalIntake",
 ) {}
 
-const DEFAULT_MODEL_SELECTION = {
+/** Claude Opus 4.8 with the 1M context window — the [claude] routing target. */
+const CLAUDE_OPUS_1M_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("claudeAgent"),
   model: "claude-opus-4-8",
   options: [
@@ -126,6 +127,35 @@ const DEFAULT_MODEL_SELECTION = {
     { id: "contextWindow", value: "1m" },
   ],
 } as const satisfies ModelSelection;
+
+/** GPT-5.5 on the fast service tier — the [codex] routing target. */
+const CODEX_FAST_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("codex"),
+  model: "gpt-5.5",
+  options: [{ id: "serviceTier", value: "fast" }],
+} as const satisfies ModelSelection;
+
+const DEFAULT_MODEL_SELECTION = CLAUDE_OPUS_1M_MODEL_SELECTION;
+
+/**
+ * Inline routing tags an intake requester can drop into their message to force
+ * the model the new thread runs on:
+ *   - `[codex]`  → GPT-5.5 fast
+ *   - `[claude]` → Claude Opus 4.8 (1M context)
+ *
+ * Returns `undefined` when no tag is present so callers fall back to the
+ * profile/project default selection. When both tags appear, the one that
+ * appears first in the message wins.
+ */
+export function modelSelectionFromIntakeTags(text: string): ModelSelection | undefined {
+  const haystack = text.toLowerCase();
+  const codexIndex = haystack.indexOf("[codex]");
+  const claudeIndex = haystack.indexOf("[claude]");
+  if (codexIndex === -1 && claudeIndex === -1) return undefined;
+  if (claudeIndex === -1) return CODEX_FAST_MODEL_SELECTION;
+  if (codexIndex === -1) return CLAUDE_OPUS_1M_MODEL_SELECTION;
+  return codexIndex < claudeIndex ? CODEX_FAST_MODEL_SELECTION : CLAUDE_OPUS_1M_MODEL_SELECTION;
+}
 
 const EXTERNAL_INTAKE_AGENT_PROMPT = [
   "System context and operating rules:",
@@ -500,10 +530,13 @@ const makeExternalIntake = Effect.gen(function* () {
   const createLinkedThread = (message: ExternalIntakeMessage, now: string) =>
     Effect.gen(function* () {
       const resolvedProject = yield* resolveProject(message);
-      const { projectId, modelSelection } = yield* ensureProject({
+      const { projectId, modelSelection: projectModelSelection } = yield* ensureProject({
         ...resolvedProject,
         now,
       });
+      // An inline [codex]/[claude] tag in the requester's message overrides the
+      // project/profile default for this thread.
+      const modelSelection = modelSelectionFromIntakeTags(message.text) ?? projectModelSelection;
       const baseRef = defaultBaseRefForProfile(resolvedProject.profile);
       const branch = buildTemporaryWorktreeBranchName((byteLength) =>
         randomBytes(byteLength).toString("hex"),
