@@ -9,6 +9,8 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "@xterm/xterm/css/xterm.css";
 import "./index.css";
+// Atlas Vector theme overrides — imported AFTER index.css so Atlas tokens win.
+import "../../../packages/atlas-theme/src/styles.css";
 
 import { isElectron } from "./env";
 import { DesktopClerkProvider } from "./cloud/desktopClerk";

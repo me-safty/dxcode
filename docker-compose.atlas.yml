@@ -48,6 +48,7 @@ services:
         # Browser-facing URL of the FastAPI (baked into the web build because the
         # browser runs on the host). Override via .env.atlas / the environment.
         VITE_ATLAS_API_URL: ${VITE_ATLAS_API_URL:-http://localhost:8000}
+        VITE_ATLAS_APP_NAME: ${VITE_ATLAS_APP_NAME:-Atlas Vector}
     environment:
       T3CODE_HOST: 0.0.0.0
       T3CODE_PORT: "3773"

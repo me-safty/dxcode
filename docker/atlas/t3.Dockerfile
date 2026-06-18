@@ -34,6 +34,8 @@ RUN pnpm install --frozen-lockfile --ignore-scripts \
 # dist/client/index.html.
 ARG VITE_ATLAS_API_URL=http://localhost:8000
 ENV VITE_ATLAS_API_URL=${VITE_ATLAS_API_URL}
+ARG VITE_ATLAS_APP_NAME="Atlas Vector"
+ENV VITE_ATLAS_APP_NAME=${VITE_ATLAS_APP_NAME}
 RUN pnpm --filter @t3tools/web run build \
  && pnpm --filter t3 run build:bundle \
  && mkdir -p apps/server/dist/client \
