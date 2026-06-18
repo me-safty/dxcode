@@ -119,6 +119,7 @@ export interface WsRpcClient {
     }) => ReturnType<LocalApi["shell"]["openInEditor"]>;
     readonly openInTerminal: (input: {
       readonly cwd: Parameters<LocalApi["shell"]["openInTerminal"]>[0];
+      readonly exec?: Parameters<LocalApi["shell"]["openInTerminal"]>[1];
     }) => ReturnType<LocalApi["shell"]["openInTerminal"]>;
   };
   readonly vcs: {

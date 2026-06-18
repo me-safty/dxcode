@@ -306,6 +306,7 @@ export interface ExternalLauncherShape {
   readonly launchTerminal: (input: {
     readonly cwd: string;
     readonly external: TerminalExternalSettings;
+    readonly exec?: string;
   }) => Effect.Effect<void, ExternalLauncherError>;
 }
 
@@ -485,11 +486,15 @@ const resolveTerminalExec = Effect.fn("externalLauncher.resolveTerminalExec")(fu
   platform: NodeJS.Platform,
   external: TerminalExternalSettings,
   env: NodeJS.ProcessEnv,
+  override?: string,
 ): Effect.fn.Return<
   string,
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
+  if (override !== undefined && override.trim().length > 0) {
+    return override.trim();
+  }
   const configured = configuredTerminalExec(platform, external);
   if (configured.length > 0) {
     return configured;
@@ -506,6 +511,7 @@ const resolveTerminalExec = Effect.fn("externalLauncher.resolveTerminalExec")(fu
 const resolveTerminalLaunch = Effect.fn("externalLauncher.resolveTerminalLaunch")(function* (
   cwd: string,
   external: TerminalExternalSettings,
+  override?: string,
 ): Effect.fn.Return<
   ProcessLaunch,
   ExternalLauncherError,
@@ -513,7 +519,7 @@ const resolveTerminalLaunch = Effect.fn("externalLauncher.resolveTerminalLaunch"
 > {
   const platform = yield* HostProcessPlatform;
   const env = yield* readCommandLookupEnv;
-  const exec = yield* resolveTerminalExec(platform, external, env);
+  const exec = yield* resolveTerminalExec(platform, external, env, override);
   yield* Effect.annotateCurrentSpan({
     "externalLauncher.terminal": exec,
     "externalLauncher.cwd": cwd,
@@ -578,7 +584,7 @@ const make = Effect.gen(function* () {
       ),
     launchTerminal: (input) =>
       provideCommandResolutionServices(
-        Effect.flatMap(resolveTerminalLaunch(input.cwd, input.external), (launch) =>
+        Effect.flatMap(resolveTerminalLaunch(input.cwd, input.external, input.exec), (launch) =>
           launchAndUnref(launch, "failed to open external terminal").pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           ),

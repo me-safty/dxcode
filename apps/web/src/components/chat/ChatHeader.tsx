@@ -13,6 +13,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
+import { OpenInTerminalPicker } from "./OpenInTerminalPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary/context";
 import { cn } from "~/lib/utils";
 
@@ -27,6 +28,7 @@ interface ChatHeaderProps {
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
+  availableTerminals: ReadonlyArray<string>;
   gitCwd: string | null;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
@@ -58,6 +60,7 @@ export const ChatHeader = memo(function ChatHeader({
   preferredScriptId,
   keybindings,
   availableEditors,
+  availableTerminals,
   gitCwd,
   onRunProjectScript,
   onAddProjectScript,
@@ -111,6 +114,13 @@ export const ChatHeader = memo(function ChatHeader({
           <OpenInPicker
             keybindings={keybindings}
             availableEditors={availableEditors}
+            openInCwd={openInCwd}
+          />
+        )}
+        {showOpenInPicker && availableTerminals.length > 0 && (
+          <OpenInTerminalPicker
+            keybindings={keybindings}
+            availableTerminals={availableTerminals}
             openInCwd={openInCwd}
           />
         )}

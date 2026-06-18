@@ -1241,6 +1241,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 externalLauncher.launchTerminal({
                   cwd: input.cwd,
                   external: settings.terminalExternal,
+                  ...(input.exec !== undefined ? { exec: input.exec } : {}),
                 }),
               ),
             ),

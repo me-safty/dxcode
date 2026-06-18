@@ -337,5 +337,6 @@ export const EXTERNAL_TERMINALS = {
 
 export const LaunchTerminalInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
+  exec: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type LaunchTerminalInput = typeof LaunchTerminalInput.Type;
