@@ -50,6 +50,7 @@ export interface ChatMessage {
   text: string;
   attachments?: ChatAttachment[];
   turnId?: TurnId | null;
+  phase?: "commentary" | "final_answer";
   createdAt: string;
   completedAt?: string | undefined;
   streaming: boolean;
