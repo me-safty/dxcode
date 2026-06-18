@@ -161,6 +161,32 @@ Primary files:
 - `apps/web/src/components/ThreadTerminalDrawer.tsx`
 - `apps/server/src/terminal/Layers/Manager.ts`
 
+## Codex Workspace Skill Loading
+
+Fix Codex repo-local skill discovery in the composer by resolving skills for the active project/worktree cwd, instead of relying on the global provider status snapshot.
+
+Expected behavior:
+
+- Repo-local Codex skills for the active workspace appear in the `$` skill picker.
+- The server exposes a workspace-aware `server.listProviderSkills` path and validates enabled Codex skill-listing requests against the requested cwd.
+- The Codex provider requests `skills/list` with the current workspace cwd and supports forced refreshes when the workspace skill cache needs to be invalidated.
+- Non-Codex or disabled providers keep returning provider snapshot skills instead of failing workspace skill search.
+- The web composer keeps provider skills keyed by active workspace, clears stale snapshot skills when the workspace changes, and surfaces skill-listing failures instead of silently reusing stale results.
+
+Primary files:
+
+- `apps/server/src/ws.ts`
+- `apps/server/src/provider/Layers/CodexProvider.ts`
+- `apps/web/src/lib/providerWorkspaceSkillsState.ts`
+- `apps/web/src/components/chat/ChatComposer.tsx`
+- `packages/contracts/src/server.ts`
+- `packages/client-runtime/src/wsRpcClient.ts`
+
+Relevant tests live in:
+
+- `apps/server/src/server.test.ts`
+- `apps/web/src/lib/providerWorkspaceSkillsState.test.ts`
+
 ## VS Code Extension Work
 
 This branch also carries the VS Code extension work that is not assumed to exist on `main`. Treat the VS Code extension, its desktop-backed integration model, workspace-scoped webview behavior, host MCP bridge, release packaging, and related tests as part of this branch's customization set during upstream merges.
@@ -218,10 +244,11 @@ When merging from upstream, keep these local behaviors unless upstream has an eq
 2. Codex subagent threading work remains preserved as a local customization unless `main` has an equivalent UI-aware subagent architecture; use `SUBAGENTS.md` as the detailed source of truth.
 3. Chat conversation and composer surfaces default to no maximum width across all host types.
 4. VS Code extension work remains preserved as a local customization unless `main` has an equivalent implementation; use `apps/vscode-extension/IMPLEMENTATION.md` as the detailed source of truth.
-5. Version Control panel work remains preserved as a local customization unless `main` has an equivalent agent-aware version-control panel; use `SOURCE_CONTROL.md` as the detailed source of truth.
-6. Version Control idle-power safeguards continue to ignore internal `.git/` watcher churn and use a conservative automatic remote Git fetch interval unless upstream ships equivalent low-churn behavior.
-7. Terminal-backed project actions reuse action terminals where possible and wait for terminal readiness before writing commands.
-8. Mobile EAS project ownership remains pointed at the local Expo project used for installable preview builds unless deliberately changed.
+5. Workspace-scoped Codex skill loading remains preserved so repo-local Codex skills for the active workspace continue to appear in the `$` skill picker.
+6. Version Control panel work remains preserved as a local customization unless `main` has an equivalent agent-aware version-control panel; use `SOURCE_CONTROL.md` as the detailed source of truth.
+7. Version Control idle-power safeguards continue to ignore internal `.git/` watcher churn and use a conservative automatic remote Git fetch interval unless upstream ships equivalent low-churn behavior.
+8. Terminal-backed project actions reuse action terminals where possible and wait for terminal readiness before writing commands.
+9. Mobile EAS project ownership remains pointed at the local Expo project used for installable preview builds unless deliberately changed.
 
 ## Retirement Criteria
 
