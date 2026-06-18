@@ -23,6 +23,7 @@ describe("resolveProbeTarget", () => {
 
   it("normalizes wildcard bind addresses to loopback", () => {
     expect(resolveProbeTarget("http://0.0.0.0:5173/")).toEqual({ host: "127.0.0.1", port: 5173 });
+    expect(resolveProbeTarget("http://[::]:5173/")).toEqual({ host: "::1", port: 5173 });
   });
 
   it("defaults the port from the scheme when absent", () => {

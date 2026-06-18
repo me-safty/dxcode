@@ -52,6 +52,7 @@ function isAllowedProbeHostname(hostname: string): boolean {
     host === "localhost" ||
     host.endsWith(".localhost") ||
     host === "::1" ||
+    host === "::" ||
     host === "host.docker.internal" ||
     host.endsWith(".local")
   ) {
@@ -91,7 +92,7 @@ export function resolveProbeTarget(url: string): ProbeTarget | null {
   }
 
   // Wildcard bind addresses are not connectable; dial loopback instead.
-  const connectHost = hostname === "0.0.0.0" || hostname === "::" ? "127.0.0.1" : hostname;
+  const connectHost = hostname === "0.0.0.0" ? "127.0.0.1" : hostname === "::" ? "::1" : hostname;
 
   return { host: connectHost, port };
 }

@@ -116,18 +116,6 @@ function isLoopbackDevHost(hostname: string): boolean {
   );
 }
 
-function isLocalOnlyDevHost(hostname: string): boolean {
-  const host = normalizeHostname(hostname);
-  return (
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host === "::1" ||
-    host === "0.0.0.0" ||
-    host === "host.docker.internal" ||
-    host.startsWith("127.")
-  );
-}
-
 function isBrowserLoopbackHost(hostname: string): boolean {
   const host = normalizeHostname(hostname);
   return (
@@ -308,7 +296,7 @@ export function canCurrentBrowserReachDevServerUrl(input: {
 
   // Loopback dev servers are only reachable when the browser itself is on
   // loopback (a remote browser cannot reach the server's localhost).
-  if (isLocalOnlyDevHost(urlHost)) {
+  if (isLoopbackDevHost(urlHost)) {
     return isBrowserLoopbackHost(browserHost);
   }
 

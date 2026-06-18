@@ -657,7 +657,7 @@ function EditableWorkspaceFileSurface(props: {
   useEffect(
     () => () => {
       editor.cleanUp();
-      saveCoordinator.dispose();
+      void saveCoordinator.dispose();
     },
     [editor, saveCoordinator],
   );

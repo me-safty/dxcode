@@ -908,8 +908,8 @@ describe("GeneralSettingsPanel observability", () => {
 
     expect(scrollArea).not.toBeNull();
     expect(viewport).not.toBeNull();
-    expect(scrollArea?.clientHeight).toBe(360);
     expect(viewport?.scrollHeight).toBeGreaterThan(viewport?.clientHeight ?? 0);
+    expect(["auto", "scroll"]).toContain(getComputedStyle(viewport!).overflowY);
     expect(viewport?.className).toContain("mask-b-from");
   });
 

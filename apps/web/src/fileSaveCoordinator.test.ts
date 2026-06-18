@@ -88,4 +88,76 @@ describe("FileSaveCoordinator", () => {
     expect(onPendingChange).not.toHaveBeenCalledWith(false);
     expect(onError).toHaveBeenCalledWith(error);
   });
+
+  it("persists pending changes before dispose completes", async () => {
+    vi.useFakeTimers();
+    const persist = vi.fn<(contents: string) => Promise<void>>().mockResolvedValue(undefined);
+    const onConfirmed = vi.fn();
+    const coordinator = new FileSaveCoordinator({
+      debounceMs: 500,
+      persist,
+      onPendingChange: vi.fn(),
+      onConfirmed,
+    });
+
+    coordinator.change("first");
+    coordinator.change("latest");
+
+    await coordinator.dispose();
+
+    expect(persist).toHaveBeenCalledOnce();
+    expect(persist).toHaveBeenCalledWith("latest");
+    expect(onConfirmed).toHaveBeenCalledWith("latest");
+  });
+
+  it("waits for an in-flight persist and saves newer dispose-time revisions", async () => {
+    vi.useFakeTimers();
+    const firstWrite = deferred();
+    const persist = vi
+      .fn<(contents: string) => Promise<void>>()
+      .mockReturnValueOnce(firstWrite.promise)
+      .mockResolvedValueOnce(undefined);
+    const coordinator = new FileSaveCoordinator({
+      debounceMs: 500,
+      persist,
+      onPendingChange: vi.fn(),
+      onConfirmed: vi.fn(),
+    });
+
+    coordinator.change("first");
+    await vi.advanceTimersByTimeAsync(500);
+    coordinator.change("latest");
+
+    const disposePromise = coordinator.dispose();
+    expect(persist).toHaveBeenCalledOnce();
+
+    firstWrite.resolve();
+    await disposePromise;
+
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist).toHaveBeenLastCalledWith("latest");
+  });
+
+  it("disposes idempotently without duplicate persists", async () => {
+    vi.useFakeTimers();
+    const persist = vi.fn<(contents: string) => Promise<void>>().mockResolvedValue(undefined);
+    const coordinator = new FileSaveCoordinator({
+      debounceMs: 500,
+      persist,
+      onPendingChange: vi.fn(),
+      onConfirmed: vi.fn(),
+    });
+
+    coordinator.change("latest");
+
+    const firstDispose = coordinator.dispose();
+    const secondDispose = coordinator.dispose();
+
+    expect(secondDispose).toBe(firstDispose);
+    await Promise.all([firstDispose, secondDispose]);
+    await coordinator.dispose();
+
+    expect(persist).toHaveBeenCalledOnce();
+    expect(persist).toHaveBeenCalledWith("latest");
+  });
 });

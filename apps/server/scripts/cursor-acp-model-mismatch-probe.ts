@@ -129,12 +129,13 @@ class JsonRpcChild {
   closed = false;
 
   constructor(bin: string, args: string[], cwd: string) {
-    const spawnCommand = resolveSpawnCommand(bin, args);
+    const environment = process.env;
+    const spawnCommand = resolveSpawnCommand(bin, args, { env: environment });
     this.child = spawn(spawnCommand.command, [...spawnCommand.args], {
       cwd,
       shell: spawnCommand.shell,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: environment,
     });
 
     this.child.on("exit", (code, signal) => {

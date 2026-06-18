@@ -1049,8 +1049,12 @@ export default function ChatView(props: ChatViewProps) {
       if (!api) {
         return false;
       }
-      const result = await api.server.probeDevServerUrl({ url });
-      return result.reachable;
+      try {
+        const result = await api.server.probeDevServerUrl({ url });
+        return result.reachable;
+      } catch {
+        return false;
+      }
     },
     [activeThreadEnvironmentId],
   );

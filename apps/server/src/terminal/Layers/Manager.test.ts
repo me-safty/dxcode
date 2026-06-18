@@ -345,9 +345,10 @@ it.layer(
 
   it.effect("reads an existing terminal snapshot without opening a missing session", () =>
     Effect.gen(function* () {
-      const { manager } = yield* createManager();
+      const { manager, ptyAdapter } = yield* createManager();
 
       yield* manager.open(openInput());
+      const spawnCountBeforeMissingSnapshot = ptyAdapter.spawnInputs.length;
       const snapshot = yield* manager.snapshot({
         threadId: "thread-1",
         terminalId: "default",
@@ -362,6 +363,7 @@ it.layer(
         }),
       );
       assert.equal(missing._tag, "TerminalSessionLookupError");
+      expect(ptyAdapter.spawnInputs).toHaveLength(spawnCountBeforeMissingSnapshot);
     }),
   );
 
