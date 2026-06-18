@@ -2935,7 +2935,9 @@ function ChatViewContent(props: ChatViewProps) {
         runOnWorktreeCreate: input.runOnWorktreeCreate,
         ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
         ...(input.autoOpenPreview ? { autoOpenPreview: input.autoOpenPreview } : {}),
-        ...(input.runInExternalTerminal ? { runInExternalTerminal: input.runInExternalTerminal } : {}),
+        ...(input.runInExternalTerminal
+          ? { runInExternalTerminal: input.runInExternalTerminal }
+          : {}),
       };
       const nextScripts = input.runOnWorktreeCreate
         ? [

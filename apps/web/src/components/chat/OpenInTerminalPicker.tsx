@@ -104,9 +104,7 @@ export const OpenInTerminalPicker = memo(function OpenInTerminalPicker({
       <GroupSeparator {...(!compact ? { className: "hidden @3xl/header-actions:block" } : {})} />
       <Menu>
         <MenuTrigger
-          render={
-            <Button aria-label="Choose terminal" size="icon-xs" variant="outline" />
-          }
+          render={<Button aria-label="Choose terminal" size="icon-xs" variant="outline" />}
         >
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>

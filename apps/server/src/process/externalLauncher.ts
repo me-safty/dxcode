@@ -680,9 +680,9 @@ const make = Effect.gen(function* () {
         Effect.flatMap(
           resolveTerminalLaunch(input.cwd, input.external, input.exec, input.command),
           (launch) =>
-          launchAndUnref(launch, "failed to open external terminal").pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          ),
+            launchAndUnref(launch, "failed to open external terminal").pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            ),
         ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
       ),
   } satisfies ExternalLauncherShape;
