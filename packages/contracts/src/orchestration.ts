@@ -205,6 +205,11 @@ export const ProjectScript = Schema.Struct({
    * the moment this script starts. Ignored without `previewUrl` or on web.
    */
   autoOpenPreview: Schema.optional(Schema.Boolean),
+  /**
+   * When true, run this script in an external terminal application instead of
+   * the in-app terminal.
+   */
+  runInExternalTerminal: Schema.optional(Schema.Boolean),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

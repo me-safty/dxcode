@@ -307,6 +307,7 @@ export interface ExternalLauncherShape {
     readonly cwd: string;
     readonly external: TerminalExternalSettings;
     readonly exec?: string;
+    readonly command?: string;
   }) => Effect.Effect<void, ExternalLauncherError>;
 }
 
@@ -508,10 +509,57 @@ const resolveTerminalExec = Effect.fn("externalLauncher.resolveTerminalExec")(fu
   return definition.fallback;
 });
 
+function quotePosixArg(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function buildPosixRunScript(cwd: string, command: string): string {
+  const quotedCwd = quotePosixArg(cwd);
+  return [
+    "#!/bin/sh",
+    `cd ${quotedCwd} || exit 1`,
+    command,
+    `cd ${quotedCwd} 2>/dev/null`,
+    `exec "${"${SHELL:-/bin/sh}"}" -il`,
+    "",
+  ].join("\n");
+}
+
+function buildWindowsRunScript(cwd: string, command: string): string {
+  return ["@echo off", `cd /d "${cwd}"`, command, `cd /d "${cwd}"`, ""].join("\r\n");
+}
+
+const prepareTerminalRunScript = Effect.fn("externalLauncher.prepareTerminalRunScript")(function* (
+  platform: NodeJS.Platform,
+  cwd: string,
+  command: string,
+): Effect.fn.Return<string, ExternalLauncherError, FileSystem.FileSystem> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const isWindows = platform === "win32";
+  const suffix = isWindows ? ".cmd" : platform === "darwin" ? ".command" : ".sh";
+  const contents = isWindows
+    ? buildWindowsRunScript(cwd, command)
+    : buildPosixRunScript(cwd, command);
+  return yield* Effect.gen(function* () {
+    const scriptPath = yield* fileSystem.makeTempFile({ prefix: "t3-action-", suffix });
+    yield* fileSystem.writeFileString(scriptPath, contents);
+    if (!isWindows) {
+      yield* fileSystem.chmod(scriptPath, 0o755);
+    }
+    return scriptPath;
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ExternalLauncherError({ message: "Failed to prepare terminal run script", cause }),
+    ),
+  );
+});
+
 const resolveTerminalLaunch = Effect.fn("externalLauncher.resolveTerminalLaunch")(function* (
   cwd: string,
   external: TerminalExternalSettings,
   override?: string,
+  command?: string,
 ): Effect.fn.Return<
   ProcessLaunch,
   ExternalLauncherError,
@@ -526,7 +574,17 @@ const resolveTerminalLaunch = Effect.fn("externalLauncher.resolveTerminalLaunch"
     "externalLauncher.platform": platform,
   });
 
+  const runCommand = command !== undefined && command.trim().length > 0 ? command : null;
+
   if (platform === "darwin") {
+    if (runCommand !== null) {
+      const scriptPath = yield* prepareTerminalRunScript(platform, cwd, runCommand);
+      return {
+        command: "open",
+        args: ["-a", exec, scriptPath],
+        options: DETACHED_IGNORE_STDIO_OPTIONS,
+      };
+    }
     return {
       command: "open",
       args: ["-a", exec, cwd],
@@ -534,8 +592,43 @@ const resolveTerminalLaunch = Effect.fn("externalLauncher.resolveTerminalLaunch"
     };
   }
 
+  if (platform === "win32") {
+    if (runCommand !== null) {
+      const scriptPath = yield* prepareTerminalRunScript(platform, cwd, runCommand);
+      if (exec.toLowerCase() === "wt.exe") {
+        return {
+          command: exec,
+          args: ["-d", cwd, "cmd.exe", "/k", scriptPath],
+          options: { ...DETACHED_IGNORE_STDIO_OPTIONS, cwd },
+        };
+      }
+      return {
+        command: "cmd.exe",
+        args: ["/c", "start", "", "cmd.exe", "/k", scriptPath],
+        options: { ...DETACHED_IGNORE_STDIO_OPTIONS, cwd },
+      };
+    }
+    if (!(yield* isCommandAvailable(exec, { env }))) {
+      return yield* new ExternalLauncherError({ message: `Terminal command not found: ${exec}` });
+    }
+    return {
+      command: exec,
+      args: [],
+      options: { ...DETACHED_IGNORE_STDIO_OPTIONS, cwd },
+    };
+  }
+
   if (!(yield* isCommandAvailable(exec, { env }))) {
     return yield* new ExternalLauncherError({ message: `Terminal command not found: ${exec}` });
+  }
+
+  if (runCommand !== null) {
+    const scriptPath = yield* prepareTerminalRunScript(platform, cwd, runCommand);
+    return {
+      command: exec,
+      args: ["-e", scriptPath],
+      options: { ...DETACHED_IGNORE_STDIO_OPTIONS, cwd },
+    };
   }
 
   return {
@@ -584,7 +677,9 @@ const make = Effect.gen(function* () {
       ),
     launchTerminal: (input) =>
       provideCommandResolutionServices(
-        Effect.flatMap(resolveTerminalLaunch(input.cwd, input.external, input.exec), (launch) =>
+        Effect.flatMap(
+          resolveTerminalLaunch(input.cwd, input.external, input.exec, input.command),
+          (launch) =>
           launchAndUnref(launch, "failed to open external terminal").pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           ),

@@ -2709,7 +2709,7 @@ function ChatViewContent(props: ChatViewProps) {
     storeNewTerminal,
   ]);
   const openExternalTerminal = useCallback(
-    (targetCwd?: string, exec?: string) => {
+    (targetCwd?: string, exec?: string, command?: string) => {
       const cwdForOpen = targetCwd ?? gitCwd ?? activeProject?.cwd;
       if (!cwdForOpen) {
         return;
@@ -2720,7 +2720,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       const stored = getStoredPreferredTerminal();
       const chosen = exec ?? (stored && availableTerminals.includes(stored) ? stored : undefined);
-      void api.shell.openInTerminal(cwdForOpen, chosen).catch(() => {
+      void api.shell.openInTerminal(cwdForOpen, chosen, command).catch(() => {
         toastManager.add({
           type: "error",
           title: "Unable to open external terminal",
@@ -2780,6 +2780,10 @@ function ChatViewContent(props: ChatViewProps) {
         });
       }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.cwd;
+      if (script.runInExternalTerminal) {
+        openExternalTerminal(targetCwd, undefined, script.command);
+        return;
+      }
       const baseTerminalId =
         terminalUiState.activeTerminalId || activeKnownTerminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
       const isBaseTerminalBusy = runningTerminalIds.includes(baseTerminalId);
@@ -2869,6 +2873,7 @@ function ChatViewContent(props: ChatViewProps) {
       activeThreadId,
       activeThreadRef,
       gitCwd,
+      openExternalTerminal,
       setTerminalOpen,
       setThreadError,
       storeNewTerminal,
@@ -2930,6 +2935,7 @@ function ChatViewContent(props: ChatViewProps) {
         runOnWorktreeCreate: input.runOnWorktreeCreate,
         ...(input.previewUrl ? { previewUrl: input.previewUrl } : {}),
         ...(input.autoOpenPreview ? { autoOpenPreview: input.autoOpenPreview } : {}),
+        ...(input.runInExternalTerminal ? { runInExternalTerminal: input.runInExternalTerminal } : {}),
       };
       const nextScripts = input.runOnWorktreeCreate
         ? [
@@ -2969,6 +2975,9 @@ function ChatViewContent(props: ChatViewProps) {
         ...(input.autoOpenPreview
           ? { autoOpenPreview: input.autoOpenPreview }
           : { autoOpenPreview: undefined }),
+        ...(input.runInExternalTerminal
+          ? { runInExternalTerminal: input.runInExternalTerminal }
+          : { runInExternalTerminal: undefined }),
       };
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId

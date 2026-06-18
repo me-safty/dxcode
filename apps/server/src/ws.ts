@@ -1242,6 +1242,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                   cwd: input.cwd,
                   external: settings.terminalExternal,
                   ...(input.exec !== undefined ? { exec: input.exec } : {}),
+                  ...(input.command !== undefined ? { command: input.command } : {}),
                 }),
               ),
             ),

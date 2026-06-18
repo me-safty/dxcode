@@ -51,9 +51,13 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.shell.openInEditor({ cwd, editor })
           : Promise.reject(unavailableLocalBackendError()),
-      openInTerminal: (cwd, exec) =>
+      openInTerminal: (cwd, exec, command) =>
         rpcClient
-          ? rpcClient.shell.openInTerminal({ cwd, ...(exec ? { exec } : {}) })
+          ? rpcClient.shell.openInTerminal({
+              cwd,
+              ...(exec ? { exec } : {}),
+              ...(command ? { command } : {}),
+            })
           : Promise.reject(unavailableLocalBackendError()),
       openExternal: async (url) => {
         if (window.desktopBridge) {

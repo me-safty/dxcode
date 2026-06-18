@@ -89,6 +89,8 @@ export interface NewProjectScriptInput {
   previewUrl: string | null;
   /** When true, automatically open the preview panel pointed at `previewUrl`. */
   autoOpenPreview: boolean;
+  /** When true, run this action in an external terminal instead of the in-app terminal. */
+  runInExternalTerminal: boolean;
 }
 
 interface ProjectScriptsControlProps {
@@ -121,6 +123,7 @@ export default function ProjectScriptsControl({
   const [keybinding, setKeybinding] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [autoOpenPreview, setAutoOpenPreview] = useState(false);
+  const [runInExternalTerminal, setRunInExternalTerminal] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
@@ -181,6 +184,7 @@ export default function ProjectScriptsControl({
         keybinding: keybindingRule?.key ?? null,
         previewUrl: trimmedPreviewUrl.length > 0 ? trimmedPreviewUrl : null,
         autoOpenPreview: trimmedPreviewUrl.length > 0 ? autoOpenPreview : false,
+        runInExternalTerminal,
       } satisfies NewProjectScriptInput;
       if (editingScriptId) {
         await onUpdateScript(editingScriptId, payload);
@@ -204,6 +208,7 @@ export default function ProjectScriptsControl({
     setKeybinding("");
     setPreviewUrl("");
     setAutoOpenPreview(false);
+    setRunInExternalTerminal(false);
     setValidationError(null);
     setDialogOpen(true);
   };
@@ -218,6 +223,7 @@ export default function ProjectScriptsControl({
     setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
     setPreviewUrl(script.previewUrl ?? "");
     setAutoOpenPreview(script.autoOpenPreview ?? false);
+    setRunInExternalTerminal(script.runInExternalTerminal ?? false);
     setValidationError(null);
     setDialogOpen(true);
   };
@@ -457,6 +463,13 @@ export default function ProjectScriptsControl({
                   checked={autoOpenPreview}
                   disabled={previewUrl.trim().length === 0}
                   onCheckedChange={(checked) => setAutoOpenPreview(Boolean(checked))}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                <span>Run in external terminal</span>
+                <Switch
+                  checked={runInExternalTerminal}
+                  onCheckedChange={(checked) => setRunInExternalTerminal(Boolean(checked))}
                 />
               </label>
               {validationError && <p className="text-sm text-destructive">{validationError}</p>}
