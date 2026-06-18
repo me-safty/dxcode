@@ -11,6 +11,8 @@ To achieve this goal, your task is to instruct new five-high subagents, one for 
 
 Each subagent should know about their own branch's customizations; provide them directly with details taken from CUSTOMIZED.md as that particular file does not exist in each individual branch, including the name of the corresponding md file in their own branch to study if there is one.
 
+If their branch is already up to date with `upstream/main`, they can skip the verification and exit only, reporting only that their branch is already up to date.
+
 The subagent must remember incoming changes have been purposefully merged, the ongoing branch work is accessory and any conflicts should be resolved by working our changes around the incoming ones as necessary. For any conflicts, the subagent is to first look at how they were resolved in `origin/main`.
 
 As final verification, each subagent must spin up its own dev environment and use playwright to verify that branch's features. Since they will be working simultaneously, assign them unique ports for their dev environments to avoid conflicts.
