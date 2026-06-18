@@ -327,29 +327,118 @@ describe("SourceControlPanelService", () => {
     ),
   );
 
-  it.effect("detects unstaged renames from untracked destination files", () =>
+  it.effect("enriches visible untracked files with stats and rename matches", () =>
     Effect.gen(function* () {
       const service = yield* SourceControlPanelService;
 
-      const snapshot = yield* service.snapshot({ cwd: "/repo" });
-      const unstagedFiles =
-        snapshot.changeGroups.find((group) => group.kind === "unstaged")?.files ?? [];
+      const result = yield* service.enrichWorkingTreeFiles({
+        cwd: "/repo",
+        paths: ["blast-review/SKILL.md", "blast-review/agents/openai.yaml"],
+      });
 
-      assert.deepStrictEqual(unstagedFiles, [
-        {
-          path: "blast-review/agents/openai.yaml",
-          originalPath: "copilot-blast-review/agents/openai.yaml",
-          status: "renamed",
-          insertions: 6,
-          deletions: 1,
-        },
-        {
-          path: "blast-review/scripts/blast-review.ts",
-          originalPath: "copilot-blast-review/scripts/copilot-blast-review.ts",
-          status: "renamed",
-          insertions: 204,
-          deletions: 21,
-        },
+      assert.deepStrictEqual(result, {
+        hiddenPaths: ["copilot-blast-review/agents/openai.yaml", "copilot-blast-review/SKILL.md"],
+        files: [
+          {
+            path: "blast-review/agents/openai.yaml",
+            originalPath: "copilot-blast-review/agents/openai.yaml",
+            status: "renamed",
+            insertions: 6,
+            deletions: 1,
+          },
+          {
+            path: "blast-review/SKILL.md",
+            originalPath: "copilot-blast-review/SKILL.md",
+            status: "renamed",
+            insertions: 2,
+            deletions: 1,
+          },
+        ],
+      });
+    }).pipe(
+      Effect.provide(
+        makeTestLayer((input) =>
+          Effect.sync(() => {
+            switch (input.operation) {
+              case "vcs.panel.enrichWorkingTreeFiles.statusPorcelain":
+                assert.deepStrictEqual(input.args, [
+                  "status",
+                  "--porcelain=2",
+                  "--branch",
+                  "-uall",
+                ]);
+                return success(
+                  [
+                    "# branch.oid abc",
+                    "# branch.head main",
+                    "1 .D N... 100644 100644 000000 abc abc copilot-blast-review/SKILL.md",
+                    "? blast-review/SKILL.md",
+                    "? blast-review/agents/openai.yaml",
+                    "? blast-review/scripts/blast-review.ts",
+                  ].join("\n"),
+                );
+              case "vcs.panel.enrichWorkingTreeFiles.unstagedNumstat":
+                return success("0\t20\tcopilot-blast-review/SKILL.md\n");
+              case "vcs.panel.enrichWorkingTreeFiles.untrackedNumstat": {
+                const path = input.args.at(-1);
+                if (path === "blast-review/SKILL.md") {
+                  return success("21\t0\t\0/dev/null\0blast-review/SKILL.md\0");
+                }
+                if (path === "blast-review/agents/openai.yaml") {
+                  return success("6\t0\t\0/dev/null\0blast-review/agents/openai.yaml\0");
+                }
+                return success("");
+              }
+              case "vcs.panel.gitIndexPath":
+                return success("/tmp/t3-code-test-missing-index");
+              case "vcs.panel.tempIndexReadTree":
+              case "vcs.panel.tempIndexIntentToAdd":
+                return success("");
+              case "vcs.panel.unstagedNameStatusWithUntracked":
+                return success(
+                  [
+                    "R043",
+                    "copilot-blast-review/SKILL.md",
+                    "blast-review/SKILL.md",
+                    "R035",
+                    "copilot-blast-review/agents/openai.yaml",
+                    "blast-review/agents/openai.yaml",
+                    "",
+                  ].join("\0"),
+                );
+              case "vcs.panel.unstagedNumstatWithUntracked":
+                return success(
+                  [
+                    "2\t1\t",
+                    "copilot-blast-review/SKILL.md",
+                    "blast-review/SKILL.md",
+                    "6\t1\t",
+                    "copilot-blast-review/agents/openai.yaml",
+                    "blast-review/agents/openai.yaml",
+                    "",
+                  ].join("\0"),
+                );
+              default:
+                return success("");
+            }
+          }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("uses all untracked destinations when enriching a visible deleted source", () => {
+    const calls: ExecuteGitInput[] = [];
+
+    return Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const result = yield* service.enrichWorkingTreeFiles({
+        cwd: "/repo",
+        paths: ["copilot-blast-review/SKILL.md"],
+      });
+
+      assert.deepStrictEqual(result.files, [
         {
           path: "blast-review/SKILL.md",
           originalPath: "copilot-blast-review/SKILL.md",
@@ -358,81 +447,125 @@ describe("SourceControlPanelService", () => {
           deletions: 1,
         },
       ]);
+      assert.deepStrictEqual(result.hiddenPaths, ["copilot-blast-review/SKILL.md"]);
+      assert.deepStrictEqual(
+        calls.find((call) => call.operation === "vcs.panel.tempIndexIntentToAdd")?.args,
+        [
+          "add",
+          "-N",
+          "--",
+          "blast-review/SKILL.md",
+          "blast-review/agents/openai.yaml",
+          "blast-review/scripts/blast-review.ts",
+        ],
+      );
+    }).pipe(
+      Effect.provide(
+        makeTestLayer((input) =>
+          Effect.sync(() => {
+            calls.push(input);
+            switch (input.operation) {
+              case "vcs.panel.enrichWorkingTreeFiles.statusPorcelain":
+                return success(
+                  [
+                    "# branch.oid abc",
+                    "# branch.head main",
+                    "1 .D N... 100644 100644 000000 abc abc copilot-blast-review/SKILL.md",
+                    "? blast-review/SKILL.md",
+                    "? blast-review/agents/openai.yaml",
+                    "? blast-review/scripts/blast-review.ts",
+                  ].join("\n"),
+                );
+              case "vcs.panel.enrichWorkingTreeFiles.unstagedNumstat":
+                return success("0\t20\tcopilot-blast-review/SKILL.md\n");
+              case "vcs.panel.gitIndexPath":
+                return success("/tmp/t3-code-test-missing-index");
+              case "vcs.panel.tempIndexReadTree":
+              case "vcs.panel.tempIndexIntentToAdd":
+                return success("");
+              case "vcs.panel.unstagedNameStatusWithUntracked":
+                return success(
+                  [
+                    "R043",
+                    "copilot-blast-review/SKILL.md",
+                    "blast-review/SKILL.md",
+                    "R035",
+                    "copilot-blast-review/agents/openai.yaml",
+                    "blast-review/agents/openai.yaml",
+                    "",
+                  ].join("\0"),
+                );
+              case "vcs.panel.unstagedNumstatWithUntracked":
+                return success(
+                  [
+                    "2\t1\t",
+                    "copilot-blast-review/SKILL.md",
+                    "blast-review/SKILL.md",
+                    "6\t1\t",
+                    "copilot-blast-review/agents/openai.yaml",
+                    "blast-review/agents/openai.yaml",
+                    "",
+                  ].join("\0"),
+                );
+              default:
+                return success("");
+            }
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("defers untracked detail loading from the initial snapshot", () =>
+    Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const snapshot = yield* service.snapshot({ cwd: "/repo" });
+      const unstagedFiles =
+        snapshot.changeGroups.find((group) => group.kind === "unstaged")?.files ?? [];
+
+      assert.equal(unstagedFiles.length, 101);
+      assert.deepStrictEqual(unstagedFiles[0], {
+        path: "generated/file-000.txt",
+        originalPath: null,
+        status: "untracked",
+        insertions: 0,
+        deletions: 0,
+      });
     }).pipe(
       Effect.provide(
         makeTestLayer(
           (input) =>
             Effect.sync(() => {
+              assert.notInclude(
+                [
+                  "vcs.panel.untrackedNumstat",
+                  "vcs.panel.gitIndexPath",
+                  "vcs.panel.tempIndexIntentToAdd",
+                  "vcs.panel.unstagedNameStatusWithUntracked",
+                  "vcs.panel.unstagedNumstatWithUntracked",
+                ],
+                input.operation,
+              );
+
               switch (input.operation) {
                 case "vcs.panel.localBranches":
                 case "vcs.panel.remotes":
                 case "vcs.panel.stashes":
                   return success("");
                 case "vcs.panel.statusPorcelain":
-                  assert.deepStrictEqual(input.args, [
-                    "status",
-                    "--porcelain=2",
-                    "--branch",
-                    "-uall",
-                  ]);
                   return success(
                     [
                       "# branch.oid abc",
                       "# branch.head main",
-                      "1 .D N... 100644 100644 000000 abc abc copilot-blast-review/SKILL.md",
-                      "? blast-review/SKILL.md",
-                      "? blast-review/agents/openai.yaml",
-                      "? blast-review/scripts/blast-review.ts",
+                      ...Array.from(
+                        { length: 101 },
+                        (_, index) => `? generated/file-${index.toString().padStart(3, "0")}.txt`,
+                      ),
                     ].join("\n"),
                   );
-                case "vcs.panel.unstagedNumstat":
-                  return success("0\t20\tcopilot-blast-review/SKILL.md\n");
-                case "vcs.panel.untrackedNumstat": {
-                  const path = input.args.at(-1);
-                  if (path === "blast-review/SKILL.md") {
-                    return success("21\t0\t\0/dev/null\0blast-review/SKILL.md\0");
-                  }
-                  if (path === "blast-review/agents/openai.yaml") {
-                    return success("6\t0\t\0/dev/null\0blast-review/agents/openai.yaml\0");
-                  }
-                  return success("");
-                }
-                case "vcs.panel.gitIndexPath":
-                  return success("/tmp/t3-code-test-missing-index");
-                case "vcs.panel.tempIndexReadTree":
-                case "vcs.panel.tempIndexIntentToAdd":
-                  return success("");
-                case "vcs.panel.unstagedNameStatusWithUntracked":
-                  return success(
-                    [
-                      "R043",
-                      "copilot-blast-review/SKILL.md",
-                      "blast-review/SKILL.md",
-                      "R035",
-                      "copilot-blast-review/agents/openai.yaml",
-                      "blast-review/agents/openai.yaml",
-                      "R087",
-                      "copilot-blast-review/scripts/copilot-blast-review.ts",
-                      "blast-review/scripts/blast-review.ts",
-                      "",
-                    ].join("\0"),
-                  );
-                case "vcs.panel.unstagedNumstatWithUntracked":
-                  return success(
-                    [
-                      "2\t1\t",
-                      "copilot-blast-review/SKILL.md",
-                      "blast-review/SKILL.md",
-                      "6\t1\t",
-                      "copilot-blast-review/agents/openai.yaml",
-                      "blast-review/agents/openai.yaml",
-                      "204\t21\t",
-                      "copilot-blast-review/scripts/copilot-blast-review.ts",
-                      "blast-review/scripts/blast-review.ts",
-                      "",
-                    ].join("\0"),
-                  );
                 case "vcs.panel.stagedNumstat":
+                case "vcs.panel.unstagedNumstat":
                   return success("");
                 default:
                   return success("");

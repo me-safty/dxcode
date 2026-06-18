@@ -148,6 +148,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       stageFiles: vi.fn(),
       unstageFiles: vi.fn(),
       discardFiles: vi.fn(),
+      enrichWorkingTreeFiles: vi.fn(),
       readFileDiff: vi.fn(),
       commitStaged: vi.fn(),
       pullBranch: vi.fn(),

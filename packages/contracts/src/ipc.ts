@@ -20,6 +20,8 @@ import type {
   VcsPanelFileActionInput,
   VcsPanelFileDiffInput,
   VcsPanelFileDiffResult,
+  VcsPanelWorkingTreeFileEnrichmentInput,
+  VcsPanelWorkingTreeFileEnrichmentResult,
   VcsPanelRemoteInput,
   VcsPanelRefActionInput,
   VcsPanelSnapshotInput,
@@ -1274,6 +1276,9 @@ export interface EnvironmentApi {
     stageFiles: (input: VcsPanelFileActionInput) => Promise<void>;
     unstageFiles: (input: VcsPanelFileActionInput) => Promise<void>;
     discardFiles: (input: VcsPanelFileActionInput) => Promise<void>;
+    enrichWorkingTreeFiles: (
+      input: VcsPanelWorkingTreeFileEnrichmentInput,
+    ) => Promise<VcsPanelWorkingTreeFileEnrichmentResult>;
     readFileDiff: (input: VcsPanelFileDiffInput) => Promise<VcsPanelFileDiffResult>;
     commitStaged: (input: VcsPanelCommitInput) => Promise<void>;
     pullBranch: (input: VcsPanelBranchActionInput) => Promise<VcsPullResult>;

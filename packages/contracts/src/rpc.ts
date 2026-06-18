@@ -53,6 +53,8 @@ import {
   VcsPanelStashDetailsInput,
   VcsPanelStashInput,
   VcsPanelUndoCommitInput,
+  VcsPanelWorkingTreeFileEnrichmentInput,
+  VcsPanelWorkingTreeFileEnrichmentResult,
   VcsPullResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
@@ -194,6 +196,7 @@ export const WS_METHODS = {
   vcsPanelStageFiles: "vcs.panel.stageFiles",
   vcsPanelUnstageFiles: "vcs.panel.unstageFiles",
   vcsPanelDiscardFiles: "vcs.panel.discardFiles",
+  vcsPanelEnrichWorkingTreeFiles: "vcs.panel.enrichWorkingTreeFiles",
   vcsPanelReadFileDiff: "vcs.panel.readFileDiff",
   vcsPanelCommitStaged: "vcs.panel.commitStaged",
   vcsPanelPullBranch: "vcs.panel.pullBranch",
@@ -510,6 +513,15 @@ export const WsVcsPanelDiscardFilesRpc = Rpc.make(WS_METHODS.vcsPanelDiscardFile
   payload: VcsPanelFileActionInput,
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
+
+export const WsVcsPanelEnrichWorkingTreeFilesRpc = Rpc.make(
+  WS_METHODS.vcsPanelEnrichWorkingTreeFiles,
+  {
+    payload: VcsPanelWorkingTreeFileEnrichmentInput,
+    success: VcsPanelWorkingTreeFileEnrichmentResult,
+    error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+  },
+);
 
 export const WsVcsPanelReadFileDiffRpc = Rpc.make(WS_METHODS.vcsPanelReadFileDiff, {
   payload: VcsPanelFileDiffInput,
@@ -929,6 +941,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPanelStageFilesRpc,
   WsVcsPanelUnstageFilesRpc,
   WsVcsPanelDiscardFilesRpc,
+  WsVcsPanelEnrichWorkingTreeFilesRpc,
   WsVcsPanelReadFileDiffRpc,
   WsVcsPanelCommitStagedRpc,
   WsVcsPanelPullBranchRpc,

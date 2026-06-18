@@ -52,6 +52,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       stageFiles: rpcClient.vcs.stageFiles,
       unstageFiles: rpcClient.vcs.unstageFiles,
       discardFiles: rpcClient.vcs.discardFiles,
+      enrichWorkingTreeFiles: rpcClient.vcs.enrichWorkingTreeFiles,
       readFileDiff: rpcClient.vcs.readFileDiff,
       commitStaged: rpcClient.vcs.commitStaged,
       pullBranch: rpcClient.vcs.pullBranch,

@@ -214,6 +214,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.vcsPanelBranchDetails, AuthOrchestrationReadScope],
   [WS_METHODS.vcsPanelBranchCommits, AuthOrchestrationReadScope],
   [WS_METHODS.vcsPanelStashDetails, AuthOrchestrationReadScope],
+  [WS_METHODS.vcsPanelEnrichWorkingTreeFiles, AuthOrchestrationReadScope],
   [WS_METHODS.vcsPanelReadFileDiff, AuthOrchestrationReadScope],
   [WS_METHODS.vcsPanelCompare, AuthOrchestrationReadScope],
   [WS_METHODS.vcsPanelCommitStaged, AuthOrchestrationOperateScope],
@@ -1504,6 +1505,14 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(
             WS_METHODS.vcsPanelStashDetails,
             sourceControlPanel.stashDetails(input),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsPanelEnrichWorkingTreeFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelEnrichWorkingTreeFiles,
+            sourceControlPanel.enrichWorkingTreeFiles(input),
             {
               "rpc.aggregate": "vcs",
             },

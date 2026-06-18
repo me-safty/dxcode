@@ -37,6 +37,8 @@ import {
   type VcsPanelStashDetailsInput,
   type VcsPanelStashInput,
   type VcsPanelUndoCommitInput,
+  type VcsPanelWorkingTreeFileEnrichmentInput,
+  type VcsPanelWorkingTreeFileEnrichmentResult,
   type VcsPullResult,
   type VcsRef,
   type VcsStatusLocalResult,
@@ -64,6 +66,9 @@ export interface SourceControlPanelServiceShape {
   readonly stageFiles: (input: VcsPanelFileActionInput) => Effect.Effect<void, GitCommandError>;
   readonly unstageFiles: (input: VcsPanelFileActionInput) => Effect.Effect<void, GitCommandError>;
   readonly discardFiles: (input: VcsPanelFileActionInput) => Effect.Effect<void, GitCommandError>;
+  readonly enrichWorkingTreeFiles: (
+    input: VcsPanelWorkingTreeFileEnrichmentInput,
+  ) => Effect.Effect<VcsPanelWorkingTreeFileEnrichmentResult, GitCommandError>;
   readonly readFileDiff: (
     input: VcsPanelFileDiffInput,
   ) => Effect.Effect<VcsPanelFileDiffResult, GitCommandError>;
@@ -329,6 +334,22 @@ function parsePorcelainStatus(input: {
 
 function untrackedPathsFromPorcelain(status: string): string[] {
   return status.split(/\r?\n/u).flatMap((line) => (line.startsWith("? ") ? [line.slice(2)] : []));
+}
+
+function unstagedFilesFromPorcelainStatus(input: {
+  status: string;
+  unstagedStats?: Map<string, { insertions: number; deletions: number }>;
+  untrackedStats?: Map<string, { insertions: number; deletions: number }>;
+}): readonly VcsPanelFileChange[] {
+  return (
+    parsePorcelainStatus({
+      status: input.status,
+      stagedFiles: [],
+      stagedStats: new Map(),
+      unstagedStats: input.unstagedStats ?? new Map(),
+      untrackedStats: input.untrackedStats ?? new Map(),
+    }).find((group) => group.kind === "unstaged")?.files ?? []
+  );
 }
 
 function parsePorcelainBranchSync(status: string) {
@@ -1221,9 +1242,8 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       };
     });
 
-  const unstagedFilesWithUntrackedRenames = (cwd: string, porcelain: string) =>
+  const unstagedFilesWithUntrackedRenames = (cwd: string, untrackedPaths: readonly string[]) =>
     Effect.gen(function* () {
-      const untrackedPaths = untrackedPathsFromPorcelain(porcelain);
       if (untrackedPaths.length === 0) return null;
 
       const gitIndexPath = (yield* run("vcs.panel.gitIndexPath", cwd, [
@@ -1278,6 +1298,103 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         ),
       );
     }).pipe(Effect.orElseSucceed(() => null));
+
+  const enrichWorkingTreeFiles: SourceControlPanelServiceShape["enrichWorkingTreeFiles"] =
+    Effect.fn("enrichWorkingTreeFiles")(function* (input) {
+      const requestedPaths = uniquePaths(input.paths);
+      const [porcelain, unstagedNumstat] = yield* Effect.all(
+        [
+          run("vcs.panel.enrichWorkingTreeFiles.statusPorcelain", input.cwd, [
+            "status",
+            "--porcelain=2",
+            "--branch",
+            "-uall",
+          ]),
+          run("vcs.panel.enrichWorkingTreeFiles.unstagedNumstat", input.cwd, [
+            "diff",
+            "--numstat",
+            "-z",
+            "--find-renames=20%",
+          ]),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      const requestedPathSet = new Set(requestedPaths);
+      const untrackedPaths = untrackedPathsFromPorcelain(porcelain);
+      const untrackedPathSet = new Set(untrackedPaths);
+      const unstagedFiles = unstagedFilesFromPorcelainStatus({
+        status: porcelain,
+        unstagedStats: parseNumstat(unstagedNumstat),
+      });
+      const deletedPathSet = new Set(
+        unstagedFiles.filter((file) => file.status === "deleted").map((file) => file.path),
+      );
+      const requestedUntrackedPaths = requestedPaths.filter((path) => untrackedPathSet.has(path));
+      const requestedDeletedPaths = requestedPaths.filter((path) => deletedPathSet.has(path));
+      const renameCandidateUntrackedPaths =
+        requestedDeletedPaths.length > 0 ? untrackedPaths : requestedUntrackedPaths;
+
+      const [untrackedStats, renameCandidates] = yield* Effect.all(
+        [
+          Effect.forEach(
+            requestedUntrackedPaths,
+            (path) =>
+              run(
+                "vcs.panel.enrichWorkingTreeFiles.untrackedNumstat",
+                input.cwd,
+                ["diff", "--no-index", "--numstat", "-z", "--", "/dev/null", path],
+                { allowNonZeroExit: true },
+              ).pipe(
+                Effect.map(parseNumstat),
+                Effect.orElseSucceed(() => new Map()),
+              ),
+            { concurrency: 4 },
+          ).pipe(Effect.map((stats) => mergeNumstats(stats))),
+          unstagedFilesWithUntrackedRenames(input.cwd, renameCandidateUntrackedPaths),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      const filesByPath = new Map<string, VcsPanelFileChange>();
+      const hiddenPaths = new Set<string>();
+      for (const file of renameCandidates ?? []) {
+        if (file.status !== "renamed" || !file.originalPath) continue;
+        if (!requestedPathSet.has(file.path) && !requestedPathSet.has(file.originalPath)) continue;
+        filesByPath.set(file.path, file);
+        hiddenPaths.add(file.originalPath);
+      }
+
+      for (const path of requestedUntrackedPaths) {
+        if (filesByPath.has(path)) continue;
+        const stats = untrackedStats.get(path);
+        filesByPath.set(path, {
+          path,
+          originalPath: null,
+          status: "untracked",
+          insertions: stats?.insertions ?? 0,
+          deletions: stats?.deletions ?? 0,
+        });
+      }
+      for (const file of unstagedFiles) {
+        if (file.status !== "deleted") continue;
+        if (
+          !requestedPathSet.has(file.path) ||
+          hiddenPaths.has(file.path) ||
+          filesByPath.has(file.path)
+        ) {
+          continue;
+        }
+        filesByPath.set(file.path, file);
+      }
+
+      return {
+        files: [...filesByPath.values()].toSorted((left, right) =>
+          left.path.localeCompare(right.path),
+        ),
+        hiddenPaths: [...hiddenPaths].toSorted((left, right) => left.localeCompare(right)),
+      };
+    });
 
   const snapshot: SourceControlPanelServiceShape["snapshot"] = Effect.fn("snapshot")(
     function* (input) {
@@ -1342,23 +1459,6 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         numstat: stagedNumstat,
         statuses: parseNameStatus(stagedNameStatus),
       });
-      const untrackedStats = mergeNumstats(
-        yield* Effect.forEach(
-          untrackedPathsFromPorcelain(porcelain),
-          (path) =>
-            run(
-              "vcs.panel.untrackedNumstat",
-              input.cwd,
-              ["diff", "--no-index", "--numstat", "-z", "--", "/dev/null", path],
-              { allowNonZeroExit: true },
-            ).pipe(
-              Effect.map(parseNumstat),
-              Effect.orElseSucceed(() => new Map()),
-            ),
-          { concurrency: 4 },
-        ),
-      );
-      const unstagedFiles = yield* unstagedFilesWithUntrackedRenames(input.cwd, porcelain);
       const remotes = parseRemoteVerbose(remotesOutput);
       const remotesWithBranches = yield* Effect.forEach(
         remotes,
@@ -1394,8 +1494,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
           stagedFiles,
           stagedStats: parseNumstat(stagedNumstat),
           unstagedStats: parseNumstat(unstagedNumstat),
-          untrackedStats,
-          ...(unstagedFiles ? { unstagedFiles } : {}),
+          untrackedStats: new Map(),
         }),
         localBranches,
         branchDetails: [],
@@ -1803,6 +1902,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     stageFiles,
     unstageFiles,
     discardFiles,
+    enrichWorkingTreeFiles,
     readFileDiff,
     commitStaged,
     pullBranch,

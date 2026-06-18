@@ -91,25 +91,47 @@ describe("VcsStatusBroadcaster", () => {
     assert.isFalse(VcsStatusBroadcaster.shouldIgnoreWatchEventPath("src/app.ts"));
   });
 
-  it.effect("debounces watcher refreshes after ignored paths are filtered", () =>
+  it.effect("batches watcher refresh decisions after ignored roots are filtered", () =>
     Effect.gen(function* () {
-      const checkedPaths: string[] = [];
+      const checkedBatches: string[][] = [];
       const refreshes = Array.from(
         yield* Stream.runCollect(
           VcsStatusBroadcaster.localWatchRefreshSignals(
             Stream.make("src/app.ts", "dist/app.js"),
-            (relativePath) =>
+            (relativePaths) =>
               Effect.sync(() => {
-                checkedPaths.push(relativePath);
-                return relativePath !== "dist/app.js";
+                checkedBatches.push([...relativePaths]);
+                return relativePaths.some((relativePath) => relativePath !== "dist/app.js");
               }),
             Duration.millis(1),
           ),
         ).pipe(Effect.timeout("2 seconds")),
       );
 
-      assert.deepStrictEqual(checkedPaths, ["src/app.ts", "dist/app.js"]);
+      assert.deepStrictEqual(checkedBatches, [["src/app.ts", "dist/app.js"]]);
       assert.equal(refreshes.length, 1);
+    }),
+  );
+
+  it.effect("does not refresh when every debounced watcher path is ignored", () =>
+    Effect.gen(function* () {
+      const checkedBatches: string[][] = [];
+      const refreshes = Array.from(
+        yield* Stream.runCollect(
+          VcsStatusBroadcaster.localWatchRefreshSignals(
+            Stream.make(".git/FETCH_HEAD", "dist/app.js", "dist/app.css"),
+            (relativePaths) =>
+              Effect.sync(() => {
+                checkedBatches.push([...relativePaths]);
+                return false;
+              }),
+            Duration.millis(1),
+          ),
+        ).pipe(Effect.timeout("2 seconds")),
+      );
+
+      assert.deepStrictEqual(checkedBatches, [["dist/app.js", "dist/app.css"]]);
+      assert.deepStrictEqual(refreshes, []);
     }),
   );
 

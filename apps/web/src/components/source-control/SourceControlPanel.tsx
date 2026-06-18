@@ -12,8 +12,10 @@ import type {
   VcsPanelSnapshotResult,
   VcsPanelStash,
   VcsPanelStashDetails,
+  VcsPanelWorkingTreeFileEnrichmentResult,
   VcsRef,
 } from "@t3tools/contracts";
+import { LegendList } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   Archive,
@@ -120,6 +122,8 @@ const DEFAULT_SECTION_WEIGHTS: Record<SectionKey, number> = {
 const COLLAPSED_SECTION_HEIGHT = 32;
 const MIN_SECTION_WEIGHT = 0.35;
 const COMMIT_PAGE_SIZE = 10;
+const WORKING_FILE_ROW_ESTIMATED_HEIGHT = 28;
+const WORKING_FILE_DRAW_DISTANCE = 600;
 const commitDateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -195,6 +199,38 @@ function mergeChangeGroups(groups: readonly VcsPanelChangeGroup[]): PanelChanged
       hasConflicts: file.hasConflicts,
     }))
     .toSorted((left, right) => left.path.localeCompare(right.path));
+}
+
+function applyWorkingTreeFileEnrichment(
+  groups: readonly VcsPanelChangeGroup[],
+  enrichedFilesByPath: ReadonlyMap<string, VcsPanelFileChange>,
+  hiddenPaths: ReadonlySet<string>,
+): VcsPanelChangeGroup[] {
+  if (enrichedFilesByPath.size === 0 && hiddenPaths.size === 0) {
+    return groups.map((group) => ({ ...group, files: [...group.files] }));
+  }
+  return groups.map((group) => {
+    if (group.kind !== "unstaged") return { ...group, files: [...group.files] };
+    const seenPaths = new Set<string>();
+    const files = group.files.flatMap((file) => {
+      if (hiddenPaths.has(file.path)) return [];
+      const enrichedFile = enrichedFilesByPath.get(file.path) ?? file;
+      seenPaths.add(enrichedFile.path);
+      return [enrichedFile];
+    });
+    for (const enrichedFile of enrichedFilesByPath.values()) {
+      if (seenPaths.has(enrichedFile.path) || hiddenPaths.has(enrichedFile.path)) continue;
+      files.push(enrichedFile);
+    }
+    return {
+      ...group,
+      files: files.toSorted((left, right) => left.path.localeCompare(right.path)),
+    };
+  });
+}
+
+function shouldEnrichWorkingTreeFile(file: PanelChangedFile): boolean {
+  return file.hasUnstagedChanges && (file.status === "untracked" || file.status === "deleted");
 }
 
 function isActionForced(event: ReactMouseEvent): boolean {
@@ -960,6 +996,21 @@ function LoadMoreCommitsButton({
   );
 }
 
+function WorkingFileVirtualRow({
+  file,
+  onRendered,
+  renderFile,
+}: {
+  readonly file: PanelChangedFile;
+  readonly onRendered: (file: PanelChangedFile) => void;
+  readonly renderFile: (file: PanelChangedFile) => ReactNode;
+}) {
+  useEffect(() => {
+    onRendered(file);
+  }, [file, onRendered]);
+  return <>{renderFile(file)}</>;
+}
+
 function InlineFileDiff({
   patch,
   resolvedTheme,
@@ -1018,6 +1069,12 @@ export function SourceControlPanel({
   const previousChangedPathsRef = useRef<ReadonlySet<string>>(new Set());
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
+  const enrichedWorkingTreeFilesRef = useRef<ReadonlyMap<string, VcsPanelFileChange>>(new Map());
+  const hiddenWorkingTreePathsRef = useRef<ReadonlySet<string>>(new Set());
+  const pendingWorkingTreeEnrichmentPathsRef = useRef<Set<string>>(new Set());
+  const inFlightWorkingTreeEnrichmentPathsRef = useRef<Set<string>>(new Set());
+  const workingTreeEnrichmentTimerRef = useRef<number | null>(null);
+  const workingTreeEnrichmentGenerationRef = useRef(0);
   const [snapshot, setSnapshot] = useState<VcsPanelSnapshotResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningActions, setRunningActions] = useState<ReadonlySet<string>>(() => new Set());
@@ -1047,6 +1104,12 @@ export function SourceControlPanel({
   const [fileDiffsByKey, setFileDiffsByKey] = useState<ReadonlyMap<string, FileDiffLoadState>>(
     () => new Map(),
   );
+  const [enrichedWorkingTreeFilesByPath, setEnrichedWorkingTreeFilesByPath] = useState<
+    ReadonlyMap<string, VcsPanelFileChange>
+  >(() => new Map());
+  const [hiddenWorkingTreePaths, setHiddenWorkingTreePaths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [addRemoteOpen, setAddRemoteOpen] = useState(false);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [divergedSyncBranch, setDivergedSyncBranch] = useState<VcsRef | null>(null);
@@ -1070,9 +1133,18 @@ export function SourceControlPanel({
   const [selectedChangePaths, setSelectedChangePaths] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const displayedChangeGroups = useMemo(
+    () =>
+      applyWorkingTreeFileEnrichment(
+        snapshot?.changeGroups ?? [],
+        enrichedWorkingTreeFilesByPath,
+        hiddenWorkingTreePaths,
+      ),
+    [enrichedWorkingTreeFilesByPath, hiddenWorkingTreePaths, snapshot?.changeGroups],
+  );
   const changedFiles = useMemo(
-    () => mergeChangeGroups(snapshot?.changeGroups ?? []),
-    [snapshot?.changeGroups],
+    () => mergeChangeGroups(displayedChangeGroups),
+    [displayedChangeGroups],
   );
   const compareBaseRefs = useMemo(() => compareBaseRefNames(snapshot), [snapshot]);
   const deferredCompareBaseQuery = useDeferredValue(compareBaseQuery);
@@ -1123,6 +1195,109 @@ export function SourceControlPanel({
     [runningActions],
   );
 
+  const resetWorkingTreeFileEnrichment = useCallback(() => {
+    workingTreeEnrichmentGenerationRef.current += 1;
+    if (workingTreeEnrichmentTimerRef.current !== null) {
+      window.clearTimeout(workingTreeEnrichmentTimerRef.current);
+      workingTreeEnrichmentTimerRef.current = null;
+    }
+    pendingWorkingTreeEnrichmentPathsRef.current.clear();
+    inFlightWorkingTreeEnrichmentPathsRef.current.clear();
+    enrichedWorkingTreeFilesRef.current = new Map();
+    hiddenWorkingTreePathsRef.current = new Set();
+    setEnrichedWorkingTreeFilesByPath(new Map());
+    setHiddenWorkingTreePaths(new Set());
+  }, []);
+
+  const applyWorkingTreeFileEnrichmentResult = useCallback(
+    (result: VcsPanelWorkingTreeFileEnrichmentResult) => {
+      setEnrichedWorkingTreeFilesByPath((current) => {
+        const next = new Map(current);
+        for (const hiddenPath of result.hiddenPaths) {
+          next.delete(hiddenPath);
+        }
+        for (const file of result.files) {
+          next.set(file.path, file);
+        }
+        enrichedWorkingTreeFilesRef.current = next;
+        return next;
+      });
+      setHiddenWorkingTreePaths((current) => {
+        const next = new Set(current);
+        for (const hiddenPath of result.hiddenPaths) {
+          next.add(hiddenPath);
+        }
+        hiddenWorkingTreePathsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
+  const flushWorkingTreeFileEnrichmentQueue = useCallback(() => {
+    workingTreeEnrichmentTimerRef.current = null;
+    if (!api) return;
+    const paths = [...pendingWorkingTreeEnrichmentPathsRef.current].filter(
+      (path) =>
+        !enrichedWorkingTreeFilesRef.current.has(path) &&
+        !hiddenWorkingTreePathsRef.current.has(path) &&
+        !inFlightWorkingTreeEnrichmentPathsRef.current.has(path),
+    );
+    pendingWorkingTreeEnrichmentPathsRef.current.clear();
+    if (paths.length === 0) return;
+
+    for (const path of paths) {
+      inFlightWorkingTreeEnrichmentPathsRef.current.add(path);
+    }
+    const generation = workingTreeEnrichmentGenerationRef.current;
+    void api.vcs
+      .enrichWorkingTreeFiles({ cwd, paths })
+      .then((result) => {
+        if (workingTreeEnrichmentGenerationRef.current !== generation) return;
+        applyWorkingTreeFileEnrichmentResult(result);
+      })
+      .catch((nextError: unknown) => {
+        if (workingTreeEnrichmentGenerationRef.current === generation) {
+          setError(errorMessage(nextError));
+        }
+      })
+      .finally(() => {
+        for (const path of paths) {
+          inFlightWorkingTreeEnrichmentPathsRef.current.delete(path);
+        }
+      });
+  }, [api, applyWorkingTreeFileEnrichmentResult, cwd]);
+
+  const queueWorkingTreeFileEnrichment = useCallback(
+    (file: PanelChangedFile) => {
+      if (!api || !shouldEnrichWorkingTreeFile(file)) return;
+      const path = file.path;
+      if (
+        enrichedWorkingTreeFilesRef.current.has(path) ||
+        hiddenWorkingTreePathsRef.current.has(path) ||
+        inFlightWorkingTreeEnrichmentPathsRef.current.has(path)
+      ) {
+        return;
+      }
+      pendingWorkingTreeEnrichmentPathsRef.current.add(path);
+      if (workingTreeEnrichmentTimerRef.current !== null) return;
+      workingTreeEnrichmentTimerRef.current = window.setTimeout(
+        flushWorkingTreeFileEnrichmentQueue,
+        50,
+      );
+    },
+    [api, flushWorkingTreeFileEnrichmentQueue],
+  );
+
+  useEffect(
+    () => () => {
+      if (workingTreeEnrichmentTimerRef.current !== null) {
+        window.clearTimeout(workingTreeEnrichmentTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const syncChangedPathSelection = useCallback((groups: readonly VcsPanelChangeGroup[]) => {
     const nextChangedPaths = mergeChangeGroups(groups).map((file) => file.path);
     const currentPaths = new Set(nextChangedPaths);
@@ -1152,6 +1327,7 @@ export function SourceControlPanel({
         refreshQueuedRef.current = false;
         setError(null);
         const nextSnapshot = await api.vcs.panelSnapshot({ cwd });
+        resetWorkingTreeFileEnrichment();
         syncChangedPathSelection(nextSnapshot.changeGroups);
         setSnapshot(nextSnapshot);
         const expandedBranches = expandedBranchesForSnapshot(nextSnapshot, expandedTreeRef.current);
@@ -1191,7 +1367,7 @@ export function SourceControlPanel({
       setLoadingBranchDetails(new Set());
       setLoading(false);
     }
-  }, [api, compareBaseOverrides, cwd, syncChangedPathSelection]);
+  }, [api, compareBaseOverrides, cwd, resetWorkingTreeFileEnrichment, syncChangedPathSelection]);
 
   useEffect(() => {
     void refresh();
@@ -2213,7 +2389,13 @@ export function SourceControlPanel({
     );
   };
 
-  const workingFileRows = changedFiles.map((file) => renderWorkingFile(file));
+  const renderWorkingFileItem = ({ item }: { item: PanelChangedFile }) => (
+    <WorkingFileVirtualRow
+      file={item}
+      onRendered={queueWorkingTreeFileEnrichment}
+      renderFile={renderWorkingFile}
+    />
+  );
 
   const renderCommit = (
     commit: VcsPanelCommitSummary,
@@ -3206,12 +3388,12 @@ export function SourceControlPanel({
   );
 
   const changesSection = (
-    <div className="space-y-2">
+    <div className="flex h-full min-h-0 flex-col gap-2">
       {changedFiles.length === 0 ? (
         <div className="px-1 py-1 text-sm text-muted-foreground">Working tree clean</div>
       ) : (
-        <div className="space-y-0.5">
-          <div className="flex h-6 items-center justify-between gap-2 rounded px-1 text-xs font-medium uppercase text-muted-foreground">
+        <>
+          <div className="flex h-6 shrink-0 items-center justify-between gap-2 rounded px-1 text-xs font-medium uppercase text-muted-foreground">
             <div className="flex min-w-0 items-center gap-1.5">
               <Tooltip>
                 <TooltipTrigger
@@ -3280,8 +3462,17 @@ export function SourceControlPanel({
               </IconButton>
             </div>
           </div>
-          {workingFileRows}
-        </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <LegendList<PanelChangedFile>
+              data={changedFiles}
+              keyExtractor={(file) => file.path}
+              renderItem={renderWorkingFileItem}
+              estimatedItemSize={WORKING_FILE_ROW_ESTIMATED_HEIGHT}
+              drawDistance={WORKING_FILE_DRAW_DISTANCE}
+              className="scrollbar-gutter-both h-full overflow-x-hidden overscroll-y-contain"
+            />
+          </div>
+        </>
       )}
     </div>
   );

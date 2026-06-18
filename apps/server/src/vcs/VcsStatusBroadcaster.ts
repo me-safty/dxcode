@@ -117,14 +117,16 @@ export function shouldIgnoreWatchEventPath(relativePath: string): boolean {
 
 export function localWatchRefreshSignals<E, R, R2>(
   relativePaths: Stream.Stream<string, E, R>,
-  shouldRefreshForPath: (relativePath: string) => Effect.Effect<boolean, never, R2>,
+  shouldRefreshForPaths: (relativePaths: readonly string[]) => Effect.Effect<boolean, never, R2>,
   debounceDuration: Duration.Duration = Duration.millis(150),
 ): Stream.Stream<void, E, R | R2> {
   return relativePaths.pipe(
     Stream.filter((relativePath) => !shouldIgnoreWatchEventPath(relativePath)),
-    Stream.filterEffect(shouldRefreshForPath),
+    Stream.groupedWithin(512, debounceDuration),
+    Stream.map((paths) => [...new Set(paths)]),
+    Stream.filter((paths) => paths.length > 0),
+    Stream.filterEffect(shouldRefreshForPaths),
     Stream.map(() => undefined),
-    Stream.debounce(debounceDuration),
   );
 }
 
@@ -453,7 +455,7 @@ export const layer = Layer.effect(
           Stream.map((event) => watchEventPath(path, cwd, event.path)),
           Stream.filter((relativePath): relativePath is string => relativePath !== null),
         ),
-        (relativePath) =>
+        (relativePaths) =>
           Option.match(vcsProcess, {
             onNone: () => Effect.succeed(true),
             onSome: (process) =>
@@ -461,14 +463,21 @@ export const layer = Layer.effect(
                 .run({
                   operation: "VcsStatusBroadcaster.watch.checkIgnore",
                   command: "git",
-                  args: ["check-ignore", "--quiet", "--", relativePath],
+                  args: ["check-ignore", "-z", "--stdin"],
                   cwd,
+                  stdin: `${relativePaths.join("\0")}\0`,
                   allowNonZeroExit: true,
                   timeoutMs: 5_000,
-                  maxOutputBytes: 1024,
+                  maxOutputBytes: 1_000_000,
                 })
                 .pipe(
-                  Effect.map((result) => result.exitCode !== 0),
+                  Effect.map((result) => {
+                    if (result.exitCode !== 0) return true;
+                    const ignoredPaths = new Set(
+                      result.stdout.split("\0").filter((ignoredPath) => ignoredPath.length > 0),
+                    );
+                    return relativePaths.some((relativePath) => !ignoredPaths.has(relativePath));
+                  }),
                   Effect.orElseSucceed(() => true),
                 ),
           }),

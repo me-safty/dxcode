@@ -128,6 +128,9 @@ export interface WsRpcClient {
     readonly stageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsPanelStageFiles>;
     readonly unstageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsPanelUnstageFiles>;
     readonly discardFiles: RpcUnaryMethod<typeof WS_METHODS.vcsPanelDiscardFiles>;
+    readonly enrichWorkingTreeFiles: RpcUnaryMethod<
+      typeof WS_METHODS.vcsPanelEnrichWorkingTreeFiles
+    >;
     readonly readFileDiff: RpcUnaryMethod<typeof WS_METHODS.vcsPanelReadFileDiff>;
     readonly commitStaged: RpcUnaryMethod<typeof WS_METHODS.vcsPanelCommitStaged>;
     readonly pullBranch: RpcUnaryMethod<typeof WS_METHODS.vcsPanelPullBranch>;
@@ -348,6 +351,8 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.vcsPanelUnstageFiles](input)),
       discardFiles: (input) =>
         transport.request((client) => client[WS_METHODS.vcsPanelDiscardFiles](input)),
+      enrichWorkingTreeFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelEnrichWorkingTreeFiles](input)),
       readFileDiff: (input) =>
         transport.request((client) => client[WS_METHODS.vcsPanelReadFileDiff](input)),
       commitStaged: (input) =>

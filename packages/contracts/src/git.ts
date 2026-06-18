@@ -480,6 +480,20 @@ export const VcsPanelFileActionInput = Schema.Struct({
 });
 export type VcsPanelFileActionInput = typeof VcsPanelFileActionInput.Type;
 
+export const VcsPanelWorkingTreeFileEnrichmentInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  paths: Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+});
+export type VcsPanelWorkingTreeFileEnrichmentInput =
+  typeof VcsPanelWorkingTreeFileEnrichmentInput.Type;
+
+export const VcsPanelWorkingTreeFileEnrichmentResult = Schema.Struct({
+  files: Schema.Array(VcsPanelFileChange),
+  hiddenPaths: Schema.Array(TrimmedNonEmptyStringSchema),
+});
+export type VcsPanelWorkingTreeFileEnrichmentResult =
+  typeof VcsPanelWorkingTreeFileEnrichmentResult.Type;
+
 const VcsPanelFileDiffSource = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("working-tree"),
