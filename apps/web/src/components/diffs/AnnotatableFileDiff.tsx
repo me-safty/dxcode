@@ -73,6 +73,7 @@ interface AnnotatableFileDiffProps {
   sectionTitle: string;
   composerDraftTarget: ScopedThreadRef | DraftId;
   options: FileDiffProps<DiffCommentAnnotationGroup>["options"];
+  renderHeaderMetadata?: FileDiffProps<DiffCommentAnnotationGroup>["renderHeaderMetadata"];
   renderHeaderPrefix: (fileDiff: FileDiffMetadata) => ReactNode;
 }
 
@@ -83,6 +84,7 @@ export function AnnotatableFileDiff({
   sectionTitle,
   composerDraftTarget,
   options,
+  renderHeaderMetadata,
   renderHeaderPrefix,
 }: AnnotatableFileDiffProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
@@ -208,6 +210,7 @@ export function AnnotatableFileDiff({
   return (
     <FileDiff<DiffCommentAnnotationGroup>
       fileDiff={fileDiff}
+      renderHeaderMetadata={renderHeaderMetadata}
       renderHeaderPrefix={renderHeaderPrefix}
       options={{
         ...options,
