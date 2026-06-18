@@ -1,4 +1,4 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
@@ -11,10 +11,8 @@ import {
 import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { useProject, useThread } from "../state/entities";
 import { useIsMobile } from "../hooks/useMediaQuery";
-import { useStore } from "../store";
-import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
-import { isManagedSectionWorkspace } from "../sectionWorkspacePolicy";
 import {
   type EnvMode,
   type EnvironmentOption,
@@ -208,8 +206,7 @@ export const BranchToolbar = memo(function BranchToolbar({
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
   );
-  const serverThreadSelector = useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]);
-  const serverThread = useStore(serverThreadSelector);
+  const serverThread = useThread(threadRef);
   const draftThread = useComposerDraftStore((store) =>
     draftId ? store.getDraftSession(draftId) : store.getDraftThreadByRef(threadRef),
   );
@@ -218,26 +215,17 @@ export const BranchToolbar = memo(function BranchToolbar({
     : draftThread
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
-  const activeProjectSelector = useMemo(
-    () => createProjectSelectorByRef(activeProjectRef),
-    [activeProjectRef],
-  );
-  const activeProject = useStore(activeProjectSelector);
-  const hasActiveThread = serverThread !== undefined || draftThread !== null;
+  const activeProject = useProject(activeProjectRef);
+  const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const managedSectionWorkspace = isManagedSectionWorkspace(activeProject?.kind);
-  const effectiveEnvMode = managedSectionWorkspace
-    ? "worktree"
-    : (effectiveEnvModeOverride ??
-      resolveEffectiveEnvMode({
-        activeWorktreePath,
-        hasServerThread: serverThread !== undefined,
-        draftThreadEnvMode: draftThread?.envMode,
-      }));
-  const envModeLocked =
-    managedSectionWorkspace ||
-    envLocked ||
-    (serverThread !== undefined && activeWorktreePath !== null);
+  const effectiveEnvMode =
+    effectiveEnvModeOverride ??
+    resolveEffectiveEnvMode({
+      activeWorktreePath,
+      hasServerThread: serverThread !== null,
+      draftThreadEnvMode: draftThread?.envMode,
+    });
+  const envModeLocked = envLocked || (serverThread !== null && activeWorktreePath !== null);
 
   const showEnvironmentPicker = Boolean(
     availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
@@ -288,11 +276,7 @@ export const BranchToolbar = memo(function BranchToolbar({
         threadId={threadId}
         {...(draftId ? { draftId } : {})}
         envLocked={envLocked}
-        {...(managedSectionWorkspace
-          ? { effectiveEnvModeOverride: "worktree" as const }
-          : effectiveEnvModeOverride
-            ? { effectiveEnvModeOverride }
-            : {})}
+        {...(effectiveEnvModeOverride ? { effectiveEnvModeOverride } : {})}
         {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
         {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
         {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}

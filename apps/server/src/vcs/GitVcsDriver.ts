@@ -68,6 +68,17 @@ export interface GitStatusDetails {
   aheadOfDefaultCount: number;
 }
 
+export interface GitRemoteStatusDetails {
+  isRepo: boolean;
+  isDefaultBranch: boolean;
+  branch: string | null;
+  upstreamRef: string | null;
+  hasUpstream: boolean;
+  aheadCount: number;
+  behindCount: number;
+  aheadOfDefaultCount: number;
+}
+
 export interface GitPreparedCommitContext {
   stagedSummary: string;
   stagedPatch: string;
@@ -157,11 +168,19 @@ export interface GitSetBranchUpstreamInput {
   remoteBranch: string;
 }
 
+export interface GitRemoteStatusOptions {
+  readonly refreshUpstream?: boolean;
+}
+
 export interface GitVcsDriverShape {
   readonly execute: (input: ExecuteGitInput) => Effect.Effect<ExecuteGitResult, GitCommandError>;
   readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
   readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
   readonly statusDetailsLocal: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+  readonly statusDetailsRemote: (
+    cwd: string,
+    options?: GitRemoteStatusOptions,
+  ) => Effect.Effect<GitRemoteStatusDetails, GitCommandError>;
   readonly prepareCommitContext: (
     cwd: string,
     filePaths?: readonly string[],
@@ -613,9 +632,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       const commitEnv: NodeJS.ProcessEnv = {
         ...process.env,
         GIT_INDEX_FILE: tempIndexPath,
-        GIT_AUTHOR_NAME: "more Code",
+        GIT_AUTHOR_NAME: "T3 Code",
         GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
-        GIT_COMMITTER_NAME: "more Code",
+        GIT_COMMITTER_NAME: "T3 Code",
         GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
       };
 
