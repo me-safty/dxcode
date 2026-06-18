@@ -38,6 +38,50 @@ export function resolveWorkspaceFilePath(cwd: string, relativePath: string): str
   return joinPath(cwd, relativePath, separator);
 }
 
+function normalizeRelativePath(value: string): string | null {
+  const segments: string[] = [];
+  for (const segment of value.replaceAll("\\", "/").split("/")) {
+    if (segment.length === 0 || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (segments.length === 0) {
+        return null;
+      }
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.length > 0 ? segments.join("/") : null;
+}
+
+export function resolveWorkspaceRelativeFilePath(
+  workspaceRoot: string | null | undefined,
+  targetPath: string,
+): string | null {
+  if (!isAbsolutePath(targetPath)) {
+    if (targetPath.startsWith("~/") || targetPath.startsWith("~\\")) {
+      return null;
+    }
+    return normalizeRelativePath(targetPath);
+  }
+  if (!workspaceRoot) {
+    return null;
+  }
+
+  const normalizedTarget = targetPath.replaceAll("\\", "/");
+  const normalizedRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+  const caseInsensitive = isWindowsAbsolutePath(targetPath) || isWindowsAbsolutePath(workspaceRoot);
+  const comparableTarget = caseInsensitive ? normalizedTarget.toLowerCase() : normalizedTarget;
+  const comparableRoot = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
+  if (!comparableTarget.startsWith(`${comparableRoot}/`)) {
+    return null;
+  }
+
+  return normalizeRelativePath(normalizedTarget.slice(normalizedRoot.length + 1));
+}
+
 export function isBrowserPreviewFile(path: string): boolean {
   return /\.(?:html?|pdf)$/i.test(path.split(/[?#]/, 1)[0] ?? "");
 }

@@ -7,6 +7,7 @@ import {
   nativeMarkdownDocumentRuns,
   nativeMarkdownListItemBlocks,
   nativeMarkdownTextRuns,
+  nativeMarkdownWithPreservedSoftBreaks,
 } from "@t3tools/mobile-markdown-text/markdown";
 
 describe("nativeMarkdownTextRuns", () => {
@@ -54,7 +55,11 @@ describe("nativeMarkdownTextRuns", () => {
         externalHost: "example.com",
       },
       { text: " " },
-      { text: "README.md:12", fileIcon: "readme" },
+      {
+        text: "README.md:12",
+        href: "file:///repo/README.md#L12",
+        fileIcon: "readme",
+      },
     ]);
   });
 
@@ -71,6 +76,21 @@ describe("nativeMarkdownTextRuns", () => {
     };
 
     expect(nativeMarkdownTextRuns(node)).toEqual([{ text: "first second\nthird" }]);
+  });
+
+  it("can preserve soft breaks for authored user messages", () => {
+    const node: MarkdownNode = {
+      type: "paragraph",
+      children: [
+        { type: "text", content: "first" },
+        { type: "soft_break" },
+        { type: "text", content: "second" },
+      ],
+    };
+
+    expect(nativeMarkdownTextRuns(nativeMarkdownWithPreservedSoftBreaks(node))).toEqual([
+      { text: "first\nsecond" },
+    ]);
   });
 
   it("normalizes common inline HTML and entities", () => {

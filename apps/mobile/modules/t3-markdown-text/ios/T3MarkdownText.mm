@@ -70,7 +70,12 @@ static void T3MarkdownTextApplyAttachments(
                                                           renderingMode:UIImageRenderingModeAlwaysOriginal];
     }
     attachment.image = image ?: [[UIImage alloc] init];
-    attachment.bounds = CGRectMake(0, -0.5, 10, 10);
+    const CGFloat attachmentSize = T3MarkdownTextAttachmentSize(attachmentRange);
+    attachment.bounds = CGRectMake(
+        0,
+        T3MarkdownTextAttachmentBaselineOffset(attachmentRange),
+        attachmentSize,
+        attachmentSize);
     const NSRange range = NSMakeRange(
         attachmentRange.location,
         MIN(attachmentRange.length, attributedString.length - attachmentRange.location));
@@ -118,6 +123,17 @@ static NSArray<NSDictionary<NSString *, id> *> *T3MarkdownTextExtractChipBackgro
 @end
 
 @implementation T3MarkdownTextBackingView
+
+@synthesize chipBackgrounds = _chipBackgrounds;
+
+- (void)setChipBackgrounds:(NSArray<NSDictionary<NSString *, id> *> *)chipBackgrounds
+{
+  if ([_chipBackgrounds isEqualToArray:chipBackgrounds]) {
+    return;
+  }
+  _chipBackgrounds = [chipBackgrounds copy];
+  [self setNeedsDisplay];
+}
 
 - (void)drawRect:(CGRect)rect
 {
@@ -373,6 +389,7 @@ T3MarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
   // Reset the frame to zero so that when it properly lays out on the next use
   _textView.frame = CGRectZero;
   _textView.attributedText = nil;
+  _textView.chipBackgrounds = @[];
 }
 
 - (void)layoutSubviews

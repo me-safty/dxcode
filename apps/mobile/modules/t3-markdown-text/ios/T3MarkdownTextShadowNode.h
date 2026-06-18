@@ -28,6 +28,15 @@ struct T3MarkdownTextAttachmentRange {
   std::string imageUri;
 };
 
+inline Float T3MarkdownTextAttachmentSize(const T3MarkdownTextAttachmentRange &range) {
+  return range.imageUri.rfind("sf:", 0) == 0 ? 12 : 14;
+}
+
+inline Float T3MarkdownTextAttachmentBaselineOffset(
+    const T3MarkdownTextAttachmentRange &range) {
+  return range.imageUri.rfind("sf:", 0) == 0 ? -1 : -2;
+}
+
 struct T3MarkdownTextChipRange {
   size_t location;
   size_t length;

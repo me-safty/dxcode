@@ -44,6 +44,14 @@ function normalizeRoutePath(value: string | null): string | null {
   return value;
 }
 
+function normalizeRouteLine(value: string | null): number | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function defaultViewMode(path: string | null): FileViewMode {
   return path !== null && isBrowserPreviewFile(path) ? "preview" : "source";
 }
@@ -168,6 +176,7 @@ function FileContent(props: {
   readonly fileContents: string | null;
   readonly fileError: string | null;
   readonly relativePath: string;
+  readonly initialLine: number | null;
   readonly threadId: ThreadId;
   readonly truncated: boolean;
 }) {
@@ -217,7 +226,11 @@ function FileContent(props: {
       {props.activeMode === "preview" && isMarkdown ? (
         <FileMarkdownPreview markdown={props.fileContents} />
       ) : (
-        <SourceFileSurface contents={props.fileContents} path={props.relativePath} />
+        <SourceFileSurface
+          contents={props.fileContents}
+          path={props.relativePath}
+          initialLine={props.initialLine}
+        />
       )}
     </View>
   );
@@ -227,15 +240,18 @@ export function ThreadFilesRouteScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     environmentId?: string | string[];
+    line?: string | string[];
     path?: string | string[];
     threadId?: string | string[];
   }>();
   const routeEnvironmentId = firstRouteParam(params.environmentId);
   const routeThreadId = firstRouteParam(params.threadId);
   const routePath = normalizeRoutePath(firstRouteParam(params.path));
+  const routeLine = normalizeRouteLine(firstRouteParam(params.line));
   const { selectedThread, selectedThreadProject } = useThreadSelection();
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const [selectedPath, setSelectedPath] = useState<string | null>(routePath);
+  const targetLine = routePath !== null && routePath === selectedPath ? routeLine : null;
   const [showTree, setShowTree] = useState(() => routePath === null);
   const [modeOverride, setModeOverride] = useState<{
     readonly path: string;
@@ -295,7 +311,7 @@ export function ThreadFilesRouteScreen() {
       setSelectedPath(path);
       setShowTree(false);
       setModeOverride(null);
-      router.setParams({ path });
+      router.setParams({ path, line: undefined });
     },
     [router],
   );
@@ -372,6 +388,7 @@ export function ThreadFilesRouteScreen() {
               environmentId={environmentId}
               fileContents={fileData?.contents ?? null}
               fileError={fileQuery.error}
+              initialLine={targetLine}
               relativePath={selectedPath}
               threadId={threadId}
               truncated={fileData?.truncated ?? false}

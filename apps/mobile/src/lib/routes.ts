@@ -35,13 +35,16 @@ export function buildThreadReviewRoutePath(
 export function buildThreadFilesRoutePath(
   input: ThreadRouteInput | PlainThreadRouteInput,
   relativePath?: string | null,
+  line?: number | null,
 ): string {
   const basePath = `${buildThreadRoutePath(input)}/files`;
   if (!relativePath) {
     return basePath;
   }
 
-  return `${basePath}?path=${encodeURIComponent(relativePath)}`;
+  const lineParam =
+    Number.isFinite(line) && Number(line) > 0 ? `&line=${Math.floor(Number(line))}` : "";
+  return `${basePath}?path=${encodeURIComponent(relativePath)}${lineParam}`;
 }
 
 export function buildThreadTerminalRoutePath(
@@ -86,17 +89,21 @@ export function buildThreadTerminalNavigation(
 export function buildThreadFilesNavigation(
   input: ThreadRouteInput | PlainThreadRouteInput,
   relativePath?: string | null,
+  line?: number | null,
 ): Href {
   const environmentId = String(input.environmentId);
   const threadId = String("threadId" in input ? input.threadId : input.id);
 
-  const params: { environmentId: string; threadId: string; path?: string } = {
+  const params: { environmentId: string; threadId: string; path?: string; line?: string } = {
     environmentId,
     threadId,
   };
 
   if (relativePath != null && relativePath !== "") {
     params.path = relativePath;
+  }
+  if (Number.isFinite(line) && Number(line) > 0) {
+    params.line = String(Math.floor(Number(line)));
   }
 
   return {
