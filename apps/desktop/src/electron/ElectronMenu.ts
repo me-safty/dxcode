@@ -119,6 +119,7 @@ export const layer = Layer.effect(
           width: 12,
           height: 12,
         });
+        icon.setTemplateImage(true);
         destructiveMenuIconCache = icon.isEmpty() ? Option.none() : Option.some(icon);
       } catch {
         destructiveMenuIconCache = Option.none();

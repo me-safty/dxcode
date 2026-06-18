@@ -2,16 +2,13 @@
 
 ## Last Upstream Merge
 
-Generated from local `main` at `31f776629` and `upstream/main` at `b489ea52a` (`v0.0.28-nightly.20260617.578`). Before the merge, this branch was 186 commits ahead and 4 commits behind upstream; after the merge, this branch is 187 commits ahead and 0 commits behind `upstream/main`. The incoming upstream diff from the merge base was 37 files changed, 3673 insertions, and 563 deletions; the remaining fork delta against `upstream/main` is 230 files changed, 31679 insertions, and 1218 deletions.
+Generated from local `main` at `d93fd1200` and `upstream/main` at `3bdaa6e10` (`v0.0.28-nightly.20260617.586`). Before the merge, this branch was 198 commits ahead and 4 commits behind upstream; after the merge, this branch is 199 commits ahead and 0 commits behind `upstream/main`. The incoming upstream diff from the merge base was 10 files changed, 638 insertions, and 453 deletions; the remaining fork delta against `upstream/main` is 230 files changed, 33045 insertions, and 1218 deletions.
 
-No local customization is retired by this merge. Upstream added inline right-panel plan rendering, right-panel bulk close and tab context-menu actions, file preview comments and task toggles, file review-comment composer/timeline support, and additional MCP session handling refinements; these are additive relative to the custom Version Control panel, VS Code extension, subagent threading, wide conversation defaults, and terminal action reuse work.
+No local customization is retired by this merge. Upstream made background VCS fetches non-interactive, bumped the mobile Shiki engine path, adapted the destructive menu icon for dark mode, and polished the marketing homepage; these are additive relative to the custom Version Control panel, VS Code extension, subagent threading, wide conversation defaults, and terminal action reuse work.
 
 Concrete conflict notes from this merge:
 
-- `apps/web/src/rightPanelStore.ts`, `apps/web/src/components/ChatView.tsx`, and `apps/web/src/components/RightPanelTabs.tsx` now carry upstream file reveal metadata, plan inline rendering, bulk-close/context-menu tab actions, and the local `source-control` singleton surface. Future merges in these files should keep the surface model additive unless upstream gains an equivalent agent-aware Version Control panel.
-- `apps/web/src/components/chat/ChatComposer.tsx` keeps the local conversation-width form while accepting upstream review-comment draft contexts.
-- `apps/web/src/components/chat/MessagesTimeline.test.tsx` keeps the local expandable subagent-row coverage and upstream file review-comment rendering coverage.
-- `apps/web/src/components/chat/ChatHeader.tsx` keeps the local `MainSidebarTrigger`, parent-thread navigation, and terminal/right-panel toggle buttons.
+- `pnpm-lock.yaml` was regenerated from the merged manifests so upstream's `@pierre/diffs` `1.3.0-beta.5`, Shiki `4.2.0`, and `react-native-shiki-engine` `^0.3.12` updates coexist with the local workspace dependency graph.
 
 ## Debug Browser Launch
 
