@@ -191,6 +191,7 @@ function createClient() {
       write: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
       clear: vi.fn(async () => undefined),
+      snapshot: vi.fn(async () => undefined),
       restart: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
       onEvent: vi.fn(() => () => undefined),

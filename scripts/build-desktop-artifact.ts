@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { fromYaml } from "@t3tools/shared/schemaYaml";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
@@ -836,12 +837,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   if (!options.skipBuild) {
     yield* Effect.log("[desktop-artifact] Building desktop/server/web artifacts...");
+    const buildSpawnCommand = resolveSpawnCommand("vp", ["run", "build:desktop"]);
     yield* runCommand(
-      ChildProcess.make({
+      ChildProcess.make(buildSpawnCommand.command, buildSpawnCommand.args, {
         cwd: repoRoot,
-        // Windows needs shell mode to resolve .cmd shims (e.g. vp.cmd).
-        shell: process.platform === "win32",
-      })`vp run build:desktop`,
+        shell: buildSpawnCommand.shell,
+      }),
       { label: "vp run build:desktop", verbose: options.verbose },
     );
   }
@@ -926,12 +927,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
+  const installSpawnCommand = resolveSpawnCommand("vp", ["install", "--prod", "--no-optional"]);
   yield* runCommand(
-    ChildProcess.make({
+    ChildProcess.make(installSpawnCommand.command, installSpawnCommand.args, {
       cwd: stageAppDir,
-      // Windows needs shell mode to resolve .cmd shims (e.g. vp.cmd).
-      shell: process.platform === "win32",
-    })`vp install --prod --no-optional`,
+      shell: installSpawnCommand.shell,
+    }),
     { label: "vp install --prod --no-optional", verbose: options.verbose },
   );
 
@@ -971,13 +972,28 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* Effect.log(
     `[desktop-artifact] Building ${options.platform}/${options.target} (arch=${options.arch}, version=${appVersion})...`,
   );
+  const electronBuilderArgs = [
+    "exec",
+    "--filter",
+    "@t3tools/desktop",
+    "--",
+    "electron-builder",
+    "--projectDir",
+    stageAppDir,
+    platformConfig.cliFlag,
+    `--${options.arch}`,
+    "--publish",
+    "never",
+  ];
+  const electronBuilderSpawnCommand = resolveSpawnCommand("vp", electronBuilderArgs, {
+    env: buildEnv,
+  });
   yield* runCommand(
-    ChildProcess.make({
+    ChildProcess.make(electronBuilderSpawnCommand.command, electronBuilderSpawnCommand.args, {
       cwd: repoRoot,
       env: buildEnv,
-      // Windows needs shell mode to resolve .cmd shims.
-      shell: process.platform === "win32",
-    })`vp exec --filter @t3tools/desktop -- electron-builder --projectDir ${stageAppDir} ${platformConfig.cliFlag} --${options.arch} --publish never`,
+      shell: electronBuilderSpawnCommand.shell,
+    }),
     {
       label: `vp exec --filter @t3tools/desktop -- electron-builder --projectDir ${stageAppDir} ${platformConfig.cliFlag} --${options.arch} --publish never`,
       verbose: options.verbose,

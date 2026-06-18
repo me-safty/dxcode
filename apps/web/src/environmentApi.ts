@@ -12,6 +12,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       write: (input) => rpcClient.terminal.write(input as never),
       resize: (input) => rpcClient.terminal.resize(input as never),
       clear: (input) => rpcClient.terminal.clear(input as never),
+      snapshot: (input) => rpcClient.terminal.snapshot(input as never),
       restart: (input) => rpcClient.terminal.restart(input as never),
       close: (input) => rpcClient.terminal.close(input as never),
       onEvent: (callback) => rpcClient.terminal.onEvent(callback),
@@ -49,6 +50,9 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     git: {
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
+    },
+    server: {
+      probeDevServerUrl: rpcClient.server.probeDevServerUrl,
     },
     orchestration: {
       dispatchCommand: rpcClient.orchestration.dispatchCommand,

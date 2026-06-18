@@ -61,12 +61,17 @@ vi.mock("../codeHighlighting", async (importActual) => {
 
 import ChatMarkdown from "./ChatMarkdown";
 import { serializeTableElementToCsv, serializeTableElementToMarkdown } from "../markdown-clipboard";
+import {
+  __readWorkspaceFilePanelStateForTests,
+  __resetWorkspaceFilePanelStateForTests,
+} from "../workspaceFilePreview";
 
 describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     readLocalApiMock.mockClear();
     resolveEnvironmentHttpUrlMock.mockClear();
+    __resetWorkspaceFilePanelStateForTests();
     localStorage.clear();
     document.body.innerHTML = "";
   });
@@ -135,6 +140,34 @@ describe("ChatMarkdown", () => {
           `${filePath}:1:7`,
         );
       });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("opens workspace file links in the file preview panel", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text="[ChatMarkdown.tsx](apps/web/src/components/ChatMarkdown.tsx)"
+        cwd="/repo/project"
+        environmentId={EnvironmentId.make("environment-chat-markdown-preview")}
+      />,
+    );
+
+    try {
+      await page.getByRole("link", { name: "ChatMarkdown.tsx" }).click();
+
+      await vi.waitFor(() => {
+        expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+          open: true,
+          view: "preview",
+          target: {
+            cwd: "/repo/project",
+            relativePath: "apps/web/src/components/ChatMarkdown.tsx",
+          },
+        });
+      });
+      expect(openInPreferredEditorMock).not.toHaveBeenCalled();
     } finally {
       await screen.unmount();
     }
@@ -382,13 +415,10 @@ describe("ChatMarkdown", () => {
     }
   });
 
-  it("restores a code block's horizontal scroll when the block is remounted", async () => {
+  it("preserves a code block's horizontal scroll when markdown props change", async () => {
     // Wide single line so the <pre> overflows its constrained container and is scrollable.
     const longLine = `const data = "${"x".repeat(400)}";`;
     const text = `\`\`\`ts\n${longLine}\n\`\`\``;
-    // Changing `cwd` recreates ChatMarkdown's `components` map, giving the inline `pre`
-    // renderer a new identity — react-markdown then remounts the whole code-block subtree,
-    // rebuilding the <pre> from scratch (the same thing that drops scroll in production).
     const renderUi = (cwd: string) => (
       <div style={{ width: 220, overflow: "hidden" }}>
         <ChatMarkdown text={text} cwd={cwd} />
@@ -415,11 +445,8 @@ describe("ChatMarkdown", () => {
 
       await screen.rerender(renderUi("/repo/other-project"));
 
-      // The block was genuinely remounted (new <pre> node) ...
       const preAfter = screen.container.querySelector<HTMLPreElement>(".chat-markdown-shiki pre");
       expect(preAfter).not.toBeNull();
-      expect(preAfter).not.toBe(preBefore);
-      // ... but its horizontal scroll position is restored.
       await vi.waitFor(() => {
         expect(
           screen.container.querySelector<HTMLPreElement>(".chat-markdown-shiki pre")?.scrollLeft,
@@ -503,7 +530,7 @@ describe("ChatMarkdown", () => {
 
         // Language with a known icon: icon XOR text — never the redundant pair.
         const languageOnly = titles[0]!;
-        const hasIcon = languageOnly.querySelector("img") != null;
+        const hasIcon = languageOnly.querySelector("svg[data-pierre-icon]") != null;
         const hasText = (languageOnly.textContent ?? "").includes("ts");
         expect(hasIcon || hasText).toBe(true);
         expect(hasIcon && hasText).toBe(false);
@@ -520,7 +547,7 @@ describe("ChatMarkdown", () => {
         expect(titles[1]!.textContent).toBe("src/main.ts");
 
         // Unknown language: no icon attempt, text label.
-        expect(titles[2]!.querySelector("img")).toBeNull();
+        expect(titles[2]!.querySelector("svg[data-pierre-icon]")).toBeNull();
         expect(titles[2]!.textContent).toBe("text");
       } finally {
         await screen.unmount();

@@ -12,7 +12,11 @@ import {
   type EditorId,
   type LaunchEditorInput,
 } from "@t3tools/contracts";
-import { isCommandAvailable, type CommandAvailabilityOptions } from "@t3tools/shared/shell";
+import {
+  isCommandAvailable,
+  resolveSpawnCommand,
+  type CommandAvailabilityOptions,
+} from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
@@ -323,14 +327,14 @@ export const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProce
     });
   }
 
-  const isWin32 = process.platform === "win32";
+  const spawnCommand = resolveSpawnCommand(launch.command, launch.args);
   yield* launchAndUnref(
     {
-      command: launch.command,
-      args: isWin32 ? launch.args.map((arg) => `"${arg}"`) : [...launch.args],
+      command: spawnCommand.command,
+      args: spawnCommand.args,
       options: {
         detached: true,
-        shell: isWin32,
+        shell: spawnCommand.shell,
         stdin: "ignore",
         stdout: "ignore",
         stderr: "ignore",

@@ -3,6 +3,7 @@ import { render } from "vitest-browser-react";
 
 import {
   isBlockedTarget,
+  MOBILE_EDGE_SWIPE_ALLOW_EDITABLE_ATTRIBUTE,
   MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE,
   MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE,
   type MobileEdgeSwipeHorizontalScrollOwnerScope,
@@ -52,6 +53,8 @@ function RightPanelSwipeHarness(props: {
 }
 
 function appendPierreShadowScrollFixture(input: {
+  readonly allowEditablePanelSwipe?: boolean;
+  readonly editable?: boolean;
   readonly inlineFileDiff?: boolean;
   readonly scrollLeft: number;
 }): {
@@ -67,6 +70,9 @@ function appendPierreShadowScrollFixture(input: {
   const shadowRoot = host.attachShadow({ mode: "open" });
   const code = document.createElement("div");
   code.setAttribute("data-code", "");
+  if (input.editable) {
+    code.setAttribute("contenteditable", "true");
+  }
   code.style.display = "block";
   code.style.overflow = "scroll clip";
   code.style.whiteSpace = "nowrap";
@@ -78,15 +84,24 @@ function appendPierreShadowScrollFixture(input: {
   line.textContent = "const x = aVeryLongLineThatOverflowsHorizontally();";
   code.appendChild(line);
   shadowRoot.appendChild(code);
+
+  let fixtureRoot: HTMLElement = host;
   if (input.inlineFileDiff) {
     const inlineFileDiff = document.createElement("div");
     inlineFileDiff.setAttribute(WORKSPACE_FILE_INLINE_DIFF_ATTRIBUTE, "true");
     inlineFileDiff.setAttribute("data-testid", "workspace-file-inline-diff");
     inlineFileDiff.appendChild(host);
-    panel.appendChild(inlineFileDiff);
-  } else {
-    panel.appendChild(host);
+    fixtureRoot = inlineFileDiff;
   }
+
+  if (input.allowEditablePanelSwipe) {
+    const editableSwipeSurface = document.createElement("div");
+    editableSwipeSurface.setAttribute(MOBILE_EDGE_SWIPE_ALLOW_EDITABLE_ATTRIBUTE, "true");
+    editableSwipeSurface.appendChild(fixtureRoot);
+    fixtureRoot = editableSwipeSurface;
+  }
+
+  panel.appendChild(fixtureRoot);
   code.scrollLeft = input.scrollLeft;
 
   return { code, line };
@@ -167,6 +182,25 @@ describe("isBlockedTarget", () => {
     xterm.appendChild(child);
     mount(xterm);
     expect(isBlockedTarget(child)).toBe(true);
+  });
+
+  it("blocks contenteditable regions unless an ancestor opts into panel swipes", () => {
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    const child = document.createElement("span");
+    editable.appendChild(child);
+    mount(editable);
+    expect(isBlockedTarget(child)).toBe(true);
+
+    const editableSwipeSurface = document.createElement("div");
+    editableSwipeSurface.setAttribute(MOBILE_EDGE_SWIPE_ALLOW_EDITABLE_ATTRIBUTE, "true");
+    const allowedEditable = document.createElement("div");
+    allowedEditable.setAttribute("contenteditable", "true");
+    const allowedChild = document.createElement("span");
+    allowedEditable.appendChild(allowedChild);
+    editableSwipeSurface.appendChild(allowedEditable);
+    mount(editableSwipeSurface);
+    expect(isBlockedTarget(allowedChild)).toBe(false);
   });
 
   it("passes through plain content", () => {
@@ -266,6 +300,52 @@ describe("useMobileEdgeSwipe over Pierre shadow scroll content", () => {
     try {
       const { code, line } = appendPierreShadowScrollFixture({ scrollLeft: 100 });
       expect(code.scrollLeft).toBeGreaterThan(1);
+
+      dispatchTouchPointer(line, "pointerdown", 200);
+      dispatchTouchPointer(line, "pointermove", 264);
+
+      expect(onSwipe).toHaveBeenCalledOnce();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("does not close the right panel over opted-in editable Pierre scroll content when it can still scroll left", async () => {
+    const onSwipe = vi.fn();
+    const screen = await render(
+      <RightPanelSwipeHarness horizontalScrollOwnerScope="all" onSwipe={onSwipe} />,
+    );
+
+    try {
+      const { code, line } = appendPierreShadowScrollFixture({
+        allowEditablePanelSwipe: true,
+        editable: true,
+        scrollLeft: 100,
+      });
+      expect(code.scrollLeft).toBeGreaterThan(1);
+
+      dispatchTouchPointer(line, "pointerdown", 200);
+      dispatchTouchPointer(line, "pointermove", 264);
+
+      expect(onSwipe).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("closes the right panel over opted-in editable Pierre scroll content at the left edge", async () => {
+    const onSwipe = vi.fn();
+    const screen = await render(
+      <RightPanelSwipeHarness horizontalScrollOwnerScope="all" onSwipe={onSwipe} />,
+    );
+
+    try {
+      const { code, line } = appendPierreShadowScrollFixture({
+        allowEditablePanelSwipe: true,
+        editable: true,
+        scrollLeft: 0,
+      });
+      expect(code.scrollLeft).toBe(0);
 
       dispatchTouchPointer(line, "pointerdown", 200);
       dispatchTouchPointer(line, "pointermove", 264);

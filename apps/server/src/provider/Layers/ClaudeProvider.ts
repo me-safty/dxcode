@@ -19,6 +19,7 @@ import {
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
 import { compareSemverVersions } from "@t3tools/shared/semver";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   query as claudeQuery,
   type SlashCommand as ClaudeSlashCommand,
@@ -594,9 +595,12 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
-  const command = ChildProcess.make(claudeSettings.binaryPath, [...args], {
+  const spawnCommand = resolveSpawnCommand(claudeSettings.binaryPath, args, {
     env: claudeEnvironment,
-    shell: process.platform === "win32",
+  });
+  const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+    env: claudeEnvironment,
+    shell: spawnCommand.shell,
   });
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });

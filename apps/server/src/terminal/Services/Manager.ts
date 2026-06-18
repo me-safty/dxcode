@@ -17,6 +17,7 @@ import {
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
+  TerminalSnapshotInput,
   TerminalSessionSnapshot,
   TerminalSessionLookupError,
   TerminalSessionStatus,
@@ -93,6 +94,13 @@ export interface TerminalManagerShape {
    * Clear terminal output history.
    */
   readonly clear: (input: TerminalClearInput) => Effect.Effect<void, TerminalError>;
+
+  /**
+   * Read an existing terminal session snapshot without opening or starting a PTY.
+   */
+  readonly snapshot: (
+    input: TerminalSnapshotInput,
+  ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
 
   /**
    * Restart a terminal session in place.

@@ -19,10 +19,12 @@ import { WorkspaceFilePreviewPanel } from "./WorkspaceFilePreviewPanel";
 const {
   getWorkingTreeDiffMock,
   gitStatusMockState,
+  refreshGitStatusMock,
   resolveEnvironmentHttpUrlMock,
   useGitStatusMock,
 } = vi.hoisted(() => ({
   getWorkingTreeDiffMock: vi.fn(async () => ({ diff: "" })),
+  refreshGitStatusMock: vi.fn(async () => null),
   gitStatusMockState: (() => {
     const state: {
       current: {
@@ -85,6 +87,7 @@ vi.mock("../environments/runtime", () => ({
 
 vi.mock("../lib/gitStatusState", () => ({
   applyGitStatusLocalUpdate: () => undefined,
+  refreshGitStatus: refreshGitStatusMock,
   resetGitStatusStateForTests: () => undefined,
   useGitStatus: useGitStatusMock,
 }));
@@ -367,6 +370,8 @@ describe("WorkspaceFilePreviewPanel real diff renderer", () => {
   afterEach(() => {
     __resetEnvironmentApiOverridesForTests();
     getWorkingTreeDiffMock.mockReset();
+    refreshGitStatusMock.mockReset();
+    refreshGitStatusMock.mockResolvedValue(null);
     resetGitStatusMock();
     resolveEnvironmentHttpUrlMock.mockClear();
     document.body.innerHTML = "";

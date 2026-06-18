@@ -53,7 +53,7 @@ import {
   type ComposerNativeInputChangeMetadata,
   isComposerNativeComposingKeyEvent,
 } from "../../composerNativeInput";
-import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { deriveComposerSendState, readFileAsDataUrl, threadHasStarted } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
   type DraftId,
@@ -98,7 +98,7 @@ import {
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
-import { basenameOfPath } from "../../vscode-icons";
+import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
@@ -943,8 +943,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // $skill suggestion menus should remain available for touch selection.
   const mobileSelectionMenuKeepsComposerExpanded =
     composerTrigger?.kind === "path" || composerTrigger?.kind === "skill";
+  const shouldCollapseComposerOnMobile = routeKind === "server" && threadHasStarted(activeThread);
   const isComposerCollapsedMobile =
-    isMobileViewport && !isComposerFocused && !mobileSelectionMenuKeepsComposerExpanded;
+    shouldCollapseComposerOnMobile &&
+    isMobileViewport &&
+    !isComposerFocused &&
+    !mobileSelectionMenuKeepsComposerExpanded;
 
   // ------------------------------------------------------------------
   // Refs

@@ -102,6 +102,9 @@ const CLAUDE_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 const CLAUDE_OAUTH_CLIENT_ID = "22422756-60c9-4084-8eb7-27705fd5cf9a";
 const CLAUDE_OAUTH_BETA_HEADER = "oauth-2025-04-20";
+// Claude Code added rate-limit statusline support in 2.1.80; this endpoint
+// is more aggressively rate-limited for non-Claude-Code user agents.
+const CLAUDE_OAUTH_USAGE_USER_AGENT = "claude-code/2.1.80";
 const CLAUDE_OAUTH_REFRESH_SKEW_MS = 60 * 1000;
 const CLAUDE_STATUSLINE_CAPTURE_ENV = "T3CODE_CLAUDE_STATUSLINE_CAPTURE_PATH";
 const CLAUDE_OAUTH_DEFAULT_SCOPES = [
@@ -451,7 +454,7 @@ async function defaultFetchClaudeOAuthUsage(input: {
   const response = await fetch(CLAUDE_OAUTH_USAGE_URL, {
     headers: {
       "Content-Type": "application/json",
-      "User-Agent": "t3code/claude-usage",
+      "User-Agent": CLAUDE_OAUTH_USAGE_USER_AGENT,
       Authorization: `Bearer ${input.accessToken}`,
       "anthropic-beta": CLAUDE_OAUTH_BETA_HEADER,
     },

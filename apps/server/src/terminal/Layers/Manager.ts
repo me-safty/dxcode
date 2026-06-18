@@ -380,7 +380,6 @@ function checkWindowsSubprocessActivity(
       timeout: "1500 millis",
       maxOutputBytes: 32_768,
       outputMode: "truncate",
-      shell: process.platform === "win32",
       timeoutBehavior: "timedOutResult",
     });
   }).pipe(
@@ -1848,6 +1847,16 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         }),
       );
 
+    const readSnapshot: TerminalManagerShape["snapshot"] = (input) =>
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
+          const session = yield* requireSession(input.threadId, terminalId);
+          return snapshot(session);
+        }),
+      );
+
     const restart: TerminalManagerShape["restart"] = (input) =>
       withThreadLock(
         input.threadId,
@@ -1954,6 +1963,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       write,
       resize,
       clear,
+      snapshot: readSnapshot,
       restart,
       close,
       subscribe: (listener) =>

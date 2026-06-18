@@ -35,6 +35,26 @@ function isPathOutsideRoot(path: Path.Path, workspaceRoot: string, absolutePath:
   );
 }
 
+async function nearestExistingAncestor(absolutePath: string, path: Path.Path): Promise<string> {
+  let currentPath = absolutePath;
+  for (;;) {
+    try {
+      await fsPromises.lstat(currentPath);
+      return currentPath;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+        throw cause;
+      }
+    }
+
+    const parentPath = path.dirname(currentPath);
+    if (parentPath === currentPath) {
+      throw new Error(`No existing ancestor for workspace path: ${absolutePath}`);
+    }
+    currentPath = parentPath;
+  }
+}
+
 export const makeWorkspaceFileSystem = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -166,8 +186,31 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
       workspaceRoot: input.cwd,
       relativePath: input.relativePath,
     });
+    const targetDirectory = path.dirname(target.absolutePath);
 
-    yield* fileSystem.makeDirectory(path.dirname(target.absolutePath), { recursive: true }).pipe(
+    yield* Effect.tryPromise({
+      try: async () => {
+        const realWorkspaceRoot = await fsPromises.realpath(input.cwd);
+        const existingAncestor = await nearestExistingAncestor(targetDirectory, path);
+        const realExistingAncestor = await fsPromises.realpath(existingAncestor);
+        if (
+          realExistingAncestor !== realWorkspaceRoot &&
+          isPathOutsideRoot(path, realWorkspaceRoot, realExistingAncestor)
+        ) {
+          throw new Error("Workspace file parent path resolves outside the project root.");
+        }
+      },
+      catch: (cause) =>
+        new WorkspaceFileSystemError({
+          cwd: input.cwd,
+          relativePath: input.relativePath,
+          operation: "workspaceFileSystem.validateWriteAncestor",
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    });
+
+    yield* fileSystem.makeDirectory(targetDirectory, { recursive: true }).pipe(
       Effect.mapError(
         (cause) =>
           new WorkspaceFileSystemError({
@@ -179,6 +222,78 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
           }),
       ),
     );
+    yield* Effect.tryPromise({
+      try: async () => {
+        const realWorkspaceRoot = await fsPromises.realpath(input.cwd);
+        const realTargetDirectory = await fsPromises.realpath(targetDirectory);
+        if (
+          realTargetDirectory !== realWorkspaceRoot &&
+          isPathOutsideRoot(path, realWorkspaceRoot, realTargetDirectory)
+        ) {
+          throw new Error("Workspace file parent path resolves outside the project root.");
+        }
+
+        const targetStat = await fsPromises.lstat(target.absolutePath).catch((cause) => {
+          if ((cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+            return null;
+          }
+          throw cause;
+        });
+        if (!targetStat) {
+          return;
+        }
+
+        if (targetStat.isSymbolicLink()) {
+          const linkTarget = await fsPromises.readlink(target.absolutePath);
+          const resolvedLinkTarget = path.resolve(path.dirname(target.absolutePath), linkTarget);
+          if (isPathOutsideRoot(path, realWorkspaceRoot, resolvedLinkTarget)) {
+            throw new Error(
+              `Workspace symlink target must stay within the project root: ${input.relativePath} -> ${formatSymlinkTarget(linkTarget)}`,
+            );
+          }
+          const realResolvedLinkTarget = await fsPromises
+            .realpath(resolvedLinkTarget)
+            .catch((cause) => {
+              throw new Error(
+                `Workspace file is a broken symlink: ${input.relativePath} -> ${formatSymlinkTarget(linkTarget)}`,
+                { cause },
+              );
+            });
+          if (
+            realResolvedLinkTarget !== realWorkspaceRoot &&
+            isPathOutsideRoot(path, realWorkspaceRoot, realResolvedLinkTarget)
+          ) {
+            throw new Error(
+              `Workspace symlink target must stay within the project root: ${input.relativePath} -> ${formatSymlinkTarget(linkTarget)}`,
+            );
+          }
+          const resolvedStat = await fsPromises.stat(resolvedLinkTarget).catch((cause) => {
+            throw new Error(
+              `Workspace file is a broken symlink: ${input.relativePath} -> ${formatSymlinkTarget(linkTarget)}`,
+              { cause },
+            );
+          });
+          if (!resolvedStat.isFile()) {
+            throw new Error(
+              `Workspace symlink target is not a file: ${input.relativePath} -> ${formatSymlinkTarget(linkTarget)}`,
+            );
+          }
+          return;
+        }
+
+        if (!targetStat.isFile()) {
+          throw new Error("Workspace path is not a file.");
+        }
+      },
+      catch: (cause) =>
+        new WorkspaceFileSystemError({
+          cwd: input.cwd,
+          relativePath: input.relativePath,
+          operation: "workspaceFileSystem.validateWriteTarget",
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    });
     yield* fileSystem.writeFileString(target.absolutePath, input.contents).pipe(
       Effect.mapError(
         (cause) =>

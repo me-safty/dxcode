@@ -632,13 +632,10 @@ it.layer(NodeServices.layer)("launchEditorProcess", (it) => {
       assertSuccess(result, undefined);
       assert.ok(spawnedCommand);
       assert.equal(spawnedCommand.command, process.execPath);
-      assert.deepEqual(
-        spawnedCommand.args,
-        process.platform === "win32" ? expectedArgs.map((arg) => `"${arg}"`) : expectedArgs,
-      );
+      assert.deepEqual(spawnedCommand.args, expectedArgs);
       assert.deepEqual(spawnedCommand.options, {
         detached: true,
-        shell: process.platform === "win32",
+        shell: false,
         stdin: "ignore",
         stdout: "ignore",
         stderr: "ignore",

@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 
@@ -277,10 +278,11 @@ const runProcess = Effect.fn("runProcess")(
     readonly errorMessage: string;
   }) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const spawnCommand = resolveSpawnCommand(input.command, input.args);
     const child = yield* spawner.spawn(
-      ChildProcess.make(input.command, input.args, {
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         cwd: process.cwd(),
-        shell: process.platform === "win32",
+        shell: spawnCommand.shell,
       }),
     );
     const [stdout, stderr, exitCode] = yield* Effect.all(

@@ -255,6 +255,11 @@ function createMockEnvironmentApi(input: {
     sourceControl: {} as EnvironmentApi["sourceControl"],
     vcs: {} as EnvironmentApi["vcs"],
     git: {} as EnvironmentApi["git"],
+    server: {
+      probeDevServerUrl: (async () => ({
+        reachable: false,
+      })) as EnvironmentApi["server"]["probeDevServerUrl"],
+    },
     orchestration: {
       dispatchCommand: input.dispatchCommand,
       getTurnDiff: (() => {
@@ -1909,6 +1914,18 @@ function dispatchChatNewShortcut(): void {
   );
 }
 
+function dispatchConfiguredDiffToggleShortcut(): void {
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "g",
+      shiftKey: true,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 function releaseModShortcut(key?: string): void {
   window.dispatchEvent(
     new KeyboardEvent("keyup", {
@@ -2162,6 +2179,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       terminalStateByThreadKey: {},
       terminalLaunchContextByThreadKey: {},
       terminalEventEntriesByKey: {},
+      terminalSessionSnapshotsByKey: {},
+      terminalDevServerLinksByKey: {},
       nextTerminalEventId: 1,
     });
   });
@@ -2989,6 +3008,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("sends bootstrap turn-starts and waits for server setup on first-send worktree drafts", async () => {
     useTerminalStateStore.setState({
       terminalStateByThreadKey: {},
+      terminalDevServerLinksByKey: {},
     });
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {
@@ -3493,6 +3513,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("shows the send state once bootstrap dispatch is in flight", async () => {
     useTerminalStateStore.setState({
       terminalStateByThreadKey: {},
+      terminalDevServerLinksByKey: {},
     });
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {
@@ -5852,6 +5873,74 @@ describe("ChatView timeline estimator parity (full app)", () => {
           const search = mounted.router.state.location.search as Record<string, unknown>;
           expect(search.diff).toBe("1");
           expect(search.diffSource).toBeUndefined();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("uses the configured diff toggle binding without discarding the selected diff target", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-diff-hotkey" as MessageId,
+        targetText: "diff hotkey target",
+      }),
+      initialPath: `${serverThreadPath(THREAD_ID)}?diff=1&diffSource=staged&diffFilePath=README.md`,
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "diff.toggle",
+              shortcut: {
+                key: "g",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: true,
+                altKey: true,
+                modKey: false,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await vi.waitFor(
+        () => {
+          const search = mounted.router.state.location.search as Record<string, unknown>;
+          expect(search.diff).toBe("1");
+          expect(search.diffSource).toBe("staged");
+          expect(search.diffFilePath).toBe("README.md");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      dispatchConfiguredDiffToggleShortcut();
+      await vi.waitFor(
+        () => {
+          const search = mounted.router.state.location.search as Record<string, unknown>;
+          expect(search.diff).toBeUndefined();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      dispatchConfiguredDiffToggleShortcut();
+      await vi.waitFor(
+        () => {
+          const search = mounted.router.state.location.search as Record<string, unknown>;
+          expect(search.diff).toBe("1");
+          expect(search.diffSource).toBe("staged");
+          expect(search.diffFilePath).toBe("README.md");
         },
         { timeout: 8_000, interval: 16 },
       );

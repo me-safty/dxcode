@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 export const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 export const TAILSCALE_STATUS_TIMEOUT_MS = 1_500;
@@ -135,10 +136,11 @@ export const readTailscaleStatus: Effect.Effect<
 > = Effect.gen(function* () {
   const args = ["status", "--json"];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const spawnCommand = resolveSpawnCommand("tailscale", args);
   const child = yield* spawner
     .spawn(
-      ChildProcess.make("tailscale", args, {
-        shell: process.platform === "win32",
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        shell: spawnCommand.shell,
       }),
     )
     .pipe(
@@ -214,10 +216,11 @@ const runTailscaleCommand = (
 ): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const spawnCommand = resolveSpawnCommand("tailscale", args);
     const child = yield* spawner
       .spawn(
-        ChildProcess.make("tailscale", args, {
-          shell: process.platform === "win32",
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          shell: spawnCommand.shell,
         }),
       )
       .pipe(

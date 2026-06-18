@@ -6,6 +6,7 @@ import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
 import * as CodexError from "./errors.ts";
@@ -282,11 +283,18 @@ export const layerCommand = (
     CodexAppServerClient,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const command = ChildProcess.make(options.command, [...(options.args ?? [])], {
+      const args = options.args ?? [];
+      const env = options.env ? { ...process.env, ...options.env } : undefined;
+      const spawnCommand = resolveSpawnCommand(
+        options.command,
+        args,
+        env !== undefined ? { env } : {},
+      );
+      const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         ...(options.cwd ? { cwd: options.cwd } : {}),
-        ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+        ...(env ? { env } : {}),
         forceKillAfter: DEFAULT_APP_SERVER_FORCE_KILL_AFTER,
-        shell: process.platform === "win32",
+        shell: spawnCommand.shell,
       });
       return yield* spawner.spawn(command).pipe(
         Effect.mapError(

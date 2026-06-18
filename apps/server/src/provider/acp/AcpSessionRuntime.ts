@@ -15,6 +15,7 @@ import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { ACP_PROCESS_TERMINATE_GRACE, terminateAcpProcessTree } from "./AcpProcessCleanup.ts";
 import {
@@ -212,13 +213,19 @@ const makeAcpSessionRuntime = (
         ),
       );
 
+    const spawnEnv = options.spawn.env ? { ...process.env, ...options.spawn.env } : undefined;
+    const spawnCommand = resolveSpawnCommand(
+      options.spawn.command,
+      options.spawn.args,
+      spawnEnv ? { env: spawnEnv } : {},
+    );
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(options.spawn.command, [...options.spawn.args], {
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          ...(options.spawn.env ? { env: { ...process.env, ...options.spawn.env } } : {}),
+          ...(spawnEnv ? { env: spawnEnv } : {}),
           detached: process.platform !== "win32",
-          shell: process.platform === "win32",
+          shell: spawnCommand.shell,
           killSignal: "SIGTERM",
           forceKillAfter: ACP_PROCESS_TERMINATE_GRACE,
         }),

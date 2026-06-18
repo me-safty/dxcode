@@ -49,6 +49,7 @@ import { readLocalApi } from "../localApi";
 import {
   buildClosedDiffSearch,
   buildOpenDiffSearch,
+  type DiffRouteSource,
   parseDiffRouteSearch,
   stripDiffSearchParams,
 } from "../diffRouteSearch";
@@ -159,7 +160,11 @@ import {
   type TerminalContextDraft,
   type TerminalContextSelection,
 } from "../lib/terminalContext";
-import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import {
+  selectTerminalDevServerLinks,
+  selectThreadTerminalState,
+  useTerminalStateStore,
+} from "../terminalStateStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -223,6 +228,7 @@ import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainActiveThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
+import { mergeDevServerLinks } from "../devServerLinks";
 import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
@@ -275,10 +281,12 @@ type EnvironmentUnavailableState = {
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
-function eventTargetElement(target: EventTarget | null): Element | null {
-  if (target instanceof Element) return target;
-  if (target instanceof Node) return target.parentElement;
-  return null;
+function eventPathContainsSelector(event: Event, selector: string): boolean {
+  const path = event.composedPath();
+  if (path.length === 0 && event.target) {
+    path.push(event.target);
+  }
+  return path.some((target) => target instanceof Element && target.closest(selector));
 }
 
 function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
@@ -286,9 +294,8 @@ function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
   if (event.metaKey || event.ctrlKey || event.altKey) return false;
   if (event.key.length !== 1) return false;
 
-  const target = eventTargetElement(event.target);
-  if (target?.closest(TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
-  if (target?.closest(TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
+  if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
+  if (eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
   if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
 
   return true;
@@ -466,6 +473,13 @@ interface TerminalLaunchContext {
 }
 
 type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
+
+interface LastDiffRouteTarget {
+  readonly threadKey: string;
+  readonly source?: DiffRouteSource;
+  readonly turnId?: TurnId;
+  readonly filePath?: string;
+}
 
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
@@ -893,6 +907,7 @@ export default function ChatView(props: ChatViewProps) {
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+  const storeRecordTerminalSnapshot = useTerminalStateStore((s) => s.recordTerminalSnapshot);
   const serverThreadKeys = useStore(
     useShallow((state) =>
       selectThreadsAcrossEnvironments(state).map((thread) =>
@@ -969,6 +984,99 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeThreadEnvironmentId = activeThreadRef?.environmentId ?? null;
+  const activeThreadIdForTerminalSnapshot = activeThreadRef?.threadId ?? null;
+  const activeRunningTerminalIdKey = terminalState.runningTerminalIds.join("\u0000");
+  const devServerLinks = useTerminalStateStore(
+    useShallow((state) => {
+      if (!activeThreadRef) return [];
+      return mergeDevServerLinks(
+        terminalState.runningTerminalIds.flatMap((terminalId) =>
+          selectTerminalDevServerLinks(
+            state.terminalDevServerLinksByKey,
+            activeThreadRef,
+            terminalId,
+          ),
+        ),
+      );
+    }),
+  );
+  useEffect(() => {
+    if (
+      !activeThreadEnvironmentId ||
+      !activeThreadIdForTerminalSnapshot ||
+      terminalState.runningTerminalIds.length === 0
+    ) {
+      return;
+    }
+
+    const api = readEnvironmentApi(activeThreadEnvironmentId);
+    if (!api) {
+      return;
+    }
+
+    let disposed = false;
+    const threadRef = scopeThreadRef(activeThreadEnvironmentId, activeThreadIdForTerminalSnapshot);
+    for (const terminalId of terminalState.runningTerminalIds) {
+      void api.terminal
+        .snapshot({
+          threadId: activeThreadIdForTerminalSnapshot,
+          terminalId,
+        })
+        .then((snapshot) => {
+          if (disposed) return;
+          storeRecordTerminalSnapshot(threadRef, snapshot);
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeRunningTerminalIdKey,
+    activeThreadEnvironmentId,
+    activeThreadIdForTerminalSnapshot,
+    storeRecordTerminalSnapshot,
+    terminalState.runningTerminalIds,
+  ]);
+  const probeDevServerUrl = useCallback(
+    async (url: string): Promise<boolean> => {
+      if (!activeThreadEnvironmentId) {
+        return false;
+      }
+      const api = readEnvironmentApi(activeThreadEnvironmentId);
+      if (!api) {
+        return false;
+      }
+      try {
+        const result = await api.server.probeDevServerUrl({ url });
+        return result.reachable;
+      } catch {
+        return false;
+      }
+    },
+    [activeThreadEnvironmentId],
+  );
+  const lastDiffRouteTargetRef = useRef<LastDiffRouteTarget | null>(null);
+  useEffect(() => {
+    if (!diffOpen || !activeThreadKey) {
+      return;
+    }
+
+    lastDiffRouteTargetRef.current = {
+      threadKey: activeThreadKey,
+      ...(rawSearch.diffSource ? { source: rawSearch.diffSource } : {}),
+      ...(rawSearch.diffTurnId ? { turnId: rawSearch.diffTurnId } : {}),
+      ...(rawSearch.diffFilePath ? { filePath: rawSearch.diffFilePath } : {}),
+    };
+  }, [
+    activeThreadKey,
+    diffOpen,
+    rawSearch.diffFilePath,
+    rawSearch.diffSource,
+    rawSearch.diffTurnId,
+  ]);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -2019,10 +2127,33 @@ export default function ChatView(props: ChatViewProps) {
       routeKind === "draft" || (isServerThread && activeThread && !threadHasStarted(activeThread))
         ? "unstaged"
         : undefined;
-    const search = (previous: Record<string, unknown>) =>
-      diffOpen
-        ? buildClosedDiffSearch(previous)
-        : buildOpenDiffSearch(previous, { source: openDiffSource });
+    const search = (previous: Record<string, unknown>) => {
+      if (diffOpen) {
+        return buildClosedDiffSearch(previous);
+      }
+
+      const lastDiffTarget =
+        activeThreadKey && lastDiffRouteTargetRef.current?.threadKey === activeThreadKey
+          ? lastDiffRouteTargetRef.current
+          : null;
+      if (lastDiffTarget?.source) {
+        return {
+          ...buildOpenDiffSearch(previous, { source: lastDiffTarget.source }),
+          ...(lastDiffTarget.filePath ? { diffFilePath: lastDiffTarget.filePath } : {}),
+        };
+      }
+      if (lastDiffTarget?.turnId) {
+        const rest = stripDiffSearchParams(previous);
+        return {
+          ...rest,
+          diff: "1" as const,
+          diffTurnId: lastDiffTarget.turnId,
+          ...(lastDiffTarget.filePath ? { diffFilePath: lastDiffTarget.filePath } : {}),
+        };
+      }
+
+      return buildOpenDiffSearch(previous, { source: openDiffSource });
+    };
 
     if (routeKind === "draft" && draftId) {
       void navigate({
@@ -2045,6 +2176,7 @@ export default function ChatView(props: ChatViewProps) {
     });
   }, [
     activeThread,
+    activeThreadKey,
     diffOpen,
     draftId,
     environmentId,
@@ -4379,6 +4511,8 @@ export default function ChatView(props: ChatViewProps) {
           gitCwd={gitCwd}
           diffOpen={diffOpen}
           sourceControlOpen={sourceControlOpen}
+          devServerLinks={devServerLinks}
+          probeDevServerUrl={probeDevServerUrl}
           fileExplorerAvailable={fileExplorerAvailable}
           fileExplorerOpen={fileExplorerOpen}
           onRunProjectScript={runProjectScript}

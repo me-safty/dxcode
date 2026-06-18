@@ -503,6 +503,92 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("uses a Claude Code user agent for OAuth usage requests", () => {
+    const homeDir = mkdtempSync(path.join(os.tmpdir(), "claude-oauth-default-fetch-"));
+    const credentialsDir = path.join(homeDir, ".claude");
+    mkdirSync(credentialsDir, { recursive: true });
+    writeFileSync(
+      path.join(credentialsDir, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "test-access-token",
+          refreshToken: "test-refresh-token",
+          expiresAt: 4_102_444_800_000,
+          scopes: ["user:profile", "user:inference"],
+          subscriptionType: "pro",
+          rateLimitTier: "default_claude_ai",
+        },
+      }),
+    );
+
+    const originalFetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+    let observedHeaders: Headers | undefined;
+    const fetchStub = async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ): Promise<Response> => {
+      assert.equal(input, "https://api.anthropic.com/api/oauth/usage");
+      observedHeaders = new Headers(init?.headers);
+      return new Response(
+        JSON.stringify({
+          five_hour: {
+            utilization: 8,
+            resets_at: "2026-05-18T06:20:00.000Z",
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    };
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: fetchStub,
+    });
+
+    const harness = makeHarness({
+      claudeConfig: { homePath: homeDir },
+      enableOAuthUsage: true,
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (originalFetchDescriptor) {
+            Object.defineProperty(globalThis, "fetch", originalFetchDescriptor);
+          }
+          rmSync(homeDir, {
+            recursive: true,
+            force: true,
+          });
+        }),
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      const getAccountRateLimits = adapter.getAccountRateLimits;
+      assert.ok(getAccountRateLimits);
+      const rateLimits = yield* getAccountRateLimits();
+      assert.deepEqual(rateLimits, {
+        source: "claude.oauth.usage",
+        primary: {
+          usedPercent: 8,
+          windowDurationMins: 300,
+          resetsAt: "2026-05-18T06:20:00.000Z",
+        },
+      });
+      assert.match(observedHeaders?.get("User-Agent") ?? "", /^claude-code\/\d+\.\d+\.\d+$/);
+      assert.equal(observedHeaders?.get("Authorization"), "Bearer test-access-token");
+      assert.equal(observedHeaders?.get("anthropic-beta"), "oauth-2025-04-20");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("emits Claude subscription usage from the OAuth usage endpoint", () => {
     const homeDir = mkdtempSync(path.join(os.tmpdir(), "claude-oauth-usage-"));
     const credentialsDir = path.join(homeDir, ".claude");

@@ -1,4 +1,6 @@
+import { Editor } from "@pierre/diffs/editor";
 import {
+  EditorProvider,
   File,
   FileDiff,
   Virtualizer,
@@ -6,7 +8,8 @@ import {
   type FileContents,
   type LineAnnotation,
 } from "@pierre/diffs/react";
-import { useQuery } from "@tanstack/react-query";
+import { type ProjectReadFileResult } from "@t3tools/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -14,9 +17,11 @@ import {
   ChevronUpIcon,
   CopyIcon,
   FolderTreeIcon,
+  LoaderCircleIcon,
   PanelRightCloseIcon,
   PlusIcon,
   TextWrapIcon,
+  TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -27,6 +32,7 @@ import {
   useState,
   type CSSProperties,
   type RefObject,
+  type ReactNode,
 } from "react";
 
 import {
@@ -36,13 +42,15 @@ import {
   resolveCodeHighlightLanguageFromPath,
 } from "../codeHighlighting";
 import { readEnvironmentApi } from "../environmentApi";
+import { FileSaveCoordinator } from "../fileSaveCoordinator";
 import { useFilePreviewWordWrapPreference } from "../filePreviewPreferences";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { MOBILE_EDGE_SWIPE_ALLOW_EDITABLE_ATTRIBUTE } from "../hooks/useMobileEdgeSwipe";
 import { useTheme } from "../hooks/useTheme";
 import { DIFF_MOBILE_TEXT_FLOOR_UNSAFE_CSS, resolveDiffThemeName } from "../lib/diffRendering";
 import { gitWorkingTreeDiffQueryOptions } from "../lib/gitReactQuery";
-import { useGitStatus } from "../lib/gitStatusState";
+import { refreshGitStatus, useGitStatus } from "../lib/gitStatusState";
 import type {
   WorkspaceFilePanelHistoryEntry,
   WorkspaceFilePreviewTarget,
@@ -65,13 +73,14 @@ import {
   WORKSPACE_FILE_INLINE_DIFF_ATTRIBUTE,
   WORKSPACE_FILE_INLINE_DIFF_SELECTOR,
 } from "../workspaceFilePreviewDom";
-import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
+import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
 
 const FILE_PREVIEW_LINE_HEIGHT = 20;
 const FILE_PREVIEW_VIRTUALIZER_CLASS_NAME = "workspace-file-preview-virtualizer";
+const FILE_SAVE_DEBOUNCE_MS = 500;
 // A tap counts as a click as long as the finger barely moves; anything larger is a scroll.
 const FILE_PREVIEW_GUTTER_TAP_SLOP_PX = 10;
 
@@ -283,17 +292,22 @@ function normalizePreviewContents(contents: string): string {
   return contents.replace(/\r\n/g, "\n");
 }
 
+function workspaceFilePreviewQueryKey(target: WorkspaceFilePreviewTarget | null) {
+  return [
+    "workspaceFilePreview",
+    target?.environmentId ?? null,
+    target?.cwd ?? null,
+    target?.relativePath ?? null,
+  ] as const;
+}
+type WorkspaceFilePreviewQueryKey = ReturnType<typeof workspaceFilePreviewQueryKey>;
+
 function workspaceFilePreviewQueryOptions(
   target: WorkspaceFilePreviewTarget | null,
   shouldReadFile: boolean,
 ) {
   return {
-    queryKey: [
-      "workspaceFilePreview",
-      target?.environmentId ?? null,
-      target?.cwd ?? null,
-      target?.relativePath ?? null,
-    ],
+    queryKey: workspaceFilePreviewQueryKey(target),
     enabled: target !== null && shouldReadFile,
     queryFn: async () => {
       if (!target) {
@@ -308,6 +322,15 @@ function workspaceFilePreviewQueryOptions(
         relativePath: target.relativePath,
       });
     },
+  };
+}
+
+function withContents(file: ProjectReadFileResult, contents: string): ProjectReadFileResult {
+  return {
+    ...file,
+    contents,
+    truncated: false,
+    sizeBytes: new TextEncoder().encode(contents).byteLength,
   };
 }
 
@@ -525,6 +548,199 @@ function WorkspaceImagePreview(props: { src: string; alt: string }) {
   );
 }
 
+function EditableWorkspaceFileSurface(props: {
+  file: ProjectReadFileResult;
+  previewFile: FileContents;
+  queryKey: WorkspaceFilePreviewQueryKey;
+  virtualizerKey?: string | undefined;
+  diffThemeName: string;
+  lineAnnotations: LineAnnotation<WorkspaceFileInlineDiffAnnotation>[];
+  previewUnsafeCss: string;
+  renderInlineDiffAnnotation: (
+    annotation: LineAnnotation<WorkspaceFileInlineDiffAnnotation>,
+  ) => ReactNode;
+  resolvedTheme: "light" | "dark";
+  selectedLines: { start: number; end: number } | null;
+  style: CSSProperties;
+  target: WorkspaceFilePreviewTarget;
+  wordWrap: boolean;
+  onPendingChange: (pending: boolean) => void;
+  onSaveErrorChange: (message: string | null) => void;
+}) {
+  const {
+    file,
+    diffThemeName,
+    lineAnnotations,
+    onPendingChange,
+    onSaveErrorChange,
+    previewFile,
+    previewUnsafeCss,
+    queryKey,
+    renderInlineDiffAnnotation,
+    resolvedTheme,
+    selectedLines,
+    style,
+    target,
+    wordWrap,
+  } = props;
+  const queryClient = useQueryClient();
+  const fallbackFileRef = useRef(file);
+
+  useEffect(() => {
+    fallbackFileRef.current = file;
+  }, [file]);
+
+  const writeQueryContents = useCallback(
+    (nextContents: string) => {
+      queryClient.setQueryData<ProjectReadFileResult>(queryKey, (current) =>
+        withContents(current ?? fallbackFileRef.current, nextContents),
+      );
+    },
+    [queryKey, queryClient],
+  );
+
+  const saveCoordinator = useMemo(
+    () =>
+      new FileSaveCoordinator({
+        debounceMs: FILE_SAVE_DEBOUNCE_MS,
+        onPendingChange,
+        onConfirmed: (confirmedContents) => {
+          onSaveErrorChange(null);
+          writeQueryContents(confirmedContents);
+          void refreshGitStatus(
+            {
+              environmentId: target.environmentId,
+              cwd: target.cwd,
+            },
+            { force: true },
+          );
+        },
+        onError: (error) => {
+          onSaveErrorChange(
+            error instanceof Error ? error.message : "Unable to save workspace file.",
+          );
+        },
+        persist: async (nextContents) => {
+          const api = readEnvironmentApi(target.environmentId);
+          if (!api) {
+            throw new Error("Environment API not found.");
+          }
+          await api.projects.writeFile({
+            cwd: target.cwd,
+            relativePath: target.relativePath,
+            contents: nextContents,
+          });
+        },
+      }),
+    [
+      onPendingChange,
+      onSaveErrorChange,
+      target.cwd,
+      target.environmentId,
+      target.relativePath,
+      writeQueryContents,
+    ],
+  );
+
+  const editor = useMemo(
+    () =>
+      new Editor<unknown>({
+        onChange: (changedFile) => {
+          onSaveErrorChange(null);
+          writeQueryContents(changedFile.contents);
+          saveCoordinator.change(changedFile.contents);
+        },
+      }),
+    [onSaveErrorChange, saveCoordinator, writeQueryContents],
+  );
+
+  useEffect(
+    () => () => {
+      editor.cleanUp();
+      void saveCoordinator.dispose();
+    },
+    [editor, saveCoordinator],
+  );
+
+  return (
+    <EditorProvider editor={editor}>
+      <Virtualizer
+        key={props.virtualizerKey}
+        className={`${FILE_PREVIEW_VIRTUALIZER_CLASS_NAME} h-full min-h-0 overflow-x-clip overflow-y-auto overscroll-contain`}
+        contentClassName="min-w-full py-2"
+        config={{
+          overscrollSize: 600,
+          intersectionObserverMargin: 1200,
+        }}
+      >
+        <File
+          className="workspace-file-preview-render min-w-full"
+          contentEditable
+          file={previewFile}
+          lineAnnotations={lineAnnotations}
+          renderAnnotation={renderInlineDiffAnnotation}
+          selectedLines={selectedLines}
+          style={style}
+          options={{
+            disableFileHeader: true,
+            lineHoverHighlight: "number",
+            overflow: wordWrap ? "wrap" : "scroll",
+            theme: diffThemeName,
+            themeType: resolvedTheme,
+            tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
+            unsafeCSS: previewUnsafeCss,
+          }}
+        />
+      </Virtualizer>
+    </EditorProvider>
+  );
+}
+
+function ReadonlyWorkspaceFileSurface(props: {
+  previewFile: FileContents;
+  virtualizerKey?: string | undefined;
+  diffThemeName: string;
+  lineAnnotations: LineAnnotation<WorkspaceFileInlineDiffAnnotation>[];
+  previewUnsafeCss: string;
+  renderInlineDiffAnnotation: (
+    annotation: LineAnnotation<WorkspaceFileInlineDiffAnnotation>,
+  ) => ReactNode;
+  resolvedTheme: "light" | "dark";
+  selectedLines: { start: number; end: number } | null;
+  style: CSSProperties;
+  wordWrap: boolean;
+}) {
+  return (
+    <Virtualizer
+      key={props.virtualizerKey}
+      className={`${FILE_PREVIEW_VIRTUALIZER_CLASS_NAME} h-full min-h-0 overflow-x-clip overflow-y-auto overscroll-contain`}
+      contentClassName="min-w-full py-2"
+      config={{
+        overscrollSize: 600,
+        intersectionObserverMargin: 1200,
+      }}
+    >
+      <File
+        className="workspace-file-preview-render min-w-full"
+        file={props.previewFile}
+        lineAnnotations={props.lineAnnotations}
+        renderAnnotation={props.renderInlineDiffAnnotation}
+        selectedLines={props.selectedLines}
+        style={props.style}
+        options={{
+          disableFileHeader: true,
+          lineHoverHighlight: "number",
+          overflow: props.wordWrap ? "wrap" : "scroll",
+          theme: props.diffThemeName,
+          themeType: props.resolvedTheme,
+          tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
+          unsafeCSS: props.previewUnsafeCss,
+        }}
+      />
+    </Virtualizer>
+  );
+}
+
 export function WorkspaceFilePreviewPanel(props: {
   backTarget?: WorkspaceFilePanelHistoryEntry | null | undefined;
   mode: DiffPanelMode;
@@ -539,6 +755,8 @@ export function WorkspaceFilePreviewPanel(props: {
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   const [wordWrap, setWordWrap] = useFilePreviewWordWrapPreference();
+  const [savePending, setSavePending] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [expandedDiffHunkId, setExpandedDiffHunkId] = useState<string | null>(null);
   const scrollRootRef = useRef<HTMLDivElement>(null);
   const lastAutoScrollKeyRef = useRef<string | null>(null);
@@ -562,6 +780,10 @@ export function WorkspaceFilePreviewPanel(props: {
     environmentId: props.target?.environmentId ?? null,
     cwd: props.target?.cwd ?? null,
   });
+  const previewQueryKey = useMemo(
+    () => workspaceFilePreviewQueryKey(props.target),
+    [props.target?.cwd, props.target?.environmentId, props.target?.relativePath],
+  );
   const query = useQuery(workspaceFilePreviewQueryOptions(props.target, !isImagePreviewTarget));
   const fileContents = query.data?.contents ?? "";
   const previewContents = useMemo(() => normalizePreviewContents(fileContents), [fileContents]);
@@ -676,10 +898,12 @@ export function WorkspaceFilePreviewPanel(props: {
       props.target.cwd,
       props.target.relativePath,
       query.data.relativePath,
-      query.data.sizeBytes,
-      previewFile.cacheKey ?? previewFile.name,
+      query.data.truncated ? query.data.sizeBytes : "editable",
+      query.data.truncated
+        ? (previewFile.cacheKey ?? previewFile.name)
+        : `${renderLanguage}:${diffThemeName}`,
     ].join("\u0000");
-  }, [isImagePreviewTarget, previewFile, props.target, query.data]);
+  }, [diffThemeName, isImagePreviewTarget, previewFile, props.target, query.data, renderLanguage]);
   const virtualizerLayoutRevision = useFilePreviewVirtualizerLayoutRevision({
     enabled: panelOpen && query.data !== undefined && !isImagePreviewTarget,
     layoutKey: previewVirtualizerLayoutKey,
@@ -698,6 +922,12 @@ export function WorkspaceFilePreviewPanel(props: {
   const returnButtonLabel = props.backTarget
     ? workspaceFilePanelBackButtonLabel(props.backTarget)
     : "Back";
+  const canEditFile = query.data !== undefined && !query.data.truncated && !isImagePreviewTarget;
+
+  useEffect(() => {
+    setSavePending(false);
+    setSaveError(null);
+  }, [props.target?.cwd, props.target?.environmentId, props.target?.relativePath]);
 
   useEffect(() => {
     if (!targetLine || !props.target || !query.data) {
@@ -917,7 +1147,7 @@ export function WorkspaceFilePreviewPanel(props: {
           </Button>
         ) : null}
         {props.target ? (
-          <VscodeEntryIcon
+          <PierreEntryIcon
             pathValue={props.target.relativePath}
             kind="file"
             theme={resolvedTheme}
@@ -928,6 +1158,19 @@ export function WorkspaceFilePreviewPanel(props: {
           <p className="truncate text-sm font-medium text-foreground">{title}</p>
           <p className="truncate font-mono text-[11px] text-muted-foreground/70">{subtitle}</p>
         </div>
+        {savePending ? (
+          <LoaderCircleIcon
+            aria-label="Saving file"
+            className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+            role="status"
+          />
+        ) : saveError ? (
+          <TriangleAlertIcon
+            aria-label={`File save failed: ${saveError}`}
+            className="size-3.5 shrink-0 text-destructive"
+            role="status"
+          />
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {props.showExplorerButton && props.onShowExplorer ? (
@@ -1014,35 +1257,42 @@ export function WorkspaceFilePreviewPanel(props: {
               Preview truncated. File size: {formatBytes(query.data.sizeBytes)}.
             </div>
           ) : null}
-          <div ref={scrollRootRef} className="min-h-0 flex-1 bg-background">
-            {previewFile ? (
-              <Virtualizer
-                key={previewVirtualizerKey}
-                className={`${FILE_PREVIEW_VIRTUALIZER_CLASS_NAME} h-full min-h-0 overflow-auto`}
-                contentClassName="min-w-full py-2"
-                config={{
-                  overscrollSize: 600,
-                  intersectionObserverMargin: 1200,
-                }}
-              >
-                <File
-                  className="workspace-file-preview-render min-w-full"
-                  file={previewFile}
-                  lineAnnotations={lineAnnotations}
-                  renderAnnotation={renderInlineDiffAnnotation}
-                  selectedLines={selectedLines}
-                  style={FILE_PREVIEW_RENDER_STYLE}
-                  options={{
-                    disableFileHeader: true,
-                    lineHoverHighlight: "number",
-                    overflow: wordWrap ? "wrap" : "scroll",
-                    theme: diffThemeName,
-                    themeType: resolvedTheme,
-                    tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
-                    unsafeCSS: previewUnsafeCss,
-                  }}
-                />
-              </Virtualizer>
+          <div
+            ref={scrollRootRef}
+            className="flex min-h-0 flex-1 flex-col bg-background"
+            {...{ [MOBILE_EDGE_SWIPE_ALLOW_EDITABLE_ATTRIBUTE]: "true" }}
+          >
+            {canEditFile && props.target && previewFile ? (
+              <EditableWorkspaceFileSurface
+                file={query.data}
+                previewFile={previewFile}
+                queryKey={previewQueryKey}
+                virtualizerKey={previewVirtualizerKey}
+                diffThemeName={diffThemeName}
+                lineAnnotations={lineAnnotations}
+                previewUnsafeCss={previewUnsafeCss}
+                renderInlineDiffAnnotation={renderInlineDiffAnnotation}
+                resolvedTheme={resolvedTheme}
+                selectedLines={selectedLines}
+                style={FILE_PREVIEW_RENDER_STYLE}
+                target={props.target}
+                wordWrap={wordWrap}
+                onPendingChange={setSavePending}
+                onSaveErrorChange={setSaveError}
+              />
+            ) : previewFile ? (
+              <ReadonlyWorkspaceFileSurface
+                previewFile={previewFile}
+                virtualizerKey={previewVirtualizerKey}
+                diffThemeName={diffThemeName}
+                lineAnnotations={lineAnnotations}
+                previewUnsafeCss={previewUnsafeCss}
+                renderInlineDiffAnnotation={renderInlineDiffAnnotation}
+                resolvedTheme={resolvedTheme}
+                selectedLines={selectedLines}
+                style={FILE_PREVIEW_RENDER_STYLE}
+                wordWrap={wordWrap}
+              />
             ) : null}
           </div>
         </div>

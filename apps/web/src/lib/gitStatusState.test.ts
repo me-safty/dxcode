@@ -5,6 +5,7 @@ import type { WsRpcClient } from "../rpc/wsRpcClient";
 import { resetAppAtomRegistryForTests } from "../rpc/atomRegistry";
 import {
   applyGitStatusLocalUpdate,
+  getGitStatusDataForTarget,
   getGitStatusSnapshot,
   resetGitStatusStateForTests,
   refreshGitStatus,
@@ -49,6 +50,8 @@ const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const OTHER_ENVIRONMENT_ID = EnvironmentId.make("environment-remote");
 const TARGET = { environmentId: ENVIRONMENT_ID, cwd: "/repo" } as const;
 const FRESH_TARGET = { environmentId: ENVIRONMENT_ID, cwd: "/fresh" } as const;
+const TARGET_KEY = "environment-local:/repo";
+const FRESH_TARGET_KEY = "environment-local:/fresh";
 const emptyWorkingTree: VcsStatusResult["workingTree"] = {
   files: [],
   insertions: 0,
@@ -110,6 +113,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       write: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
       clear: vi.fn(async () => undefined),
+      snapshot: vi.fn(async () => undefined),
       restart: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
       onEvent: vi.fn(() => () => undefined),
@@ -218,6 +222,7 @@ afterEach(async () => {
 describe("gitStatusState", () => {
   it("starts fresh cwd state in a pending state", () => {
     expect(getGitStatusSnapshot(FRESH_TARGET)).toEqual({
+      targetKey: FRESH_TARGET_KEY,
       data: null,
       error: null,
       cause: null,
@@ -231,6 +236,7 @@ describe("gitStatusState", () => {
 
     expect(gitClient.onStatus).toHaveBeenCalledOnce();
     expect(getGitStatusSnapshot(TARGET)).toEqual({
+      targetKey: TARGET_KEY,
       data: null,
       error: null,
       cause: null,
@@ -240,6 +246,7 @@ describe("gitStatusState", () => {
     emitGitStatus(BASE_STATUS);
 
     expect(getGitStatusSnapshot(TARGET)).toEqual({
+      targetKey: TARGET_KEY,
       data: BASE_STATUS,
       error: null,
       cause: null,
@@ -265,6 +272,7 @@ describe("gitStatusState", () => {
     // The unary result is written straight to the atom rather than waiting for
     // the onStatus broadcast.
     expect(getGitStatusSnapshot(TARGET)).toEqual({
+      targetKey: TARGET_KEY,
       data: { ...BASE_STATUS, refName: "/repo-refreshed" },
       error: null,
       cause: null,
@@ -272,6 +280,19 @@ describe("gitStatusState", () => {
     });
 
     release();
+  });
+
+  it("rejects status data from a previous cwd during target transitions", () => {
+    const staleState = {
+      targetKey: TARGET_KEY,
+      data: BASE_STATUS,
+      error: null,
+      cause: null,
+      isPending: false,
+    };
+
+    expect(getGitStatusDataForTarget(staleState, FRESH_TARGET)).toBeNull();
+    expect(getGitStatusDataForTarget(staleState, TARGET)).toBe(BASE_STATUS);
   });
 
   it("does not let a stale refresh clobber a newer one", async () => {
@@ -401,6 +422,7 @@ describe("gitStatusState", () => {
     const release = watchGitStatus(TARGET);
 
     expect(getGitStatusSnapshot(TARGET)).toEqual({
+      targetKey: TARGET_KEY,
       data: null,
       error: null,
       cause: null,
@@ -411,6 +433,7 @@ describe("gitStatusState", () => {
     registered.emit(BASE_STATUS);
 
     expect(getGitStatusSnapshot(TARGET)).toEqual({
+      targetKey: TARGET_KEY,
       data: BASE_STATUS,
       error: null,
       cause: null,
@@ -433,6 +456,7 @@ describe("gitStatusState", () => {
     }
 
     expect(getGitStatusSnapshot(TARGET)).toEqual({
+      targetKey: TARGET_KEY,
       data: BASE_STATUS,
       error: null,
       cause: null,
@@ -443,6 +467,7 @@ describe("gitStatusState", () => {
     secondClient.emit({ ...BASE_STATUS, refName: "reconnected-refName" });
 
     expect(getGitStatusSnapshot(TARGET)).toEqual({
+      targetKey: TARGET_KEY,
       data: { ...BASE_STATUS, refName: "reconnected-refName" },
       error: null,
       cause: null,

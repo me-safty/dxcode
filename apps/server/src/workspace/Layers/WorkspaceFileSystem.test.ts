@@ -322,6 +322,100 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         expect(escapedStat).toBeNull();
       }),
     );
+
+    it.effect("rejects writes through symlinks that resolve outside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const outsideCwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* writeTextFile(outsideCwd, "outside.md", "outside\n");
+        const outsidePath = path.join(outsideCwd, "outside.md");
+        yield* Effect.promise(() => fsPromises.symlink(outsidePath, path.join(cwd, "OUTSIDE.md")));
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "OUTSIDE.md",
+            contents: "overwrite\n",
+          })
+          .pipe(Effect.flip);
+        const outsideContents = yield* Effect.promise(() =>
+          fsPromises.readFile(outsidePath, "utf8"),
+        );
+
+        expect(error).toMatchObject({
+          _tag: "WorkspaceFileSystemError",
+          detail: expect.stringContaining(
+            "Workspace symlink target must stay within the project root",
+          ),
+        });
+        expect(outsideContents).toBe("outside\n");
+      }),
+    );
+
+    it.effect("rejects writes through symlinks that only escape after realpath resolution", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const outsideCwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* writeTextFile(outsideCwd, "outside.md", "outside\n");
+        const outsidePath = path.join(outsideCwd, "outside.md");
+        yield* Effect.promise(() => fsPromises.symlink(outsidePath, path.join(cwd, "redirect.md")));
+        yield* Effect.promise(() => fsPromises.symlink("redirect.md", path.join(cwd, "INSIDE.md")));
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "INSIDE.md",
+            contents: "overwrite\n",
+          })
+          .pipe(Effect.flip);
+        const outsideContents = yield* Effect.promise(() =>
+          fsPromises.readFile(outsidePath, "utf8"),
+        );
+
+        expect(error).toMatchObject({
+          _tag: "WorkspaceFileSystemError",
+          detail: expect.stringContaining(
+            "Workspace symlink target must stay within the project root",
+          ),
+        });
+        expect(outsideContents).toBe("outside\n");
+      }),
+    );
+
+    it.effect(
+      "rejects writes through symlinked parent directories outside the workspace root",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem;
+          const cwd = yield* makeTempDir;
+          const outsideCwd = yield* makeTempDir;
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          yield* fileSystem.makeDirectory(path.join(outsideCwd, "nested"), { recursive: true });
+          yield* Effect.promise(() => fsPromises.symlink(outsideCwd, path.join(cwd, "linked-dir")));
+
+          const error = yield* workspaceFileSystem
+            .writeFile({
+              cwd,
+              relativePath: "linked-dir/nested/escape.md",
+              contents: "escape\n",
+            })
+            .pipe(Effect.flip);
+          const escapedStat = yield* fileSystem
+            .stat(path.join(outsideCwd, "nested", "escape.md"))
+            .pipe(Effect.catch(() => Effect.succeed(null)));
+
+          expect(error).toMatchObject({
+            _tag: "WorkspaceFileSystemError",
+            detail: expect.stringContaining("resolves outside the project root"),
+          });
+          expect(escapedStat).toBeNull();
+        }),
+    );
   });
 
   describe("deleteEntry", () => {

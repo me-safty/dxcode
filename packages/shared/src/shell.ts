@@ -2,6 +2,7 @@
 import * as NodeOS from "node:os";
 import { execFileSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
+import * as NodePath from "node:path";
 import { extname, join } from "node:path";
 
 const PATH_CAPTURE_START = "__T3CODE_PATH_START__";
@@ -10,6 +11,7 @@ const SHELL_ENV_NAME_PATTERN = /^[A-Z0-9_]+$/;
 const WINDOWS_PATH_DELIMITER = ";";
 const POSIX_PATH_DELIMITER = ":";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
+const WINDOWS_SHELL_META_CHARS = /([()\][%!^"`<>&|;, *?])/g;
 
 type ExecFileSyncLike = (
   file: string,
@@ -20,10 +22,37 @@ type ExecFileSyncLike = (
 export interface CommandAvailabilityOptions {
   readonly platform?: NodeJS.Platform;
   readonly env?: NodeJS.ProcessEnv;
+  readonly extendEnv?: boolean;
 }
 
 export interface WindowsEnvironmentProbeOptions {
   readonly loadProfile?: boolean;
+}
+
+export interface ResolvedSpawnCommand {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly shell: boolean;
+}
+
+/**
+ * Escapes a single argument for `cmd.exe` shell mode (`spawn(..., { shell: true })`
+ * on Windows). Node joins the command and arguments with spaces before handing
+ * the command line to `cmd.exe`, so dynamic values need to survive both cmd
+ * parsing and the target process' argv parsing.
+ */
+function escapeWindowsShellArg(arg: string): string {
+  let escaped = arg.replace(/(\\*)"/g, '$1$1\\"');
+  escaped = escaped.replace(/(\\*)$/, "$1$1");
+  escaped = `"${escaped}"`;
+  return escaped.replace(WINDOWS_SHELL_META_CHARS, "^$1");
+}
+
+function sanitizeShellModeArgsForPlatform(
+  args: ReadonlyArray<string>,
+  platform: NodeJS.Platform,
+): Array<string> {
+  return platform === "win32" ? args.map(escapeWindowsShellArg) : [...args];
 }
 
 function trimNonEmpty(value: string | null | undefined): string | undefined {
@@ -415,6 +444,36 @@ export function resolveCommandPath(
     }
   }
   return null;
+}
+
+function resolveSpawnEnvironment(options: CommandAvailabilityOptions): NodeJS.ProcessEnv {
+  if (options.env === undefined) return process.env;
+  if (options.extendEnv) return { ...process.env, ...options.env };
+  return options.env;
+}
+
+export function resolveSpawnCommand(
+  command: string,
+  args: ReadonlyArray<string>,
+  options: CommandAvailabilityOptions = {},
+): ResolvedSpawnCommand {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32") {
+    return { command, args: [...args], shell: false };
+  }
+
+  const env = resolveSpawnEnvironment(options);
+  const resolvedCommand = resolveCommandPath(command, { platform, env }) ?? command;
+  const extension = NodePath.win32.extname(resolvedCommand).toLowerCase();
+  if (extension !== ".cmd" && extension !== ".bat") {
+    return { command: resolvedCommand, args: [...args], shell: false };
+  }
+
+  return {
+    command: escapeWindowsShellArg(resolvedCommand),
+    args: sanitizeShellModeArgsForPlatform(args, platform),
+    shell: true,
+  };
 }
 
 export function isCommandAvailable(

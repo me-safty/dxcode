@@ -5,6 +5,7 @@ import type {
 import * as NetService from "@t3tools/shared/Net";
 import { extractJsonObject, fromLenientJson } from "@t3tools/shared/schemaJson";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -1149,11 +1150,14 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     remoteServerKind: input.remoteServerKind,
     httpBaseUrl: input.httpBaseUrl,
   });
+  const spawnCommand = resolveSpawnCommand("ssh", args, {
+    env: childEnvironment,
+  });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make("ssh", args, {
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env: childEnvironment,
-        shell: process.platform === "win32",
+        shell: spawnCommand.shell,
         stdin: {
           stream: Stream.empty,
           endOnDone: true,

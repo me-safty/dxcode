@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   migratePersistedTerminalStateStoreState,
+  selectTerminalDevServerLinks,
   selectTerminalEventEntries,
+  selectTerminalSessionSnapshot,
   selectThreadTerminalState,
   useTerminalStateStore,
 } from "./terminalStateStore";
@@ -63,6 +65,8 @@ describe("terminalStateStore actions", () => {
       terminalStateByThreadKey: {},
       terminalLaunchContextByThreadKey: {},
       terminalEventEntriesByKey: {},
+      terminalSessionSnapshotsByKey: {},
+      terminalDevServerLinksByKey: {},
       nextTerminalEventId: 1,
     });
   });
@@ -330,6 +334,149 @@ describe("terminalStateStore actions", () => {
     expect(entries[0]?.event.type).toBe("started");
   });
 
+  it("caches terminal snapshots and keeps history current from terminal events", () => {
+    const store = useTerminalStateStore.getState();
+    store.applyTerminalEvent(
+      THREAD_REF,
+      makeTerminalEvent("started", {
+        snapshot: {
+          threadId: THREAD_ID,
+          terminalId: "default",
+          cwd: "/tmp/workspace",
+          worktreePath: null,
+          status: "running",
+          pid: 123,
+          history: "Local: http://localhost:5173/\n",
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: "2026-04-02T20:00:00.000Z",
+        },
+      }),
+    );
+    store.applyTerminalEvent(
+      THREAD_REF,
+      makeTerminalEvent("output", {
+        data: "Network: http://192.168.1.44:5173/\n",
+      }),
+    );
+
+    expect(
+      selectTerminalSessionSnapshot(
+        useTerminalStateStore.getState().terminalSessionSnapshotsByKey,
+        THREAD_REF,
+        "default",
+      )?.history,
+    ).toBe("Local: http://localhost:5173/\nNetwork: http://192.168.1.44:5173/\n");
+    expect(
+      selectTerminalDevServerLinks(
+        useTerminalStateStore.getState().terminalDevServerLinksByKey,
+        THREAD_REF,
+        "default",
+      ).map((link) => link.url),
+    ).toEqual(["http://192.168.1.44:5173/", "http://localhost:5173/"]);
+
+    store.applyTerminalEvent(THREAD_REF, makeTerminalEvent("cleared"));
+
+    expect(
+      selectTerminalSessionSnapshot(
+        useTerminalStateStore.getState().terminalSessionSnapshotsByKey,
+        THREAD_REF,
+        "default",
+      )?.history,
+    ).toBe("");
+    expect(
+      selectTerminalDevServerLinks(
+        useTerminalStateStore.getState().terminalDevServerLinksByKey,
+        THREAD_REF,
+        "default",
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps dev server links separate from capped terminal snapshot history", () => {
+    const store = useTerminalStateStore.getState();
+    store.applyTerminalEvent(
+      THREAD_REF,
+      makeTerminalEvent("started", {
+        snapshot: {
+          threadId: THREAD_ID,
+          terminalId: "default",
+          cwd: "/tmp/workspace",
+          worktreePath: null,
+          status: "running",
+          pid: 123,
+          history: "Local: http://localhost:5173/\n",
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: "2026-04-02T20:00:00.000Z",
+        },
+      }),
+    );
+    store.applyTerminalEvent(
+      THREAD_REF,
+      makeTerminalEvent("output", {
+        data: Array.from({ length: 5_050 }, (_, index) => `log ${index}\n`).join(""),
+      }),
+    );
+
+    const history =
+      selectTerminalSessionSnapshot(
+        useTerminalStateStore.getState().terminalSessionSnapshotsByKey,
+        THREAD_REF,
+        "default",
+      )?.history ?? "";
+    expect(history).not.toContain("localhost:5173");
+    expect(
+      selectTerminalDevServerLinks(
+        useTerminalStateStore.getState().terminalDevServerLinksByKey,
+        THREAD_REF,
+        "default",
+      ).map((link) => link.url),
+    ).toEqual(["http://localhost:5173/"]);
+  });
+
+  it("clears stale dev server links at subprocess boundaries", () => {
+    const store = useTerminalStateStore.getState();
+    store.applyTerminalEvent(
+      THREAD_REF,
+      makeTerminalEvent("started", {
+        snapshot: {
+          threadId: THREAD_ID,
+          terminalId: "default",
+          cwd: "/tmp/workspace",
+          worktreePath: null,
+          status: "running",
+          pid: 123,
+          history: "Local: http://localhost:5173/\n",
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: "2026-04-02T20:00:00.000Z",
+        },
+      }),
+    );
+
+    store.applyTerminalEvent(
+      THREAD_REF,
+      makeTerminalEvent("activity", {
+        hasRunningSubprocess: false,
+      }),
+    );
+    store.applyTerminalEvent(
+      THREAD_REF,
+      makeTerminalEvent("output", {
+        data: "Local: http://localhost:3000/\n",
+      }),
+    );
+
+    expect(
+      selectTerminalDevServerLinks(
+        useTerminalStateStore.getState().terminalDevServerLinksByKey,
+        THREAD_REF,
+        "default",
+      ).map((link) => link.url),
+    ).toEqual(["http://localhost:3000/"]);
+  });
+
   it("applies activity and exited terminal events to subprocess state while buffering events", () => {
     const store = useTerminalStateStore.getState();
     store.ensureTerminal(THREAD_REF, "terminal-2", { open: true, active: true });
@@ -374,6 +521,25 @@ describe("terminalStateStore actions", () => {
   it("clears buffered terminal events when a thread terminal state is removed", () => {
     const store = useTerminalStateStore.getState();
     store.recordTerminalEvent(THREAD_REF, makeTerminalEvent("output"));
+    store.recordTerminalSnapshot(THREAD_REF, {
+      threadId: THREAD_ID,
+      terminalId: "default",
+      cwd: "/tmp/workspace",
+      worktreePath: null,
+      status: "running",
+      pid: 123,
+      history: "Local: http://localhost:5173/\n",
+      exitCode: null,
+      exitSignal: null,
+      updatedAt: "2026-04-02T20:00:00.000Z",
+    });
+    expect(
+      selectTerminalDevServerLinks(
+        useTerminalStateStore.getState().terminalDevServerLinksByKey,
+        THREAD_REF,
+        "default",
+      ).map((link) => link.url),
+    ).toEqual(["http://localhost:5173/"]);
     store.removeTerminalState(THREAD_REF);
 
     const entries = selectTerminalEventEntries(
@@ -383,6 +549,20 @@ describe("terminalStateStore actions", () => {
     );
 
     expect(entries).toEqual([]);
+    expect(
+      selectTerminalSessionSnapshot(
+        useTerminalStateStore.getState().terminalSessionSnapshotsByKey,
+        THREAD_REF,
+        "default",
+      ),
+    ).toBeNull();
+    expect(
+      selectTerminalDevServerLinks(
+        useTerminalStateStore.getState().terminalDevServerLinksByKey,
+        THREAD_REF,
+        "default",
+      ),
+    ).toEqual([]);
   });
 
   it("is a no-op when clearing terminal state for a thread with no state or buffered events", () => {

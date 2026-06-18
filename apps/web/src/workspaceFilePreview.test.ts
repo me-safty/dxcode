@@ -6,6 +6,7 @@ import {
   __resetWorkspaceFilePanelStateForTests,
   closeWorkspaceFilePreview,
   closeWorkspaceSourceControlPanel,
+  openPathInWorkspaceFilePreview,
   openWorkspaceFileExplorer,
   openWorkspaceFilePreview,
   openWorkspaceSourceControlPanel,
@@ -82,6 +83,42 @@ describe("resolveWorkspaceFilePreviewTarget", () => {
         targetPath: "/repo/other/src/index.ts",
       }),
     ).toBeNull();
+  });
+});
+
+describe("openPathInWorkspaceFilePreview", () => {
+  it("opens an in-workspace path without requiring a local editor", () => {
+    expect(
+      openPathInWorkspaceFilePreview({
+        environmentId,
+        cwd: "/repo/project",
+        targetPath: "/repo/project/src/index.ts:2",
+        displayPath: "src/index.ts:2",
+      }),
+    ).toBe(true);
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "preview",
+      target: {
+        environmentId,
+        cwd: "/repo/project",
+        relativePath: "src/index.ts",
+        displayPath: "src/index.ts:2",
+        line: 2,
+      },
+    });
+  });
+
+  it("rejects paths outside the workspace", () => {
+    expect(
+      openPathInWorkspaceFilePreview({
+        environmentId,
+        cwd: "/repo/project",
+        targetPath: "/repo/other/src/index.ts",
+      }),
+    ).toBe(false);
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({ open: false });
   });
 });
 

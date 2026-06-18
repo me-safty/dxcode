@@ -9,6 +9,7 @@ import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { buildSshChildEnvironment, type SshAuthOptions } from "./auth.ts";
 import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
@@ -196,11 +197,14 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     hasStdin: input.stdin !== undefined,
     timeoutMs: input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS,
   });
+  const spawnCommand = resolveSpawnCommand("ssh", args, {
+    env: environment,
+  });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make("ssh", args, {
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env: environment,
-        shell: process.platform === "win32",
+        shell: spawnCommand.shell,
         stdin: {
           stream: stdinStream(input.stdin),
           endOnDone: true,
