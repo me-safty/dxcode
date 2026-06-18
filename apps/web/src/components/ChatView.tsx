@@ -111,6 +111,11 @@ const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((mod) => ({ default: mod.PreviewPanel })),
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
+const SourceControlPanel = lazy(() =>
+  import("./source-control/SourceControlPanel").then((mod) => ({
+    default: mod.SourceControlPanel,
+  })),
+);
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 import { BranchToolbar } from "./BranchToolbar";
@@ -132,6 +137,7 @@ import {
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
+import { useHostDisplayPreferences } from "../hostDisplayPreferences";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import {
@@ -1088,6 +1094,8 @@ function ChatViewContent(props: ChatViewProps) {
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
   const settings = useSettings();
+  const hostDisplayPreferences = useHostDisplayPreferences();
+  const sourceControlPanelEnabled = hostDisplayPreferences.enableSourceControlPanel;
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -1292,8 +1300,19 @@ function ChatViewContent(props: ChatViewProps) {
   const activeRightPanelSurface = useRightPanelStore((store) =>
     selectActiveRightPanelSurface(store.byThreadKey, activeThreadRef),
   );
+  const visibleRightPanelSurfaces = useMemo(
+    () =>
+      rightPanelState.surfaces.filter(
+        (surface) => surface.kind !== "source-control" || sourceControlPanelEnabled,
+      ),
+    [rightPanelState.surfaces, sourceControlPanelEnabled],
+  );
+  const visibleActiveRightPanelSurface =
+    activeRightPanelSurface?.kind === "source-control" && !sourceControlPanelEnabled
+      ? null
+      : activeRightPanelSurface;
   const activeFileSurface =
-    activeRightPanelSurface?.kind === "file" ? activeRightPanelSurface : null;
+    visibleActiveRightPanelSurface?.kind === "file" ? visibleActiveRightPanelSurface : null;
   const activePreviewState = usePreviewStateStore((state) =>
     selectThreadPreviewState(state.byThreadKey, activeThreadRef),
   );
@@ -1660,6 +1679,31 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [openOrReuseProjectDraftThread],
+  );
+
+  const handleSourceControlThreadRefChange = useCallback(
+    async (input: { branch: string | null; worktreePath: string | null }) => {
+      if (!activeThread) return;
+      if (isServerThread) {
+        const api = readEnvironmentApi(activeThread.environmentId);
+        if (!api) return;
+        await api.orchestration.dispatchCommand({
+          type: "thread.meta.update",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          branch: input.branch,
+          worktreePath: input.worktreePath,
+        });
+        return;
+      }
+
+      setDraftThreadContext(composerDraftTarget, {
+        branch: input.branch,
+        worktreePath: input.worktreePath,
+        envMode: input.worktreePath ? "worktree" : "local",
+      });
+    },
+    [activeThread, composerDraftTarget, isServerThread, setDraftThreadContext],
   );
 
   useEffect(() => {
@@ -2260,6 +2304,7 @@ function ChatViewContent(props: ChatViewProps) {
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const sourceControlAvailable = Boolean(sourceControlPanelEnabled && gitCwd && isGitRepo);
   const terminalShortcutLabelOptions = useMemo(
     () => ({
       context: {
@@ -2323,6 +2368,10 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   };
+  const addSourceControlSurface = useCallback(() => {
+    if (!activeThreadRef || !sourceControlAvailable) return;
+    useRightPanelStore.getState().open(activeThreadRef, "source-control");
+  }, [activeThreadRef, sourceControlAvailable]);
   const openFileSurface = (relativePath: string) => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
@@ -4710,20 +4759,20 @@ function ChatViewContent(props: ChatViewProps) {
     </div>
   );
   const rightPanelContent = activeThreadRef ? (
-    activeRightPanelSurface?.kind === "preview" ? (
+    visibleActiveRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
           threadRef={activeThreadRef}
-          tabId={activeRightPanelSurface.resourceId}
+          tabId={visibleActiveRightPanelSurface.resourceId}
           configuredUrls={configuredPreviewUrls}
           visible
         />
       </Suspense>
-    ) : activeRightPanelSurface?.kind === "terminal" ? (
+    ) : visibleActiveRightPanelSurface?.kind === "terminal" ? (
       <PersistentThreadTerminalPanel
         threadRef={activeThreadRef}
-        surface={activeRightPanelSurface}
+        surface={visibleActiveRightPanelSurface}
         launchContext={activeTerminalLaunchContext ?? null}
         focusRequestId={terminalFocusRequestId}
         keybindings={keybindings}
@@ -4738,11 +4787,11 @@ function ChatViewContent(props: ChatViewProps) {
         newShortcutLabel={newTerminalShortcutLabel ?? undefined}
         closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
       />
-    ) : activeRightPanelSurface?.kind === "diff" ? (
+    ) : visibleActiveRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
         <DiffPanel mode="embedded" composerDraftTarget={composerDraftTarget} />
       </Suspense>
-    ) : activeRightPanelSurface?.kind === "plan" ? (
+    ) : visibleActiveRightPanelSurface?.kind === "plan" ? (
       <PlanSidebar
         activePlan={activePlan}
         activeProposedPlan={sidebarProposedPlan}
@@ -4754,7 +4803,18 @@ function ChatViewContent(props: ChatViewProps) {
         timestampFormat={timestampFormat}
         mode="embedded"
       />
-    ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
+    ) : visibleActiveRightPanelSurface?.kind === "source-control" && gitCwd ? (
+      <Suspense fallback={null}>
+        <SourceControlPanel
+          environmentId={environmentId}
+          threadId={activeThreadRef.threadId}
+          cwd={gitCwd}
+          worktreePath={activeThreadWorktreePath}
+          onThreadRefChange={handleSourceControlThreadRefChange}
+        />
+      </Suspense>
+    ) : (visibleActiveRightPanelSurface?.kind === "files" ||
+        visibleActiveRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
       <Suspense fallback={null}>
@@ -4768,7 +4828,9 @@ function ChatViewContent(props: ChatViewProps) {
           keybindings={keybindings}
           availableEditors={availableEditors}
           relativePath={
-            activeRightPanelSurface.kind === "file" ? activeRightPanelSurface.relativePath : null
+            visibleActiveRightPanelSurface.kind === "file"
+              ? visibleActiveRightPanelSurface.relativePath
+              : null
           }
           revealLine={activeFileSurface?.revealLine ?? null}
           revealRequestId={activeFileSurface?.revealRequestId ?? 0}
@@ -5034,8 +5096,8 @@ function ChatViewContent(props: ChatViewProps) {
         <RightPanelTabs
           mode="inline"
           maximized={rightPanelMaximized}
-          surfaces={rightPanelState.surfaces}
-          activeSurfaceId={activeRightPanelSurface?.id ?? null}
+          surfaces={visibleRightPanelSurfaces}
+          activeSurfaceId={visibleActiveRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
           terminalLabelsById={activeTerminalLabelsById}
@@ -5049,9 +5111,11 @@ function ChatViewContent(props: ChatViewProps) {
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
+          onAddSourceControl={addSourceControlSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={Boolean(activeProject)}
+          sourceControlAvailable={sourceControlAvailable}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -5062,8 +5126,8 @@ function ChatViewContent(props: ChatViewProps) {
           <RightPanelTabs
             mode="sheet"
             layoutControls={panelToggleControls}
-            surfaces={rightPanelState.surfaces}
-            activeSurfaceId={activeRightPanelSurface?.id ?? null}
+            surfaces={visibleRightPanelSurfaces}
+            activeSurfaceId={visibleActiveRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
             terminalLabelsById={activeTerminalLabelsById}
@@ -5077,9 +5141,11 @@ function ChatViewContent(props: ChatViewProps) {
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
+            onAddSourceControl={addSourceControlSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={Boolean(activeProject)}
+            sourceControlAvailable={sourceControlAvailable}
           >
             {rightPanelContent}
           </RightPanelTabs>

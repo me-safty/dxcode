@@ -6,3 +6,6 @@
 export const isElectron =
   typeof window !== "undefined" &&
   (window.desktopBridge !== undefined || window.nativeApi !== undefined);
+
+export const isVscodeWebview =
+  typeof window !== "undefined" && window.t3HostBridge !== undefined && !isElectron;

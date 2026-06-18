@@ -114,11 +114,23 @@ export const layer = Layer.effect(
     ): Electron.MenuItemConstructorOptions[] => {
       const template: Electron.MenuItemConstructorOptions[] = [];
       let hasInsertedDestructiveSeparator = false;
+      let lastWasSeparator = false;
 
       for (const item of entries) {
-        if (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0) {
-          template.push({ type: "separator" });
+        if (item.separator === true) {
+          if (template.length > 0 && !lastWasSeparator) {
+            template.push({ type: "separator" });
+            lastWasSeparator = true;
+          }
+          continue;
+        }
+
+        if (item.destructive && !hasInsertedDestructiveSeparator) {
           hasInsertedDestructiveSeparator = true;
+          if (template.length > 0 && !lastWasSeparator) {
+            template.push({ type: "separator" });
+            lastWasSeparator = true;
+          }
         }
 
         const itemOption: Electron.MenuItemConstructorOptions = {
@@ -138,6 +150,7 @@ export const layer = Layer.effect(
         }
 
         template.push(itemOption);
+        lastWasSeparator = false;
       }
 
       return template;
