@@ -113,6 +113,26 @@ export function resolveAssistantMessageCopyState({
   };
 }
 
+export function hasRenderableCommandOutput(value: string | null | undefined): value is string {
+  return getRenderableCommandOutputLines(value).length > 0;
+}
+
+export function getRenderableCommandOutputLines(value: string | null | undefined): string[] {
+  if (typeof value !== "string" || value.length === 0) {
+    return [];
+  }
+  const lines = value.split(/\r?\n/u);
+  let startIndex = 0;
+  let endIndex = lines.length;
+  while (startIndex < endIndex && (lines[startIndex]?.trim().length ?? 0) === 0) {
+    startIndex += 1;
+  }
+  while (endIndex > startIndex && (lines[endIndex - 1]?.trim().length ?? 0) === 0) {
+    endIndex -= 1;
+  }
+  return lines.slice(startIndex, endIndex);
+}
+
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
   let nullTurnResponseIndex = 0;
