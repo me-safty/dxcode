@@ -581,6 +581,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(ExternalLauncher.ExternalLauncher)({
           resolveAvailableEditors: () => Effect.succeed([]),
+          resolveAvailableTerminals: () => Effect.succeed([]),
           ...options?.layers?.externalLauncher,
         }),
       ),

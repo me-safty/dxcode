@@ -361,6 +361,13 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const TerminalExternalSettings = Schema.Struct({
+  osxExec: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  linuxExec: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  windowsExec: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type TerminalExternalSettings = typeof TerminalExternalSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
@@ -405,6 +412,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  terminalExternal: TerminalExternalSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -487,6 +495,13 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  terminalExternal: Schema.optionalKey(
+    Schema.Struct({
+      osxExec: Schema.optionalKey(TrimmedString),
+      linuxExec: Schema.optionalKey(TrimmedString),
+      windowsExec: Schema.optionalKey(TrimmedString),
     }),
   ),
   providers: Schema.optionalKey(

@@ -5,6 +5,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
+  EXTERNAL_TERMINALS,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type ProviderInstanceConfig,
@@ -78,7 +79,12 @@ import {
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { useServerObservability, useServerProviders } from "../../rpc/serverState";
+import {
+  useServerAvailableTerminals,
+  useServerObservability,
+  useServerProviders,
+} from "../../rpc/serverState";
+import { isMacPlatform, isWindowsPlatform } from "../../lib/utils";
 
 const THEME_OPTIONS = [
   {
@@ -479,12 +485,71 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
+const EXTERNAL_TERMINAL_AUTO_DETECT = "__auto-detect__";
+
 export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const observability = useServerObservability();
+  const availableTerminals = useServerAvailableTerminals();
   const serverProviders = useServerProviders();
+  const hostPlatform = typeof navigator === "undefined" ? "" : navigator.platform;
+  const hostPlatformKey: "osx" | "linux" | "windows" = isMacPlatform(hostPlatform)
+    ? "osx"
+    : isWindowsPlatform(hostPlatform)
+      ? "windows"
+      : "linux";
+  const externalTerminalOptionsFor = (
+    platform: "osx" | "linux" | "windows",
+  ): ReadonlyArray<string> =>
+    platform === hostPlatformKey && availableTerminals.length > 0
+      ? availableTerminals
+      : EXTERNAL_TERMINALS[
+          platform === "osx" ? "darwin" : platform === "windows" ? "win32" : "linux"
+        ].candidates;
+  const externalTerminalHint = (forPlatform: "osx" | "linux" | "windows"): string => {
+    if (forPlatform === hostPlatformKey) {
+      return availableTerminals.length > 0
+        ? "Pick a detected terminal, or choose Auto-detect to use the default."
+        : "Pick a terminal, or choose Auto-detect to use the default.";
+    }
+    return "Used when running on this platform. Choose Auto-detect to use the default.";
+  };
+  const renderExternalTerminalControl = (input: {
+    platform: "osx" | "linux" | "windows";
+    value: string;
+    ariaLabel: string;
+    commit: (next: string) => void;
+  }) => {
+    const baseOptions = externalTerminalOptionsFor(input.platform);
+    const options =
+      input.value === "" || baseOptions.includes(input.value)
+        ? baseOptions
+        : [...baseOptions, input.value];
+    return (
+      <Select
+        value={input.value === "" ? EXTERNAL_TERMINAL_AUTO_DETECT : input.value}
+        onValueChange={(next) =>
+          input.commit(next === EXTERNAL_TERMINAL_AUTO_DETECT ? "" : String(next))
+        }
+      >
+        <SelectTrigger className="w-full sm:w-72" aria-label={input.ariaLabel}>
+          <SelectValue>{input.value === "" ? "Auto-detect" : input.value}</SelectValue>
+        </SelectTrigger>
+        <SelectPopup align="end" alignItemWithTrigger={false}>
+          <SelectItem hideIndicator value={EXTERNAL_TERMINAL_AUTO_DETECT}>
+            Auto-detect
+          </SelectItem>
+          {options.map((terminal) => (
+            <SelectItem key={terminal} hideIndicator value={terminal}>
+              {terminal}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+    );
+  };
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -890,6 +955,89 @@ export function GeneralSettingsPanel() {
               />
             </div>
           }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="External terminal">
+        <SettingsRow
+          title="macOS terminal application"
+          description={externalTerminalHint("osx")}
+          resetAction={
+            settings.terminalExternal.osxExec !==
+            DEFAULT_UNIFIED_SETTINGS.terminalExternal.osxExec ? (
+              <SettingResetButton
+                label="macOS external terminal"
+                onClick={() =>
+                  updateSettings({
+                    terminalExternal: { ...settings.terminalExternal, osxExec: "" },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={renderExternalTerminalControl({
+            platform: "osx",
+            value: settings.terminalExternal.osxExec,
+            ariaLabel: "macOS external terminal application",
+            commit: (next) =>
+              updateSettings({
+                terminalExternal: { ...settings.terminalExternal, osxExec: next },
+              }),
+          })}
+        />
+
+        <SettingsRow
+          title="Linux terminal command"
+          description={externalTerminalHint("linux")}
+          resetAction={
+            settings.terminalExternal.linuxExec !==
+            DEFAULT_UNIFIED_SETTINGS.terminalExternal.linuxExec ? (
+              <SettingResetButton
+                label="Linux external terminal"
+                onClick={() =>
+                  updateSettings({
+                    terminalExternal: { ...settings.terminalExternal, linuxExec: "" },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={renderExternalTerminalControl({
+            platform: "linux",
+            value: settings.terminalExternal.linuxExec,
+            ariaLabel: "Linux external terminal command",
+            commit: (next) =>
+              updateSettings({
+                terminalExternal: { ...settings.terminalExternal, linuxExec: next },
+              }),
+          })}
+        />
+
+        <SettingsRow
+          title="Windows terminal command"
+          description={externalTerminalHint("windows")}
+          resetAction={
+            settings.terminalExternal.windowsExec !==
+            DEFAULT_UNIFIED_SETTINGS.terminalExternal.windowsExec ? (
+              <SettingResetButton
+                label="Windows external terminal"
+                onClick={() =>
+                  updateSettings({
+                    terminalExternal: { ...settings.terminalExternal, windowsExec: "" },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={renderExternalTerminalControl({
+            platform: "windows",
+            value: settings.terminalExternal.windowsExec,
+            ariaLabel: "Windows external terminal command",
+            commit: (next) =>
+              updateSettings({
+                terminalExternal: { ...settings.terminalExternal, windowsExec: next },
+              }),
+          })}
         />
       </SettingsSection>
 

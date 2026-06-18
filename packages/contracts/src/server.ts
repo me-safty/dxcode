@@ -404,6 +404,7 @@ export const ServerConfig = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviders,
   availableEditors: Schema.Array(EditorId),
+  availableTerminals: Schema.Array(Schema.String),
   observability: ServerObservability,
   settings: ServerSettings,
 });

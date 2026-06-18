@@ -25,6 +25,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+  { key: "mod+shift+c", command: "terminal.openExternal", when: "terminalFocus" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },

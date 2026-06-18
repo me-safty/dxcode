@@ -1,5 +1,6 @@
 import { FitAddon } from "@xterm/addon-fit";
 import {
+  ExternalLink,
   Globe2,
   Plus,
   SquareSplitHorizontal,
@@ -852,10 +853,12 @@ interface ThreadTerminalDrawerProps {
   onSplitTerminal: () => void;
   onSplitTerminalVertical: () => void;
   onNewTerminal: () => void;
+  onOpenExternalTerminal: (cwd: string) => void;
   splitShortcutLabel?: string | undefined;
   splitVerticalShortcutLabel?: string | undefined;
   newShortcutLabel?: string | undefined;
   closeShortcutLabel?: string | undefined;
+  openExternalShortcutLabel?: string | undefined;
   onActiveTerminalChange: (terminalId: string) => void;
   onCloseTerminal: (terminalId: string) => void;
   onHeightChange: (height: number) => void;
@@ -913,10 +916,12 @@ export default function ThreadTerminalDrawer({
   onSplitTerminal,
   onSplitTerminalVertical,
   onNewTerminal,
+  onOpenExternalTerminal,
   splitShortcutLabel,
   splitVerticalShortcutLabel,
   newShortcutLabel,
   closeShortcutLabel,
+  openExternalShortcutLabel,
   onActiveTerminalChange,
   onCloseTerminal,
   onHeightChange,
@@ -1099,6 +1104,12 @@ export default function ThreadTerminalDrawer({
   const closeTerminalActionLabel = closeShortcutLabel
     ? `Close Terminal (${closeShortcutLabel})`
     : "Close Terminal";
+  const openExternalTerminalActionLabel = openExternalShortcutLabel
+    ? `Open in External Terminal (${openExternalShortcutLabel})`
+    : "Open in External Terminal";
+  const onOpenExternalTerminalAction = useCallback(() => {
+    onOpenExternalTerminal(resolveTerminalLaunchLocation(resolvedActiveTerminalId).cwd);
+  }, [onOpenExternalTerminal, resolveTerminalLaunchLocation, resolvedActiveTerminalId]);
   const onSplitTerminalAction = useCallback(() => {
     if (hasReachedSplitLimit) return;
     onSplitTerminal();
@@ -1304,6 +1315,14 @@ export default function ThreadTerminalDrawer({
             <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
               className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+              onClick={onOpenExternalTerminalAction}
+              label={openExternalTerminalActionLabel}
+            >
+              <ExternalLink className="size-3.25" />
+            </TerminalActionButton>
+            <div className="h-4 w-px bg-border/80" />
+            <TerminalActionButton
+              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
               onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
               label={closeTerminalActionLabel}
             >
@@ -1434,6 +1453,13 @@ export default function ThreadTerminalDrawer({
                     label={newTerminalActionLabel}
                   >
                     <Plus className="size-3.25" />
+                  </TerminalActionButton>
+                  <TerminalActionButton
+                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                    onClick={onOpenExternalTerminalAction}
+                    label={openExternalTerminalActionLabel}
+                  >
+                    <ExternalLink className="size-3.25" />
                   </TerminalActionButton>
                   <TerminalActionButton
                     className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"

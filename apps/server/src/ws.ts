@@ -44,6 +44,7 @@ import {
   FilesystemBrowseError,
   AssetAccessError,
   EnvironmentAuthorizationError,
+  ExternalLauncherError,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -167,6 +168,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.projectsSearchEntries, AuthOrchestrationReadScope],
   [WS_METHODS.projectsWriteFile, AuthOrchestrationOperateScope],
   [WS_METHODS.shellOpenInEditor, AuthOrchestrationOperateScope],
+  [WS_METHODS.shellOpenInTerminal, AuthOrchestrationOperateScope],
   [WS_METHODS.filesystemBrowse, AuthOrchestrationReadScope],
   [WS_METHODS.assetsCreateUrl, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeVcsStatus, AuthOrchestrationReadScope],
@@ -766,6 +768,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           issues: keybindingsConfig.issues,
           providers,
           availableEditors: yield* externalLauncher.resolveAvailableEditors(),
+          availableTerminals: yield* externalLauncher.resolveAvailableTerminals(),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
@@ -1223,6 +1226,28 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(WS_METHODS.shellOpenInEditor, externalLauncher.launchEditor(input), {
             "rpc.aggregate": "workspace",
           }),
+        [WS_METHODS.shellOpenInTerminal]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.shellOpenInTerminal,
+            serverSettings.getSettings.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ExternalLauncherError({
+                    message: "Failed to read external terminal settings",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((settings) =>
+                externalLauncher.launchTerminal({
+                  cwd: input.cwd,
+                  external: settings.terminalExternal,
+                }),
+              ),
+            ),
+            {
+              "rpc.aggregate": "workspace",
+            },
+          ),
         [WS_METHODS.filesystemBrowse]: (input) =>
           observeRpcEffect(
             WS_METHODS.filesystemBrowse,

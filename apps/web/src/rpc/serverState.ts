@@ -47,6 +47,9 @@ const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 const selectAvailableEditors = (config: ServerConfig | null): ReadonlyArray<EditorId> =>
   config?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
+const EMPTY_AVAILABLE_TERMINALS: ReadonlyArray<string> = [];
+const selectAvailableTerminals = (config: ServerConfig | null): ReadonlyArray<string> =>
+  config?.availableTerminals ?? EMPTY_AVAILABLE_TERMINALS;
 const selectKeybindings = (config: ServerConfig | null) =>
   config?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
 const selectKeybindingsConfigPath = (config: ServerConfig | null) =>
@@ -282,6 +285,10 @@ export function useServerKeybindings(): ServerConfig["keybindings"] {
 
 export function useServerAvailableEditors(): ReadonlyArray<EditorId> {
   return useAtomValue(serverConfigAtom, selectAvailableEditors);
+}
+
+export function useServerAvailableTerminals(): ReadonlyArray<string> {
+  return useAtomValue(serverConfigAtom, selectAvailableTerminals);
 }
 
 export function useServerKeybindingsConfigPath(): string | null {

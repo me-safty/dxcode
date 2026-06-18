@@ -550,7 +550,9 @@ interface PersistentThreadTerminalDrawerProps {
   splitVerticalShortcutLabel: string | undefined;
   newShortcutLabel: string | undefined;
   closeShortcutLabel: string | undefined;
+  openExternalShortcutLabel: string | undefined;
   keybindings: ResolvedKeybindingsConfig;
+  onOpenExternalTerminal: (cwd: string) => void;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
 }
 
@@ -565,7 +567,9 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   splitVerticalShortcutLabel,
   newShortcutLabel,
   closeShortcutLabel,
+  openExternalShortcutLabel,
   keybindings,
+  onOpenExternalTerminal,
   onAddTerminalContext,
 }: PersistentThreadTerminalDrawerProps) {
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
@@ -873,10 +877,12 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         onSplitTerminal={splitTerminal}
         onSplitTerminalVertical={splitTerminalVertical}
         onNewTerminal={createNewTerminal}
+        onOpenExternalTerminal={onOpenExternalTerminal}
         splitShortcutLabel={visible ? splitShortcutLabel : undefined}
         splitVerticalShortcutLabel={visible ? splitVerticalShortcutLabel : undefined}
         newShortcutLabel={visible ? newShortcutLabel : undefined}
         closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+        openExternalShortcutLabel={visible ? openExternalShortcutLabel : undefined}
         keybindings={keybindings}
         onActiveTerminalChange={activateTerminal}
         onCloseTerminal={closeTerminal}
@@ -899,12 +905,14 @@ interface PersistentThreadTerminalPanelProps {
   onSplitTerminal: () => void;
   onSplitTerminalVertical: () => void;
   onNewTerminal: () => void;
+  onOpenExternalTerminal: (cwd: string) => void;
   onActiveTerminalChange: (terminalId: string) => void;
   onCloseTerminal: (terminalId: string) => void;
   splitShortcutLabel?: string | undefined;
   splitVerticalShortcutLabel?: string | undefined;
   newShortcutLabel?: string | undefined;
   closeShortcutLabel?: string | undefined;
+  openExternalShortcutLabel?: string | undefined;
 }
 
 const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPanel({
@@ -917,12 +925,14 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
   onSplitTerminal,
   onSplitTerminalVertical,
   onNewTerminal,
+  onOpenExternalTerminal,
   onActiveTerminalChange,
   onCloseTerminal,
   splitShortcutLabel,
   splitVerticalShortcutLabel,
   newShortcutLabel,
   closeShortcutLabel,
+  openExternalShortcutLabel,
 }: PersistentThreadTerminalPanelProps) {
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
@@ -1045,10 +1055,12 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
       onSplitTerminal={onSplitTerminal}
       onSplitTerminalVertical={onSplitTerminalVertical}
       onNewTerminal={onNewTerminal}
+      onOpenExternalTerminal={onOpenExternalTerminal}
       splitShortcutLabel={splitShortcutLabel}
       splitVerticalShortcutLabel={splitVerticalShortcutLabel}
       newShortcutLabel={newShortcutLabel}
       closeShortcutLabel={closeShortcutLabel}
+      openExternalShortcutLabel={openExternalShortcutLabel}
       onActiveTerminalChange={onActiveTerminalChange}
       onCloseTerminal={onCloseTerminal}
       onHeightChange={() => undefined}
@@ -2288,6 +2300,11 @@ function ChatViewContent(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   );
+  const openExternalTerminalShortcutLabel = useMemo(
+    () =>
+      shortcutLabelForCommand(keybindings, "terminal.openExternal", terminalShortcutLabelOptions),
+    [keybindings, terminalShortcutLabelOptions],
+  );
   const createBrowserSurface = useCallback(() => {
     if (!activeThreadRef) return;
     const api = readEnvironmentApi(activeThreadRef.environmentId);
@@ -2705,6 +2722,26 @@ function ChatViewContent(props: ChatViewProps) {
     gitCwd,
     storeNewTerminal,
   ]);
+  const openExternalTerminal = useCallback(
+    (targetCwd?: string) => {
+      const cwdForOpen = targetCwd ?? gitCwd ?? activeProject?.cwd;
+      if (!cwdForOpen) {
+        return;
+      }
+      const api = readLocalApi();
+      if (!api) {
+        return;
+      }
+      void api.shell.openInTerminal(cwdForOpen).catch(() => {
+        toastManager.add({
+          type: "error",
+          title: "Unable to open external terminal",
+          description: "Check the external terminal app configured in Settings.",
+        });
+      });
+    },
+    [activeProject?.cwd, gitCwd],
+  );
   const closeTerminal = useCallback(
     (terminalId: string) => {
       const api = readEnvironmentApi(environmentId);
@@ -3624,6 +3661,13 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "terminal.openExternal") {
+        event.preventDefault();
+        event.stopPropagation();
+        openExternalTerminal();
+        return;
+      }
+
       if (command === "diff.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -3658,6 +3702,7 @@ function ChatViewContent(props: ChatViewProps) {
     closePanelTerminal,
     closeTerminal,
     createNewTerminal,
+    openExternalTerminal,
     setTerminalOpen,
     runProjectScript,
     splitTerminal,
@@ -4731,12 +4776,14 @@ function ChatViewContent(props: ChatViewProps) {
         onSplitTerminal={splitPanelTerminal}
         onSplitTerminalVertical={splitPanelTerminalVertical}
         onNewTerminal={addTerminalSurface}
+        onOpenExternalTerminal={openExternalTerminal}
         onActiveTerminalChange={activatePanelTerminal}
         onCloseTerminal={closePanelTerminal}
         splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
         splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
         newShortcutLabel={newTerminalShortcutLabel ?? undefined}
         closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+        openExternalShortcutLabel={openExternalTerminalShortcutLabel ?? undefined}
       />
     ) : activeRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
@@ -5024,7 +5071,9 @@ function ChatViewContent(props: ChatViewProps) {
             splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
             newShortcutLabel={newTerminalShortcutLabel ?? undefined}
             closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+            openExternalShortcutLabel={openExternalTerminalShortcutLabel ?? undefined}
             keybindings={keybindings}
+            onOpenExternalTerminal={openExternalTerminal}
             onAddTerminalContext={addTerminalContextToDraft}
           />
         ) : null}

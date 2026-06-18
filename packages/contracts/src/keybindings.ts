@@ -53,6 +53,7 @@ const STATIC_KEYBINDING_COMMANDS = [
   "terminal.splitVertical",
   "terminal.new",
   "terminal.close",
+  "terminal.openExternal",
   "rightPanel.toggle",
   "diff.toggle",
   "preview.toggle",

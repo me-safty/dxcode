@@ -331,6 +331,7 @@ const baseServerConfig: ServerConfig = {
   issues: [],
   providers: defaultProviders,
   availableEditors: ["cursor"],
+  availableTerminals: [],
   observability: {
     logsDirectoryPath: "/tmp/workspace/.config/logs",
     localTracingEnabled: true,

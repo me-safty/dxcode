@@ -84,6 +84,7 @@ import {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalError,
+  LaunchTerminalInput,
   TerminalEvent,
   TerminalMetadataStreamEvent,
   TerminalOpenInput,
@@ -154,6 +155,7 @@ export const WS_METHODS = {
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
+  shellOpenInTerminal: "shell.openInTerminal",
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
@@ -378,6 +380,11 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
   payload: LaunchEditorInput,
+  error: Schema.Union([ExternalLauncherError, EnvironmentAuthorizationError]),
+});
+
+export const WsShellOpenInTerminalRpc = Rpc.make(WS_METHODS.shellOpenInTerminal, {
+  payload: LaunchTerminalInput,
   error: Schema.Union([ExternalLauncherError, EnvironmentAuthorizationError]),
 });
 
@@ -701,6 +708,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
+  WsShellOpenInTerminalRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,
   WsSubscribeVcsStatusRpc,

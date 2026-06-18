@@ -305,3 +305,37 @@ export const TerminalError = Schema.Union([
   TerminalNotRunningError,
 ]);
 export type TerminalError = typeof TerminalError.Type;
+
+type ExternalTerminalDefinition = {
+  readonly candidates: readonly [string, ...string[]];
+  readonly fallback: string;
+};
+
+export const EXTERNAL_TERMINALS = {
+  darwin: {
+    candidates: ["Ghostty", "iTerm", "WezTerm", "Alacritty", "kitty", "Warp", "Hyper", "Terminal"],
+    fallback: "Terminal",
+  },
+  linux: {
+    candidates: [
+      "x-terminal-emulator",
+      "gnome-terminal",
+      "konsole",
+      "xfce4-terminal",
+      "alacritty",
+      "kitty",
+      "wezterm",
+      "xterm",
+    ],
+    fallback: "xterm",
+  },
+  win32: {
+    candidates: ["wt.exe", "pwsh.exe", "powershell.exe", "cmd.exe"],
+    fallback: "cmd.exe",
+  },
+} as const satisfies Record<"darwin" | "linux" | "win32", ExternalTerminalDefinition>;
+
+export const LaunchTerminalInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type LaunchTerminalInput = typeof LaunchTerminalInput.Type;

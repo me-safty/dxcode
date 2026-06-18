@@ -8,9 +8,11 @@
  */
 import {
   EDITORS,
+  EXTERNAL_TERMINALS,
   ExternalLauncherError,
   type EditorId,
   type LaunchEditorInput,
+  type TerminalExternalSettings,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -298,6 +300,13 @@ export interface ExternalLauncherShape {
    * Launches the editor as a detached process so server startup is not blocked.
    */
   readonly launchEditor: (input: LaunchEditorInput) => Effect.Effect<void, ExternalLauncherError>;
+
+  readonly resolveAvailableTerminals: () => Effect.Effect<ReadonlyArray<string>>;
+
+  readonly launchTerminal: (input: {
+    readonly cwd: string;
+    readonly external: TerminalExternalSettings;
+  }) => Effect.Effect<void, ExternalLauncherError>;
 }
 
 /**
@@ -397,6 +406,139 @@ const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(fu
   );
 });
 
+function terminalDefinitionForPlatform(
+  platform: NodeJS.Platform,
+): (typeof EXTERNAL_TERMINALS)[keyof typeof EXTERNAL_TERMINALS] {
+  if (platform === "darwin") {
+    return EXTERNAL_TERMINALS.darwin;
+  }
+  if (platform === "win32") {
+    return EXTERNAL_TERMINALS.win32;
+  }
+  return EXTERNAL_TERMINALS.linux;
+}
+
+function configuredTerminalExec(
+  platform: NodeJS.Platform,
+  external: TerminalExternalSettings,
+): string {
+  if (platform === "darwin") {
+    return external.osxExec.trim();
+  }
+  if (platform === "win32") {
+    return external.windowsExec.trim();
+  }
+  return external.linuxExec.trim();
+}
+
+const isMacAppAvailable = Effect.fn("externalLauncher.isMacAppAvailable")(function* (
+  name: string,
+): Effect.fn.Return<boolean, never, ChildProcessSpawner.ChildProcessSpawner> {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const command = ChildProcess.make("open", ["-Ra", name], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  return yield* spawner.spawn(command).pipe(
+    Effect.flatMap((handle) => handle.exitCode),
+    Effect.map((code) => (code as number) === 0),
+    Effect.scoped,
+    Effect.orElseSucceed(() => false),
+  );
+});
+
+const isTerminalAvailable = Effect.fn("externalLauncher.isTerminalAvailable")(function* (
+  platform: NodeJS.Platform,
+  candidate: string,
+  env: NodeJS.ProcessEnv,
+): Effect.fn.Return<
+  boolean,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+> {
+  if (platform === "darwin") {
+    return yield* isMacAppAvailable(candidate);
+  }
+  return yield* isCommandAvailable(candidate, { env });
+});
+
+const buildAvailableTerminals = Effect.fn("externalLauncher.buildAvailableTerminals")(function* (
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): Effect.fn.Return<
+  ReadonlyArray<string>,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+> {
+  const definition = terminalDefinitionForPlatform(platform);
+  const available: string[] = [];
+  for (const candidate of definition.candidates) {
+    if (yield* isTerminalAvailable(platform, candidate, env)) {
+      available.push(candidate);
+    }
+  }
+  return available;
+});
+
+const resolveTerminalExec = Effect.fn("externalLauncher.resolveTerminalExec")(function* (
+  platform: NodeJS.Platform,
+  external: TerminalExternalSettings,
+  env: NodeJS.ProcessEnv,
+): Effect.fn.Return<
+  string,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+> {
+  const configured = configuredTerminalExec(platform, external);
+  if (configured.length > 0) {
+    return configured;
+  }
+  const definition = terminalDefinitionForPlatform(platform);
+  for (const candidate of definition.candidates) {
+    if (yield* isTerminalAvailable(platform, candidate, env)) {
+      return candidate;
+    }
+  }
+  return definition.fallback;
+});
+
+const resolveTerminalLaunch = Effect.fn("externalLauncher.resolveTerminalLaunch")(function* (
+  cwd: string,
+  external: TerminalExternalSettings,
+): Effect.fn.Return<
+  ProcessLaunch,
+  ExternalLauncherError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+> {
+  const platform = yield* HostProcessPlatform;
+  const env = yield* readCommandLookupEnv;
+  const exec = yield* resolveTerminalExec(platform, external, env);
+  yield* Effect.annotateCurrentSpan({
+    "externalLauncher.terminal": exec,
+    "externalLauncher.cwd": cwd,
+    "externalLauncher.platform": platform,
+  });
+
+  if (platform === "darwin") {
+    return {
+      command: "open",
+      args: ["-a", exec, cwd],
+      options: DETACHED_IGNORE_STDIO_OPTIONS,
+    };
+  }
+
+  if (!(yield* isCommandAvailable(exec, { env }))) {
+    return yield* new ExternalLauncherError({ message: `Terminal command not found: ${exec}` });
+  }
+
+  return {
+    command: exec,
+    args: [],
+    options: { ...DETACHED_IGNORE_STDIO_OPTIONS, cwd },
+  };
+});
+
 const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -423,6 +565,24 @@ const make = Effect.gen(function* () {
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           ),
         ),
+      ),
+    resolveAvailableTerminals: () =>
+      provideCommandResolutionServices(
+        Effect.flatMap(HostProcessPlatform, (platform) =>
+          Effect.flatMap(readCommandLookupEnv, (env) =>
+            buildAvailableTerminals(platform, env).pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            ),
+          ),
+        ),
+      ),
+    launchTerminal: (input) =>
+      provideCommandResolutionServices(
+        Effect.flatMap(resolveTerminalLaunch(input.cwd, input.external), (launch) =>
+          launchAndUnref(launch, "failed to open external terminal").pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          ),
+        ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
       ),
   } satisfies ExternalLauncherShape;
 });

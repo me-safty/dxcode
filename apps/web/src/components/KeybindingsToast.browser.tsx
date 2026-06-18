@@ -129,6 +129,7 @@ function createBaseServerConfig(): ServerConfig {
       },
     ],
     availableEditors: [],
+    availableTerminals: [],
     observability: {
       logsDirectoryPath: "/repo/project/.t3/logs",
       localTracingEnabled: true,
