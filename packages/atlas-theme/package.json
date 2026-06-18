@@ -1,0 +1,10 @@
+{
+  "name": "@atlas/theme",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas Vector theme layer — CSS-variable overrides applied on top of T3's tokens.",
+  "exports": {
+    "./styles.css": "./src/styles.css"
+  }
+}

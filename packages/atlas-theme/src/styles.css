@@ -1,0 +1,22 @@
+/*
+ * Atlas Vector theme overrides.
+ *
+ * MUST be imported AFTER apps/web/src/index.css so these declarations win the
+ * cascade. This is the ONLY place Atlas restyles T3's Tailwind v4 design tokens
+ * — keep it token-level so upstream component updates keep applying (see
+ * AGENTS.md "The Atlas aesthetic"). The full palette + Inter pass lands in the
+ * brand step; this starter only claims the primary/accent seam.
+ */
+
+:root {
+  /* Atlas navy. */
+  --primary: #212847;
+  --primary-foreground: #ffffff;
+  --ring: #212847;
+}
+
+.dark {
+  --primary: #2f3a63;
+  --primary-foreground: #ffffff;
+  --ring: #2f3a63;
+}

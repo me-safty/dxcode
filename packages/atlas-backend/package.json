@@ -1,0 +1,20 @@
+{
+  "name": "@atlas/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed client surface for Vector's FastAPI backend (identity, deals, dataroom, RAG).",
+  "exports": {
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts"
+    },
+    "./endpoints": {
+      "types": "./src/endpoints.ts",
+      "import": "./src/endpoints.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  }
+}
