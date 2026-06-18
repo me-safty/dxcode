@@ -12,7 +12,8 @@ export type DealRole = "owner" | "member" | "viewer";
 export interface AtlasUser {
   readonly id: string;
   readonly email: string;
-  readonly name?: string;
+  readonly full_name: string;
+  readonly role: DealRole | string;
 }
 
 export interface LoginRequest {
@@ -22,7 +23,9 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   /** JWT — FastAPI is the source of truth for identity. */
-  readonly token: string;
+  readonly access_token: string;
+  readonly token_type: string;
+  readonly user: AtlasUser;
 }
 
 export interface Deal {

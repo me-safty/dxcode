@@ -29,6 +29,9 @@ services:
     extends:
       file: ../vector/docker-compose.yml
       service: api
+    environment:
+      # Allow the T3 web origin (served on :3773) to call the FastAPI cross-origin.
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3773"
     # `extends` intentionally does NOT copy depends_on — re-declare so the API
     # waits for its datastores to be healthy.
     depends_on:
@@ -58,6 +61,9 @@ services:
       - "3773:3773"
     volumes:
       - workspaces:/workspaces
+      # Persist T3 server state (pairing grants, sessions) so you pair once and
+      # it survives restarts instead of resetting the token each boot.
+      - t3data:/root/.t3
     depends_on:
       api:
         condition: service_started
@@ -69,3 +75,5 @@ volumes:
   esdata:
   # Shared by `api` (from ../vector) and `t3` — the agent's per-deal workspace seam.
   workspaces:
+  # T3 server state (pairing grants / sessions) — keeps pairing across restarts.
+  t3data:

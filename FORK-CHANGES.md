@@ -11,5 +11,5 @@ Each entry: **file · why · how to re-apply after rebase.**
 | File | Why | How to re-apply after an upstream rebase |
 | --- | --- | --- |
 | `AGENTS.md` (and its `CLAUDE.md` symlink) | Replaced T3's agent guide with the Atlas Vector fork guide (Rule #1, two-backend architecture, FastAPI feature map). One intentional upstream-doc divergence. | Persistent divergence — on conflict keep the Atlas version; fold any genuinely useful new upstream guidance into the "Upstream T3 essentials" section at the bottom. |
-| `apps/web/src/main.tsx` | One line: import the Atlas theme (`packages/atlas-theme/src/styles.css`) immediately after `./index.css` so Atlas tokens win the cascade. | Re-add the single Atlas theme import right after the `./index.css` import. |
+| `apps/web/src/main.tsx` | (1) import the Atlas theme (`packages/atlas-theme/src/styles.css`) after `./index.css` so Atlas tokens win the cascade; (2) wrap the app element in `<AtlasAuthGate>` (FastAPI login gate, inert when `VITE_ATLAS_API_URL` is unset). | Re-add the theme import after `./index.css`, and re-wrap the app element in `<AtlasAuthGate>` (import from `./atlas/AtlasAuthGate`). |
 | `apps/web/src/branding.ts` | `APP_BASE_NAME` falls back to `VITE_ATLAS_APP_NAME` (→ "Atlas Vector") before "T3 Code". | Re-add `?? import.meta.env.VITE_ATLAS_APP_NAME` in the `APP_BASE_NAME` chain. |
