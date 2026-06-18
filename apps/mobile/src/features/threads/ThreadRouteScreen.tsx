@@ -420,6 +420,7 @@ export function ThreadRouteScreen() {
         gitStatus={gitStatus.data}
         gitOperationLabel={gitState.gitOperationLabel}
         canOpenTerminal={Boolean(selectedThreadProject?.workspaceRoot)}
+        canOpenFiles={Boolean(selectedThreadProject?.workspaceRoot)}
         projectScripts={selectedThreadProject?.scripts ?? []}
         terminalSessions={terminalMenuSessions}
         onOpenTerminal={handleOpenTerminal}

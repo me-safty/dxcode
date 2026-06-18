@@ -56,6 +56,19 @@ export default function ThreadLayout() {
         }}
       />
       <Stack.Screen
+        name="files"
+        options={{
+          animation: "slide_from_right",
+          contentStyle: sheetStyle,
+          headerBackButtonDisplayMode: "minimal",
+          headerShown: true,
+          headerTitle: "Files",
+          headerBackTitle: "",
+          headerShadowVisible: false,
+          headerStyle: headerBg,
+        }}
+      />
+      <Stack.Screen
         name="review-comment"
         options={{
           contentStyle: sheetStyle,

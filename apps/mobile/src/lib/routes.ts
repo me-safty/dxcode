@@ -32,6 +32,18 @@ export function buildThreadReviewRoutePath(
   return `${buildThreadRoutePath(input)}/review`;
 }
 
+export function buildThreadFilesRoutePath(
+  input: ThreadRouteInput | PlainThreadRouteInput,
+  relativePath?: string | null,
+): string {
+  const basePath = `${buildThreadRoutePath(input)}/files`;
+  if (!relativePath) {
+    return basePath;
+  }
+
+  return `${basePath}?path=${encodeURIComponent(relativePath)}`;
+}
+
 export function buildThreadTerminalRoutePath(
   input: ThreadRouteInput | PlainThreadRouteInput,
   terminalId?: string | null,
@@ -67,6 +79,28 @@ export function buildThreadTerminalNavigation(
 
   return {
     pathname: "/threads/[environmentId]/[threadId]/terminal",
+    params,
+  };
+}
+
+export function buildThreadFilesNavigation(
+  input: ThreadRouteInput | PlainThreadRouteInput,
+  relativePath?: string | null,
+): Href {
+  const environmentId = String(input.environmentId);
+  const threadId = String("threadId" in input ? input.threadId : input.id);
+
+  const params: { environmentId: string; threadId: string; path?: string } = {
+    environmentId,
+    threadId,
+  };
+
+  if (relativePath != null && relativePath !== "") {
+    params.path = relativePath;
+  }
+
+  return {
+    pathname: "/threads/[environmentId]/[threadId]/files",
     params,
   };
 }
