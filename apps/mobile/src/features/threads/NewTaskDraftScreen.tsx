@@ -30,6 +30,7 @@ import {
   resolveProviderOptionDescriptors,
 } from "../../lib/providerOptions";
 import { buildThreadRoutePath } from "../../lib/routes";
+import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { useProjects } from "../../state/entities";
 import { branchBadgeLabel, useNewTaskFlow } from "./new-task-flow-provider";
 import { useCreateProjectThread } from "./use-project-actions";
@@ -430,7 +431,10 @@ export function NewTaskDraftScreen(props: {
             onPasteImages={(uris) => void handleNativePasteImages(uris)}
             placeholder={`Describe a coding task in ${selectedProject.title}`}
             style={{ flex: 1, minHeight: 0 }}
-            textStyle={{ fontSize: 18, lineHeight: 28 }}
+            textStyle={{
+              fontSize: MOBILE_TYPOGRAPHY.headline.fontSize,
+              lineHeight: MOBILE_TYPOGRAPHY.title.lineHeight,
+            }}
           />
         </View>
 
