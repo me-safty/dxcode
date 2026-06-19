@@ -22,7 +22,11 @@ import { readLocalApi } from "../localApi";
 import { readEnvironmentThreadRefs, readProject, readThreadShell } from "../state/entities";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
-import { getOrphanedWorktreePathForThread, worktreeDisplayName } from "../worktreeCleanup";
+import {
+  formatWorktreeDeleteConfirmation,
+  getOrphanedWorktreePathForThread,
+  worktreeDisplayName,
+} from "../worktreeCleanup";
 import { useUiStateStore } from "../uiStateStore";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
@@ -180,10 +184,7 @@ export function useThreadActions() {
         threadRef.threadId,
       );
       const displayWorktreePath = orphanedWorktreePath
-        ? worktreeDisplayName(
-            orphanedWorktreePath,
-            useUiStateStore.getState().worktreeLabelByPath,
-          )
+        ? worktreeDisplayName(orphanedWorktreePath, useUiStateStore.getState().worktreeLabelByPath)
         : null;
       const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== null;
       const localApi = readLocalApi();
@@ -191,12 +192,10 @@ export function useThreadActions() {
       if (canDeleteWorktree && localApi) {
         const confirmationResult = await settlePromise(() =>
           localApi.dialogs.confirm(
-            [
-              "This thread is the only one linked to this worktree:",
-              displayWorktreePath ?? orphanedWorktreePath,
-              "",
-              "Delete the worktree too?",
-            ].join("\n"),
+            formatWorktreeDeleteConfirmation(
+              orphanedWorktreePath,
+              useUiStateStore.getState().worktreeLabelByPath,
+            ),
           ),
         );
         if (confirmationResult._tag === "Failure") {

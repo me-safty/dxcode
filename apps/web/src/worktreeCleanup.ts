@@ -61,3 +61,16 @@ export function worktreeDisplayName(
   }
   return formatWorktreePathForDisplay(worktreePath);
 }
+
+export function formatWorktreeDeleteConfirmation(
+  worktreePath: string,
+  labelByPath: Readonly<Record<string, string>>,
+): string {
+  return [
+    "This thread is the only one linked to this worktree:",
+    `Name: ${worktreeDisplayName(worktreePath, labelByPath)}`,
+    `Path: ${worktreePath}`,
+    "",
+    "Delete the worktree too?",
+  ].join("\n");
+}

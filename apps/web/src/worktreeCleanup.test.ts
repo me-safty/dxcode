@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 import {
+  formatWorktreeDeleteConfirmation,
   formatWorktreePathForDisplay,
   getOrphanedWorktreePathForThread,
   worktreeDisplayName,
@@ -130,5 +131,21 @@ describe("worktreeDisplayName", () => {
 
   it("trims surrounding whitespace from the custom label", () => {
     expect(worktreeDisplayName(path, { [path]: "  Checkout UI  " })).toBe("Checkout UI");
+  });
+});
+
+describe("formatWorktreeDeleteConfirmation", () => {
+  it("shows both a custom label and the full path for the destructive target", () => {
+    const path = "/Users/julius/.t3/worktrees/t3code-mvp/t3code-4e609bb8";
+
+    expect(formatWorktreeDeleteConfirmation(path, { [path]: "Checkout UI" })).toBe(
+      [
+        "This thread is the only one linked to this worktree:",
+        "Name: Checkout UI",
+        `Path: ${path}`,
+        "",
+        "Delete the worktree too?",
+      ].join("\n"),
+    );
   });
 });

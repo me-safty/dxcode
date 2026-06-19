@@ -46,11 +46,7 @@ export interface UiWorktreeState {
   worktreeLabelByPath: Record<string, string>;
 }
 
-export interface UiState
-  extends UiProjectState,
-    UiThreadState,
-    UiEndpointState,
-    UiWorktreeState {}
+export interface UiState extends UiProjectState, UiThreadState, UiEndpointState, UiWorktreeState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
