@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  buildGrokBuildPresentationFromProbe,
   buildGrokModelsFromAcpProbe,
   buildGrokModelsFromCliModels,
   parseGrokModelsCliOutput,
@@ -59,5 +60,26 @@ Available models:
     expect(acpModels).toEqual([
       expect.objectContaining({ slug: "grok-build", name: "Grok Build", isCustom: false }),
     ]);
+  });
+
+  it("detects standard ACP session modes without config options", () => {
+    expect(
+      buildGrokBuildPresentationFromProbe({
+        configOptions: [],
+        sessionSetupResult: {
+          sessionId: "session-1",
+          modes: {
+            currentModeId: "ask",
+            availableModes: [
+              { id: "ask", name: "Ask" },
+              { id: "code", name: "Code" },
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      displayName: "Grok Build",
+      showInteractionModeToggle: true,
+    });
   });
 });

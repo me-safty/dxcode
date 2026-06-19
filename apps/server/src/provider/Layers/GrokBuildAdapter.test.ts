@@ -229,6 +229,119 @@ grokAdapterTestLayer("GrokBuildAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
     }),
   );
+
+  it.effect("preserves the canonical model slug in session state", () =>
+    Effect.gen(function* () {
+      const adapter = yield* GrokBuildAdapter;
+      const threadId = ThreadId.make("grok-canonical-model-thread");
+      const turnCompleted = yield* Stream.take(adapter.streamEvents, 20).pipe(
+        Stream.filter((event) => event.type === "turn.completed"),
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok-build"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok-build-test"),
+          model: "composer-2.5",
+        },
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "keep the canonical model slug",
+        attachments: [],
+      });
+      yield* Fiber.join(turnCompleted);
+
+      const session = (yield* adapter.listSessions()).find(
+        (candidate) => candidate.threadId === threadId,
+      );
+      assert.equal(session?.model, "composer-2.5");
+      assert.isUndefined(session?.activeTurnId);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+});
+
+const grokPromptFailureAdapterTestLayer = it.layer(
+  Layer.effect(
+    GrokBuildAdapter,
+    Effect.gen(function* () {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_FAIL_PROMPT: "1" }),
+      );
+      const settings = decodeGrokBuildSettings({
+        enabled: true,
+        command: wrapperPath,
+        args: [],
+        envJson: "{}",
+        customModels: [],
+      });
+      return yield* makeGrokBuildAdapter(settings, {
+        instanceId: ProviderInstanceId.make("grok-build-test"),
+      });
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3code-grok-prompt-failure-test-",
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+);
+
+grokPromptFailureAdapterTestLayer("GrokBuildAdapter prompt failures", (it) => {
+  it.effect("closes a failed turn before reporting the runtime error", () =>
+    Effect.gen(function* () {
+      const adapter = yield* GrokBuildAdapter;
+      const threadId = ThreadId.make("grok-prompt-failure-thread");
+      const failureEvents = yield* Stream.take(adapter.streamEvents, 20).pipe(
+        Stream.filter((event) => event.type === "turn.completed" || event.type === "runtime.error"),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok-build"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "fail this prompt",
+        attachments: [],
+      });
+
+      const events = Array.from(yield* Fiber.join(failureEvents));
+      assert.deepStrictEqual(
+        events.map((event) => event.type),
+        ["turn.completed", "runtime.error"],
+      );
+      const completed = events[0];
+      assert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        assert.equal(completed.turnId, turn.turnId);
+        assert.equal(completed.payload.state, "failed");
+      }
+
+      const session = (yield* adapter.listSessions()).find(
+        (candidate) => candidate.threadId === threadId,
+      );
+      assert.equal(session?.status, "error");
+      assert.isUndefined(session?.activeTurnId);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
 });
 
 const grokPermissionAdapterTestLayer = it.layer(

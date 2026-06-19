@@ -61,6 +61,7 @@ import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import {
   GROK_BUILD_EMBEDDED_FILE_MAX_BYTES,
   GROK_BUILD_RESUME_VERSION,
+  applyGrokBuildModelSelection,
   buildGrokBuildPromptBlocks,
   makeGrokBuildAcpRuntime,
   mapGrokSlugToAcpModelId,
@@ -143,18 +144,6 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
 }
 
 export { buildGrokBuildPromptBlocks, mapGrokSlugToAcpModelId as resolveGrokBuildAcpBaseModelId };
-
-export function applyGrokBuildModelSelection<E>(input: {
-  readonly runtime: AcpSessionRuntimeShape;
-  readonly model: string | undefined;
-  readonly mapError: (cause: import("effect-acp/errors").AcpError) => E;
-}): Effect.Effect<void, E> {
-  return Effect.gen(function* () {
-    if (!input.model) return;
-    const resolvedModel = mapGrokSlugToAcpModelId(input.model);
-    yield* input.runtime.setModel(resolvedModel).pipe(Effect.mapError(input.mapError));
-  });
-}
 
 export function makeGrokBuildAdapter(
   settings: GrokBuildSettings,
@@ -812,17 +801,14 @@ export function makeGrokBuildAdapter(
               input.modelSelection?.instanceId === boundInstanceId
                 ? input.modelSelection
                 : undefined;
-            const model = turnModelSelection?.model ?? ctx.session.model;
-            const resolvedModel = mapGrokSlugToAcpModelId(model);
+            const model = turnModelSelection?.model ?? ctx.session.model ?? "grok-build";
 
-            if (model !== undefined) {
-              yield* applyGrokBuildModelSelection({
-                runtime: ctx.acp,
-                model,
-                mapError: (cause) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
-              });
-            }
+            yield* applyGrokBuildModelSelection({
+              runtime: ctx.acp,
+              model,
+              mapError: (cause) =>
+                mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
+            });
 
             yield* applyAcpInteractionMode({
               runtime: ctx.acp,
@@ -864,9 +850,10 @@ export function makeGrokBuildAdapter(
             ctx.lastPlanFingerprint = undefined;
             ctx.session = {
               ...ctx.session,
+              status: "running",
               activeTurnId: turnId,
               updatedAt: yield* nowIso,
-              model: resolvedModel,
+              model,
             };
 
             yield* offerRuntimeEvent({
@@ -875,7 +862,7 @@ export function makeGrokBuildAdapter(
               provider: PROVIDER,
               threadId: input.threadId,
               turnId,
-              payload: { model: resolvedModel },
+              payload: { model },
             });
 
             const payload: Omit<EffectAcpSchema.PromptRequest, "sessionId"> = {
@@ -889,8 +876,21 @@ export function makeGrokBuildAdapter(
                 logNative(input.threadId, "session/prompt(response)", result, "acp.jsonrpc"),
               ),
               Effect.tap((result) =>
-                Effect.sync(() => {
+                Effect.gen(function* () {
                   ctx.turns.push({ id: turnId, items: [{ prompt: promptBlocks, result }] });
+                  if (ctx.activeTurnId === turnId) {
+                    ctx.activeTurnId = undefined;
+                    const {
+                      activeTurnId: _activeTurnId,
+                      lastError: _lastError,
+                      ...session
+                    } = ctx.session;
+                    ctx.session = {
+                      ...session,
+                      status: "ready",
+                      updatedAt: yield* nowIso,
+                    };
+                  }
                 }),
               ),
               Effect.flatMap((result) =>
@@ -912,23 +912,41 @@ export function makeGrokBuildAdapter(
               ),
               Effect.catchCause((_cause) => {
                 if (ctx.stopped) return Effect.void;
-                return makeEventStamp().pipe(
-                  Effect.flatMap((stamp) =>
-                    offerRuntimeEvent({
-                      type: "runtime.error",
-                      ...stamp,
-                      provider: PROVIDER,
-                      threadId: ctx.threadId,
-                      turnId: ctx.activeTurnId,
-                      payload: {
-                        message: "Failed to send prompt to Grok Build CLI.",
-                        class: "provider_error",
-                        detail: { errorCode: "PromptFailed" },
-                      },
-                    }),
-                  ),
-                  Effect.asVoid,
-                );
+                const errorMessage = "Failed to send prompt to Grok Build CLI.";
+                return Effect.gen(function* () {
+                  if (ctx.activeTurnId === turnId) {
+                    ctx.activeTurnId = undefined;
+                    const { activeTurnId: _activeTurnId, ...session } = ctx.session;
+                    ctx.session = {
+                      ...session,
+                      status: "error",
+                      updatedAt: yield* nowIso,
+                      lastError: errorMessage,
+                    };
+                  }
+                  yield* offerRuntimeEvent({
+                    type: "turn.completed",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: ctx.threadId,
+                    turnId,
+                    payload: {
+                      state: "failed",
+                      errorMessage,
+                    },
+                  });
+                  yield* offerRuntimeEvent({
+                    type: "runtime.error",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: ctx.threadId,
+                    payload: {
+                      message: errorMessage,
+                      class: "provider_error",
+                      detail: { errorCode: "PromptFailed" },
+                    },
+                  });
+                });
               }),
               Effect.forkIn(ctx.scope),
             );

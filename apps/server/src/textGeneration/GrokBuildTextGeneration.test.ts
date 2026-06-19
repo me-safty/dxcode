@@ -162,6 +162,30 @@ it.layer(GrokBuildTextGenerationTestLayer)("GrokBuildTextGeneration", (it) => {
     ),
   );
 
+  it.effect("rejects tool permissions without blocking structured text generation", () =>
+    withFakeAcpAgent(
+      {
+        T3_ACP_EMIT_TOOL_CALLS: "1",
+        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+          subject: "Keep text generation non-interactive",
+          body: "",
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateCommitMessage({
+            cwd: process.cwd(),
+            branch: "feature/grok-safe-text-generation",
+            stagedSummary: "M README.md",
+            stagedPatch: "diff --git a/README.md b/README.md",
+            modelSelection: createModelSelection(ProviderInstanceId.make("grok-build"), "default"),
+          });
+
+          expect(generated.subject).toBe("Keep text generation non-interactive");
+        }),
+    ),
+  );
+
   it.effect("closes the ACP child process after text generation completes", () => {
     const exitLogDir = mkdtempSync(path.join(os.tmpdir(), "t3code-grok-text-exit-log-"));
     const exitLogPath = path.join(exitLogDir, "exit.log");

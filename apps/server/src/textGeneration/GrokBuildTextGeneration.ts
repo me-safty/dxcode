@@ -24,8 +24,12 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
-import { applyGrokBuildModelSelection } from "../provider/Layers/GrokBuildAdapter.ts";
-import { makeGrokBuildAcpRuntime, parseEnvJson } from "../provider/acp/GrokAcpSupport.ts";
+import { applyAcpInteractionMode } from "../provider/acp/AcpInteractionModeSupport.ts";
+import {
+  applyGrokBuildModelSelection,
+  makeGrokBuildAcpRuntime,
+  parseEnvJson,
+} from "../provider/acp/GrokAcpSupport.ts";
 
 const GROK_BUILD_TIMEOUT_MS = 180_000;
 
@@ -107,9 +111,23 @@ export const makeGrokBuildTextGeneration = Effect.fn("makeGrokBuildTextGeneratio
         }
         return Ref.update(outputRef, (current) => current + content.text);
       });
+      yield* runtime.handleRequestPermission(() =>
+        Effect.succeed({ outcome: { outcome: "cancelled" as const } }),
+      );
 
       const promptResult = yield* Effect.gen(function* () {
         yield* runtime.start();
+        yield* applyAcpInteractionMode({
+          runtime,
+          runtimeMode: "approval-required",
+          interactionMode: undefined,
+          mapError: ({ cause }) =>
+            mapGrokBuildAcpError(
+              operation,
+              "Failed to set Grok Build ACP mode for text generation.",
+              cause,
+            ),
+        });
         yield* applyGrokBuildModelSelection({
           runtime,
           model: modelSelection.model,

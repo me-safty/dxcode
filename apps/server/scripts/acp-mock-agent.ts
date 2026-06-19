@@ -20,6 +20,7 @@ const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHO
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const emitCreatePlan = process.env.T3_ACP_EMIT_CREATE_PLAN === "1";
 const emitUpdateTodos = process.env.T3_ACP_EMIT_UPDATE_TODOS === "1";
+const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
@@ -178,6 +179,8 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
       options: [
         { value: "default", name: "Auto" },
         { value: "composer-2", name: "Composer 2" },
+        { value: "grok-build", name: "Grok Build" },
+        { value: "grok-composer-2.5-fast", name: "Composer 2.5 Fast" },
         { value: "composer-2[fast=true]", name: "Composer 2 Fast" },
         { value: "gpt-5.3-codex[reasoning=medium,fast=false]", name: "Codex 5.3" },
       ],
@@ -327,6 +330,13 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
 
+      if (failPrompt) {
+        return yield* AcpError.AcpRequestError.invalidParams("Mock prompt failure", {
+          method: "session/prompt",
+          params: request,
+        });
+      }
+
       if (emitInterleavedAssistantToolCalls) {
         const toolCallId = "tool-call-1";
 
@@ -451,7 +461,7 @@ const program = Effect.gen(function* () {
           sessionId: requestedSessionId,
           update: {
             sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: "hello from mock" },
+            content: { type: "text", text: promptResponseText ?? "hello from mock" },
           },
         });
 

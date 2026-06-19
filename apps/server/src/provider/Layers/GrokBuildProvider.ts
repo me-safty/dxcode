@@ -98,8 +98,11 @@ function isModeConfigOption(option: EffectAcpSchema.SessionConfigOption): boolea
 
 export function buildGrokBuildPresentationFromProbe(input: {
   readonly configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
+  readonly sessionSetupResult?: GrokAcpProbeResult["sessionSetupResult"];
 }): GrokBuildPresentation {
-  const hasModes = input.configOptions.some(isModeConfigOption);
+  const hasModes =
+    input.configOptions.some(isModeConfigOption) ||
+    (input.sessionSetupResult?.modes?.availableModes.length ?? 0) > 0;
   return {
     displayName: "Grok Build",
     showInteractionModeToggle: hasModes,
@@ -266,6 +269,7 @@ const runGrokAcpDiscovery = (
     return {
       presentation: buildGrokBuildPresentationFromProbe({
         configOptions: probe.configOptions,
+        sessionSetupResult: probe.sessionSetupResult,
       }),
       models: acpModels,
     };

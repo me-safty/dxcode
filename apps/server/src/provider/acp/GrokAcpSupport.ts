@@ -222,6 +222,19 @@ export function mapGrokSlugToAcpModelId(model: string | undefined): string {
   return model;
 }
 
+export function applyGrokBuildModelSelection<E>(input: {
+  readonly runtime: AcpSessionRuntimeShape;
+  readonly model: string | undefined;
+  readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
+}): Effect.Effect<void, E> {
+  return Effect.gen(function* () {
+    if (!input.model) return;
+    yield* input.runtime
+      .setModel(mapGrokSlugToAcpModelId(input.model))
+      .pipe(Effect.mapError(input.mapError));
+  });
+}
+
 const makeGrokAcpProbeRuntime = (
   settings: Pick<GrokBuildSettings, "command" | "args" | "envJson">,
   environment: NodeJS.ProcessEnv = process.env,
