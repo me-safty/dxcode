@@ -25,6 +25,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
+import * as Effect from "effect/Effect";
 import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { useMemo } from "react";
@@ -188,6 +189,7 @@ const PersistedDraftThreadState = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
+  startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -258,6 +260,7 @@ export interface DraftSessionState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  startFromOrigin: boolean;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -319,6 +322,7 @@ interface ComposerDraftStoreState {
       worktreePath?: string | null;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
     },
@@ -333,6 +337,7 @@ interface ComposerDraftStoreState {
       worktreePath?: string | null;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
     },
@@ -346,6 +351,7 @@ interface ComposerDraftStoreState {
       projectRef?: ScopedProjectRef;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
     },
@@ -1177,6 +1183,7 @@ function createDraftThreadState(
     worktreePath?: string | null;
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
+    startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
   },
@@ -1197,6 +1204,12 @@ function createDraftThreadState(
         ? null
         : (existingThread?.branch ?? null)
       : (options.branch ?? null);
+  const nextStartFromOrigin =
+    options?.startFromOrigin === undefined
+      ? projectChanged
+        ? false
+        : (existingThread?.startFromOrigin ?? false)
+      : options.startFromOrigin;
   return {
     threadId,
     environmentId: projectRef.environmentId,
@@ -1215,6 +1228,7 @@ function createDraftThreadState(
         : projectChanged
           ? "local"
           : (existingThread?.envMode ?? "local")),
+    startFromOrigin: nextStartFromOrigin,
     promotedTo: null,
   };
 }
@@ -1246,6 +1260,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
+    left.startFromOrigin === right.startFromOrigin &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -1340,6 +1355,7 @@ function normalizePersistedDraftThreads(
       const createdAt = candidateDraftThread.createdAt;
       const branch = candidateDraftThread.branch;
       const worktreePath = candidateDraftThread.worktreePath;
+      const startFromOrigin = candidateDraftThread.startFromOrigin === true;
       const normalizedWorktreePath = typeof worktreePath === "string" ? worktreePath : null;
       const promotedToCandidate = candidateDraftThread.promotedTo;
       const promotedToRecord =
@@ -1387,6 +1403,7 @@ function normalizePersistedDraftThreads(
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
+        startFromOrigin,
         promotedTo,
       };
     }
@@ -1432,6 +1449,7 @@ function normalizePersistedDraftThreads(
           branch: null,
           worktreePath: null,
           envMode: "local",
+          startFromOrigin: false,
           promotedTo: null,
         };
       } else if (
@@ -1951,6 +1969,7 @@ function toHydratedDraftThreadState(
     branch: persistedDraftThread.branch,
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
+    startFromOrigin: persistedDraftThread.startFromOrigin,
     promotedTo: persistedDraftThread.promotedTo
       ? scopeThreadRef(
           persistedDraftThread.promotedTo.environmentId as EnvironmentId,
@@ -2136,6 +2155,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   ? null
                   : existing.branch
                 : (options.branch ?? null);
+            const nextStartFromOrigin =
+              options.startFromOrigin === undefined
+                ? projectChanged
+                  ? false
+                  : existing.startFromOrigin
+                : options.startFromOrigin;
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
               environmentId: nextProjectRef.environmentId,
@@ -2156,6 +2181,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   : projectChanged
                     ? "local"
                     : (existing.envMode ?? "local")),
+              startFromOrigin: nextStartFromOrigin,
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -2168,6 +2194,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
+              nextDraftThread.startFromOrigin === existing.startFromOrigin &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;

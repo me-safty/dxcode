@@ -191,11 +191,13 @@ export function resolveSidebarNewThreadSeedContext(input: {
     branch: string | null;
     worktreePath: string | null;
     envMode: SidebarNewThreadEnvMode;
+    startFromOrigin: boolean;
   } | null;
 }): {
   branch?: string | null;
   worktreePath?: string | null;
   envMode: SidebarNewThreadEnvMode;
+  startFromOrigin?: boolean;
 } {
   if (isManagedSectionWorkspace(input.projectKind)) {
     return {
@@ -214,6 +216,7 @@ export function resolveSidebarNewThreadSeedContext(input: {
       branch: input.activeDraftThread.branch,
       worktreePath: input.activeDraftThread.worktreePath,
       envMode: input.activeDraftThread.envMode,
+      startFromOrigin: input.activeDraftThread.startFromOrigin,
     };
   }
 
