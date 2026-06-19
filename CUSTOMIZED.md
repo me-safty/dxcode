@@ -298,5 +298,5 @@ When retiring the local changes, remove the corresponding tests or update them t
 
 > Here are referenced the latest commit SHAs for the `main` branch of both the `origin` and `upstream` remotes. These SHAs are used to determine if any worktrees need to be updated with changes from `upstream/main` and `origin/main`.
 
-**Last origin/main commit SHA:** 434b29b82
-**Last upstream/main commit SHA:** 3e01c4bc5
+**Last origin/main commit SHA:** 8dfebb857
+**Last upstream/main commit SHA:** d9f59be70
