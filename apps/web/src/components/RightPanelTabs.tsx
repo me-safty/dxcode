@@ -23,6 +23,7 @@ import { useTheme } from "~/hooks/useTheme";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
+import { shouldCloseRightPanelTabOnAuxClick } from "./RightPanelTabs.logic";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -330,6 +331,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [props],
   );
+  const handleTabMouseDown = useCallback((event: ReactMouseEvent) => {
+    if (!shouldCloseRightPanelTabOnAuxClick(event.button)) return;
+    event.preventDefault();
+  }, []);
+  const handleTabAuxClick = useCallback(
+    (event: ReactMouseEvent, surface: RightPanelSurface) => {
+      if (!shouldCloseRightPanelTabOnAuxClick(event.button)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      props.onCloseSurface(surface);
+    },
+    [props],
+  );
 
   useEffect(() => {
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
@@ -365,6 +379,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 <div
                   key={surface.id}
                   data-active-tab={active}
+                  onMouseDown={handleTabMouseDown}
+                  onAuxClick={(event) => handleTabAuxClick(event, surface)}
                   onContextMenu={(event) => void handleTabContextMenu(event, surface)}
                   className={cn(
                     "group flex h-7 min-w-25 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm",
