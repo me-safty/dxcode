@@ -11,6 +11,7 @@ interface ThreadContextLike {
 
 interface DraftThreadContextLike extends ThreadContextLike {
   envMode: DraftThreadEnvMode;
+  startFromOrigin: boolean;
 }
 
 interface NewThreadHandler {
@@ -20,6 +21,7 @@ interface NewThreadHandler {
       branch?: string | null;
       worktreePath?: string | null;
       envMode?: DraftThreadEnvMode;
+      startFromOrigin?: boolean;
     },
   ): Promise<void>;
 }
@@ -34,11 +36,11 @@ export interface ChatThreadActionContext {
   readonly handleNewThread: NewThreadHandler;
 }
 
-export function resolveNewDraftFetchOrigin(input: {
+export function resolveNewDraftStartFromOrigin(input: {
   envMode: DraftThreadEnvMode;
-  defaultWorktreeFetchOrigin: boolean;
+  newWorktreesStartFromOrigin: boolean;
 }): boolean {
-  return input.envMode === "worktree" && input.defaultWorktreeFetchOrigin;
+  return input.envMode === "worktree" && input.newWorktreesStartFromOrigin;
 }
 
 export function resolveThreadActionProjectRef(
@@ -64,6 +66,9 @@ function buildContextualThreadOptions(context: ChatThreadActionContext): NewThre
     envMode:
       context.activeDraftThread?.envMode ??
       (context.activeThread?.worktreePath ? "worktree" : "local"),
+    ...(context.activeDraftThread
+      ? { startFromOrigin: context.activeDraftThread.startFromOrigin }
+      : {}),
   };
 }
 

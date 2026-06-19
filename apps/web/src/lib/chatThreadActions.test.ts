@@ -3,7 +3,7 @@ import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
-  resolveNewDraftFetchOrigin,
+  resolveNewDraftStartFromOrigin,
   startNewLocalThreadFromContext,
   startNewThreadFromContext,
   type ChatThreadActionContext,
@@ -25,17 +25,17 @@ function createContext(overrides: Partial<ChatThreadActionContext> = {}): ChatTh
 }
 
 describe("chatThreadActions", () => {
-  it("only applies the fetch-origin default to new worktree drafts", () => {
+  it("only applies the start-from-origin default to new worktree drafts", () => {
     expect(
-      resolveNewDraftFetchOrigin({
+      resolveNewDraftStartFromOrigin({
         envMode: "worktree",
-        defaultWorktreeFetchOrigin: true,
+        newWorktreesStartFromOrigin: true,
       }),
     ).toBe(true);
     expect(
-      resolveNewDraftFetchOrigin({
+      resolveNewDraftStartFromOrigin({
         envMode: "local",
-        defaultWorktreeFetchOrigin: true,
+        newWorktreesStartFromOrigin: true,
       }),
     ).toBe(false);
   });
@@ -49,6 +49,7 @@ describe("chatThreadActions", () => {
           branch: "feature/refactor",
           worktreePath: "/tmp/worktree",
           envMode: "worktree",
+          startFromOrigin: true,
         },
       }),
     );
@@ -77,6 +78,7 @@ describe("chatThreadActions", () => {
           branch: "feature/refactor",
           worktreePath: "/tmp/worktree",
           envMode: "worktree",
+          startFromOrigin: true,
         },
         handleNewThread,
       }),
@@ -87,6 +89,32 @@ describe("chatThreadActions", () => {
       branch: "feature/refactor",
       worktreePath: "/tmp/worktree",
       envMode: "worktree",
+      startFromOrigin: true,
+    });
+  });
+
+  it("preserves an explicitly disabled origin base in contextual thread options", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+
+    await startNewThreadFromContext(
+      createContext({
+        activeDraftThread: {
+          environmentId: ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          branch: "feature/refactor",
+          worktreePath: "/tmp/worktree",
+          envMode: "worktree",
+          startFromOrigin: false,
+        },
+        handleNewThread,
+      }),
+    );
+
+    expect(handleNewThread).toHaveBeenCalledWith(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), {
+      branch: "feature/refactor",
+      worktreePath: "/tmp/worktree",
+      envMode: "worktree",
+      startFromOrigin: false,
     });
   });
 

@@ -408,9 +408,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
-      ...(settings.defaultWorktreeFetchOrigin !==
-      DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin
-        ? ["New worktree origin base"]
+      ...(settings.newWorktreesStartFromOrigin !==
+      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
+        ? ["New worktrees start from origin"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
@@ -430,7 +430,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
-      settings.defaultWorktreeFetchOrigin,
+      settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
       settings.automaticGitFetchInterval,
@@ -461,7 +461,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-      defaultWorktreeFetchOrigin: DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin,
+      newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -699,14 +699,15 @@ export function GeneralSettingsPanel() {
           description="Pick the default workspace mode for newly created draft threads."
           resetAction={
             settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ||
-            settings.defaultWorktreeFetchOrigin !==
-              DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin ? (
+            settings.newWorktreesStartFromOrigin !==
+              DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
               <SettingResetButton
                 label="new threads"
                 onClick={() =>
                   updateSettings({
                     defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-                    defaultWorktreeFetchOrigin: DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin,
+                    newWorktreesStartFromOrigin:
+                      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
                   })
                 }
               />
@@ -744,14 +745,14 @@ export function GeneralSettingsPanel() {
             title="Start from origin"
             description="Creates the worktree from the latest matching branch on origin instead of your local branch."
             resetAction={
-              settings.defaultWorktreeFetchOrigin !==
-              DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin ? (
+              settings.newWorktreesStartFromOrigin !==
+              DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
                 <SettingResetButton
-                  label="new worktree origin base"
+                  label="new worktrees start from origin"
                   onClick={() =>
                     updateSettings({
-                      defaultWorktreeFetchOrigin:
-                        DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin,
+                      newWorktreesStartFromOrigin:
+                        DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
                     })
                   }
                 />
@@ -759,9 +760,9 @@ export function GeneralSettingsPanel() {
             }
             control={
               <Switch
-                checked={settings.defaultWorktreeFetchOrigin}
+                checked={settings.newWorktreesStartFromOrigin}
                 onCheckedChange={(checked) =>
-                  updateSettings({ defaultWorktreeFetchOrigin: Boolean(checked) })
+                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
                 }
                 aria-label="Start new worktrees from origin by default"
               />

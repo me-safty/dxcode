@@ -6033,7 +6033,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
                   branch: "t3code/bootstrap-refName",
-                  fetchOrigin: true,
+                  startFromOrigin: true,
                 },
                 runSetupScript: true,
               },

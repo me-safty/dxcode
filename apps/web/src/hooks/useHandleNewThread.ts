@@ -20,7 +20,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { readThreadShell, useProjects, useThread } from "../state/entities";
-import { resolveNewDraftFetchOrigin } from "../lib/chatThreadActions";
+import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useSettings } from "./useSettings";
@@ -28,7 +28,9 @@ import { useSettings } from "./useSettings";
 export function useNewThreadHandler() {
   const projects = useProjects();
   const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
-  const defaultWorktreeFetchOrigin = useSettings((settings) => settings.defaultWorktreeFetchOrigin);
+  const newWorktreesStartFromOrigin = useSettings(
+    (settings) => settings.newWorktreesStartFromOrigin,
+  );
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
@@ -42,7 +44,7 @@ export function useNewThreadHandler() {
         branch?: string | null;
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
-        fetchOrigin?: boolean;
+        startFromOrigin?: boolean;
       },
     ): Promise<void> => {
       const {
@@ -65,7 +67,7 @@ export function useNewThreadHandler() {
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
-      const hasFetchOriginOption = options?.fetchOrigin !== undefined;
+      const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
       const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
@@ -88,13 +90,13 @@ export function useNewThreadHandler() {
             hasBranchOption ||
             hasWorktreePathOption ||
             hasEnvModeOption ||
-            hasFetchOriginOption
+            hasStartFromOriginOption
           ) {
             setDraftThreadContext(reusableStoredDraftThread.draftId, {
               ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
               ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
               ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
-              ...(hasFetchOriginOption ? { fetchOrigin: options?.fetchOrigin } : {}),
+              ...(hasStartFromOriginOption ? { startFromOrigin: options?.startFromOrigin } : {}),
             });
           }
           setLogicalProjectDraftThreadId(
@@ -124,12 +126,17 @@ export function useNewThreadHandler() {
         latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
         latestActiveDraftThread.promotedTo == null
       ) {
-        if (hasBranchOption || hasWorktreePathOption || hasEnvModeOption || hasFetchOriginOption) {
+        if (
+          hasBranchOption ||
+          hasWorktreePathOption ||
+          hasEnvModeOption ||
+          hasStartFromOriginOption
+        ) {
           setDraftThreadContext(currentRouteTarget.draftId, {
             ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
             ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
             ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
-            ...(hasFetchOriginOption ? { fetchOrigin: options?.fetchOrigin } : {}),
+            ...(hasStartFromOriginOption ? { startFromOrigin: options?.startFromOrigin } : {}),
           });
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, currentRouteTarget.draftId, {
@@ -140,7 +147,7 @@ export function useNewThreadHandler() {
           ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
           ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
-          ...(hasFetchOriginOption ? { fetchOrigin: options?.fetchOrigin } : {}),
+          ...(hasStartFromOriginOption ? { startFromOrigin: options?.startFromOrigin } : {}),
         });
         return Promise.resolve();
       }
@@ -156,11 +163,11 @@ export function useNewThreadHandler() {
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
           envMode: initialEnvMode,
-          fetchOrigin:
-            options?.fetchOrigin ??
-            resolveNewDraftFetchOrigin({
+          startFromOrigin:
+            options?.startFromOrigin ??
+            resolveNewDraftStartFromOrigin({
               envMode: initialEnvMode,
-              defaultWorktreeFetchOrigin,
+              newWorktreesStartFromOrigin,
             }),
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
@@ -172,7 +179,7 @@ export function useNewThreadHandler() {
         });
       })();
     },
-    [defaultWorktreeFetchOrigin, getCurrentRouteTarget, projectGroupingSettings, router, projects],
+    [newWorktreesStartFromOrigin, getCurrentRouteTarget, projectGroupingSettings, router, projects],
   );
 }
 

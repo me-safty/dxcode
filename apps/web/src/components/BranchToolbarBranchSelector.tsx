@@ -61,8 +61,8 @@ interface BranchToolbarBranchSelectorProps {
   effectiveEnvModeOverride?: "local" | "worktree";
   activeThreadBranchOverride?: string | null;
   onActiveThreadBranchOverrideChange?: (refName: string | null) => void;
-  fetchOrigin: boolean;
-  onFetchOriginChange: (fetchOrigin: boolean) => void;
+  startFromOrigin: boolean;
+  onStartFromOriginChange: (startFromOrigin: boolean) => void;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
 }
@@ -95,12 +95,12 @@ export function BranchToolbarBranchSelector({
   effectiveEnvModeOverride,
   activeThreadBranchOverride,
   onActiveThreadBranchOverrideChange,
-  fetchOrigin,
-  onFetchOriginChange,
+  startFromOrigin,
+  onStartFromOriginChange,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
 }: BranchToolbarBranchSelectorProps) {
-  const fetchOriginSwitchId = useId();
+  const startFromOriginSwitchId = useId();
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, "thread session stop");
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -687,7 +687,7 @@ export function BranchToolbarBranchSelector({
               <TooltipTrigger
                 render={
                   <label
-                    htmlFor={fetchOriginSwitchId}
+                    htmlFor={startFromOriginSwitchId}
                     className="flex cursor-pointer items-center justify-between gap-3 border-t border-border/60 px-3 py-2 text-xs"
                   >
                     <span className="flex min-w-0 items-center gap-1.5 font-medium text-muted-foreground">
@@ -695,11 +695,11 @@ export function BranchToolbarBranchSelector({
                       <span className="truncate">Start from origin</span>
                     </span>
                     <Switch
-                      id={fetchOriginSwitchId}
-                      checked={fetchOrigin}
+                      id={startFromOriginSwitchId}
+                      checked={startFromOrigin}
                       className="[--thumb-size:--spacing(3.5)]"
                       aria-label="Start worktree from origin"
-                      onCheckedChange={(checked) => onFetchOriginChange(Boolean(checked))}
+                      onCheckedChange={(checked) => onStartFromOriginChange(Boolean(checked))}
                     />
                   </label>
                 }

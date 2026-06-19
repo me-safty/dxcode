@@ -141,6 +141,7 @@ import { getProviderModelCapabilities, resolveSelectableProvider } from "../prov
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
+import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -1129,8 +1130,10 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
-  const [pendingServerThreadFetchOriginByThreadId, setPendingServerThreadFetchOriginByThreadId] =
-    useState<Record<string, boolean>>({});
+  const [
+    pendingServerThreadStartFromOriginByThreadId,
+    setPendingServerThreadStartFromOriginByThreadId,
+  ] = useState<Record<string, boolean>>({});
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -3339,11 +3342,11 @@ function ChatViewContent(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
-  const fetchOrigin = isLocalDraftThread
-    ? (draftThread?.fetchOrigin ?? false)
+  const startFromOrigin = isLocalDraftThread
+    ? (draftThread?.startFromOrigin ?? false)
     : canOverrideServerThreadEnvMode
-      ? (pendingServerThreadFetchOriginByThreadId[activeThread?.id ?? ""] ??
-        settings.defaultWorktreeFetchOrigin)
+      ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
+        settings.newWorktreesStartFromOrigin)
       : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
@@ -3907,7 +3910,7 @@ function ChatViewContent(props: ChatViewProps) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
-                      ...(fetchOrigin ? { fetchOrigin: true } : {}),
+                      ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },
                     runSetupScript: true,
                   }
@@ -4593,6 +4596,10 @@ function ChatViewContent(props: ChatViewProps) {
       if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, {
           envMode: mode,
+          startFromOrigin: resolveNewDraftStartFromOrigin({
+            envMode: mode,
+            newWorktreesStartFromOrigin: settings.newWorktreesStartFromOrigin,
+          }),
           ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
         });
       }
@@ -4603,24 +4610,25 @@ function ChatViewContent(props: ChatViewProps) {
       composerDraftTarget,
       draftThread?.worktreePath,
       isLocalDraftThread,
+      settings.newWorktreesStartFromOrigin,
       setPendingServerThreadEnvMode,
       scheduleComposerFocus,
       setDraftThreadContext,
     ],
   );
 
-  const onFetchOriginChange = (nextFetchOrigin: boolean) => {
+  const onStartFromOriginChange = (nextStartFromOrigin: boolean) => {
     if (canOverrideServerThreadEnvMode && activeThread) {
-      setPendingServerThreadFetchOriginByThreadId((current) =>
-        current[activeThread.id] === nextFetchOrigin
+      setPendingServerThreadStartFromOriginByThreadId((current) =>
+        current[activeThread.id] === nextStartFromOrigin
           ? current
-          : { ...current, [activeThread.id]: nextFetchOrigin },
+          : { ...current, [activeThread.id]: nextStartFromOrigin },
       );
       return;
     }
     if (isLocalDraftThread) {
       setDraftThreadContext(composerDraftTarget, {
-        fetchOrigin: nextFetchOrigin,
+        startFromOrigin: nextStartFromOrigin,
       });
     }
   };
@@ -4958,8 +4966,8 @@ function ChatViewContent(props: ChatViewProps) {
                   threadId={activeThread.id}
                   {...(routeKind === "draft" && draftId ? { draftId } : {})}
                   onEnvModeChange={onEnvModeChange}
-                  fetchOrigin={fetchOrigin}
-                  onFetchOriginChange={onFetchOriginChange}
+                  startFromOrigin={startFromOrigin}
+                  onStartFromOriginChange={onStartFromOriginChange}
                   {...(canOverrideServerThreadEnvMode ? { effectiveEnvModeOverride: envMode } : {})}
                   {...(canOverrideServerThreadEnvMode
                     ? {

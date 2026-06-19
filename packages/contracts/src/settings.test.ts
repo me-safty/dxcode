@@ -65,13 +65,13 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 });
 
 describe("ServerSettings worktree defaults", () => {
-  it("defaults fetch origin off for legacy configs", () => {
-    expect(decodeServerSettings({}).defaultWorktreeFetchOrigin).toBe(false);
+  it("defaults start-from-origin off for legacy configs", () => {
+    expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(false);
   });
 
-  it("accepts fetch origin updates", () => {
+  it("accepts start-from-origin updates", () => {
     expect(
-      decodeServerSettingsPatch({ defaultWorktreeFetchOrigin: true }).defaultWorktreeFetchOrigin,
+      decodeServerSettingsPatch({ newWorktreesStartFromOrigin: true }).newWorktreesStartFromOrigin,
     ).toBe(true);
   });
 });
