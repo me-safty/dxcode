@@ -5,6 +5,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as EffectAcpErrors from "effect-acp/errors";
+import type * as EffectAcpSchema from "effect-acp/schema";
 
 import {
   ProviderAdapterRequestError,
@@ -41,6 +42,22 @@ export function mapAcpToAdapterError(
     detail: error.message,
     cause: error,
   });
+}
+
+export function selectAutoApprovedPermissionOption(
+  request: EffectAcpSchema.RequestPermissionRequest,
+): string | undefined {
+  const allowAlwaysOption = request.options.find((option) => option.kind === "allow_always");
+  if (typeof allowAlwaysOption?.optionId === "string" && allowAlwaysOption.optionId.trim()) {
+    return allowAlwaysOption.optionId.trim();
+  }
+
+  const allowOnceOption = request.options.find((option) => option.kind === "allow_once");
+  if (typeof allowOnceOption?.optionId === "string" && allowOnceOption.optionId.trim()) {
+    return allowOnceOption.optionId.trim();
+  }
+
+  return undefined;
 }
 
 export function acpPermissionOutcome(decision: ProviderApprovalDecision): string {

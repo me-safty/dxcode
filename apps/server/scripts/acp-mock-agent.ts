@@ -18,6 +18,8 @@ const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
+const emitCreatePlan = process.env.T3_ACP_EMIT_CREATE_PLAN === "1";
+const emitUpdateTodos = process.env.T3_ACP_EMIT_UPDATE_TODOS === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
@@ -489,6 +491,41 @@ const program = Effect.gen(function* () {
             rawOutput: {
               content: "package.json\n",
             },
+          },
+        });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitCreatePlan) {
+        yield* agent.client.extRequest("cursor/create_plan", {
+          toolCallId: "create-plan-tool-call-1",
+          name: "Mock implementation plan",
+          plan: "# Mock plan\n\n- [ ] First todo\n- [ ] Second todo",
+          todos: [
+            { id: "todo-1", content: "First todo", status: "pending" },
+            { id: "todo-2", content: "Second todo", status: "pending" },
+          ],
+        });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitUpdateTodos) {
+        yield* agent.client.extNotification("cursor/update_todos", {
+          toolCallId: "update-todos-tool-call-1",
+          todos: [
+            { id: "todo-1", content: "First todo", status: "completed" },
+            { id: "todo-2", content: "Second todo", status: "in_progress" },
+          ],
+          merge: true,
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: promptResponseText ?? "todo progress updated" },
           },
         });
 

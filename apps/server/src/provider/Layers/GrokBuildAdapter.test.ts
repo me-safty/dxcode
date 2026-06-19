@@ -268,7 +268,7 @@ grokPermissionAdapterTestLayer("GrokBuildAdapter permissions", (it) => {
         threadId,
         provider: ProviderDriverKind.make("grok-build"),
         cwd: process.cwd(),
-        runtimeMode: "full-access",
+        runtimeMode: "approval-required",
         modelSelection: {
           instanceId: ProviderInstanceId.make("grok-build-test"),
           model: "default",
@@ -492,6 +492,213 @@ grokUserInputAdapterTestLayer("GrokBuildAdapter user input", (it) => {
       yield* adapter.respondToUserInput(threadId, requestId, { scope: "workspace" });
 
       yield* Fiber.await(sendTurnFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+});
+
+const grokPlanAdapterTestLayer = it.layer(
+  Layer.effect(
+    GrokBuildAdapter,
+    Effect.gen(function* () {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_EMIT_CREATE_PLAN: "1" }),
+      );
+      const settings = decodeGrokBuildSettings({
+        enabled: true,
+        command: wrapperPath,
+        args: [],
+        envJson: "{}",
+        customModels: [],
+      });
+      return yield* makeGrokBuildAdapter(settings, {
+        instanceId: ProviderInstanceId.make("grok-build-test"),
+      });
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3code-grok-plan-test-",
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+);
+
+grokPlanAdapterTestLayer("GrokBuildAdapter plan flow", (it) => {
+  it.effect("accepts create_plan extension requests during planning", () =>
+    Effect.gen(function* () {
+      const adapter = yield* GrokBuildAdapter;
+      const threadId = ThreadId.make("grok-create-plan-thread");
+
+      const proposedPlanFiber = yield* Stream.take(adapter.streamEvents, 20).pipe(
+        Stream.filter((event) => event.type === "turn.proposed.completed"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok-build"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok-build-test"),
+          model: "default",
+        },
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "draft a plan",
+        attachments: [],
+        interactionMode: "plan",
+      });
+
+      const proposedEvents = Array.from(yield* Fiber.join(proposedPlanFiber));
+      assert.equal(proposedEvents.length, 1);
+      const proposed = proposedEvents[0];
+      assert.isDefined(proposed);
+      if (proposed?.type === "turn.proposed.completed") {
+        assert.include(proposed.payload.planMarkdown, "Mock plan");
+      }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+});
+
+const grokTodoAdapterTestLayer = it.layer(
+  Layer.effect(
+    GrokBuildAdapter,
+    Effect.gen(function* () {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_EMIT_UPDATE_TODOS: "1" }),
+      );
+      const settings = decodeGrokBuildSettings({
+        enabled: true,
+        command: wrapperPath,
+        args: [],
+        envJson: "{}",
+        customModels: [],
+      });
+      return yield* makeGrokBuildAdapter(settings, {
+        instanceId: ProviderInstanceId.make("grok-build-test"),
+      });
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3code-grok-todo-test-",
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+);
+
+grokTodoAdapterTestLayer("GrokBuildAdapter todo updates", (it) => {
+  it.effect("maps update_todos notifications into plan updates during implementation", () =>
+    Effect.gen(function* () {
+      const adapter = yield* GrokBuildAdapter;
+      const threadId = ThreadId.make("grok-update-todos-thread");
+
+      const planUpdateFiber = yield* Stream.take(adapter.streamEvents, 20).pipe(
+        Stream.filter((event) => event.type === "turn.plan.updated"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok-build"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok-build-test"),
+          model: "default",
+        },
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "implement todos",
+        attachments: [],
+        interactionMode: "default",
+      });
+
+      const planEvents = Array.from(yield* Fiber.join(planUpdateFiber));
+      assert.equal(planEvents.length, 1);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+});
+
+const grokModeAdapterTestLayer = it.layer(
+  Layer.effect(
+    GrokBuildAdapter,
+    Effect.gen(function* () {
+      const tempDir = yield* Effect.promise(() =>
+        mkdtemp(path.join(os.tmpdir(), "grok-adapter-mode-log-")),
+      );
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      );
+      const settings = decodeGrokBuildSettings({
+        enabled: true,
+        command: wrapperPath,
+        args: [],
+        envJson: "{}",
+        customModels: [],
+      });
+      return yield* makeGrokBuildAdapter(settings, {
+        instanceId: ProviderInstanceId.make("grok-build-test"),
+      });
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3code-grok-mode-test-",
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+);
+
+grokModeAdapterTestLayer("GrokBuildAdapter interaction modes", (it) => {
+  it.effect("switches to implementation mode when interactionMode is default", () =>
+    Effect.gen(function* () {
+      const adapter = yield* GrokBuildAdapter;
+      const threadId = ThreadId.make("grok-mode-switch-thread");
+      const turnCompletedFiber = yield* Stream.take(adapter.streamEvents, 20).pipe(
+        Stream.filter((event) => event.type === "turn.completed"),
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok-build"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok-build-test"),
+          model: "default",
+        },
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "implement the plan",
+        attachments: [],
+        interactionMode: "default",
+      });
+
+      yield* Fiber.join(turnCompletedFiber);
       yield* adapter.stopSession(threadId);
     }),
   );

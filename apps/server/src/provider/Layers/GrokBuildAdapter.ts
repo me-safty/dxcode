@@ -43,12 +43,20 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import type { ProviderAdapterError } from "../Errors.ts";
-import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import {
+  acpPermissionOutcome,
+  mapAcpToAdapterError,
+  selectAutoApprovedPermissionOption,
+} from "../acp/AcpAdapterSupport.ts";
+import { applyAcpInteractionMode } from "../acp/AcpInteractionModeSupport.ts";
 import {
   makeAcpRequestOpenedEvent,
   makeAcpRequestResolvedEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
-import { mapAcpParsedSessionEvent } from "../acp/AcpSessionEventSupport.ts";
+import {
+  emitDedupedAcpPlanUpdate,
+  mapAcpParsedSessionEvent,
+} from "../acp/AcpSessionEventSupport.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import {
   GROK_BUILD_EMBEDDED_FILE_MAX_BYTES,
@@ -62,7 +70,14 @@ import {
   type GrokAcpPromptCapabilities,
 } from "../acp/GrokAcpSupport.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
-import { CursorAskQuestionRequest, extractAskQuestions } from "../acp/CursorAcpExtension.ts";
+import {
+  CursorAskQuestionRequest,
+  CursorCreatePlanRequest,
+  CursorUpdateTodosRequest,
+  extractAskQuestions,
+  extractPlanMarkdown,
+  extractTodosAsPlan,
+} from "../acp/CursorAcpExtension.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -184,6 +199,17 @@ export function makeGrokBuildAdapter(
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
+
+    const mapExtensionFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.mapError(
+          (cause) =>
+            new EffectAcpErrors.AcpTransportError({
+              detail: "Failed to process Grok Build ACP extension event.",
+              cause,
+            }),
+        ),
+      );
 
     yield* Effect.addFinalizer(() =>
       Effect.forEach(sessions.values(), stopSessionInternal, { discard: true }).pipe(
@@ -458,46 +484,98 @@ export function makeGrokBuildAdapter(
                 "cursor/ask_question",
                 CursorAskQuestionRequest,
                 (params) =>
+                  mapExtensionFailure(
+                    Effect.gen(function* () {
+                      yield* logNative(
+                        input.threadId,
+                        "cursor/ask_question",
+                        params,
+                        "acp.jsonrpc",
+                      );
+                      const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
+                      const runtimeRequestId = RuntimeRequestId.make(requestId);
+                      const answers = yield* Deferred.make<ProviderUserInputAnswers>();
+                      pendingUserInputs.set(requestId, { answers });
+                      yield* offerRuntimeEvent({
+                        type: "user-input.requested",
+                        ...(yield* makeEventStamp()),
+                        provider: PROVIDER,
+                        threadId: input.threadId,
+                        turnId: ctx?.activeTurnId,
+                        requestId: runtimeRequestId,
+                        payload: { questions: extractAskQuestions(params) },
+                        raw: {
+                          source: "acp.jsonrpc",
+                          method: "cursor/ask_question",
+                          payload: params,
+                        },
+                      });
+                      const resolved = yield* Deferred.await(answers);
+                      pendingUserInputs.delete(requestId);
+                      yield* offerRuntimeEvent({
+                        type: "user-input.resolved",
+                        ...(yield* makeEventStamp()),
+                        provider: PROVIDER,
+                        threadId: input.threadId,
+                        turnId: ctx?.activeTurnId,
+                        requestId: runtimeRequestId,
+                        payload: { answers: resolved },
+                      });
+                      return { answers: resolved };
+                    }),
+                  ),
+              );
+              yield* acp.handleExtRequest("cursor/create_plan", CursorCreatePlanRequest, (params) =>
+                mapExtensionFailure(
                   Effect.gen(function* () {
-                    yield* logNative(input.threadId, "cursor/ask_question", params, "acp.jsonrpc");
-                    const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
-                    const runtimeRequestId = RuntimeRequestId.make(requestId);
-                    const answers = yield* Deferred.make<ProviderUserInputAnswers>();
-                    pendingUserInputs.set(requestId, { answers });
+                    yield* logNative(input.threadId, "cursor/create_plan", params, "acp.jsonrpc");
                     yield* offerRuntimeEvent({
-                      type: "user-input.requested",
+                      type: "turn.proposed.completed",
                       ...(yield* makeEventStamp()),
                       provider: PROVIDER,
                       threadId: input.threadId,
                       turnId: ctx?.activeTurnId,
-                      requestId: runtimeRequestId,
-                      payload: { questions: extractAskQuestions(params) },
+                      payload: { planMarkdown: extractPlanMarkdown(params) },
                       raw: {
                         source: "acp.jsonrpc",
-                        method: "cursor/ask_question",
+                        method: "cursor/create_plan",
                         payload: params,
                       },
                     });
-                    const resolved = yield* Deferred.await(answers);
-                    pendingUserInputs.delete(requestId);
-                    yield* offerRuntimeEvent({
-                      type: "user-input.resolved",
-                      ...(yield* makeEventStamp()),
-                      provider: PROVIDER,
-                      threadId: input.threadId,
-                      turnId: ctx?.activeTurnId,
-                      requestId: runtimeRequestId,
-                      payload: { answers: resolved },
-                    });
-                    return { answers: resolved };
-                  }).pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new EffectAcpErrors.AcpTransportError({
-                          detail: "Failed to process Grok ACP user-input event.",
-                          cause,
-                        }),
-                    ),
+                    return { accepted: true } as const;
+                  }),
+                ),
+              );
+              yield* acp.handleExtNotification(
+                "cursor/update_todos",
+                CursorUpdateTodosRequest,
+                (params) =>
+                  mapExtensionFailure(
+                    Effect.gen(function* () {
+                      yield* logNative(
+                        input.threadId,
+                        "cursor/update_todos",
+                        params,
+                        "acp.jsonrpc",
+                      );
+                      if (ctx) {
+                        yield* emitDedupedAcpPlanUpdate({
+                          provider: PROVIDER,
+                          context: {
+                            threadId: ctx.threadId,
+                            activeTurnId: ctx.activeTurnId,
+                          },
+                          stamp: yield* makeEventStamp(),
+                          planState: ctx,
+                          payload: extractTodosAsPlan(params),
+                          rawPayload: params,
+                          source: "acp.jsonrpc",
+                          method: "cursor/update_todos",
+                          encodePlanPayload: encodeJsonStringForDiagnostics,
+                          offerRuntimeEvent,
+                        });
+                      }
+                    }),
                   ),
               );
               yield* acp.handleRequestPermission((params) =>
@@ -508,6 +586,17 @@ export function makeGrokBuildAdapter(
                     params,
                     "acp.jsonrpc",
                   );
+                  if (input.runtimeMode === "full-access") {
+                    const autoApprovedOptionId = selectAutoApprovedPermissionOption(params);
+                    if (autoApprovedOptionId !== undefined) {
+                      return {
+                        outcome: {
+                          outcome: "selected" as const,
+                          optionId: autoApprovedOptionId,
+                        },
+                      };
+                    }
+                  }
                   const permissionRequest = parsePermissionRequest(params);
                   const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
                   const runtimeRequestId = RuntimeRequestId.make(requestId);
@@ -581,6 +670,14 @@ export function makeGrokBuildAdapter(
                   mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
               });
             }
+
+            yield* applyAcpInteractionMode({
+              runtime: acp,
+              runtimeMode: input.runtimeMode,
+              interactionMode: undefined,
+              mapError: ({ cause }) =>
+                mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_mode", cause),
+            });
 
             const promptCapabilities = extractGrokAcpPromptCapabilities(started.initializeResult);
             const now = yield* nowIso;
@@ -726,6 +823,14 @@ export function makeGrokBuildAdapter(
                   mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
               });
             }
+
+            yield* applyAcpInteractionMode({
+              runtime: ctx.acp,
+              runtimeMode: ctx.session.runtimeMode,
+              interactionMode: input.interactionMode,
+              mapError: ({ cause }) =>
+                mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_mode", cause),
+            });
 
             const attachments = input.attachments ?? [];
             const sessionCwd = ctx.session.cwd?.trim();
