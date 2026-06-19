@@ -120,6 +120,8 @@ describe("renderT3Webview", () => {
     expect(html).toContain("clearTimeout(pending.timeoutId)");
     expect(html).not.toContain('"bootstrapToken"');
     expect(html).toContain('"bearerToken":"bearer-token"');
+    expect(html).toContain('"label":"Local VS Code"');
+    expect(html).toContain('"httpBaseUrl":"http://127.0.0.1:49111"');
     expect(html).toContain('"environmentId":"environment-desktop"');
     expect(html).toContain('"projectId":"project-workspace"');
     expect(html).toContain('window.history.replaceState(null, document.title, "#" + initialRoute)');

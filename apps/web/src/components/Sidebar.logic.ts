@@ -91,6 +91,25 @@ export function resolveVscodeProjectScope(input: {
   };
 }
 
+export type SidebarThreadParentRelation = {
+  readonly kind: string;
+  readonly parentThreadId?: string | undefined;
+  readonly depth?: number | undefined;
+  readonly status?: string | undefined;
+  readonly [key: string]: unknown;
+};
+
+type SidebarThreadVisibilityInput = {
+  readonly id: string;
+  readonly parentRelation?: SidebarThreadParentRelation | null | undefined;
+  readonly session?: { readonly status: string } | null | undefined;
+};
+
+export type SidebarThreadRowModel<TThread> = {
+  readonly thread: TThread;
+  readonly indentLevel: number;
+};
+
 export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {
@@ -104,6 +123,18 @@ export interface ThreadStatusPill {
   colorClass: string;
   dotClass: string;
   pulse: boolean;
+}
+
+export function resolveSidebarOptionsMenuVisibility(input: { hideProjectChrome: boolean }): {
+  showButton: boolean;
+  showProjectOptions: boolean;
+  showThreadOptions: boolean;
+} {
+  return {
+    showButton: true,
+    showProjectOptions: !input.hideProjectChrome,
+    showThreadOptions: true,
+  };
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
@@ -343,6 +374,91 @@ export function getVisibleSidebarThreadIds<TThreadId>(
   );
 }
 
+function readSidebarThreadParentRelation(thread: unknown): SidebarThreadParentRelation | null {
+  if (thread === null || typeof thread !== "object" || !("parentRelation" in thread)) {
+    return null;
+  }
+  const relation = (thread as { readonly parentRelation?: unknown }).parentRelation;
+  if (relation === null || typeof relation !== "object") {
+    return null;
+  }
+  const kind = (relation as { readonly kind?: unknown }).kind;
+  if (typeof kind !== "string") {
+    return null;
+  }
+  return relation as SidebarThreadParentRelation;
+}
+
+export function isRootSidebarThread<T>(thread: T): boolean {
+  return readSidebarThreadParentRelation(thread)?.kind !== "subagent";
+}
+
+export function isContextualSubagentSidebarThread<T extends SidebarThreadVisibilityInput>(
+  thread: T,
+  activeThreadId: string | null | undefined,
+): boolean {
+  const parentRelation = readSidebarThreadParentRelation(thread);
+  if (parentRelation?.kind !== "subagent") {
+    return false;
+  }
+  if (activeThreadId !== null && activeThreadId !== undefined && thread.id === activeThreadId) {
+    return true;
+  }
+  return parentRelation.status === "running" || thread.session?.status === "running";
+}
+
+export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
+  threads: readonly T[],
+  activeThreadId: string | null | undefined,
+): SidebarThreadRowModel<T>[] {
+  const rootRows: SidebarThreadRowModel<T>[] = [];
+  const childRowsByParentId = new Map<string, SidebarThreadRowModel<T>[]>();
+  const orphanChildRows: SidebarThreadRowModel<T>[] = [];
+
+  for (const thread of threads) {
+    if (isRootSidebarThread(thread)) {
+      rootRows.push({ thread, indentLevel: 0 });
+      continue;
+    }
+    if (!isContextualSubagentSidebarThread(thread, activeThreadId)) {
+      continue;
+    }
+
+    const parentRelation = readSidebarThreadParentRelation(thread);
+    const indentLevel = Math.max(1, parentRelation?.depth ?? 1);
+    const row = { thread, indentLevel };
+    const parentThreadId = parentRelation?.parentThreadId;
+    if (!parentThreadId) {
+      orphanChildRows.push(row);
+      continue;
+    }
+    const existing = childRowsByParentId.get(parentThreadId);
+    if (existing) {
+      existing.push(row);
+    } else {
+      childRowsByParentId.set(parentThreadId, [row]);
+    }
+  }
+
+  const rows: SidebarThreadRowModel<T>[] = [];
+  const renderedChildThreadIds = new Set<string>();
+  for (const row of rootRows) {
+    rows.push(row);
+    const childRows = childRowsByParentId.get(row.thread.id) ?? [];
+    rows.push(...childRows);
+    for (const childRow of childRows) {
+      renderedChildThreadIds.add(childRow.thread.id);
+    }
+  }
+  for (const row of [...childRowsByParentId.values()].flat()) {
+    if (!renderedChildThreadIds.has(row.thread.id)) {
+      rows.push(row);
+    }
+  }
+  rows.push(...orphanChildRows);
+  return rows;
+}
+
 export function getSidebarThreadIdsToPrewarm<TThreadId>(
   visibleThreadIds: readonly TThreadId[],
   limit = SIDEBAR_THREAD_PREWARM_LIMIT,
@@ -508,6 +624,13 @@ export function resolveThreadRowClassName(input: {
   }
 
   return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
+}
+
+export function resolveThreadListClassName(input: { hideThreadGroupRail: boolean }): string {
+  return cn(
+    "mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5",
+    input.hideThreadGroupRail && "mx-0 border-l-0 px-0 sm:mx-0 sm:px-0",
+  );
 }
 
 export function resolveThreadStatusPill(input: {

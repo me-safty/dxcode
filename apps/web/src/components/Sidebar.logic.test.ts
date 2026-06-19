@@ -1,19 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
+  buildSidebarThreadRows,
   createThreadJumpHintVisibilityController,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
+  isContextualSubagentSidebarThread,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  isRootSidebarThread,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveSidebarOptionsMenuVisibility,
+  type SidebarThreadParentRelation,
+  resolveThreadListClassName,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -24,8 +30,10 @@ import {
   EnvironmentId,
   OrchestrationLatestTurn,
   ProjectId,
+  ProviderItemId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -493,6 +501,135 @@ describe("getVisibleSidebarThreadIds", () => {
   });
 });
 
+describe("isRootSidebarThread", () => {
+  it("keeps root threads and hides subagent child threads from root sidebar lists", () => {
+    expect(isRootSidebarThread(makeThread())).toBe(true);
+    expect(
+      isRootSidebarThread(
+        makeThread({
+          id: ThreadId.make("thread-subagent"),
+          parentRelation: {
+            kind: "subagent",
+            rootThreadId: ThreadId.make("thread-root"),
+            parentThreadId: ThreadId.make("thread-root"),
+            parentTurnId: TurnId.make("turn-root"),
+            parentItemId: ProviderItemId.make("item-root"),
+            parentActivitySequence: 0,
+            providerThreadId: "provider-thread-subagent",
+            titleSeed: "Inspect auth flow",
+            depth: 1,
+            startedAt: "2026-03-09T10:00:00.000Z",
+            completedAt: null,
+            status: "running",
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isContextualSubagentSidebarThread", () => {
+  it("shows subagents only when they are active or running", () => {
+    const child = makeThread({
+      id: ThreadId.make("thread-subagent"),
+      parentRelation: {
+        kind: "subagent",
+        rootThreadId: ThreadId.make("thread-root"),
+        parentThreadId: ThreadId.make("thread-root"),
+        parentTurnId: TurnId.make("turn-root"),
+        parentItemId: ProviderItemId.make("item-root"),
+        parentActivitySequence: 0,
+        providerThreadId: "provider-thread-subagent",
+        titleSeed: "Inspect auth flow",
+        depth: 1,
+        startedAt: "2026-03-09T10:00:00.000Z",
+        completedAt: "2026-03-09T10:02:00.000Z",
+        status: "completed",
+      },
+    });
+
+    expect(isContextualSubagentSidebarThread(child, null)).toBe(false);
+    expect(isContextualSubagentSidebarThread(child, child.id)).toBe(true);
+    expect(
+      isContextualSubagentSidebarThread(
+        {
+          ...child,
+          parentRelation: {
+            ...child.parentRelation!,
+            status: "running",
+          },
+        },
+        null,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("buildSidebarThreadRows", () => {
+  it("nests active and running subagents under their parent without showing completed inactive ones", () => {
+    const root = makeThread({ id: ThreadId.make("thread-root") });
+    const activeChild = makeThread({
+      id: ThreadId.make("thread-active-child"),
+      parentRelation: {
+        kind: "subagent",
+        rootThreadId: root.id,
+        parentThreadId: root.id,
+        parentTurnId: TurnId.make("turn-root"),
+        parentItemId: ProviderItemId.make("item-active"),
+        parentActivitySequence: 0,
+        providerThreadId: "provider-thread-active-child",
+        titleSeed: "Inspect auth flow",
+        depth: 1,
+        startedAt: "2026-03-09T10:00:00.000Z",
+        completedAt: "2026-03-09T10:02:00.000Z",
+        status: "completed",
+      },
+    });
+    const runningChild = makeThread({
+      id: ThreadId.make("thread-running-child"),
+      parentRelation: {
+        kind: "subagent",
+        rootThreadId: root.id,
+        parentThreadId: root.id,
+        parentTurnId: TurnId.make("turn-root"),
+        parentItemId: ProviderItemId.make("item-running"),
+        parentActivitySequence: 1,
+        providerThreadId: "provider-thread-running-child",
+        titleSeed: "Check tests",
+        depth: 1,
+        startedAt: "2026-03-09T10:01:00.000Z",
+        completedAt: null,
+        status: "running",
+      },
+    });
+    const inactiveChild = makeThread({
+      id: ThreadId.make("thread-inactive-child"),
+      parentRelation: {
+        kind: "subagent",
+        rootThreadId: root.id,
+        parentThreadId: root.id,
+        parentTurnId: TurnId.make("turn-root"),
+        parentItemId: ProviderItemId.make("item-inactive"),
+        parentActivitySequence: 2,
+        providerThreadId: "provider-thread-inactive-child",
+        titleSeed: "Summarize docs",
+        depth: 1,
+        startedAt: "2026-03-09T10:02:00.000Z",
+        completedAt: "2026-03-09T10:03:00.000Z",
+        status: "completed",
+      },
+    });
+
+    expect(
+      buildSidebarThreadRows([root, activeChild, runningChild, inactiveChild], activeChild.id),
+    ).toEqual([
+      { thread: root, indentLevel: 0 },
+      { thread: activeChild, indentLevel: 1 },
+      { thread: runningChild, indentLevel: 1 },
+    ]);
+  });
+});
+
 describe("isContextMenuPointerDown", () => {
   it("treats secondary-button presses as context menu gestures on all platforms", () => {
     expect(
@@ -652,6 +789,42 @@ describe("resolveThreadRowClassName", () => {
   });
 });
 
+describe("resolveThreadListClassName", () => {
+  it("keeps the project grouping rail for normal multi-project sidebars", () => {
+    const className = resolveThreadListClassName({ hideThreadGroupRail: false });
+
+    expect(className).not.toContain("border-l-0");
+  });
+
+  it("removes the project grouping rail for VS Code single-project sidebars", () => {
+    const className = resolveThreadListClassName({ hideThreadGroupRail: true });
+
+    expect(className).toContain("border-l-0");
+    expect(className).toContain("mx-0");
+    expect(className).toContain("px-0");
+    expect(className).toContain("sm:mx-0");
+    expect(className).toContain("sm:px-0");
+  });
+});
+
+describe("resolveSidebarOptionsMenuVisibility", () => {
+  it("keeps sidebar options visible when project chrome is shown", () => {
+    expect(resolveSidebarOptionsMenuVisibility({ hideProjectChrome: false })).toEqual({
+      showButton: true,
+      showProjectOptions: true,
+      showThreadOptions: true,
+    });
+  });
+
+  it("keeps sidebar options visible with only thread options when project chrome is hidden", () => {
+    expect(resolveSidebarOptionsMenuVisibility({ hideProjectChrome: true })).toEqual({
+      showButton: true,
+      showProjectOptions: false,
+      showThreadOptions: true,
+    });
+  });
+});
+
 describe("resolveProjectStatusIndicator", () => {
   it("returns null when no threads have a notable status", () => {
     expect(resolveProjectStatusIndicator([null, null])).toBeNull();
@@ -773,7 +946,9 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   };
 }
 
-function makeThread(overrides: Partial<Thread> = {}): Thread {
+function makeThread(
+  overrides: Partial<Thread> & { readonly parentRelation?: SidebarThreadParentRelation } = {},
+): Thread & { readonly parentRelation?: SidebarThreadParentRelation } {
   return {
     id: ThreadId.make("thread-1"),
     environmentId: localEnvironmentId,

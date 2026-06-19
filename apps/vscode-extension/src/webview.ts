@@ -24,6 +24,7 @@ export interface WebviewHostAppearance {
 }
 
 export interface WebviewBackendConnection {
+  readonly environmentId: string;
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
   readonly bearerToken: string;
@@ -80,8 +81,8 @@ export async function renderT3Webview(input: WebviewRenderInput): Promise<string
   ].join("; ");
   const bridgeScript = makeBridgeScript({
     bootstrap: {
-      environmentId: input.connection.environmentId,
       label: "Local VS Code",
+      environmentId: input.connection.environmentId,
       httpBaseUrl: input.connection.httpBaseUrl,
       wsBaseUrl: input.connection.wsBaseUrl,
       bearerToken: input.connection.bearerToken,

@@ -27,6 +27,25 @@ describe("desktop primary auth", () => {
     expect(getLocalEnvironmentBearerToken).toHaveBeenCalledTimes(1);
   });
 
+  it("uses a host-injected bootstrap bearer token before asking the desktop bridge", async () => {
+    const getLocalEnvironmentBearerToken = vi.fn().mockResolvedValue("desktop-bearer-token");
+    window.t3HostBridge = {
+      getLocalEnvironmentBootstrap: () => ({
+        environmentId: "environment-local" as never,
+        label: "VS Code workspace",
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+        bearerToken: "host-bearer-token",
+      }),
+    };
+    window.desktopBridge = {
+      getLocalEnvironmentBearerToken,
+    } as unknown as DesktopBridge;
+
+    await expect(readDesktopPrimaryBearerToken()).resolves.toBe("host-bearer-token");
+    expect(getLocalEnvironmentBearerToken).not.toHaveBeenCalled();
+  });
+
   it("does not require desktop auth in a browser", async () => {
     await expect(readDesktopPrimaryBearerToken()).resolves.toBeNull();
   });

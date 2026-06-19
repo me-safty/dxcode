@@ -34,8 +34,11 @@ import * as Stream from "effect/Stream";
 
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
+import {
+  getHostBearerToken,
+  getHostLocalEnvironmentBootstrap,
+} from "../environments/primary/hostBootstrap";
 import { readPrimaryEnvironmentTarget } from "../environments/primary/target";
-import { getHostBearerToken } from "../environments/primary/hostBootstrap";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -272,9 +275,31 @@ const capabilitiesLayer = Layer.effectContext(
   }),
 );
 
+function readHostPrimaryConnectionRegistration(): PrimaryConnectionRegistration | null {
+  const bootstrap = getHostLocalEnvironmentBootstrap();
+  const bearerToken = getHostBearerToken();
+  if (!bootstrap?.environmentId || !bootstrap.httpBaseUrl || !bootstrap.wsBaseUrl || !bearerToken) {
+    return null;
+  }
+
+  return new PrimaryConnectionRegistration({
+    target: new PrimaryConnectionTarget({
+      environmentId: bootstrap.environmentId,
+      label: bootstrap.label,
+      httpBaseUrl: bootstrap.httpBaseUrl,
+      wsBaseUrl: bootstrap.wsBaseUrl,
+    }),
+  });
+}
+
 const loadPrimaryConnectionRegistration = Effect.fn(
   "web.connectionPlatform.loadPrimaryConnectionRegistration",
 )(function* () {
+  const hostRegistration = readHostPrimaryConnectionRegistration();
+  if (hostRegistration) {
+    return hostRegistration;
+  }
+
   const resolved = readPrimaryEnvironmentTarget();
   if (resolved === null) {
     return yield* new ConnectionBlockedError({
@@ -301,9 +326,10 @@ const loadPrimaryConnectionRegistration = Effect.fn(
   const descriptor = yield* fetchRemoteEnvironmentDescriptor({
     httpBaseUrl: resolved.target.httpBaseUrl,
   }).pipe(Effect.provide(primaryEnvironmentHttpLayer), Effect.mapError(mapRemoteEnvironmentError));
+  const hostEnvironmentId = getHostLocalEnvironmentBootstrap()?.environmentId;
   return new PrimaryConnectionRegistration({
     target: new PrimaryConnectionTarget({
-      environmentId: descriptor.environmentId,
+      environmentId: hostEnvironmentId ?? descriptor.environmentId,
       label: descriptor.label,
       httpBaseUrl: resolved.target.httpBaseUrl,
       wsBaseUrl: resolved.target.wsBaseUrl,
@@ -315,8 +341,13 @@ const primaryRegistrationRetrySchedule = Schedule.exponential("1 second").pipe(
   Schedule.either(Schedule.spaced("16 seconds")),
 );
 
+function hasHostPrimaryEnvironmentBootstrap(): boolean {
+  const bootstrap = getHostLocalEnvironmentBootstrap();
+  return Boolean(bootstrap?.httpBaseUrl && bootstrap.wsBaseUrl);
+}
+
 const platformConnectionSourceLayer = Layer.sync(PlatformConnectionSource, () => {
-  if (isHostedStaticApp()) {
+  if (!hasHostPrimaryEnvironmentBootstrap() && isHostedStaticApp()) {
     return PlatformConnectionSource.of({
       registrations: Stream.empty,
     });
