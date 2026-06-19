@@ -1,38 +1,9 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { WebView } from "react-native-webview";
 
 import { AppText as Text } from "../../components/AppText";
 import { LoadingStrip } from "../../components/LoadingStrip";
-import { useAssetUrl } from "../../state/assets";
-import { resolveWorkspaceFilePath } from "./filePath";
-
-export function useWorkspaceFilePreviewUrl(props: {
-  readonly cwd: string | null;
-  readonly environmentId: EnvironmentId | null;
-  readonly relativePath: string | null;
-  readonly threadId: ThreadId | null;
-}) {
-  const absolutePath = useMemo(
-    () =>
-      props.cwd !== null && props.relativePath !== null
-        ? resolveWorkspaceFilePath(props.cwd, props.relativePath)
-        : null,
-    [props.cwd, props.relativePath],
-  );
-
-  return useAssetUrl(
-    props.environmentId,
-    absolutePath !== null && props.threadId !== null
-      ? {
-          _tag: "workspace-file",
-          threadId: props.threadId,
-          path: absolutePath,
-        }
-      : null,
-  );
-}
 
 export function WorkspaceFileWebPreview(props: { readonly uri: string | null }) {
   const [loadProgress, setLoadProgress] = useState(0);

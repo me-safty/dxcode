@@ -1,3 +1,8 @@
+import {
+  isWorkspaceBrowserPreviewPath,
+  isWorkspaceImagePreviewPath,
+} from "@t3tools/shared/filePreview";
+
 export interface FileBreadcrumb {
   readonly label: string;
   readonly path: string;
@@ -83,7 +88,15 @@ export function resolveWorkspaceRelativeFilePath(
 }
 
 export function isBrowserPreviewFile(path: string): boolean {
-  return /\.(?:html?|pdf)$/i.test(path.split(/[?#]/, 1)[0] ?? "");
+  return isWorkspaceBrowserPreviewPath(path);
+}
+
+export function isImagePreviewFile(path: string): boolean {
+  return isWorkspaceImagePreviewPath(path);
+}
+
+export function isSvgImagePreviewFile(path: string): boolean {
+  return /\.svg$/i.test(path.split(/[?#]/, 1)[0] ?? "");
 }
 
 export function isMarkdownPreviewFile(path: string): boolean {

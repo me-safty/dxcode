@@ -33,8 +33,17 @@ import { ReviewHighlighterProvider } from "../review/ReviewHighlighterProvider";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { SourceFileSurface } from "./SourceFileSurface";
-import { useWorkspaceFilePreviewUrl, WorkspaceFileWebPreview } from "./WorkspaceFileWebPreview";
-import { basename, fileBreadcrumbs, isBrowserPreviewFile, isMarkdownPreviewFile } from "./filePath";
+import { WorkspaceFileImagePreview } from "./WorkspaceFileImagePreview";
+import { WorkspaceFileWebPreview } from "./WorkspaceFileWebPreview";
+import {
+  basename,
+  fileBreadcrumbs,
+  isBrowserPreviewFile,
+  isImagePreviewFile,
+  isMarkdownPreviewFile,
+  isSvgImagePreviewFile,
+} from "./filePath";
+import { useWorkspaceFileAssetUrl } from "./workspaceFileAssetUrl";
 
 type FileViewMode = "preview" | "source";
 
@@ -63,7 +72,9 @@ function normalizeRouteLine(value: string | null): number | null {
 }
 
 function defaultViewMode(path: string | null): FileViewMode {
-  return path !== null && isBrowserPreviewFile(path) ? "preview" : "source";
+  return path !== null && (isBrowserPreviewFile(path) || isImagePreviewFile(path))
+    ? "preview"
+    : "source";
 }
 
 function ModeButton(props: {
@@ -197,7 +208,7 @@ function FileBreadcrumbs(props: { readonly projectName: string; readonly relativ
 
 function FilePreviewHeader(props: {
   readonly activeMode: FileViewMode;
-  readonly canPreview: boolean;
+  readonly showModeSelector: boolean;
   readonly externalPreviewUri?: string | null;
   readonly projectName: string;
   readonly relativePath: string;
@@ -217,7 +228,7 @@ function FilePreviewHeader(props: {
           iconSize={13}
         />
       </View>
-      {props.canPreview ? (
+      {props.showModeSelector ? (
         <View className="mt-2 flex-row items-center gap-2">
           <ModeButton
             active={props.activeMode === "preview"}
@@ -258,7 +269,7 @@ function FilePreviewHeader(props: {
 
 function FileContent(props: {
   readonly activeMode: FileViewMode;
-  readonly browserPreviewUri: string | null;
+  readonly previewUri: string | null;
   readonly fileContents: string | null;
   readonly fileError: string | null;
   readonly relativePath: string;
@@ -267,9 +278,22 @@ function FileContent(props: {
 }) {
   const isMarkdown = isMarkdownPreviewFile(props.relativePath);
   const isBrowserFile = isBrowserPreviewFile(props.relativePath);
+  const isImageFile = isImagePreviewFile(props.relativePath);
+
+  if (props.activeMode === "preview" && isImageFile) {
+    if (isSvgImagePreviewFile(props.relativePath)) {
+      return <WorkspaceFileWebPreview uri={props.previewUri} />;
+    }
+    return (
+      <WorkspaceFileImagePreview
+        accessibilityLabel={basename(props.relativePath)}
+        uri={props.previewUri}
+      />
+    );
+  }
 
   if (props.activeMode === "preview" && isBrowserFile) {
-    return <WorkspaceFileWebPreview uri={props.browserPreviewUri} />;
+    return <WorkspaceFileWebPreview uri={props.previewUri} />;
   }
 
   if (props.fileError && props.fileContents === null) {
@@ -515,22 +539,27 @@ export function ThreadFileScreen() {
     readonly path: string;
     readonly mode: FileViewMode;
   } | null>(null);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const isBrowserFile = relativePath !== null && isBrowserPreviewFile(relativePath);
+  const isImageFile = relativePath !== null && isImagePreviewFile(relativePath);
   const canPreview =
-    relativePath !== null &&
-    (isMarkdownPreviewFile(relativePath) || isBrowserPreviewFile(relativePath));
+    relativePath !== null && (isMarkdownPreviewFile(relativePath) || isBrowserFile || isImageFile);
   const activeMode =
     relativePath !== null && modeOverride?.path === relativePath
       ? modeOverride.mode
       : defaultViewMode(relativePath);
   const resolvedActiveMode = canPreview ? activeMode : "source";
-  const browserPreviewPath =
-    relativePath !== null && isBrowserPreviewFile(relativePath) ? relativePath : null;
-  const browserPreviewUri = useWorkspaceFilePreviewUrl({
+  const assetPreviewPath = isBrowserFile || isImageFile ? relativePath : null;
+  const assetPreviewUri = useWorkspaceFileAssetUrl({
     cwd,
     environmentId,
-    relativePath: browserPreviewPath,
+    relativePath: assetPreviewPath,
     threadId,
   });
+  const previewUri =
+    assetPreviewUri === null || previewRevision === 0
+      ? assetPreviewUri
+      : `${assetPreviewUri}${assetPreviewUri.includes("?") ? "&" : "?"}revision=${previewRevision}`;
   const needsFileContents =
     relativePath !== null &&
     (resolvedActiveMode === "source" || isMarkdownPreviewFile(relativePath));
@@ -566,12 +595,21 @@ export function ThreadFileScreen() {
       <View className="flex-1 bg-sheet">
         <Stack.Screen options={{ title: basename(relativePath) }} />
         <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button icon="arrow.clockwise" onPress={fileQuery.refresh} />
+          <Stack.Toolbar.Button
+            icon="arrow.clockwise"
+            onPress={() => {
+              if (resolvedActiveMode === "preview" && (isBrowserFile || isImageFile)) {
+                setPreviewRevision((current) => current + 1);
+                return;
+              }
+              fileQuery.refresh();
+            }}
+          />
         </Stack.Toolbar>
         <FilePreviewHeader
           activeMode={resolvedActiveMode}
-          canPreview={canPreview}
-          externalPreviewUri={isBrowserPreviewFile(relativePath) ? browserPreviewUri : undefined}
+          showModeSelector={canPreview && !isImageFile}
+          externalPreviewUri={isBrowserFile ? assetPreviewUri : undefined}
           projectName={projectName}
           relativePath={relativePath}
           onSetMode={(mode) => {
@@ -580,7 +618,7 @@ export function ThreadFileScreen() {
         />
         <FileContent
           activeMode={resolvedActiveMode}
-          browserPreviewUri={browserPreviewUri}
+          previewUri={previewUri}
           fileContents={fileData?.contents ?? null}
           fileError={fileQuery.error}
           initialLine={targetLine}
