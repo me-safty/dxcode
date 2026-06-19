@@ -31,6 +31,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Equal from "effect/Equal";
 import * as PubSub from "effect/PubSub";
@@ -348,7 +349,7 @@ const makeServerSettings = Effect.gen(function* () {
             );
           environment.push({
             ...variable,
-            value: secret ? textDecoder.decode(secret) : "",
+            value: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
           });
         }
         providerInstances[instanceId] = {
