@@ -8,9 +8,9 @@ This tracks planned improvements to make T3 Code a stronger harness around codin
 
 | Priority | Enhancement                                       | Status      | Why It Matters                                                                                                                    |
 | -------- | ------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| P0       | Workspace identity and sidebar hierarchy          | Not started | Creates the Project -> Workspace -> Chat model that every other harness feature can attach to.                                    |
-| P0       | Workspace migration and compatibility layer       | Not started | Lets existing projects, threads, routes, and APIs keep working while workspace ownership rolls out.                               |
-| P0       | Dev/prod data isolation and feature flag rollout  | Not started | Lets the new workspace layout run in dev without risking the user's deployed/current T3 Code data.                                |
+| P0       | Workspace identity and sidebar hierarchy          | Started     | Creates the Project -> Workspace -> Chat model that every other harness feature can attach to.                                    |
+| P0       | Workspace migration and compatibility layer       | Started     | Lets existing projects, threads, routes, and APIs keep working while workspace ownership rolls out.                               |
+| P0       | Dev/prod data isolation and feature flag rollout  | Started     | Lets the new workspace layout run in dev without risking the user's deployed/current T3 Code data.                                |
 | P0       | Workspace context folder                          | Not started | Gives each workspace durable memory across turns, restarts, and provider handoffs.                                                |
 | P0       | Durable task list                                 | Not started | Gives every workspace a trustworthy task state instead of relying on the agent to update a checklist.                             |
 | P1       | Workspace setup scripts and local file copy rules | Not started | Makes workspace creation reliable by handling setup, run scripts, and `.env*` copying before agents start work.                   |
@@ -72,6 +72,12 @@ Initial implementation notes:
 - Add workspace-level new-chat creation from the sidebar before adding a larger workspace dashboard.
 - Prevent more than one active agent run per workspace until concurrent same-workspace runs are designed.
 
+Current branch status:
+
+- The workspace layout groups existing threads into generated default workspaces by worktree path, branch, or local checkout.
+- Workspace rows expand/collapse independently from the selected center chat.
+- Terminal drawer state and right-panel visibility follow the active workspace-scoped thread reference, while chat-specific diff and plan data remains attached to the selected chat.
+
 ## P0: Workspace Migration and Compatibility Layer
 
 Make the workspace rollout additive first so existing T3 Code users do not lose projects, chats, diffs, routes, or provider sessions.
@@ -122,6 +128,12 @@ Rollback and safety:
 - Keep a clear invariant: every visible chat belongs to exactly one workspace.
 - Add tests for old snapshots, new snapshots, and mixed snapshots where some threads have workspace linkage and some do not.
 
+Current branch status:
+
+- There is not yet a durable workspace table. The UI synthesizes compatible workspace groups from existing thread project, branch, worktree, and local-checkout metadata.
+- Projection and client reducer paths preserve an existing worktree identity when stale restored local metadata arrives without a worktree path.
+- Project-scoped new chat creation clears active branch/worktree context when the selected project differs from the current chat, so the draft appears under the selected project instead of the previously active workspace.
+
 ## P0: Dev/Prod Data Isolation and Feature Flag Rollout
 
 Keep the deployed/current T3 Code experience on the existing layout and data store while the dev build can run the new workspace layout safely.
@@ -167,6 +179,11 @@ The sandbox wrapper sets these defaults:
 - `T3CODE_HOME=$HOME/.t3-dev` so dev data does not touch the user's current T3 Code data.
 - `T3CODE_WORKSPACE_LAYOUT=1` so workspace-first UI work can be developed behind a flag.
 - Refuses `T3CODE_HOME=$HOME/.t3` unless `T3CODE_ALLOW_PROD_HOME=1` is set.
+
+Current branch status:
+
+- `vp run dev:sandbox` is available as the repeatable development entrypoint for the workspace layout.
+- The sandbox uses dev-only state, shifted ports, and the workspace layout flag by default.
 
 Implementation notes:
 
