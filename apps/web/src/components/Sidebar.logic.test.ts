@@ -507,6 +507,7 @@ describe("resolveSidebarNewThreadSeedContext", () => {
           branch: "feature/draft",
           worktreePath: "/repo/.t3/worktrees/draft",
           envMode: "worktree",
+          startFromOrigin: true,
         },
       }),
     ).toEqual({
@@ -548,12 +549,14 @@ describe("resolveSidebarNewThreadSeedContext", () => {
           branch: "feature/new-draft",
           worktreePath: "/repo/worktree",
           envMode: "worktree",
+          startFromOrigin: true,
         },
       }),
     ).toEqual({
       branch: "feature/new-draft",
       worktreePath: "/repo/worktree",
       envMode: "worktree",
+      startFromOrigin: true,
     });
   });
 

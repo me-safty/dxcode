@@ -207,11 +207,13 @@ export function resolveSidebarNewThreadSeedContext(input: {
     branch: string | null;
     worktreePath: string | null;
     envMode: SidebarNewThreadEnvMode;
+    startFromOrigin: boolean;
   } | null;
 }): {
   branch?: string | null;
   worktreePath?: string | null;
   envMode: SidebarNewThreadEnvMode;
+  startFromOrigin?: boolean;
 } {
   if (input.defaultEnvMode === "worktree") {
     return {
@@ -224,6 +226,7 @@ export function resolveSidebarNewThreadSeedContext(input: {
       branch: input.activeDraftThread.branch,
       worktreePath: input.activeDraftThread.worktreePath,
       envMode: input.activeDraftThread.envMode,
+      startFromOrigin: input.activeDraftThread.startFromOrigin,
     };
   }
 
