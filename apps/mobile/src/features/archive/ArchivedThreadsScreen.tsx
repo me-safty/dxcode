@@ -314,7 +314,7 @@ function ArchivedThreadRow(props: {
 function ArchiveError(props: { readonly message: string; readonly onRetry: () => void }) {
   return (
     <View className="rounded-[20px] border border-danger-border bg-danger p-4">
-      <Text className="text-sm font-t3-bold text-danger-foreground">
+      <Text className="text-base font-t3-bold text-danger-foreground">
         Could not load every archive
       </Text>
       <Text className="mt-1 text-sm leading-[18px] text-foreground-muted">{props.message}</Text>
