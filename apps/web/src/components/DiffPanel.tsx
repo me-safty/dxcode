@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { Virtualizer } from "@pierre/diffs/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -8,22 +7,15 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import {
+  CheckIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
   ChevronRightIcon,
   Columns2Icon,
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
 } from "lucide-react";
-import {
-  type WheelEvent as ReactWheelEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
@@ -46,9 +38,19 @@ import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { AnnotatableFileDiff } from "./diffs/AnnotatableFileDiff";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
+import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 
 type DiffRenderMode = "stacked" | "split";
@@ -178,10 +180,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
   }));
   const patchViewportRef = useRef<HTMLDivElement>(null);
-  const turnStripRef = useRef<HTMLDivElement>(null);
   const previousDiffOpenRef = useRef(false);
-  const [canScrollTurnStripLeft, setCanScrollTurnStripLeft] = useState(false);
-  const [canScrollTurnStripRight, setCanScrollTurnStripRight] = useState(false);
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
@@ -234,6 +233,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   );
 
   const selectedTurnId = diffSearch.diffTurnId ?? null;
+  const selectedGitScope = diffSearch.diffScope === "unstaged" ? "unstaged" : "branch";
   const selectedFilePath = selectedTurnId !== null ? (diffSearch.diffFilePath ?? null) : null;
   const selectedTurn =
     selectedTurnId === null
@@ -243,7 +243,16 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const selectedCheckpointTurnCount =
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
-  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.turnId}` : "conversation";
+  const latestTurn = orderedTurnDiffSummaries[0];
+  const selectedScopeLabel =
+    selectedTurnId === null
+      ? selectedGitScope === "unstaged"
+        ? "Unstaged"
+        : "Branch changes"
+      : selectedTurn?.turnId === latestTurn?.turnId
+        ? "Latest turn"
+        : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
+  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.turnId}` : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
@@ -253,7 +262,9 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
       : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
   const reviewSectionTitle = selectedTurn
     ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
-    : "All turns";
+    : selectedGitScope === "unstaged"
+      ? "Unstaged"
+      : "Branch changes";
   const selectedCheckpointRange = useMemo(
     () =>
       typeof selectedCheckpointTurnCount === "number"
@@ -264,57 +275,50 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         : null,
     [selectedCheckpointTurnCount],
   );
-  const conversationCheckpointTurnCount = useMemo(() => {
-    const turnCounts: Array<number> = [];
-    for (const summary of orderedTurnDiffSummaries) {
-      const value =
-        summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
-      if (typeof value === "number") {
-        turnCounts.push(value);
-      }
-    }
-    if (turnCounts.length === 0) {
-      return undefined;
-    }
-    const latest = Math.max(...turnCounts);
-    return latest > 0 ? latest : undefined;
-  }, [inferredCheckpointTurnCountByTurnId, orderedTurnDiffSummaries]);
-  const conversationCheckpointRange = useMemo(
-    () =>
-      !selectedTurn && typeof conversationCheckpointTurnCount === "number"
-        ? {
-            fromTurnCount: 0,
-            toTurnCount: conversationCheckpointTurnCount,
-          }
-        : null,
-    [conversationCheckpointTurnCount, selectedTurn],
-  );
-  const activeCheckpointRange = selectedTurn
-    ? selectedCheckpointRange
-    : conversationCheckpointRange;
-  const conversationCacheScope = useMemo(() => {
-    if (selectedTurn || orderedTurnDiffSummaries.length === 0) {
-      return null;
-    }
-    return `conversation:${orderedTurnDiffSummaries.map((summary) => summary.turnId).join(",")}`;
-  }, [orderedTurnDiffSummaries, selectedTurn]);
   const activeCheckpointDiff = useCheckpointDiff(
     {
       environmentId: activeThread?.environmentId ?? null,
       threadId: activeThreadId,
-      fromTurnCount: activeCheckpointRange?.fromTurnCount ?? null,
-      toTurnCount: activeCheckpointRange?.toTurnCount ?? null,
+      fromTurnCount: selectedCheckpointRange?.fromTurnCount ?? null,
+      toTurnCount: selectedCheckpointRange?.toTurnCount ?? null,
       ignoreWhitespace: diffIgnoreWhitespace,
-      cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : conversationCacheScope,
+      cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : null,
     },
-    { enabled: isGitRepo },
+    { enabled: isGitRepo && selectedTurn !== undefined },
   );
-  const selectedTurnCheckpointDiff = selectedTurn ? activeCheckpointDiff.data?.diff : undefined;
-  const conversationCheckpointDiff = selectedTurn ? undefined : activeCheckpointDiff.data?.diff;
-  const isLoadingCheckpointDiff = activeCheckpointDiff.isPending;
-  const checkpointDiffError = activeCheckpointDiff.error;
+  const primaryBranchDiffPreview = useEnvironmentQuery(
+    selectedTurnId === null && activeThread && activeCwd
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeThread.environmentId,
+          input: { cwd: activeCwd },
+        })
+      : null,
+  );
+  const shouldRetryBranchDiffAtEnvironmentCwd =
+    selectedTurnId === null &&
+    primaryBranchDiffPreview.error?.includes("configured workspace root") === true &&
+    serverConfig?.cwd !== undefined &&
+    serverConfig.cwd !== activeCwd;
+  const fallbackBranchDiffPreview = useEnvironmentQuery(
+    shouldRetryBranchDiffAtEnvironmentCwd && activeThread && serverConfig
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeThread.environmentId,
+          input: { cwd: serverConfig.cwd },
+        })
+      : null,
+  );
+  const branchDiffPreview = shouldRetryBranchDiffAtEnvironmentCwd
+    ? fallbackBranchDiffPreview
+    : primaryBranchDiffPreview;
+  const gitDiff = branchDiffPreview.data?.sources.find(
+    (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
+  )?.diff;
 
-  const selectedPatch = selectedTurn ? selectedTurnCheckpointDiff : conversationCheckpointDiff;
+  const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff;
+  const isLoadingSelectedPatch = selectedTurn
+    ? activeCheckpointDiff.isPending
+    : branchDiffPreview.isPending;
+  const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
   const renderablePatch = useMemo(
@@ -395,176 +399,77 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
       },
     });
   };
-  const selectWholeConversation = () => {
+  const selectGitScope = (scope: "branch" | "unstaged") => {
     if (!activeThread) return;
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
+        return { ...rest, diff: "1", ...(scope === "unstaged" ? { diffScope: scope } : {}) };
       },
     });
   };
-  const updateTurnStripScrollState = useCallback(() => {
-    const element = turnStripRef.current;
-    if (!element) {
-      setCanScrollTurnStripLeft(false);
-      setCanScrollTurnStripRight(false);
-      return;
-    }
-
-    const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
-    setCanScrollTurnStripLeft(element.scrollLeft > 4);
-    setCanScrollTurnStripRight(element.scrollLeft < maxScrollLeft - 4);
-  }, []);
-  const scrollTurnStripBy = useCallback((offset: number) => {
-    const element = turnStripRef.current;
-    if (!element) return;
-    element.scrollBy({ left: offset, behavior: "smooth" });
-  }, []);
-  const onTurnStripWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    const element = turnStripRef.current;
-    if (!element) return;
-    if (element.scrollWidth <= element.clientWidth + 1) return;
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-
-    event.preventDefault();
-    element.scrollBy({ left: event.deltaY, behavior: "auto" });
-  }, []);
-
-  useEffect(() => {
-    const element = turnStripRef.current;
-    if (!element) return;
-
-    const frameId = window.requestAnimationFrame(() => updateTurnStripScrollState());
-    const onScroll = () => updateTurnStripScrollState();
-
-    element.addEventListener("scroll", onScroll, { passive: true });
-
-    const resizeObserver = new ResizeObserver(() => updateTurnStripScrollState());
-    resizeObserver.observe(element);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      element.removeEventListener("scroll", onScroll);
-      resizeObserver.disconnect();
-    };
-  }, [updateTurnStripScrollState]);
-
-  useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => updateTurnStripScrollState());
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [orderedTurnDiffSummaries, selectedTurnId, updateTurnStripScrollState]);
-
-  useEffect(() => {
-    const element = turnStripRef.current;
-    if (!element) return;
-
-    const selectedChip = element.querySelector<HTMLElement>("[data-turn-chip-selected='true']");
-    selectedChip?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-  }, [selectedTurn?.turnId, selectedTurnId]);
 
   const headerRow = (
     <>
-      <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
-        <button
-          type="button"
-          className={cn(
-            "absolute left-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
-            canScrollTurnStripLeft
-              ? "border-border/70 hover:border-border hover:text-foreground"
-              : "cursor-not-allowed border-border/40 text-muted-foreground/40",
-          )}
-          onClick={() => scrollTurnStripBy(-180)}
-          disabled={!canScrollTurnStripLeft}
-          aria-label="Scroll turn list left"
-        >
-          <ChevronLeftIcon className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "absolute right-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
-            canScrollTurnStripRight
-              ? "border-border/70 hover:border-border hover:text-foreground"
-              : "cursor-not-allowed border-border/40 text-muted-foreground/40",
-          )}
-          onClick={() => scrollTurnStripBy(180)}
-          disabled={!canScrollTurnStripRight}
-          aria-label="Scroll turn list right"
-        >
-          <ChevronRightIcon className="size-3.5" />
-        </button>
-        <div
-          ref={turnStripRef}
-          className="turn-chip-strip flex gap-1 overflow-x-auto px-8 py-0.5"
-          style={
-            canScrollTurnStripLeft || canScrollTurnStripRight
-              ? {
-                  maskImage: `linear-gradient(to right, ${canScrollTurnStripLeft ? "transparent 24px, black 72px" : "black"}, ${canScrollTurnStripRight ? "black calc(100% - 72px), transparent calc(100% - 24px)" : "black"})`,
-                }
-              : undefined
-          }
-          onWheel={onTurnStripWheel}
-        >
-          <button
-            type="button"
-            className="shrink-0 rounded-md"
-            onClick={selectWholeConversation}
-            data-turn-chip-selected={selectedTurnId === null}
+      <div className="min-w-0 flex-1 [-webkit-app-region:no-drag]">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg bg-muted/70 px-3 text-sm font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`Diff scope: ${selectedScopeLabel}`}
           >
-            <div
-              className={cn(
-                "rounded-md border px-2 py-1 text-left transition-colors",
-                selectedTurnId === null
-                  ? "border-border bg-accent text-accent-foreground"
-                  : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+            <span className="truncate">{selectedScopeLabel}</span>
+            <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-60">
+            <DropdownMenuItem onClick={() => selectGitScope("unstaged")}>
+              <span>Unstaged</span>
+              {selectedTurnId === null && selectedGitScope === "unstaged" && (
+                <CheckIcon className="ml-auto" />
               )}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => selectGitScope("branch")}>
+              <span>Branch changes</span>
+              {selectedTurnId === null && selectedGitScope === "branch" && (
+                <CheckIcon className="ml-auto" />
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                if (latestTurn) selectTurn(latestTurn.turnId);
+              }}
             >
-              <div className="text-[10px] leading-tight font-medium">All turns</div>
-            </div>
-          </button>
-          {orderedTurnDiffSummaries.map((summary) => (
-            <Tooltip key={summary.turnId}>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label={summary.turnId}
-                    className="shrink-0 rounded-md"
-                    onClick={() => selectTurn(summary.turnId)}
-                    data-turn-chip-selected={summary.turnId === selectedTurn?.turnId}
-                  />
-                }
-              >
-                <div
-                  className={cn(
-                    "rounded-md border px-2 py-1 text-left transition-colors",
-                    summary.turnId === selectedTurn?.turnId
-                      ? "border-border bg-accent text-accent-foreground"
-                      : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
-                  )}
-                >
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] leading-tight font-medium">
-                      Turn{" "}
-                      {summary.checkpointTurnCount ??
-                        inferredCheckpointTurnCountByTurnId[summary.turnId] ??
-                        "?"}
-                    </span>
-                    <span className="text-[9px] leading-tight opacity-70 tabular-nums">
-                      {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
-                    </span>
-                  </div>
-                </div>
-              </TooltipTrigger>
-              <TooltipPopup side="top">{summary.turnId}</TooltipPopup>
-            </Tooltip>
-          ))}
-        </div>
+              <span>Latest turn</span>
+              {selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId && (
+                <CheckIcon className="ml-auto" />
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-64">
+                {orderedTurnDiffSummaries.map((summary) => {
+                  const turnCount =
+                    summary.checkpointTurnCount ??
+                    inferredCheckpointTurnCountByTurnId[summary.turnId] ??
+                    "?";
+                  return (
+                    <DropdownMenuItem
+                      key={summary.turnId}
+                      onClick={() => selectTurn(summary.turnId)}
+                    >
+                      <span>Turn {turnCount}</span>
+                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                        {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
+                      </span>
+                      {summary.turnId === selectedTurn?.turnId && <CheckIcon className="ml-1" />}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
         <ToggleGroup
@@ -644,7 +549,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Turn diffs are unavailable because this project is not a git repository.
         </div>
-      ) : orderedTurnDiffSummaries.length === 0 ? (
+      ) : selectedTurnId !== null && orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           No completed turns yet.
         </div>
@@ -654,14 +559,22 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
             ref={patchViewportRef}
             className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden"
           >
-            {checkpointDiffError && !renderablePatch && (
+            {selectedPatchError && !renderablePatch && (
               <div className="px-3">
-                <p className="mb-2 text-[11px] text-red-500/80">{checkpointDiffError}</p>
+                <p className="mb-2 text-[11px] text-red-500/80">{selectedPatchError}</p>
               </div>
             )}
             {!renderablePatch ? (
-              isLoadingCheckpointDiff ? (
-                <DiffPanelLoadingState label="Loading checkpoint diff..." />
+              isLoadingSelectedPatch ? (
+                <DiffPanelLoadingState
+                  label={
+                    selectedTurn
+                      ? "Loading checkpoint diff..."
+                      : selectedGitScope === "unstaged"
+                        ? "Loading unstaged diff..."
+                        : "Loading branch diff..."
+                  }
+                />
               ) : (
                 <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
                   <p>
@@ -672,12 +585,9 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                 </div>
               )
             ) : renderablePatch.kind === "files" ? (
-              <Virtualizer
+              <div
+                key={collapseScopeKey ?? reviewSectionId}
                 className="diff-render-surface h-full min-h-0 overflow-auto px-2 pb-2"
-                config={{
-                  overscrollSize: 600,
-                  intersectionObserverMargin: 1200,
-                }}
               >
                 {renderableFiles.map((fileDiff) => {
                   const filePath = resolveFileDiffPath(fileDiff);
@@ -751,7 +661,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                     </div>
                   );
                 })}
-              </Virtualizer>
+              </div>
             ) : (
               <div className="h-full overflow-auto p-2">
                 <div className="space-y-2">

@@ -2,6 +2,7 @@ import { TurnId } from "@t3tools/contracts";
 
 export interface DiffRouteSearch {
   diff?: "1" | undefined;
+  diffScope?: "unstaged" | undefined;
   diffTurnId?: TurnId | undefined;
   diffFilePath?: string | undefined;
 }
@@ -20,19 +21,27 @@ function normalizeSearchString(value: unknown): string | undefined {
 
 export function stripDiffSearchParams<T extends Record<string, unknown>>(
   params: T,
-): Omit<T, "diff" | "diffTurnId" | "diffFilePath"> {
-  const { diff: _diff, diffTurnId: _diffTurnId, diffFilePath: _diffFilePath, ...rest } = params;
-  return rest as Omit<T, "diff" | "diffTurnId" | "diffFilePath">;
+): Omit<T, "diff" | "diffScope" | "diffTurnId" | "diffFilePath"> {
+  const {
+    diff: _diff,
+    diffScope: _diffScope,
+    diffTurnId: _diffTurnId,
+    diffFilePath: _diffFilePath,
+    ...rest
+  } = params;
+  return rest as Omit<T, "diff" | "diffScope" | "diffTurnId" | "diffFilePath">;
 }
 
 export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRouteSearch {
   const diff = isDiffOpenValue(search.diff) ? "1" : undefined;
   const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
   const diffTurnId = diffTurnIdRaw ? TurnId.make(diffTurnIdRaw) : undefined;
+  const diffScope = diff && !diffTurnId && search.diffScope === "unstaged" ? "unstaged" : undefined;
   const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
 
   return {
     ...(diff ? { diff } : {}),
+    ...(diffScope ? { diffScope } : {}),
     ...(diffTurnId ? { diffTurnId } : {}),
     ...(diffFilePath ? { diffFilePath } : {}),
   };

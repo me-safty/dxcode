@@ -60,6 +60,26 @@ describe("parseDiffRouteSearch", () => {
     });
   });
 
+  it("parses the unstaged diff scope without a selected turn", () => {
+    expect(parseDiffRouteSearch({ diff: "1", diffScope: "unstaged" })).toEqual({
+      diff: "1",
+      diffScope: "unstaged",
+    });
+  });
+
+  it("drops the git diff scope when a turn is selected", () => {
+    expect(
+      parseDiffRouteSearch({ diff: "1", diffScope: "unstaged", diffTurnId: "turn-1" }),
+    ).toEqual({
+      diff: "1",
+      diffTurnId: "turn-1",
+    });
+  });
+
+  it("drops unknown diff scopes", () => {
+    expect(parseDiffRouteSearch({ diff: "1", diffScope: "staged" })).toEqual({ diff: "1" });
+  });
+
   it("normalizes whitespace-only values", () => {
     const parsed = parseDiffRouteSearch({
       diff: "1",
