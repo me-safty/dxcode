@@ -150,7 +150,7 @@ describe("nativeMarkdownTextRuns", () => {
 });
 
 describe("nativeMarkdownDocumentRuns", () => {
-  it("decorates known skill references as selectable skill chips", () => {
+  it("decorates known skill references as selectable skill links", () => {
     const node: MarkdownNode = {
       type: "document",
       children: [

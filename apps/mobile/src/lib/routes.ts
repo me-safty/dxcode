@@ -42,9 +42,15 @@ export function buildThreadFilesRoutePath(
     return basePath;
   }
 
+  const pathSegments = relativePath.split("/").filter((segment) => segment.length > 0);
+  if (pathSegments.length === 0) {
+    return basePath;
+  }
+
+  const encodedPath = pathSegments.map(encodeURIComponent).join("/");
   const lineParam =
-    Number.isFinite(line) && Number(line) > 0 ? `&line=${Math.floor(Number(line))}` : "";
-  return `${basePath}?path=${encodeURIComponent(relativePath)}${lineParam}`;
+    Number.isFinite(line) && Number(line) > 0 ? `?line=${Math.floor(Number(line))}` : "";
+  return `${basePath}/${encodedPath}${lineParam}`;
 }
 
 export function buildThreadTerminalRoutePath(
@@ -93,21 +99,27 @@ export function buildThreadFilesNavigation(
 ): Href {
   const environmentId = String(input.environmentId);
   const threadId = String("threadId" in input ? input.threadId : input.id);
+  const path = relativePath?.split("/").filter((segment) => segment.length > 0) ?? [];
 
-  const params: { environmentId: string; threadId: string; path?: string; line?: string } = {
-    environmentId,
-    threadId,
-  };
-
-  if (relativePath != null && relativePath !== "") {
-    params.path = relativePath;
+  if (path.length === 0) {
+    return {
+      pathname: "/threads/[environmentId]/[threadId]/files",
+      params: { environmentId, threadId },
+    };
   }
+
+  const params: {
+    environmentId: string;
+    threadId: string;
+    path: string[];
+    line?: string;
+  } = { environmentId, threadId, path };
   if (Number.isFinite(line) && Number(line) > 0) {
     params.line = String(Math.floor(Number(line)));
   }
 
   return {
-    pathname: "/threads/[environmentId]/[threadId]/files",
+    pathname: "/threads/[environmentId]/[threadId]/files/[...path]",
     params,
   };
 }

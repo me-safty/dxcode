@@ -264,7 +264,6 @@ function useReviewCommentColors(): ReviewCommentColors {
 function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSets {
   const colorScheme = useColorScheme();
   const colors = MARKDOWN_COLORS[colorScheme === "dark" ? "dark" : "light"];
-  const inlineSkillBackground = String(useThemeColor("--color-inline-skill-background"));
   const inlineSkillForeground = String(useThemeColor("--color-inline-skill-foreground"));
 
   return useMemo(() => {
@@ -601,8 +600,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           codeBackgroundColor: markdownUserCodeBg,
           codeBlockBackgroundColor: markdownUserFenceBg,
           fileTextColor: "#ffffff",
-          skillBackgroundColor: "rgba(217, 70, 239, 0.24)",
-          skillTextColor: "#ffffff",
+          skillTextColor: "#f0abfc",
           quoteMarkerColor: markdownUserBodyColor,
           dividerColor: markdownUserBodyColor,
           fontSize: 15,
@@ -632,7 +630,6 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           codeBackgroundColor: markdownCodeBg,
           codeBlockBackgroundColor: markdownCodeBg,
           fileTextColor: markdownCodeText,
-          skillBackgroundColor: inlineSkillBackground,
           skillTextColor: inlineSkillForeground,
           quoteMarkerColor: markdownBlockquoteBorder,
           dividerColor: markdownHrColor,
@@ -644,7 +641,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         },
       },
     };
-  }, [colors, inlineSkillBackground, inlineSkillForeground, onLinkPress]);
+  }, [colors, inlineSkillForeground, onLinkPress]);
 }
 
 function renderFeedEntry(

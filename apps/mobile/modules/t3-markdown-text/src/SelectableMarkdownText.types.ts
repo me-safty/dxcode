@@ -8,7 +8,6 @@ export interface NativeMarkdownTextStyle {
   readonly codeBackgroundColor: string;
   readonly codeBlockBackgroundColor: string;
   readonly fileTextColor: string;
-  readonly skillBackgroundColor: string;
   readonly skillTextColor: string;
   readonly quoteMarkerColor: string;
   readonly dividerColor: string;

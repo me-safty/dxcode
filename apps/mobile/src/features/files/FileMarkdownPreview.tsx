@@ -120,7 +120,6 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
         codeBackgroundColor: codeBackground,
         codeBlockBackgroundColor: codeBackground,
         fileTextColor: codeText,
-        skillBackgroundColor: codeBackground,
         skillTextColor: codeText,
         quoteMarkerColor: blockquoteBorder,
         dividerColor: horizontalRule,

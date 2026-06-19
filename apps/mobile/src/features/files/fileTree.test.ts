@@ -64,6 +64,43 @@ describe("mobile file tree helpers", () => {
     ).toEqual(["src", "src/components", "src/components/App.tsx"]);
   });
 
+  it("supports fuzzy, whitespace-separated path queries", () => {
+    const tree = buildFileTree([
+      {
+        kind: "file",
+        path: ".plans/19-version-control-phase-1-vcs-driver-foundation.md",
+      },
+      {
+        kind: "file",
+        path: ".repos/alchemy-effect/examples/aws-lambda/src/JobNotifications.ts",
+      },
+      { kind: "directory", path: "apps/web/src/components/chat" },
+      { kind: "file", path: "apps/web/src/components/chat/ChatHeader.test.ts" },
+      { kind: "file", path: "apps/web/src/components/chat/ChatHeader.tsx" },
+      { kind: "file", path: "apps/web/src/components/chat/Composer.tsx" },
+    ]);
+
+    const expectedPaths = [
+      "apps",
+      "apps/web",
+      "apps/web/src",
+      "apps/web/src/components",
+      "apps/web/src/components/chat",
+      "apps/web/src/components/chat/ChatHeader.test.ts",
+      "apps/web/src/components/chat/ChatHeader.tsx",
+    ];
+
+    for (const searchQuery of ["chat hea", "cht hdr"]) {
+      expect(
+        flattenFileTree({
+          nodes: tree,
+          expanded: new Set(),
+          searchQuery,
+        }).map((item) => item.node.path),
+      ).toEqual(expectedPaths);
+    }
+  });
+
   it("expands top-level directories by default", () => {
     const tree = buildFileTree(entries);
 

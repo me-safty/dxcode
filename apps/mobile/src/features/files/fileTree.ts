@@ -1,10 +1,13 @@
 import type { ProjectEntry } from "@t3tools/contracts";
+import { normalizeSearchQuery, scoreQueryMatch } from "@t3tools/shared/searchRanking";
 
 export interface FileTreeNode {
   readonly path: string;
   readonly name: string;
   readonly kind: ProjectEntry["kind"];
   readonly children: ReadonlyArray<FileTreeNode>;
+  readonly searchSegments: ReadonlyArray<string>;
+  readonly searchWords: ReadonlyArray<string>;
 }
 
 export interface VisibleFileTreeNode {
@@ -32,12 +35,42 @@ function createMutableNode(
   };
 }
 
+function splitSearchWords(value: string): ReadonlyArray<string> {
+  return value
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+}
+
+function buildNodeSearchTerms(path: string): {
+  readonly segments: ReadonlyArray<string>;
+  readonly words: ReadonlyArray<string>;
+} {
+  const segments: string[] = [];
+  const words: string[] = [];
+
+  for (const segment of path.split("/")) {
+    if (!segment) {
+      continue;
+    }
+    segments.push(segment.toLowerCase());
+    words.push(...splitSearchWords(segment));
+  }
+
+  return { segments, words };
+}
+
 function freezeNode(node: MutableFileTreeNode): FileTreeNode {
+  const searchTerms = buildNodeSearchTerms(node.path);
   return {
     path: node.path,
     name: node.name,
     kind: node.kind,
     children: [...node.children.values()].sort(compareNodes).map(freezeNode),
+    searchSegments: searchTerms.segments,
+    searchWords: searchTerms.words,
   };
 }
 
@@ -106,8 +139,27 @@ export function defaultExpandedTreePaths(nodes: ReadonlyArray<FileTreeNode>): Re
   return expanded;
 }
 
-function nodeMatchesSearch(node: FileTreeNode, query: string): boolean {
-  return node.name.toLowerCase().includes(query) || node.path.toLowerCase().includes(query);
+function valueMatchesSearchToken(value: string, token: string, fuzzy: boolean): boolean {
+  return (
+    scoreQueryMatch({
+      value,
+      query: token,
+      exactBase: 0,
+      prefixBase: 2,
+      boundaryBase: 4,
+      includesBase: 6,
+      ...(fuzzy ? { fuzzyBase: 100 } : {}),
+      boundaryMarkers: ["/", "-", "_", "."],
+    }) !== null
+  );
+}
+
+function nodeMatchesSearch(node: FileTreeNode, tokens: ReadonlyArray<string>): boolean {
+  return tokens.every(
+    (token) =>
+      node.searchSegments.some((segment) => valueMatchesSearchToken(segment, token, false)) ||
+      node.searchWords.some((word) => valueMatchesSearchToken(word, token, true)),
+  );
 }
 
 function flattenNode(
@@ -115,21 +167,22 @@ function flattenNode(
   node: FileTreeNode,
   depth: number,
   expanded: ReadonlySet<string>,
-  normalizedSearch: string,
+  searchTokens: ReadonlyArray<string>,
 ): boolean {
-  const matches = normalizedSearch.length > 0 && nodeMatchesSearch(node, normalizedSearch);
+  const isSearching = searchTokens.length > 0;
+  const matches = isSearching && nodeMatchesSearch(node, searchTokens);
   let descendantMatches = false;
   const childOutput: VisibleFileTreeNode[] = [];
 
-  if (node.kind === "directory" && (expanded.has(node.path) || normalizedSearch.length > 0)) {
+  if (node.kind === "directory" && (expanded.has(node.path) || isSearching)) {
     for (const child of node.children) {
-      if (flattenNode(childOutput, child, depth + 1, expanded, normalizedSearch)) {
+      if (flattenNode(childOutput, child, depth + 1, expanded, searchTokens)) {
         descendantMatches = true;
       }
     }
   }
 
-  const visible = normalizedSearch.length === 0 || matches || descendantMatches;
+  const visible = !isSearching || matches || descendantMatches;
   if (!visible) {
     return false;
   }
@@ -145,9 +198,10 @@ export function flattenFileTree(input: {
   readonly searchQuery?: string;
 }): ReadonlyArray<VisibleFileTreeNode> {
   const output: VisibleFileTreeNode[] = [];
-  const normalizedSearch = input.searchQuery?.trim().toLowerCase() ?? "";
+  const normalizedSearch = normalizeSearchQuery(input.searchQuery ?? "");
+  const searchTokens = normalizedSearch.split(/[\s/\\._-]+/).filter(Boolean);
   for (const node of input.nodes) {
-    flattenNode(output, node, 0, input.expanded, normalizedSearch);
+    flattenNode(output, node, 0, input.expanded, searchTokens);
   }
   return output;
 }

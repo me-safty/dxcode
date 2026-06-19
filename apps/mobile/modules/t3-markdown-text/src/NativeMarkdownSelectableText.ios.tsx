@@ -6,8 +6,7 @@ import type { NativeMarkdownTextRun } from "./nativeMarkdownText";
 import type { NativeMarkdownTextStyle } from "./SelectableMarkdownText.types";
 
 const EXTERNAL_LINK_PREFIX = "◉ ";
-const FILE_LINK_PREFIX = "\uFFFC\u00A0";
-const CHIP_SUFFIX = "\u00A0";
+const INLINE_ATTACHMENT_PREFIX = "\uFFFC\u00A0";
 const SKILL_ICON_PLACEHOLDER = "\uFFFC";
 const PARAGRAPH_STYLE_ENCODING_OFFSET = 1000;
 
@@ -71,10 +70,9 @@ function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle
                         : run.bold
                           ? textStyle.strongColor
                           : textStyle.color,
-    fontFamily: isFile
-      ? textStyle.boldFontFamily
-      : isSkill
-        ? "DMSans_500Medium"
+    fontFamily:
+      isFile || isSkill
+        ? textStyle.boldFontFamily
         : run.code || isCodeBlock
           ? "ui-monospace"
           : isHeading
@@ -91,7 +89,7 @@ function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle
             ? headingFontSize
             : run.role === "code-language"
               ? 11
-              : run.code || isSkill || isCodeBlock
+              : run.code || isCodeBlock
                 ? Math.max(12, textStyle.fontSize - 2)
                 : textStyle.fontSize,
     lineHeight:
@@ -105,13 +103,9 @@ function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle
               ? 18
               : textStyle.lineHeight,
     fontStyle: run.italic ? "italic" : "normal",
-    fontWeight: isHeading || run.bold || isFile ? "700" : isSkill ? "500" : "400",
+    fontWeight: isHeading || run.bold || isFile || isSkill ? "700" : "400",
     textDecorationLine,
-    backgroundColor: isCodeBlock
-      ? textStyle.codeBlockBackgroundColor
-      : isSkill
-        ? textStyle.skillBackgroundColor
-        : undefined,
+    backgroundColor: isCodeBlock ? textStyle.codeBlockBackgroundColor : undefined,
     ...(hasParagraphStyle
       ? {
           shadowColor: "transparent",
@@ -140,9 +134,9 @@ export function NativeMarkdownSelectableText(props: {
 
     let text = run.text;
     if (run.fileIcon) {
-      text = `${FILE_LINK_PREFIX}${text}`;
+      text = `${INLINE_ATTACHMENT_PREFIX}${text}`;
     } else if (run.skillName && run.skillLabel) {
-      text = `\u00A0${SKILL_ICON_PLACEHOLDER}\u00A0${run.skillLabel}${CHIP_SUFFIX}`;
+      text = `${SKILL_ICON_PLACEHOLDER}\u00A0${run.skillLabel}`;
     } else if (run.externalHost && run.href && !prefixedExternalLinks.has(run.href)) {
       prefixedExternalLinks.add(run.href);
       text = `${EXTERNAL_LINK_PREFIX}${text}`;
@@ -163,7 +157,6 @@ export function NativeMarkdownSelectableText(props: {
     props.textStyle.codeBackgroundColor,
     props.textStyle.codeBlockBackgroundColor,
     props.textStyle.fileTextColor,
-    props.textStyle.skillBackgroundColor,
     props.textStyle.skillTextColor,
     props.textStyle.quoteMarkerColor,
     props.textStyle.dividerColor,
@@ -192,7 +185,7 @@ export function NativeMarkdownSelectableText(props: {
               run.fileIcon
                 ? `t3-file:${Image.resolveAssetSource(markdownFileIconSource(run.fileIcon)).uri}`
                 : run.skillName
-                  ? "t3-chip-skill:sf:cube"
+                  ? "t3-skill:sf:cube"
                   : undefined
             }
             style={runStyle(run, props.textStyle)}

@@ -1,34 +1,44 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Pressable, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { WebView } from "react-native-webview";
 
 import { AppText as Text } from "../../components/AppText";
-import { useThemeColor } from "../../lib/useThemeColor";
+import { LoadingStrip } from "../../components/LoadingStrip";
 import { useAssetUrl } from "../../state/assets";
 import { resolveWorkspaceFilePath } from "./filePath";
 
-export function WorkspaceFileWebPreview(props: {
-  readonly cwd: string;
-  readonly environmentId: EnvironmentId;
-  readonly relativePath: string;
-  readonly threadId: ThreadId;
+export function useWorkspaceFilePreviewUrl(props: {
+  readonly cwd: string | null;
+  readonly environmentId: EnvironmentId | null;
+  readonly relativePath: string | null;
+  readonly threadId: ThreadId | null;
 }) {
-  const [loadProgress, setLoadProgress] = useState(0);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const iconColor = String(useThemeColor("--color-icon-muted"));
   const absolutePath = useMemo(
-    () => resolveWorkspaceFilePath(props.cwd, props.relativePath),
+    () =>
+      props.cwd !== null && props.relativePath !== null
+        ? resolveWorkspaceFilePath(props.cwd, props.relativePath)
+        : null,
     [props.cwd, props.relativePath],
   );
-  const uri = useAssetUrl(props.environmentId, {
-    _tag: "workspace-file",
-    threadId: props.threadId,
-    path: absolutePath,
-  });
 
-  if (uri === null) {
+  return useAssetUrl(
+    props.environmentId,
+    absolutePath !== null && props.threadId !== null
+      ? {
+          _tag: "workspace-file",
+          threadId: props.threadId,
+          path: absolutePath,
+        }
+      : null,
+  );
+}
+
+export function WorkspaceFileWebPreview(props: { readonly uri: string | null }) {
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  if (props.uri === null) {
     return (
       <View className="flex-1 items-center justify-center gap-3 bg-card px-6">
         <ActivityIndicator />
@@ -38,26 +48,8 @@ export function WorkspaceFileWebPreview(props: {
   }
 
   return (
-    <View className="flex-1 bg-card">
-      <View className="h-9 flex-row items-center gap-2 border-b border-border bg-card px-3">
-        <View className="h-1.5 flex-1 overflow-hidden rounded-full bg-subtle">
-          <View
-            className="h-full rounded-full bg-foreground-muted"
-            style={{ width: `${Math.max(6, Math.round(loadProgress * 100))}%` }}
-          />
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open preview externally"
-          hitSlop={8}
-          className="h-7 w-7 items-center justify-center rounded-full bg-subtle"
-          onPress={() => {
-            void Linking.openURL(uri);
-          }}
-        >
-          <SymbolView name="safari" size={14} tintColor={iconColor} type="monochrome" />
-        </Pressable>
-      </View>
+    <View className="relative flex-1 bg-card">
+      {loadProgress > 0 && loadProgress < 1 ? <LoadingStrip progress={loadProgress} /> : null}
       {loadError ? (
         <View className="border-b border-border bg-card px-4 py-2">
           <Text className="text-[12px] font-t3-bold text-foreground">Preview failed</Text>
@@ -67,7 +59,7 @@ export function WorkspaceFileWebPreview(props: {
         </View>
       ) : null}
       <WebView
-        source={{ uri }}
+        source={{ uri: props.uri }}
         originWhitelist={["*"]}
         allowsBackForwardNavigationGestures
         allowsFullscreenVideo
@@ -77,9 +69,14 @@ export function WorkspaceFileWebPreview(props: {
           setLoadProgress(event.nativeEvent.progress);
         }}
         onLoadStart={() => {
+          setLoadProgress(0.05);
           setLoadError(null);
         }}
+        onLoadEnd={() => {
+          setLoadProgress(0);
+        }}
         onError={(event) => {
+          setLoadProgress(0);
           setLoadError(event.nativeEvent.description || "The file could not be rendered.");
         }}
         renderLoading={() => (

@@ -1,14 +1,7 @@
 import type { ProjectEntry } from "@t3tools/contracts";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
@@ -16,7 +9,6 @@ import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import {
   buildFileTree,
-  countFileNodes,
   defaultExpandedTreePaths,
   flattenFileTree,
   type VisibleFileTreeNode,
@@ -54,7 +46,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
         props.onPressFile(node.path);
       }}
       className={cn(
-        "mx-2 min-h-[42px] flex-row items-center gap-2 rounded-[12px] px-2 active:opacity-70",
+        "mx-2 min-h-[42px] flex-row items-center gap-2 rounded-[12px] px-2 active:bg-subtle",
         selected && "bg-subtle-strong",
       )}
       style={{ paddingLeft: 8 + depth * 18 }}
@@ -92,28 +84,24 @@ export function FileTreeBrowser(props: {
   readonly entries: ReadonlyArray<ProjectEntry>;
   readonly error: string | null;
   readonly isPending: boolean;
-  readonly projectName: string;
+  readonly searchQuery: string;
   readonly selectedPath: string | null;
-  readonly truncated: boolean;
   readonly onRefresh: () => void;
   readonly onSelectFile: (path: string) => void;
 }) {
-  const [searchQuery, setSearchQuery] = useState("");
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const iconColor = String(useThemeColor("--color-icon-muted"));
-  const placeholderColor = String(useThemeColor("--color-placeholder"));
 
   const tree = useMemo(() => buildFileTree(props.entries), [props.entries]);
-  const fileCount = useMemo(() => countFileNodes(tree), [tree]);
   const defaultExpanded = useMemo(() => defaultExpandedTreePaths(tree), [tree]);
   const visibleNodes = useMemo(
     () =>
       flattenFileTree({
         nodes: tree,
         expanded: expandedPaths,
-        searchQuery,
+        searchQuery: props.searchQuery,
       }),
-    [expandedPaths, searchQuery, tree],
+    [expandedPaths, props.searchQuery, tree],
   );
 
   useEffect(() => {
@@ -152,44 +140,6 @@ export function FileTreeBrowser(props: {
 
   return (
     <View className="flex-1 bg-sheet">
-      <View className="border-b border-border bg-card px-4 pb-3 pt-2">
-        <View className="flex-row items-center gap-3">
-          <View className="min-w-0 flex-1">
-            <Text className="text-[16px] font-t3-bold text-foreground" numberOfLines={1}>
-              {props.projectName}
-            </Text>
-            <Text className="text-[12px] leading-[17px] text-foreground-muted" numberOfLines={1}>
-              {props.isPending && props.entries.length === 0
-                ? "Indexing..."
-                : `${fileCount.toLocaleString()} files${props.truncated ? " · partial" : ""}`}
-            </Text>
-          </View>
-          {props.isPending ? <ActivityIndicator size="small" /> : null}
-        </View>
-        <View className="mt-3 h-10 flex-row items-center gap-2 rounded-[14px] border border-input-border bg-input px-3">
-          <SymbolView
-            name="magnifyingglass"
-            size={14}
-            tintColor={placeholderColor}
-            type="monochrome"
-          />
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="Search files"
-            placeholderTextColor={placeholderColor}
-            className="min-w-0 flex-1 font-sans text-[14px] text-foreground"
-          />
-          {searchQuery.length > 0 ? (
-            <Pressable accessibilityRole="button" onPress={() => setSearchQuery("")}>
-              <SymbolView name="xmark.circle.fill" size={16} tintColor={placeholderColor} />
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-
       {props.error && props.entries.length === 0 ? (
         <View className="px-4 py-5">
           <Text className="text-[13px] font-t3-bold text-foreground">Files unavailable</Text>
@@ -201,6 +151,8 @@ export function FileTreeBrowser(props: {
         <FlatList
           data={visibleNodes}
           keyExtractor={(item) => item.node.path}
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingVertical: 8 }}
           refreshControl={
@@ -218,12 +170,18 @@ export function FileTreeBrowser(props: {
           )}
           ListEmptyComponent={
             <View className="px-4 py-5">
-              <Text className="text-[13px] font-t3-bold text-foreground">No files found</Text>
-              <Text className="mt-1 text-[12px] leading-[18px] text-foreground-muted">
-                {searchQuery.trim().length > 0
-                  ? "Try a different search."
-                  : "The workspace file index is empty."}
-              </Text>
+              {props.isPending ? (
+                <ActivityIndicator size="small" />
+              ) : (
+                <>
+                  <Text className="text-[13px] font-t3-bold text-foreground">No files found</Text>
+                  <Text className="mt-1 text-[12px] leading-[18px] text-foreground-muted">
+                    {props.searchQuery.trim().length > 0
+                      ? "Try a different search."
+                      : "The workspace file index is empty."}
+                  </Text>
+                </>
+              )}
             </View>
           }
         />
