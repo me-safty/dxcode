@@ -130,6 +130,40 @@ it.effect("launches an installed editor with platform-safe arguments", () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.effect("prefers a stable Zed command over an earlier nightly command", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-zed-editor-" });
+    const nightlyDir = path.join(root, "Zed Nightly", "bin");
+    const stableDir = path.join(root, "Zed", "bin");
+    yield* fileSystem.makeDirectory(nightlyDir, { recursive: true });
+    yield* fileSystem.makeDirectory(stableDir, { recursive: true });
+    yield* fileSystem.writeFileString(path.join(nightlyDir, "zed.CMD"), "@echo off\r\n");
+    yield* fileSystem.writeFileString(path.join(stableDir, "zed.CMD"), "@echo off\r\n");
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher;
+      yield* launcher.launchEditor({ editor: "zed", cwd: "C:\\workspace" });
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "win32",
+          env: { PATH: `${nightlyDir};${stableDir}`, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+          resolveExecutable: (command) => command,
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.options.env?.PATH?.split(";")[0], stableDir);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("discovers editors through the service API", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;

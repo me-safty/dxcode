@@ -2,6 +2,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -17,6 +19,7 @@ import {
   readPathFromLaunchctl,
   readPathFromLoginShell,
   resolveCommandPath,
+  resolveCommandPaths,
   resolveKnownWindowsCliDirs,
   resolveSpawnCommand,
   resolveWindowsEnvironment,
@@ -363,6 +366,30 @@ effectIt.layer(NodeServices.layer)("resolveCommandPath", (it) => {
 
       expect(result._tag).toBe("Failure");
     }),
+  );
+});
+
+effectIt.layer(NodeServices.layer)("resolveCommandPaths", (it) => {
+  it.effect("returns every matching win32 command path in PATH order", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-shell-paths-" });
+      const nightlyDir = path.join(root, "Zed Nightly", "bin");
+      const stableDir = path.join(root, "Zed", "bin");
+      yield* fileSystem.makeDirectory(nightlyDir, { recursive: true });
+      yield* fileSystem.makeDirectory(stableDir, { recursive: true });
+      const nightlyPath = path.join(nightlyDir, "zed.CMD");
+      const stablePath = path.join(stableDir, "zed.CMD");
+      yield* fileSystem.writeFileString(nightlyPath, "@echo off\r\n");
+      yield* fileSystem.writeFileString(stablePath, "@echo off\r\n");
+
+      expect(
+        yield* resolveCommandPaths("zed", {
+          env: { PATH: `${nightlyDir};${stableDir}`, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+        }).pipe(Effect.provideService(HostProcessPlatform, "win32")),
+      ).toEqual([nightlyPath, stablePath]);
+    }).pipe(Effect.scoped),
   );
 });
 
