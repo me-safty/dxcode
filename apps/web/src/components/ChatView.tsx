@@ -44,7 +44,12 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { isComposerQueueDraftEmpty, useMessageQueue, type QueuedMessage } from "../messageQueue";
+import {
+  EMPTY_MESSAGE_QUEUE,
+  isComposerQueueDraftEmpty,
+  useMessageQueue,
+  type QueuedMessage,
+} from "../messageQueue";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   collapseExpandedComposerCursor,
@@ -791,6 +796,7 @@ export default function ChatView(props: ChatViewProps) {
       [routeKind, routeThreadRef],
     ),
   );
+  const isServerThread = routeKind === "server" && serverThread !== undefined;
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
@@ -835,7 +841,7 @@ export default function ChatView(props: ChatViewProps) {
   const messageQueueDequeue = useMessageQueue((store) => store.dequeue);
   const messageQueueRemove = useMessageQueue((store) => store.remove);
   const queuedMessages = useMessageQueue((store) =>
-    isServerThread ? store.getQueue(routeThreadRef) : [],
+    isServerThread ? store.getQueue(routeThreadRef) : EMPTY_MESSAGE_QUEUE,
   );
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
@@ -973,7 +979,6 @@ export default function ChatView(props: ChatViewProps) {
         : undefined,
     [draftThread, fallbackDraftProject?.defaultModelSelection, localDraftError, threadId],
   );
-  const isServerThread = routeKind === "server" && serverThread !== undefined;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =

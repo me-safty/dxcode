@@ -73,6 +73,23 @@ const decodeElicitationComplete = Schema.decodeUnknownEffect(
 );
 const parserFactory = RpcSerialization.ndJsonRpc();
 
+/**
+ * Effect RPC uses bigint request ids. Some ACP agents (for example Grok Build)
+ * emit string ids such as "skills-reload" for their own internal traffic.
+ * Those messages must not be forwarded to RpcClient/RpcServer queues.
+ */
+function isRpcCompatibleRequestId(requestId: string): boolean {
+  if (requestId === "") {
+    return false;
+  }
+  try {
+    BigInt(requestId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(function* (
   options: AcpPatchedProtocolOptions,
 ): Effect.fn.Return<AcpPatchedProtocol, never, Scope.Scope> {
@@ -298,7 +315,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       });
     }
 
-    if (!options.serverRequestMethods.has(message.tag)) {
+    if (!options.serverRequestMethods.has(message.tag) || !isRpcCompatibleRequestId(message.id)) {
       return handleExtRequest(message).pipe(
         Effect.catch(() => respondWithError(message.id, AcpError.AcpRequestError.internalError())),
         Effect.asVoid,
@@ -312,6 +329,9 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     Ref.get(extPending).pipe(
       Effect.flatMap((pending) => {
         if (!pending.has(message.requestId)) {
+          if (!isRpcCompatibleRequestId(message.requestId)) {
+            return Effect.void;
+          }
           return Queue.offer(clientQueue, message).pipe(Effect.asVoid);
         }
         if (message.exit._tag === "Success") {
@@ -349,7 +369,9 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
                     "Streaming extension responses are not supported",
                   ),
                 )
-              : Queue.offer(clientQueue, message).pipe(Effect.asVoid),
+              : isRpcCompatibleRequestId(message.requestId)
+                ? Queue.offer(clientQueue, message).pipe(Effect.asVoid)
+                : Effect.void,
           ),
         );
       case "Defect":

@@ -23,6 +23,8 @@ export interface QueuedMessage {
   readonly createdAt: string;
 }
 
+export const EMPTY_MESSAGE_QUEUE: readonly QueuedMessage[] = [];
+
 export interface MessageQueueState {
   readonly queueByThreadKey: Readonly<Record<string, QueuedMessage[]>>;
   readonly enqueue: (
@@ -155,6 +157,6 @@ export const useMessageQueue = create<MessageQueueState>((set, get) => ({
 
   getQueue: (threadRef) => {
     const key = threadKey(threadRef);
-    return get().queueByThreadKey[key] ?? [];
+    return get().queueByThreadKey[key] ?? EMPTY_MESSAGE_QUEUE;
   },
 }));
