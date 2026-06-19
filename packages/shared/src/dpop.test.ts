@@ -71,6 +71,36 @@ describe("verifyDpopProof", () => {
     assert.equal(result.jti, "proof-1");
   });
 
+  it("rejects malformed DPoP header and payload JSON", () => {
+    const [header, payload, signature] = proof.split(".");
+    if (!header || !payload || !signature) {
+      assert.fail("Expected the test DPoP proof to use compact JWT format.");
+    }
+    const malformedJson = Buffer.from("{").toString("base64url");
+
+    const malformedHeader = verifyDpopProof({
+      proof: `${malformedJson}.${payload}.${signature}`,
+      method: "POST",
+      url: "https://example.com/oauth/token",
+      nowEpochSeconds: 101,
+    });
+    if (malformedHeader.ok) {
+      assert.fail("Expected malformed DPoP header JSON to fail.");
+    }
+    assert.equal(malformedHeader.reason, "Invalid DPoP JWT header.");
+
+    const malformedPayload = verifyDpopProof({
+      proof: `${header}.${malformedJson}.${signature}`,
+      method: "POST",
+      url: "https://example.com/oauth/token",
+      nowEpochSeconds: 101,
+    });
+    if (malformedPayload.ok) {
+      assert.fail("Expected malformed DPoP payload JSON to fail.");
+    }
+    assert.equal(malformedPayload.reason, "Invalid DPoP JWT payload.");
+  });
+
   it("rejects method, URL, thumbprint, and time-window mismatches", () => {
     const thumbprint = computeDpopJwkThumbprint(publicJwk);
     assert.equal(
