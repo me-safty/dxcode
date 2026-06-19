@@ -48,15 +48,22 @@ vi.mock("@pierre/diffs/react", () => {
 
 const storeMock = vi.hoisted(() => ({
   state: {
-    environmentStateById: {},
+    threadShellByKey: {},
   } as {
-    environmentStateById: Record<string, unknown>;
+    threadShellByKey: Record<string, unknown>;
   },
 }));
 
-vi.mock("../../store", () => ({
-  useStore: <T,>(selector: (state: typeof storeMock.state) => T) => selector(storeMock.state),
-}));
+vi.mock("../../state/entities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../state/entities")>();
+  return {
+    ...actual,
+    useThreadShell: (ref: { environmentId: string; threadId: string } | null) =>
+      ref === null
+        ? null
+        : (storeMock.state.threadShellByKey[`${ref.environmentId}\0${ref.threadId}`] ?? null),
+  };
+});
 
 function matchMedia() {
   return {
@@ -106,7 +113,7 @@ const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
 
 beforeEach(() => {
   storeMock.state = {
-    environmentStateById: {},
+    threadShellByKey: {},
   };
 });
 
@@ -148,7 +155,9 @@ function buildUserTimelineEntry(text: string) {
       id: MessageId.make("message-1"),
       role: "user" as const,
       text,
+      turnId: null,
       createdAt: MESSAGE_CREATED_AT,
+      updatedAt: MESSAGE_CREATED_AT,
       streaming: false,
     },
   };
@@ -300,7 +309,9 @@ describe("MessagesTimeline", () => {
                 "```",
                 "</review_comment>",
               ].join("\n"),
+              turnId: null,
               createdAt: "2026-03-17T19:12:28.000Z",
+              updatedAt: "2026-03-17T19:12:28.000Z",
               streaming: false,
             },
           },
@@ -320,27 +331,23 @@ describe("MessagesTimeline", () => {
     const childThreadId = ThreadId.make("subagent-child-1");
     const parentTurnId = TurnId.make("turn-followup");
     storeMock.state = {
-      environmentStateById: {
-        [ACTIVE_THREAD_ENVIRONMENT_ID]: {
-          threadShellById: {
-            [childThreadId]: {
-              id: childThreadId,
-              title: "Say hi briefly",
-              parentRelation: {
-                kind: "subagent",
-                rootThreadId: ThreadId.make("thread-1"),
-                parentThreadId: ThreadId.make("thread-1"),
-                parentTurnId,
-                parentItemId: "call-send-input",
-                parentActivitySequence: 2,
-                providerThreadId: "provider-child-1",
-                titleSeed: "Say hi in German",
-                depth: 1,
-                startedAt: "2026-03-17T19:12:30.000Z",
-                completedAt: null,
-                status: "running",
-              },
-            },
+      threadShellByKey: {
+        [`${ACTIVE_THREAD_ENVIRONMENT_ID}\0${childThreadId}`]: {
+          id: childThreadId,
+          title: "Say hi briefly",
+          parentRelation: {
+            kind: "subagent",
+            rootThreadId: ThreadId.make("thread-1"),
+            parentThreadId: ThreadId.make("thread-1"),
+            parentTurnId,
+            parentItemId: "call-send-input",
+            parentActivitySequence: 2,
+            providerThreadId: "provider-child-1",
+            titleSeed: "Say hi in German",
+            depth: 1,
+            startedAt: "2026-03-17T19:12:30.000Z",
+            completedAt: null,
+            status: "running",
           },
         },
       },
@@ -409,7 +416,9 @@ describe("MessagesTimeline", () => {
                 "```",
                 "</review_comment>",
               ].join("\n"),
+              turnId: null,
               createdAt: "2026-03-17T19:12:28.000Z",
+              updatedAt: "2026-03-17T19:12:28.000Z",
               streaming: false,
             },
           },

@@ -1,28 +1,36 @@
-import { parseScopedThreadKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
+import {
+  parseScopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
+import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Data from "effect/Data";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useRouter } from "@tanstack/react-router";
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { terminalEnvironment } from "../state/terminal";
+import { threadEnvironment } from "../state/threads";
+import { vcsEnvironment } from "../state/vcs";
 import { useNewThreadHandler } from "./useHandleNewThread";
-import { ensureEnvironmentApi, readEnvironmentApi } from "../environmentApi";
-import { invalidateSourceControlState } from "../lib/sourceControlActions";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
-import { newCommandId } from "../lib/utils";
 import { readLocalApi } from "../localApi";
-import {
-  selectProjectByRef,
-  selectThreadByRef,
-  selectThreadsForEnvironment,
-  useStore,
-} from "../store";
+import { readEnvironmentThreadRefs, readProject, readThreadShell } from "../state/entities";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import type { Thread } from "../types";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
+import { useAtomCommand } from "../state/use-atom-command";
+
+export class ThreadArchiveBlockedError extends Data.TaggedError("ThreadArchiveBlockedError")<{
+  readonly message: string;
+}> {}
 
 function collectLifecycleThreadIds(
   threads: readonly Pick<Thread, "id" | "parentRelation">[],
@@ -46,7 +54,31 @@ function withRootLast(threadIds: ReadonlySet<ThreadId>, rootThreadId: ThreadId):
   );
 }
 
+function findThreadById<T extends Pick<Thread, "id">>(
+  threads: readonly T[],
+  threadId: ThreadId,
+): T | null {
+  return threads.find((thread) => thread.id === threadId) ?? null;
+}
+
 export function useThreadActions() {
+  const closeTerminal = useAtomCommand(terminalEnvironment.close);
+  const archiveThreadMutation = useAtomCommand(threadEnvironment.archive, {
+    reportFailure: false,
+  });
+  const unarchiveThreadMutation = useAtomCommand(threadEnvironment.unarchive, {
+    reportFailure: false,
+  });
+  const deleteThreadMutation = useAtomCommand(threadEnvironment.delete, {
+    reportFailure: false,
+  });
+  const stopThreadSession = useAtomCommand(threadEnvironment.stopSession);
+  const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
+    reportFailure: false,
+  });
+  const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
+    reportFailure: false,
+  });
   const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
   const confirmThreadDelete = useSettings((settings) => settings.confirmThreadDelete);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
@@ -55,7 +87,7 @@ export function useThreadActions() {
   );
   const clearTerminalUiState = useTerminalUiStateStore((state) => state.clearTerminalUiState);
   const router = useRouter();
-  const { handleNewThread } = useNewThreadHandler();
+  const handleNewThread = useNewThreadHandler();
   // Keep a ref so archiveThread can call handleNewThread without appearing in
   // its dependency array — handleNewThread is inherently unstable (depends on
   // the projects list) and would otherwise cascade new references into every
@@ -64,8 +96,7 @@ export function useThreadActions() {
   handleNewThreadRef.current = handleNewThread;
 
   const resolveThreadTarget = useCallback((target: ScopedThreadRef) => {
-    const state = useStore.getState();
-    const thread = selectThreadByRef(state, target);
+    const thread = readThreadShell(target);
     if (!thread) {
       return null;
     }
@@ -81,12 +112,13 @@ export function useThreadActions() {
 
   const archiveThread = useCallback(
     async (target: ScopedThreadRef) => {
-      const api = readEnvironmentApi(target.environmentId);
-      if (!api) return;
       const resolved = resolveThreadTarget(target);
-      if (!resolved) return;
+      if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
-      const threads = selectThreadsForEnvironment(useStore.getState(), threadRef.environmentId);
+      const threads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
+        const shell = readThreadShell(ref);
+        return shell === null ? [] : [shell];
+      });
       const archivedThreadIds = collectLifecycleThreadIds(threads, new Set([threadRef.threadId]));
       if (
         threads.some(
@@ -96,7 +128,13 @@ export function useThreadActions() {
             entry.session.activeTurnId != null,
         )
       ) {
-        throw new Error("Cannot archive a running thread.");
+        return AsyncResult.failure(
+          Cause.fail(
+            new ThreadArchiveBlockedError({
+              message: "Cannot archive a running thread.",
+            }),
+          ),
+        );
       }
 
       const currentRouteThreadRef = getCurrentRouteThreadRef();
@@ -104,54 +142,67 @@ export function useThreadActions() {
         currentRouteThreadRef?.environmentId === threadRef.environmentId &&
         archivedThreadIds.has(currentRouteThreadRef.threadId);
 
-      if (shouldNavigateToDraft) {
-        await handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId));
+      for (const archivedThreadId of withRootLast(archivedThreadIds, threadRef.threadId)) {
+        const archiveResult = await archiveThreadMutation({
+          environmentId: threadRef.environmentId,
+          input: { threadId: archivedThreadId },
+        });
+        if (archiveResult._tag === "Failure") {
+          return archiveResult;
+        }
       }
 
-      await Promise.all(
-        withRootLast(archivedThreadIds, threadRef.threadId).map((threadId) =>
-          api.orchestration.dispatchCommand({
-            type: "thread.archive",
-            commandId: newCommandId(),
-            threadId,
-          }),
-        ),
-      );
+      if (shouldNavigateToDraft) {
+        const navigationResult = await settlePromise(() =>
+          handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId)),
+        );
+        if (navigationResult._tag === "Failure") {
+          return navigationResult;
+        }
+        refreshArchivedThreadsForEnvironment(threadRef.environmentId);
+        return AsyncResult.success(undefined);
+      }
+
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
+      return AsyncResult.success(undefined);
     },
-    [getCurrentRouteThreadRef, resolveThreadTarget],
+    [archiveThreadMutation, getCurrentRouteThreadRef, resolveThreadTarget],
   );
 
-  const unarchiveThread = useCallback(async (target: ScopedThreadRef) => {
-    const api = readEnvironmentApi(target.environmentId);
-    if (!api) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.unarchive",
-      commandId: newCommandId(),
-      threadId: target.threadId,
-    });
-    refreshArchivedThreadsForEnvironment(target.environmentId);
-  }, []);
+  const unarchiveThread = useCallback(
+    async (target: ScopedThreadRef) => {
+      const result = await unarchiveThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId },
+      });
+      if (result._tag === "Success") {
+        refreshArchivedThreadsForEnvironment(target.environmentId);
+      }
+      return result;
+    },
+    [unarchiveThreadMutation],
+  );
 
   const deleteThread = useCallback(
     async (target: ScopedThreadRef, opts: { deletedThreadKeys?: ReadonlySet<string> } = {}) => {
-      const api = readEnvironmentApi(target.environmentId);
-      if (!api) return;
       const resolved = resolveThreadTarget(target);
       if (!resolved) {
         // Thread not in main store (e.g. archived thread) — dispatch delete directly.
-        await api.orchestration.dispatchCommand({
-          type: "thread.delete",
-          commandId: newCommandId(),
-          threadId: target.threadId,
+        const result = await deleteThreadMutation({
+          environmentId: target.environmentId,
+          input: { threadId: target.threadId },
         });
-        refreshArchivedThreadsForEnvironment(target.environmentId);
-        return;
+        if (result._tag === "Success") {
+          refreshArchivedThreadsForEnvironment(target.environmentId);
+        }
+        return result;
       }
       const { thread, threadRef } = resolved;
-      const state = useStore.getState();
-      const threads = selectThreadsForEnvironment(state, threadRef.environmentId);
-      const threadProject = selectProjectByRef(state, {
+      const threads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
+        const shell = readThreadShell(ref);
+        return shell === null ? [] : [shell];
+      });
+      const threadProject = readProject({
         environmentId: threadRef.environmentId,
         projectId: thread.projectId,
       });
@@ -180,38 +231,39 @@ export function useThreadActions() {
       const displayWorktreePath = orphanedWorktreePath
         ? formatWorktreePathForDisplay(orphanedWorktreePath)
         : null;
-      const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== undefined;
+      const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== null;
       const localApi = readLocalApi();
-      const shouldDeleteWorktree =
-        canDeleteWorktree &&
-        localApi &&
-        (await localApi.dialogs.confirm(
-          [
-            "This thread is the only one linked to this worktree:",
-            displayWorktreePath ?? orphanedWorktreePath,
-            "",
-            "Delete the worktree too?",
-          ].join("\n"),
-        ));
+      let shouldDeleteWorktree = false;
+      if (canDeleteWorktree && localApi) {
+        const confirmationResult = await settlePromise(() =>
+          localApi.dialogs.confirm(
+            [
+              "This thread is the only one linked to this worktree:",
+              displayWorktreePath ?? orphanedWorktreePath,
+              "",
+              "Delete the worktree too?",
+            ].join("\n"),
+          ),
+        );
+        if (confirmationResult._tag === "Failure") {
+          return confirmationResult;
+        }
+        shouldDeleteWorktree = confirmationResult.value;
+      }
 
-      for (const deletedThreadId of targetThreadIds) {
-        const deletedThread = threads.find((entry) => entry.id === deletedThreadId);
-        if (deletedThread?.session && deletedThread.session.status !== "closed") {
-          await api.orchestration
-            .dispatchCommand({
-              type: "thread.session.stop",
-              commandId: newCommandId(),
-              threadId: deletedThreadId,
-              createdAt: new Date().toISOString(),
-            })
-            .catch(() => undefined);
+      for (const deletedThreadId of withRootLast(deletedIds, threadRef.threadId)) {
+        const deletedThread = findThreadById(threads, deletedThreadId);
+        if (deletedThread?.session && deletedThread.session.status !== "stopped") {
+          await stopThreadSession({
+            environmentId: threadRef.environmentId,
+            input: { threadId: deletedThreadId },
+          });
         }
 
-        try {
-          await api.terminal.close({ threadId: deletedThreadId, deleteHistory: true });
-        } catch {
-          // Terminal may already be closed.
-        }
+        await closeTerminal({
+          environmentId: threadRef.environmentId,
+          input: { threadId: deletedThreadId, deleteHistory: true },
+        });
       }
 
       const currentRouteThreadRef = getCurrentRouteThreadRef();
@@ -228,17 +280,19 @@ export function useThreadActions() {
         deletedThreadIds: deletedIds,
         sortOrder: sidebarThreadSortOrder,
       });
-      for (const deletedThreadId of withRootLast(targetThreadIds, threadRef.threadId)) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.delete",
-          commandId: newCommandId(),
-          threadId: deletedThreadId,
+      for (const deletedThreadId of withRootLast(deletedIds, threadRef.threadId)) {
+        const deleteResult = await deleteThreadMutation({
+          environmentId: threadRef.environmentId,
+          input: { threadId: deletedThreadId },
         });
+        if (deleteResult._tag === "Failure") {
+          return deleteResult;
+        }
       }
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
-      for (const deletedThreadId of targetThreadIds) {
+      for (const deletedThreadId of deletedIds) {
         const deletedThreadRef = scopeThreadRef(threadRef.environmentId, deletedThreadId);
-        const deletedThread = threads.find((entry) => entry.id === deletedThreadId);
+        const deletedThread = findThreadById(threads, deletedThreadId);
         clearComposerDraftForThread(deletedThreadRef);
         if (deletedThread) {
           clearProjectDraftThreadById(
@@ -251,44 +305,71 @@ export function useThreadActions() {
 
       if (shouldNavigateToFallback) {
         if (fallbackThreadId) {
-          const fallbackThread = selectThreadByRef(
-            useStore.getState(),
+          const fallbackThread = readThreadShell(
             scopeThreadRef(threadRef.environmentId, fallbackThreadId),
           );
           if (fallbackThread) {
-            await router.navigate({
-              to: "/$environmentId/$threadId",
-              params: buildThreadRouteParams(
-                scopeThreadRef(fallbackThread.environmentId, fallbackThread.id),
-              ),
-              replace: true,
-            });
+            const navigationResult = await settlePromise(() =>
+              router.navigate({
+                to: "/$environmentId/$threadId",
+                params: buildThreadRouteParams(
+                  scopeThreadRef(fallbackThread.environmentId, fallbackThread.id),
+                ),
+                replace: true,
+              }),
+            );
+            if (navigationResult._tag === "Failure") {
+              return navigationResult;
+            }
           } else {
-            await router.navigate({ to: "/", replace: true });
+            const navigationResult = await settlePromise(() =>
+              router.navigate({ to: "/", replace: true }),
+            );
+            if (navigationResult._tag === "Failure") {
+              return navigationResult;
+            }
           }
         } else {
-          await router.navigate({ to: "/", replace: true });
+          const navigationResult = await settlePromise(() =>
+            router.navigate({ to: "/", replace: true }),
+          );
+          if (navigationResult._tag === "Failure") {
+            return navigationResult;
+          }
         }
       }
 
       if (!shouldDeleteWorktree || !orphanedWorktreePath || !threadProject) {
-        return;
+        return AsyncResult.success(undefined);
       }
 
-      try {
-        await ensureEnvironmentApi(threadRef.environmentId).vcs.removeWorktree({
-          cwd: threadProject.cwd,
+      const removeResult = await removeWorktree({
+        environmentId: threadRef.environmentId,
+        input: {
+          cwd: threadProject.workspaceRoot,
           path: orphanedWorktreePath,
           force: true,
-        });
-        await invalidateSourceControlState({
-          environmentId: threadRef.environmentId,
-        });
-      } catch (error) {
+        },
+      });
+      const refreshResult =
+        removeResult._tag === "Success"
+          ? await refreshVcsStatus({
+              environmentId: threadRef.environmentId,
+              input: { cwd: threadProject.workspaceRoot },
+            })
+          : null;
+      const cleanupFailure =
+        removeResult._tag === "Failure"
+          ? removeResult
+          : refreshResult?._tag === "Failure"
+            ? refreshResult
+            : null;
+      if (cleanupFailure) {
+        const error = squashAtomCommandFailure(cleanupFailure);
         const message = error instanceof Error ? error.message : "Unknown error removing worktree.";
         console.error("Failed to remove orphaned worktree after thread deletion", {
           threadId: threadRef.threadId,
-          projectCwd: threadProject.cwd,
+          projectCwd: threadProject.workspaceRoot,
           worktreePath: orphanedWorktreePath,
           error,
         });
@@ -299,48 +380,61 @@ export function useThreadActions() {
             description: `Could not remove ${displayWorktreePath ?? orphanedWorktreePath}. ${message}`,
           }),
         );
+        return cleanupFailure;
       }
+      return AsyncResult.success(undefined);
     },
     [
       clearComposerDraftForThread,
       clearProjectDraftThreadById,
       clearTerminalUiState,
+      closeTerminal,
+      deleteThreadMutation,
       getCurrentRouteThreadRef,
+      refreshVcsStatus,
+      removeWorktree,
       router,
       resolveThreadTarget,
       sidebarThreadSortOrder,
+      stopThreadSession,
     ],
   );
 
   const confirmAndDeleteThread = useCallback(
     async (target: ScopedThreadRef) => {
-      const api = readEnvironmentApi(target.environmentId);
-      if (!api) return;
       const localApi = readLocalApi();
       const resolved = resolveThreadTarget(target);
 
       if (confirmThreadDelete && localApi) {
         const title = resolved?.thread.title ?? "this thread";
-        const confirmed = await localApi.dialogs.confirm(
-          [
-            `Delete thread "${title}"?`,
-            "This permanently clears conversation history for this thread.",
-          ].join("\n"),
+        const confirmationResult = await settlePromise(() =>
+          localApi.dialogs.confirm(
+            [
+              `Delete thread "${title}"?`,
+              "This permanently clears conversation history for this thread.",
+            ].join("\n"),
+          ),
         );
-        if (!confirmed) {
-          return;
+        if (confirmationResult._tag === "Failure") {
+          return confirmationResult;
+        }
+        if (!confirmationResult.value) {
+          return AsyncResult.success(undefined);
         }
       }
 
-      await deleteThread(target);
+      return deleteThread(target);
     },
     [confirmThreadDelete, deleteThread, resolveThreadTarget],
   );
 
-  return {
-    archiveThread,
-    unarchiveThread,
-    deleteThread,
-    confirmAndDeleteThread,
-  };
+  return useMemo(
+    () => ({
+      archiveThread,
+      unarchiveThread,
+      deleteThread,
+      confirmAndDeleteThread,
+    }),
+    [archiveThread, confirmAndDeleteThread, deleteThread, unarchiveThread],
+  );
 }

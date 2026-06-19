@@ -6,7 +6,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
+import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import {
   createContext,
@@ -102,7 +102,7 @@ import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatShortTimestamp } from "../../timestampFormat";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import { useStore } from "../../store";
+import { useThreadShell } from "../../state/entities";
 
 import {
   buildInlineTerminalContextText,
@@ -618,16 +618,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
                 <TooltipTrigger
                   render={<p className="text-muted-foreground text-xs tabular-nums" />}
                 >
-                  {formatShortTimestamp(
-                    row.message.completedAt ?? row.message.createdAt,
-                    ctx.timestampFormat,
-                  )}
+                  {formatShortTimestamp(row.message.updatedAt, ctx.timestampFormat)}
                 </TooltipTrigger>
                 <TooltipPopup>
-                  {formatChatTimestampTooltip(
-                    row.message.completedAt ?? row.message.createdAt,
-                    ctx.timestampFormat,
-                  )}
+                  {formatChatTimestampTooltip(row.message.updatedAt, ctx.timestampFormat)}
                 </TooltipPopup>
               </Tooltip>
             )}
@@ -1806,13 +1800,7 @@ const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
 }) {
   const ctx = use(TimelineRowCtx);
   const navigate = useNavigate();
-  const childShell = useStore(
-    useCallback(
-      (state) =>
-        state.environmentStateById[ctx.activeThreadEnvironmentId]?.threadShellById[props.threadId],
-      [ctx.activeThreadEnvironmentId, props.threadId],
-    ),
-  );
+  const childShell = useThreadShell(scopeThreadRef(ctx.activeThreadEnvironmentId, props.threadId));
   const relation =
     childShell?.parentRelation?.kind === "subagent" ? childShell.parentRelation : null;
   const rawTitle = childShell?.title?.trim();
