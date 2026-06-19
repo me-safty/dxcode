@@ -51,13 +51,13 @@ import {
 import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import {
-  makeAcpAssistantItemEvent,
-  makeAcpContentDeltaEvent,
-  makeAcpPlanUpdatedEvent,
   makeAcpRequestOpenedEvent,
   makeAcpRequestResolvedEvent,
-  makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
+import {
+  emitDedupedAcpPlanUpdate,
+  mapAcpParsedSessionEvent,
+} from "../acp/AcpSessionEventSupport.ts";
 import {
   type AcpSessionMode,
   type AcpSessionModeState,
@@ -406,39 +406,6 @@ export function makeCursorAdapter(
         );
       });
 
-    const emitPlanUpdate = (
-      ctx: CursorSessionContext,
-      payload: {
-        readonly explanation?: string | null;
-        readonly plan: ReadonlyArray<{
-          readonly step: string;
-          readonly status: "pending" | "inProgress" | "completed";
-        }>;
-      },
-      rawPayload: unknown,
-      source: "acp.jsonrpc" | "acp.cursor.extension",
-      method: string,
-    ) =>
-      Effect.gen(function* () {
-        const fingerprint = `${ctx.activeTurnId ?? "no-turn"}:${encodeJsonStringForDiagnostics(payload) ?? "[unserializable payload]"}`;
-        if (ctx.lastPlanFingerprint === fingerprint) {
-          return;
-        }
-        ctx.lastPlanFingerprint = fingerprint;
-        yield* offerRuntimeEvent(
-          makeAcpPlanUpdatedEvent({
-            stamp: yield* makeEventStamp(),
-            provider: PROVIDER,
-            threadId: ctx.threadId,
-            turnId: ctx.activeTurnId,
-            payload,
-            source,
-            method,
-            rawPayload,
-          }),
-        );
-      });
-
     const requireSession = (
       threadId: ThreadId,
     ): Effect.Effect<CursorSessionContext, ProviderAdapterSessionNotFoundError> => {
@@ -628,13 +595,21 @@ export function makeCursorAdapter(
                       "acp.cursor.extension",
                     );
                     if (ctx) {
-                      yield* emitPlanUpdate(
-                        ctx,
-                        extractTodosAsPlan(params),
-                        params,
-                        "acp.cursor.extension",
-                        "cursor/update_todos",
-                      );
+                      yield* emitDedupedAcpPlanUpdate({
+                        provider: PROVIDER,
+                        context: {
+                          threadId: ctx.threadId,
+                          activeTurnId: ctx.activeTurnId,
+                        },
+                        stamp: yield* makeEventStamp(),
+                        planState: ctx,
+                        payload: extractTodosAsPlan(params),
+                        rawPayload: params,
+                        source: "acp.cursor.extension",
+                        method: "cursor/update_todos",
+                        encodePlanPayload: encodeJsonStringForDiagnostics,
+                        offerRuntimeEvent,
+                      });
                     }
                   }),
                 ),
@@ -759,88 +734,28 @@ export function makeCursorAdapter(
 
           const nf = yield* Stream.runDrain(
             Stream.mapEffect(acp.getEvents(), (event) =>
-              Effect.gen(function* () {
-                switch (event._tag) {
-                  case "ModeChanged":
-                    return;
-                  case "AssistantItemStarted":
-                    yield* offerRuntimeEvent(
-                      makeAcpAssistantItemEvent({
-                        stamp: yield* makeEventStamp(),
-                        provider: PROVIDER,
-                        threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
-                        itemId: event.itemId,
-                        lifecycle: "item.started",
-                      }),
-                    );
-                    return;
-                  case "AssistantItemCompleted":
-                    yield* offerRuntimeEvent(
-                      makeAcpAssistantItemEvent({
-                        stamp: yield* makeEventStamp(),
-                        provider: PROVIDER,
-                        threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
-                        itemId: event.itemId,
-                        lifecycle: "item.completed",
-                      }),
-                    );
-                    return;
-                  case "PlanUpdated":
-                    yield* logNative(
-                      ctx.threadId,
-                      "session/update",
-                      event.rawPayload,
-                      "acp.jsonrpc",
-                    );
-                    yield* emitPlanUpdate(
-                      ctx,
-                      event.payload,
-                      event.rawPayload,
-                      "acp.jsonrpc",
-                      "session/update",
-                    );
-                    return;
-                  case "ToolCallUpdated":
-                    yield* logNative(
-                      ctx.threadId,
-                      "session/update",
-                      event.rawPayload,
-                      "acp.jsonrpc",
-                    );
-                    yield* offerRuntimeEvent(
-                      makeAcpToolCallEvent({
-                        stamp: yield* makeEventStamp(),
-                        provider: PROVIDER,
-                        threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
-                        toolCall: event.toolCall,
-                        rawPayload: event.rawPayload,
-                      }),
-                    );
-                    return;
-                  case "ContentDelta":
-                    yield* logNative(
-                      ctx.threadId,
-                      "session/update",
-                      event.rawPayload,
-                      "acp.jsonrpc",
-                    );
-                    yield* offerRuntimeEvent(
-                      makeAcpContentDeltaEvent({
-                        stamp: yield* makeEventStamp(),
-                        provider: PROVIDER,
-                        threadId: ctx.threadId,
-                        turnId: ctx.activeTurnId,
-                        ...(event.itemId ? { itemId: event.itemId } : {}),
-                        text: event.text,
-                        rawPayload: event.rawPayload,
-                      }),
-                    );
-                    return;
-                }
-              }),
+              makeEventStamp().pipe(
+                Effect.flatMap((stamp) =>
+                  mapAcpParsedSessionEvent({
+                    event,
+                    provider: PROVIDER,
+                    context: {
+                      threadId: ctx.threadId,
+                      activeTurnId: ctx.activeTurnId,
+                    },
+                    stamp,
+                    offerRuntimeEvent,
+                    ...(nativeEventLogger
+                      ? {
+                          logNative: (threadId, method, payload) =>
+                            logNative(threadId, method, payload, "acp.jsonrpc").pipe(Effect.ignore),
+                        }
+                      : {}),
+                    planState: ctx,
+                    encodePlanPayload: encodeJsonStringForDiagnostics,
+                  }),
+                ),
+              ),
             ),
           ).pipe(
             Effect.catch((cause) =>

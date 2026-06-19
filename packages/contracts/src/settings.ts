@@ -120,7 +120,12 @@ const makeBinaryPathSetting = (fallback: string) =>
     Schema.withDecodingDefault(Effect.succeed(fallback)),
   );
 
-export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch";
+export type ProviderSettingsFormControl =
+  | "text"
+  | "password"
+  | "textarea"
+  | "switch"
+  | "string-array";
 
 export interface ProviderSettingsFormAnnotation {
   readonly control?: ProviderSettingsFormControl | undefined;
@@ -357,7 +362,12 @@ export const GrokBuildSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed(["agent", "stdio"])),
       Schema.annotateKey({
         title: "Arguments",
-        description: "Arguments to pass to the Grok Build CLI.",
+        description: "Arguments to pass to the Grok Build CLI, one per line.",
+        providerSettingsForm: {
+          control: "string-array",
+          placeholder: "agent\nstdio",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     envJson: Schema.String.pipe(

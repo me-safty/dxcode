@@ -17,7 +17,13 @@ import { makeGrokBuildAdapter } from "../Layers/GrokBuildAdapter.ts";
 import {
   buildInitialGrokBuildProviderSnapshot,
   checkGrokBuildProviderStatus,
+  enrichGrokBuildSnapshot,
 } from "../Layers/GrokBuildProvider.ts";
+import {
+  makeProviderMaintenanceCapabilities,
+  makeStaticProviderMaintenanceResolver,
+  resolveProviderMaintenanceCapabilitiesEffect,
+} from "../providerMaintenance.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
@@ -31,6 +37,15 @@ import { type TextGenerationShape } from "../../textGeneration/TextGeneration.ts
 
 const DRIVER_KIND = ProviderDriverKind.make("grok-build");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+const UPDATE = makeStaticProviderMaintenanceResolver(
+  makeProviderMaintenanceCapabilities({
+    provider: DRIVER_KIND,
+    packageName: null,
+    updateExecutable: "grok",
+    updateArgs: ["update"],
+    updateLockKey: "grok-cli",
+  }),
+);
 
 export type GrokBuildDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -113,20 +128,34 @@ export const GrokBuildDriver: ProviderDriver<GrokBuildSettings, GrokBuildDriverE
           ),
       };
 
+      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+        binaryPath: effectiveConfig.command,
+        env: processEnv,
+      });
+
       const checkProvider = checkGrokBuildProviderStatus(effectiveConfig, processEnv).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
 
       const snapshot = yield* makeManagedServerProvider<GrokBuildSettings>({
+        maintenanceCapabilities,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) =>
           buildInitialGrokBuildProviderSnapshot(settings).pipe(Effect.map(stampIdentity)),
         checkProvider,
+        enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
+          enrichGrokBuildSnapshot({
+            settings,
+            snapshot: currentSnapshot,
+            maintenanceCapabilities,
+            publishSnapshot,
+            stampIdentity,
+            environment: processEnv,
+          }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
-        maintenanceCapabilities: { provider: DRIVER_KIND, packageName: null, update: null },
       }).pipe(
         Effect.mapError(
           (cause) =>

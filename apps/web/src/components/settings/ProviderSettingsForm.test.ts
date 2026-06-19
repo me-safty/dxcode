@@ -5,8 +5,10 @@ import { DRIVER_OPTION_BY_VALUE } from "./providerDriverMeta";
 import {
   deriveProviderSettingsFields,
   nextProviderConfigWithFieldValue,
+  parseProviderConfigStringArrayDraft,
   readProviderConfigBoolean,
   readProviderConfigString,
+  readProviderConfigStringArray,
 } from "./ProviderSettingsForm";
 
 describe("ProviderSettingsForm helpers", () => {
@@ -36,6 +38,21 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("derives Grok arguments as a string-array control", () => {
+    const grokBuild = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("grok-build")];
+    expect(grokBuild).toBeDefined();
+
+    const args = deriveProviderSettingsFields(grokBuild!).find((field) => field.key === "args");
+
+    expect(args).toMatchObject({
+      label: "Arguments",
+      description: "Arguments to pass to the Grok Build CLI, one per line.",
+      control: "string-array",
+      placeholder: "agent\nstdio",
+      clearWhenEmpty: "omit",
+    });
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();
@@ -56,6 +73,46 @@ describe("ProviderSettingsForm helpers", () => {
 
   it("reads non-string config values as blank strings", () => {
     expect(readProviderConfigString({ binaryPath: 123 }, "binaryPath")).toBe("");
+  });
+
+  it("reads string-array config values and tolerates legacy newline strings", () => {
+    expect(readProviderConfigStringArray({ args: ["agent", "stdio", 42] }, "args")).toEqual([
+      "agent",
+      "stdio",
+    ]);
+    expect(readProviderConfigStringArray({ args: "agent\nstdio" }, "args")).toEqual([
+      "agent",
+      "stdio",
+    ]);
+  });
+
+  it("parses string-array drafts one item per non-empty line", () => {
+    expect(parseProviderConfigStringArrayDraft(" agent \n\nstdio\n  --flag  ")).toEqual([
+      "agent",
+      "stdio",
+      "--flag",
+    ]);
+  });
+
+  it("stores and clears string-array fields without changing unknown config keys", () => {
+    const field = {
+      key: "args",
+      control: "string-array" as const,
+      label: "Arguments",
+      clearWhenEmpty: "omit" as const,
+    };
+
+    expect(
+      nextProviderConfigWithFieldValue({ forkOwned: 1 }, field, [" agent ", "", "stdio"]),
+    ).toEqual({
+      forkOwned: 1,
+      args: ["agent", "stdio"],
+    });
+    expect(
+      nextProviderConfigWithFieldValue({ forkOwned: 1, args: ["agent", "stdio"] }, field, []),
+    ).toEqual({
+      forkOwned: 1,
+    });
   });
 
   it("omits false boolean fields when clearWhenEmpty is omit", () => {
