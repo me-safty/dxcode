@@ -2,26 +2,21 @@ import type {
   ContextMenuItem,
   EnvironmentId,
   VcsPanelBranchCommitsInput,
-  VcsPanelBranchCommitsResult,
   ThreadId,
   VcsPanelBranchDetails,
   VcsPanelChangeGroup,
   VcsPanelCommitSummary,
   VcsPanelFileDiffInput,
-  VcsPanelFileDiffResult,
   VcsPanelFileChange,
   VcsPanelRemote,
-  VcsPanelCompareResult,
   VcsPanelSnapshotResult,
   VcsPanelStash,
   VcsPanelStashDetails,
   VcsPanelWorkingTreeFileEnrichmentResult,
   VcsRef,
-  VcsSwitchRefResult,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  type AtomCommandResult,
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
@@ -67,7 +62,10 @@ import { cn, newCommandId } from "~/lib/utils";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
-import { useAtomCommand } from "~/state/use-atom-command";
+import {
+  resolveSourceControlPanelPresentationState,
+  useSourceControlPanelApi,
+} from "~/state/sourceControlPanel";
 import { vcsEnvironment } from "~/state/vcs";
 import { resolvePathLinkTarget } from "~/terminal-links";
 
@@ -1072,200 +1070,7 @@ export function SourceControlPanel({
   const gitActionScope = useMemo(() => ({ environmentId, cwd }), [cwd, environmentId]);
   const threadRef = useMemo(() => ({ environmentId, threadId }), [environmentId, threadId]);
   const gitAction = useGitStackedAction(gitActionScope);
-  const panelSnapshot = useAtomCommand(vcsEnvironment.panelSnapshot, { reportFailure: false });
-  const panelBranchDetails = useAtomCommand(vcsEnvironment.panelBranchDetails, {
-    reportFailure: false,
-  });
-  const panelBranchCommits = useAtomCommand(vcsEnvironment.panelBranchCommits, {
-    reportFailure: false,
-  });
-  const panelStashDetails = useAtomCommand(vcsEnvironment.panelStashDetails, {
-    reportFailure: false,
-  });
-  const panelStageFiles = useAtomCommand(vcsEnvironment.panelStageFiles, { reportFailure: false });
-  const panelUnstageFiles = useAtomCommand(vcsEnvironment.panelUnstageFiles, {
-    reportFailure: false,
-  });
-  const panelDiscardFiles = useAtomCommand(vcsEnvironment.panelDiscardFiles, {
-    reportFailure: false,
-  });
-  const panelEnrichWorkingTreeFiles = useAtomCommand(vcsEnvironment.panelEnrichWorkingTreeFiles, {
-    reportFailure: false,
-  });
-  const panelReadFileDiff = useAtomCommand(vcsEnvironment.panelReadFileDiff, {
-    reportFailure: false,
-  });
-  const panelCommitStaged = useAtomCommand(vcsEnvironment.panelCommitStaged, {
-    reportFailure: false,
-  });
-  const panelPullBranch = useAtomCommand(vcsEnvironment.panelPullBranch, { reportFailure: false });
-  const panelPushBranch = useAtomCommand(vcsEnvironment.panelPushBranch, { reportFailure: false });
-  const panelDeleteBranch = useAtomCommand(vcsEnvironment.panelDeleteBranch, {
-    reportFailure: false,
-  });
-  const panelUndoLatestCommit = useAtomCommand(vcsEnvironment.panelUndoLatestCommit, {
-    reportFailure: false,
-  });
-  const panelRevertCommit = useAtomCommand(vcsEnvironment.panelRevertCommit, {
-    reportFailure: false,
-  });
-  const panelCheckoutCommit = useAtomCommand(vcsEnvironment.panelCheckoutCommit, {
-    reportFailure: false,
-  });
-  const panelCreateBranchFromCommit = useAtomCommand(vcsEnvironment.panelCreateBranchFromCommit, {
-    reportFailure: false,
-  });
-  const panelMergeBranchIntoCurrent = useAtomCommand(vcsEnvironment.panelMergeBranchIntoCurrent, {
-    reportFailure: false,
-  });
-  const panelRebaseCurrentOnto = useAtomCommand(vcsEnvironment.panelRebaseCurrentOnto, {
-    reportFailure: false,
-  });
-  const panelFetchBranch = useAtomCommand(vcsEnvironment.panelFetchBranch, {
-    reportFailure: false,
-  });
-  const panelFetchRemote = useAtomCommand(vcsEnvironment.panelFetchRemote, {
-    reportFailure: false,
-  });
-  const panelFetchAllRemotes = useAtomCommand(vcsEnvironment.panelFetchAllRemotes, {
-    reportFailure: false,
-  });
-  const panelAddRemote = useAtomCommand(vcsEnvironment.panelAddRemote, { reportFailure: false });
-  const panelRemoveRemote = useAtomCommand(vcsEnvironment.panelRemoveRemote, {
-    reportFailure: false,
-  });
-  const panelCreateStash = useAtomCommand(vcsEnvironment.panelCreateStash, {
-    reportFailure: false,
-  });
-  const panelApplyStash = useAtomCommand(vcsEnvironment.panelApplyStash, {
-    reportFailure: false,
-  });
-  const panelPopStash = useAtomCommand(vcsEnvironment.panelPopStash, { reportFailure: false });
-  const panelDropStash = useAtomCommand(vcsEnvironment.panelDropStash, { reportFailure: false });
-  const panelCompare = useAtomCommand(vcsEnvironment.panelCompare, { reportFailure: false });
-  const switchRefCommand = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
-  const runPanelCommand = useCallback(
-    async <TInput extends { readonly cwd: string }, TResult>(
-      command: (target: {
-        readonly environmentId: EnvironmentId;
-        readonly input: TInput;
-      }) => Promise<AtomCommandResult<TResult, unknown>>,
-      input: TInput,
-    ): Promise<TResult> => {
-      const result = await command({ environmentId, input });
-      if (result._tag === "Success") {
-        return result.value;
-      }
-      throw squashAtomCommandFailure(result);
-    },
-    [environmentId],
-  );
-  const api = useMemo(
-    () => ({
-      vcs: {
-        panelSnapshot: (input: { readonly cwd: string }) =>
-          runPanelCommand<typeof input, VcsPanelSnapshotResult>(panelSnapshot, input),
-        branchDetails: (input: Parameters<typeof panelBranchDetails>[0]["input"]) =>
-          runPanelCommand<typeof input, VcsPanelBranchDetails>(panelBranchDetails, input),
-        branchCommits: (input: Parameters<typeof panelBranchCommits>[0]["input"]) =>
-          runPanelCommand<typeof input, VcsPanelBranchCommitsResult>(panelBranchCommits, input),
-        stashDetails: (input: Parameters<typeof panelStashDetails>[0]["input"]) =>
-          runPanelCommand<typeof input, VcsPanelStashDetails>(panelStashDetails, input),
-        stageFiles: (input: Parameters<typeof panelStageFiles>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelStageFiles, input),
-        unstageFiles: (input: Parameters<typeof panelUnstageFiles>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelUnstageFiles, input),
-        discardFiles: (input: Parameters<typeof panelDiscardFiles>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelDiscardFiles, input),
-        enrichWorkingTreeFiles: (
-          input: Parameters<typeof panelEnrichWorkingTreeFiles>[0]["input"],
-        ) =>
-          runPanelCommand<typeof input, VcsPanelWorkingTreeFileEnrichmentResult>(
-            panelEnrichWorkingTreeFiles,
-            input,
-          ),
-        readFileDiff: (input: Parameters<typeof panelReadFileDiff>[0]["input"]) =>
-          runPanelCommand<typeof input, VcsPanelFileDiffResult>(panelReadFileDiff, input),
-        commitStaged: (input: Parameters<typeof panelCommitStaged>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelCommitStaged, input),
-        pullBranch: (input: Parameters<typeof panelPullBranch>[0]["input"]) =>
-          runPanelCommand<typeof input, unknown>(panelPullBranch, input),
-        pushBranch: (input: Parameters<typeof panelPushBranch>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelPushBranch, input),
-        deleteBranch: (input: Parameters<typeof panelDeleteBranch>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelDeleteBranch, input),
-        undoLatestCommit: (input: Parameters<typeof panelUndoLatestCommit>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelUndoLatestCommit, input),
-        revertCommit: (input: Parameters<typeof panelRevertCommit>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelRevertCommit, input),
-        checkoutCommit: (input: Parameters<typeof panelCheckoutCommit>[0]["input"]) =>
-          runPanelCommand<typeof input, VcsSwitchRefResult>(panelCheckoutCommit, input),
-        createBranchFromCommit: (
-          input: Parameters<typeof panelCreateBranchFromCommit>[0]["input"],
-        ) => runPanelCommand<typeof input, unknown>(panelCreateBranchFromCommit, input),
-        mergeBranchIntoCurrent: (
-          input: Parameters<typeof panelMergeBranchIntoCurrent>[0]["input"],
-        ) => runPanelCommand<typeof input, void>(panelMergeBranchIntoCurrent, input),
-        rebaseCurrentOnto: (input: Parameters<typeof panelRebaseCurrentOnto>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelRebaseCurrentOnto, input),
-        fetchBranch: (input: Parameters<typeof panelFetchBranch>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelFetchBranch, input),
-        fetchRemote: (input: Parameters<typeof panelFetchRemote>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelFetchRemote, input),
-        fetchAllRemotes: (input: Parameters<typeof panelFetchAllRemotes>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelFetchAllRemotes, input),
-        addRemote: (input: Parameters<typeof panelAddRemote>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelAddRemote, input),
-        removeRemote: (input: Parameters<typeof panelRemoveRemote>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelRemoveRemote, input),
-        createStash: (input: Parameters<typeof panelCreateStash>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelCreateStash, input),
-        applyStash: (input: Parameters<typeof panelApplyStash>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelApplyStash, input),
-        popStash: (input: Parameters<typeof panelPopStash>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelPopStash, input),
-        dropStash: (input: Parameters<typeof panelDropStash>[0]["input"]) =>
-          runPanelCommand<typeof input, void>(panelDropStash, input),
-        compare: (input: Parameters<typeof panelCompare>[0]["input"]) =>
-          runPanelCommand<typeof input, VcsPanelCompareResult>(panelCompare, input),
-        switchRef: (input: Parameters<typeof switchRefCommand>[0]["input"]) =>
-          runPanelCommand<typeof input, VcsSwitchRefResult>(switchRefCommand, input),
-      },
-    }),
-    [
-      panelAddRemote,
-      panelApplyStash,
-      panelBranchCommits,
-      panelBranchDetails,
-      panelCheckoutCommit,
-      panelCommitStaged,
-      panelCompare,
-      panelCreateBranchFromCommit,
-      panelCreateStash,
-      panelDeleteBranch,
-      panelDiscardFiles,
-      panelDropStash,
-      panelEnrichWorkingTreeFiles,
-      panelFetchAllRemotes,
-      panelFetchBranch,
-      panelFetchRemote,
-      panelMergeBranchIntoCurrent,
-      panelPopStash,
-      panelPullBranch,
-      panelPushBranch,
-      panelReadFileDiff,
-      panelRebaseCurrentOnto,
-      panelRemoveRemote,
-      panelRevertCommit,
-      panelSnapshot,
-      panelStageFiles,
-      panelStashDetails,
-      panelUndoLatestCommit,
-      panelUnstageFiles,
-      runPanelCommand,
-      switchRefCommand,
-    ],
-  );
+  const api = useSourceControlPanelApi(environmentId);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const openInPreferredEditor = useOpenInPreferredEditor(
     environmentId,
@@ -1414,6 +1219,17 @@ export function SourceControlPanel({
       workingTree: status.workingTree,
     });
   }, [vcsStatus.data]);
+  const presentationState = useMemo(
+    () =>
+      resolveSourceControlPanelPresentationState({
+        snapshot,
+        loading,
+        error,
+        statusPending: vcsStatus.isPending,
+        statusError: vcsStatus.error,
+      }),
+    [error, loading, snapshot, vcsStatus.error, vcsStatus.isPending],
+  );
   const isActionRunning = useCallback(
     (actionKey: string) => runningActions.has(actionKey),
     [runningActions],
@@ -2459,25 +2275,25 @@ export function SourceControlPanel({
     </CollapsibleSection>
   );
 
-  if (loading && !snapshot) {
+  if (presentationState.status === "loading") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-        Loading repository state...
+        {presentationState.message}
       </div>
     );
   }
 
-  if (!snapshot) {
+  if (presentationState.status === "unavailable") {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
         <div className="relative rounded border border-destructive/35 bg-destructive/10 py-2 pl-2 pr-9 text-xs text-destructive-foreground">
           <div className="max-h-20 overflow-auto whitespace-pre-wrap break-words">
-            {error ?? "Source control is unavailable."}
+            {presentationState.message}
           </div>
           <div className="absolute right-1 top-1">
             <IconButton
               label="Copy error"
-              disabled={!error}
+              disabled={!presentationState.canCopyError}
               onClick={() => copyText(error ?? "", "No error to copy.")}
             >
               <Copy className="size-3.5" />
@@ -2490,6 +2306,10 @@ export function SourceControlPanel({
         </Button>
       </div>
     );
+  }
+
+  if (!snapshot) {
+    return null;
   }
 
   const toggleChangedFileSelection = (path: string, checked: boolean) => {
@@ -3598,11 +3418,24 @@ export function SourceControlPanel({
           <span>{snapshot.status.aheadOfDefaultCount} ahead of default</span>
         ) : null}
       </div>
-      {error ? (
-        <div className="relative mt-1 rounded border border-destructive/35 bg-destructive/10 py-1.5 pl-2 pr-8 text-destructive-foreground">
-          <div className="max-h-20 overflow-auto whitespace-pre-wrap break-words">{error}</div>
+      {presentationState.syncMessage ? (
+        <div
+          className={cn(
+            "relative mt-1 rounded border py-1.5 pl-2 pr-8",
+            error
+              ? "border-destructive/35 bg-destructive/10 text-destructive-foreground"
+              : "border-border/70 bg-muted/45 text-muted-foreground",
+          )}
+        >
+          <div className="max-h-20 overflow-auto whitespace-pre-wrap break-words">
+            {presentationState.syncMessage}
+          </div>
           <div className="absolute right-1 top-1">
-            <IconButton label="Copy error" onClick={() => copyText(error)}>
+            <IconButton
+              label="Copy status"
+              disabled={!error}
+              onClick={() => copyText(error ?? "", "No error to copy.")}
+            >
               <Copy className="size-3.5" />
             </IconButton>
           </div>

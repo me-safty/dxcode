@@ -145,6 +145,7 @@ import { useSettings } from "../hooks/useSettings";
 import { useHostDisplayPreferences } from "../hostDisplayPreferences";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
+import { resolveSubagentParentThreadRef } from "../subagentControls";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -1227,12 +1228,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const isServerThread = routeKind === "server" && serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
-  const activeThreadSubagentRelation =
-    activeThread?.parentRelation?.kind === "subagent" ? activeThread.parentRelation : null;
-  const activeThreadParentRef =
-    activeThread && activeThreadSubagentRelation
-      ? scopeThreadRef(activeThread.environmentId, activeThreadSubagentRelation.parentThreadId)
-      : null;
+  const activeThreadParentRef = resolveSubagentParentThreadRef(activeThread);
   const openActiveThreadParent = useCallback(() => {
     if (!activeThreadParentRef) return;
     void navigate({
