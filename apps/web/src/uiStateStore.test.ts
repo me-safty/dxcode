@@ -2,6 +2,7 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  collapseAllProjects,
   legacyProjectCwdPreferenceKey,
   markThreadUnread,
   markThreadVisited,
@@ -114,6 +115,53 @@ describe("uiStateStore pure functions", () => {
     expect(reorderProjects(state, currentOrder, ["env-local:proj-a"], ["env-local:proj-a"])).toBe(
       state,
     );
+  });
+
+  it("collapseAllProjects sets all given project IDs to collapsed", () => {
+    const project1 = ProjectId.make("project-1");
+    const project2 = ProjectId.make("project-2");
+    const initialState = makeUiState({
+      projectExpandedById: {
+        [project1]: true,
+        [project2]: true,
+      },
+    });
+
+    const next = collapseAllProjects(initialState, [project1, project2]);
+
+    expect(next.projectExpandedById[project1]).toBe(false);
+    expect(next.projectExpandedById[project2]).toBe(false);
+  });
+
+  it("collapseAllProjects does not affect projects not in the list", () => {
+    const project1 = ProjectId.make("project-1");
+    const project2 = ProjectId.make("project-2");
+    const initialState = makeUiState({
+      projectExpandedById: {
+        [project1]: true,
+        [project2]: true,
+      },
+    });
+
+    const next = collapseAllProjects(initialState, [project1]);
+
+    expect(next.projectExpandedById[project1]).toBe(false);
+    expect(next.projectExpandedById[project2]).toBe(true);
+  });
+
+  it("collapseAllProjects is a no-op when all given projects already collapsed", () => {
+    const project1 = ProjectId.make("project-1");
+    const project2 = ProjectId.make("project-2");
+    const initialState = makeUiState({
+      projectExpandedById: {
+        [project1]: false,
+        [project2]: false,
+      },
+    });
+
+    const next = collapseAllProjects(initialState, [project1, project2]);
+
+    expect(next).toBe(initialState);
   });
 
   it("stores only collapsed changed-file turns", () => {
