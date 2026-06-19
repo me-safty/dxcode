@@ -83,6 +83,8 @@ beforeAll(() => {
     documentElement: {
       classList,
       offsetHeight: 0,
+      setAttribute: () => {},
+      removeAttribute: () => {},
     },
   });
 });
