@@ -55,7 +55,7 @@ The intended model is host-MCP discovery, not a VS Code-only provider special ca
 - The VS Code extension is the first host implementation. It advertises its temporary socket endpoint as `{ name, socketPath, toolTimeoutSec }`.
 - Advertisements include the VS Code workspace folder metadata already used by the extension backend bootstrap: stable workspace folder key, display name, resolved local `cwd`, URI scheme, URI authority, and the active workspace folder key.
 - Provider session startup in the desktop backend looks up host MCP advertisements for the thread's project workspace root and injects the first matching endpoint into the provider's MCP config.
-- Matching should follow the same project/workspace scoping rules the VS Code extension uses for sidebar visibility and startup selection. The extension currently resolves workspace folders into stable keys and executable `cwd`s, the server maps those folders to T3 projects in `bootstrapProjects[]`, and the VS Code webview filters by those project ids with a cwd fallback while the welcome payload is settling. Discovery should reuse that metadata shape and extract shared project/workspace matching helpers if they can live outside the React-only sidebar code.
+- Matching follows the same project/workspace scoping rules the VS Code extension uses for startup selection. The extension resolves workspace folders into stable keys and executable `cwd`s, the server maps those folders to T3 projects in `bootstrapProjects[]`, and discovery uses shared workspace-folder helpers from `@t3tools/shared/workspaceFolders` so VS Code bootstrap, host-MCP advertisements, and local-backend advertisements share active-folder and workspace-root matching semantics.
 - If multiple VS Code windows advertise the same project, use the first live match. This is an acceptable edge case and does not need special UI or selection semantics initially.
 - If no matching live advertisement exists, no VS Code MCP server is injected. The provider should fail normally if the user asks for a VS Code MCP tool that is unavailable.
 - Discovery is local-machine only. A web client can use a VS Code MCP bridge only when the backend it is connected to can reach the advertised local socket. Remote browsers or remote saved environments cannot use a socket that exists only on the user's workstation.
@@ -131,6 +131,7 @@ Remaining follow-up work:
 Implemented:
 
 - `HostMcpAdvertisement` is a versioned shared contract in `packages/contracts`, with runtime advertisement helpers in `packages/shared/hostMcp`.
+- `@t3tools/shared/workspaceFolders` owns stable workspace folder identity keys, active-folder fallback, and workspace-root matching used by VS Code bootstrap, host-MCP discovery, and local-backend advertisement discovery.
 - The desktop backend writes and heartbeats `DesktopBackendAdvertisement` records after HTTP readiness succeeds. The VS Code extension reads those records before rendering a webview and shows a manual-start fallback with a reconnect button when no live desktop backend is available.
 - The VS Code extension writes and heartbeats its per-instance host MCP advertisement after `VsCodeMcpBridge.ensureStarted()` succeeds. The advertised workspace folders come from the same `resolveBootstrapWorkspaceFolders(...)` output used for desktop connection scoping, with the same active workspace folder key selected by `resolveActiveWorkspaceFolder(...)`.
 - Provider startup receives the thread's project workspace root, scans live advertisements, matches the target against advertised workspace folders, probes the first live match, and merges it with bootstrap-provided `hostMcpServers`.
@@ -572,7 +573,7 @@ Implemented:
 
 - Host MCP and desktop bootstrap contracts share workspace folder metadata shaped as `workspaceFolders[]` and `activeWorkspaceFolderKey`.
 - Each workspace folder carries `key`, `name`, `cwd`, `uriScheme`, and `uriAuthority`.
-- The VS Code extension builds folder keys as `<scheme>:<authority>:<fsPath>` and advertises every supported workspace folder.
+- Workspace folder keys are built through `@t3tools/shared/workspaceFolders` as `<scheme>:<authority>:<fsPath>`, and the VS Code extension advertises every supported workspace folder.
 - `file:` and `vscode-remote:` workspace folders are treated as directly executable filesystem roots.
 - `vscode-vfs://github/<owner>/<repo>` workspace folders from GitHub RemoteHub are cloned with `git clone --filter=blob:none` into `<T3 home>/virtual-workspaces/github/<owner>-<repo>-<hash>` and bootstrapped from that local checkout.
 - Unsupported virtual workspace folders are skipped instead of passing their `Uri.fsPath` to the backend as a bogus cwd.

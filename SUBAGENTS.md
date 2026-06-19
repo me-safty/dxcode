@@ -14,7 +14,7 @@ The current behavior is:
 - A child conversation view shows the raw initial prompt that launched that child when Codex exposes it, followed by that child's output, tool calls, diffs, MCP calls, and other actions. Grandchildren appear only as blocks inside their direct parent child view.
 - Users cannot prompt or steer a subagent. The child view exposes stop control only while the child is running and a header button for returning to its direct parent conversation.
 - Stopping a parent does not automatically stop running children. Stopping a child explicitly targets that child.
-- Archive/delete actions are exposed only for root parent conversations and should include descendant subagent threads as part of that root lifecycle.
+- Archive/delete actions are exposed only for root parent conversations. The server orchestration decider owns descendant lifecycle cascade, so archiving or deleting a root parent includes active subagent descendants even if a particular client has not materialized every hidden child thread.
 
 ## Assessment
 
@@ -37,7 +37,7 @@ type OrchestrationThreadParentRelation =
       rootThreadId: ThreadId;
       parentThreadId: ThreadId;
       parentTurnId: TurnId | null;
-      parentItemId: string | null;
+      parentItemId: ProviderItemId;
       parentActivitySequence: number;
       providerThreadId: string;
       titleSeed: string | null;
@@ -68,7 +68,7 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 7. Child stop/interrupt handling routes through the provider-bound root session while targeting the selected child thread/turn. Parent stop remains scoped to the requested parent thread and does not cascade to active children.
 
-8. Completed child detail remains tied to the root parent lifecycle. The web action layer dispatches archive/delete lifecycle actions for the root and collected descendant subagent threads, with root actions last. Delete also attempts to stop and close terminal state for involved lifecycle thread ids.
+8. Completed child detail remains tied to the root parent lifecycle. Root archive/delete requests are dispatched for the root thread, and the orchestration decider cascades active subagent descendants before the parent event. Force-deleting a project delegates through lifecycle roots so descendant subagents are not double-deleted. Delete still attempts to stop and close terminal state for involved lifecycle thread ids.
 
 9. Unsupported providers keep the previous fallback behavior. No durable nested-thread behavior should be inferred for Claude, Cursor, OpenCode, or other providers until their event streams expose enough lineage to make child routing reliable.
 
@@ -90,6 +90,8 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 8. Shared subagent display helpers keep duration and fallback labels consistent across parent blocks and child controls. Terminal child rows with missing completion timestamps show an explicit unknown-duration fallback instead of implying successful completion, and active children use `working` wording instead of `running` wording.
 
+9. Shared workspace scoping helpers in `packages/client-runtime/src/environment/workspaceScope.ts` centralize visible project/thread selection for client surfaces that need to reason about active root threads, descendants, hidden subagent routes, and workspace-bound source-control context after the upstream connection-runtime rewrite.
+
 ## Decisions Captured
 
 - Persistence retention: child detail is tied to parent lifecycle.
@@ -109,6 +111,7 @@ The implementation and review fixes have been covered by focused automated tests
 
 - Server tests cover Codex subagent ingestion, child terminal status, parent-relation persistence, projection upsert preservation, and child stop/interrupt routing through the provider-bound root session.
 - Server tests cover raw subagent prompt projection into child threads, including start-then-complete late prompt updates and whitespace-only prompt suppression.
+- Server tests cover root thread archive/delete lifecycle cascade through subagent descendants and project force-delete behavior that deletes descendants only once.
 - Web tests cover sidebar/thread state behavior, duplicate parent subagent control-row removal, child composer suppression, subagent stop control behavior, and duration fallback labels.
 - Playwright checked Codex subagent behavior with marker prompts: before the prompt projection fix, the child view showed the output marker but not the initial prompt marker; after the fix, the child view showed the initial prompt marker followed by the output marker. Earlier Playwright coverage also checked that the parent showed exactly one compact subagent block, child output/actions did not leak into the parent, the child view was reachable from the parent block, the child view showed the child command/output, and the child view did not expose a prompt composer.
 
@@ -127,14 +130,12 @@ pnpm exec vp run lint:mobile
 
 ## Remaining Risks And Hardening Items
 
-1. Root lifecycle cascade should be hardened server-side for hidden descendants that are not materialized in the current client environment. The client currently dispatches archive/delete for collected descendants, but a database/root-thread cascade would be more robust across reconnects and multi-client gaps.
+1. Diff/checkpoint aggregation is intentionally parent-visible at the workspace level, but the exact UI for aggregate root diffs should be audited separately. Per-action diff rendering is scoped to the child timeline.
 
-2. Diff/checkpoint aggregation is intentionally parent-visible at the workspace level, but the exact UI for aggregate root diffs should be audited separately. Per-action diff rendering is scoped to the child timeline.
+2. Reconnect and restart behavior should be stress-tested with active children, especially when the parent reconnects after receiving child output but before receiving the parent collab lifecycle item.
 
-3. Reconnect and restart behavior should be stress-tested with active children, especially when the parent reconnects after receiving child output but before receiving the parent collab lifecycle item.
+3. Multi-client behavior needs broader coverage across web, desktop, VS Code, and mobile shells. The data model is shared, but route guards, sidebar shell subscriptions, and hidden-thread availability should be checked in each client surface.
 
-4. Multi-client behavior needs broader coverage across web, desktop, VS Code, and mobile shells. The data model is shared, but route guards, sidebar shell subscriptions, and hidden-thread availability should be checked in each client surface.
+4. Deep nesting should be load-tested. The model supports arbitrary depth, but the UI should still be checked for indentation, active-row sorting stability, and large active-child sets.
 
-5. Deep nesting should be load-tested. The model supports arbitrary depth, but the UI should still be checked for indentation, active-row sorting stability, and large active-child sets.
-
-6. Unsupported provider fallback should remain explicit. If another provider later exposes durable child-thread lineage, it should be added provider-by-provider rather than by guessing from output text.
+5. Unsupported provider fallback should remain explicit. If another provider later exposes durable child-thread lineage, it should be added provider-by-provider rather than by guessing from output text.
