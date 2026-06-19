@@ -143,9 +143,14 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
     // `replayEvents` enrichment that means one git subprocess per project event on
     // every reconnect, which is the dominant cost behind the "Some requests are
     // slow" toast (#2037). Memoise the cwd -> top-level mapping so a replay burst
-    // resolves each workspace at most once per TTL. A resolved top-level uses the
-    // positive TTL; an unresolved cwd (not a repo / git timed out) uses the
-    // negative TTL so a directory that later becomes a repo is still picked up.
+    // resolves each workspace at most once per positive TTL.
+    //
+    // Only a resolved top-level is cached. An unresolved cwd (not a repo, or git
+    // timed out) is intentionally not cached: a timeout is not a definitive answer,
+    // and caching the cwd fallback would let a nested workspace keep resolving
+    // `git remote -v` against the nested path, pinning the identity rootPath to the
+    // nested dir until the entry expired. Re-running rev-parse on the next resolve
+    // self-corrects, matching the pre-cache behaviour.
     const repositoryIdentityCacheKeyCache = yield* Cache.makeWith<
       string,
       RepositoryIdentityCacheKey
@@ -160,7 +165,7 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
           onSuccess: (value) =>
             value.resolved
               ? (options.positiveCacheTtl ?? DEFAULT_POSITIVE_CACHE_TTL)
-              : (options.negativeCacheTtl ?? DEFAULT_NEGATIVE_CACHE_TTL),
+              : Duration.zero,
           onFailure: () => Duration.zero,
         }),
       },

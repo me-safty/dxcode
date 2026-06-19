@@ -302,4 +302,64 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         }).pipe(Effect.provide(resolverLayer));
       }),
   );
+
+  it.effect(
+    "retries the top-level lookup after a transient git failure instead of caching the cwd fallback",
+    () =>
+      Effect.gen(function* () {
+        let revParseCalls = 0;
+        const nestedWorkspace = "/workspace/repo/packages/web";
+        const topLevel = "/workspace/repo";
+        const succeed = (stdout: string) =>
+          Effect.succeed({
+            stdout,
+            stderr: "",
+            code: ChildProcessSpawner.ExitCode(0),
+            timedOut: false,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          } satisfies ProcessRunner.ProcessRunOutput);
+        const processRunner = ProcessRunner.ProcessRunner.of({
+          run: (input) => {
+            if (input.args.includes("rev-parse") && input.args.includes("--show-toplevel")) {
+              revParseCalls += 1;
+              // First lookup times out (the #2037 failure mode); later ones resolve.
+              return revParseCalls === 1
+                ? Effect.succeed({
+                    stdout: "",
+                    stderr: "",
+                    code: null,
+                    timedOut: true,
+                    stdoutTruncated: false,
+                    stderrTruncated: false,
+                  } satisfies ProcessRunner.ProcessRunOutput)
+                : succeed(topLevel);
+            }
+            if (input.args.includes("remote") && input.args.includes("-v")) {
+              return succeed(
+                "origin\tgit@github.com:T3Tools/t3code.git (fetch)\n" +
+                  "origin\tgit@github.com:T3Tools/t3code.git (push)\n",
+              );
+            }
+            return succeed("");
+          },
+        });
+        const resolverLayer = Layer.effect(
+          RepositoryIdentityResolver,
+          makeRepositoryIdentityResolver({ cacheCapacity: 16 }),
+        ).pipe(Layer.provide(Layer.succeed(ProcessRunner.ProcessRunner, processRunner)));
+
+        yield* Effect.gen(function* () {
+          const resolver = yield* RepositoryIdentityResolver;
+          yield* resolver.resolve(nestedWorkspace);
+          const second = yield* resolver.resolve(nestedWorkspace);
+
+          // A failed lookup is not cached, so the next resolve retries rev-parse
+          // and recovers the real top-level rather than pinning rootPath to the
+          // nested workspace path.
+          expect(revParseCalls).toBe(2);
+          expect(second?.rootPath).toBe(topLevel);
+        }).pipe(Effect.provide(resolverLayer));
+      }),
+  );
 });
