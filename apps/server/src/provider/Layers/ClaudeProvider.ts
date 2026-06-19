@@ -3,6 +3,7 @@ import {
   type ModelCapabilities,
   type ModelSelection,
   ProviderDriverKind,
+  type ProviderInstanceId,
   type ServerProviderModel,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
@@ -39,6 +40,10 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { probeClaudeUsageLimits } from "../claudeUsageProbe.ts";
+import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
+import type { PtyAdapterShape } from "../../terminal/Services/PTY.ts";
+import type { ProviderUsageStateShape } from "../Services/ProviderUsageState.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -623,6 +628,9 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings: ClaudeSettings,
   ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
   environment?: NodeJS.ProcessEnv,
+  ptyAdapter?: PtyAdapterShape,
+  instanceId?: ProviderInstanceId,
+  providerUsageState?: ProviderUsageStateShape,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -753,6 +761,31 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const runtimeUsageLimits = providerUsageState
+    ? yield* providerUsageState
+        .get(PROVIDER, instanceId)
+        .pipe(Effect.orElseSucceed(() => undefined))
+    : undefined;
+
+  const usageLimits = runtimeUsageLimits
+    ? runtimeUsageLimits
+    : ptyAdapter
+      ? yield* probeClaudeUsageLimits(
+          {
+            binaryPath: claudeSettings.binaryPath,
+            launchArgs: claudeSettings.launchArgs,
+            cwd: process.cwd(),
+            checkedAt,
+            environment: yield* makeClaudeEnvironment(claudeSettings, environment),
+          },
+          ptyAdapter,
+        ).pipe(Effect.map((result) => result.usageLimits))
+      : makeUnavailableUsageLimits({
+          source: "claudeStatusProbe",
+          checkedAt,
+          reason: "Usage limits unavailable for this Claude instance in the current runtime.",
+        });
+
   const authMetadata = claudeAuthMetadata({
     subscriptionType: capabilities.subscriptionType,
     authMethod: capabilities.tokenSource,
@@ -773,6 +806,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         ...(authMetadata ? authMetadata : {}),
       },
       ...(versionUpgradeMessage ? { message: versionUpgradeMessage } : {}),
+      ...(usageLimits ? { usageLimits } : {}),
     },
   });
 });

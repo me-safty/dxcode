@@ -1405,7 +1405,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     ),
   );
   const nextEventId = Effect.map(randomUUIDv4, (id) => EventId.make(id));
-  const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
+  const makeEventStamp = () =>
+    Effect.map(Effect.all({ eventId: nextEventId, createdAt: nowIso }), (stamp) => ({
+      ...stamp,
+      providerInstanceId: boundInstanceId,
+    }));
 
   const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
@@ -1565,6 +1569,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: deltaStamp.eventId,
         provider: PROVIDER,
         createdAt: deltaStamp.createdAt,
+        providerInstanceId: deltaStamp.providerInstanceId,
         threadId: context.session.threadId,
         turnId: turnState.turnId,
         itemId: asRuntimeItemId(block.itemId),
@@ -1596,6 +1601,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       eventId: stamp.eventId,
       provider: PROVIDER,
       createdAt: stamp.createdAt,
+      providerInstanceId: stamp.providerInstanceId,
       itemId: asRuntimeItemId(block.itemId),
       threadId: context.session.threadId,
       turnId: turnState.turnId,
@@ -1688,6 +1694,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: stamp.eventId,
         provider: PROVIDER,
         createdAt: stamp.createdAt,
+        providerInstanceId: stamp.providerInstanceId,
         threadId: context.session.threadId,
         payload: {
           providerThreadId: nextThreadId,
@@ -1719,6 +1726,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       eventId: stamp.eventId,
       provider: PROVIDER,
       createdAt: stamp.createdAt,
+      providerInstanceId: stamp.providerInstanceId,
       threadId: context.session.threadId,
       ...(turnState ? { turnId: asCanonicalTurnId(turnState.turnId) } : {}),
       payload: {
@@ -1742,6 +1750,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       eventId: stamp.eventId,
       provider: PROVIDER,
       createdAt: stamp.createdAt,
+      providerInstanceId: stamp.providerInstanceId,
       threadId: context.session.threadId,
       ...(turnState ? { turnId: asCanonicalTurnId(turnState.turnId) } : {}),
       payload: {
@@ -1847,6 +1856,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       eventId: stamp.eventId,
       provider: PROVIDER,
       createdAt: stamp.createdAt,
+      providerInstanceId: stamp.providerInstanceId,
       threadId: context.session.threadId,
       turnId: turnState.turnId,
       payload: {
@@ -1988,6 +1998,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: stamp.eventId,
         provider: PROVIDER,
         createdAt: stamp.createdAt,
+        providerInstanceId: stamp.providerInstanceId,
         threadId: context.session.threadId,
         payload: {
           state: status,
@@ -2011,6 +2022,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: toolStamp.eventId,
         provider: PROVIDER,
         createdAt: toolStamp.createdAt,
+        providerInstanceId: toolStamp.providerInstanceId,
         threadId: context.session.threadId,
         turnId: turnState.turnId,
         itemId: asRuntimeItemId(tool.itemId),
@@ -2062,6 +2074,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       eventId: stamp.eventId,
       provider: PROVIDER,
       createdAt: stamp.createdAt,
+      providerInstanceId: stamp.providerInstanceId,
       threadId: context.session.threadId,
       turnId: turnState.turnId,
       payload: {
@@ -2151,6 +2164,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
+          providerInstanceId: stamp.providerInstanceId,
           threadId: context.session.threadId,
           turnId: context.turnState.turnId,
           ...(assistantBlockEntry?.block
@@ -2214,6 +2228,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
+          providerInstanceId: stamp.providerInstanceId,
           threadId: context.session.threadId,
           ...(context.turnState
             ? {
@@ -2251,6 +2266,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               eventId: planStamp.eventId,
               provider: PROVIDER,
               createdAt: planStamp.createdAt,
+              providerInstanceId: planStamp.providerInstanceId,
               threadId: context.session.threadId,
               ...(context.turnState
                 ? {
@@ -2313,6 +2329,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: stamp.eventId,
         provider: PROVIDER,
         createdAt: stamp.createdAt,
+        providerInstanceId: stamp.providerInstanceId,
         threadId: context.session.threadId,
         ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
         itemId: asRuntimeItemId(tool.itemId),
@@ -2391,6 +2408,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: updatedStamp.eventId,
         provider: PROVIDER,
         createdAt: updatedStamp.createdAt,
+        providerInstanceId: updatedStamp.providerInstanceId,
         threadId: context.session.threadId,
         ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
         itemId: asRuntimeItemId(tool.itemId),
@@ -2419,6 +2437,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           eventId: deltaStamp.eventId,
           provider: PROVIDER,
           createdAt: deltaStamp.createdAt,
+          providerInstanceId: deltaStamp.providerInstanceId,
           threadId: context.session.threadId,
           turnId: context.turnState.turnId,
           itemId: asRuntimeItemId(tool.itemId),
@@ -2443,6 +2462,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: completedStamp.eventId,
         provider: PROVIDER,
         createdAt: completedStamp.createdAt,
+        providerInstanceId: completedStamp.providerInstanceId,
         threadId: context.session.threadId,
         ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
         itemId: asRuntimeItemId(tool.itemId),
@@ -2513,6 +2533,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: turnStartedStamp.eventId,
         provider: PROVIDER,
         createdAt: turnStartedStamp.createdAt,
+        providerInstanceId: turnStartedStamp.providerInstanceId,
         threadId: context.session.threadId,
         turnId,
         payload: {},
@@ -2597,6 +2618,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       eventId: stamp.eventId,
       provider: PROVIDER,
       createdAt: stamp.createdAt,
+      providerInstanceId: stamp.providerInstanceId,
       threadId: context.session.threadId,
       ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
       providerRefs: nativeProviderRefs(context),
@@ -2802,6 +2824,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       eventId: stamp.eventId,
       provider: PROVIDER,
       createdAt: stamp.createdAt,
+      providerInstanceId: stamp.providerInstanceId,
       threadId: context.session.threadId,
       ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
       providerRefs: nativeProviderRefs(context),
@@ -2974,6 +2997,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: stamp.eventId,
         provider: PROVIDER,
         createdAt: stamp.createdAt,
+        providerInstanceId: stamp.providerInstanceId,
         threadId: context.session.threadId,
         ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
         requestId: asRuntimeRequestId(requestId),
@@ -3028,6 +3052,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: stamp.eventId,
         provider: PROVIDER,
         createdAt: stamp.createdAt,
+        providerInstanceId: stamp.providerInstanceId,
         threadId: context.session.threadId,
         payload: {
           reason: "Session stopped",
@@ -3171,6 +3196,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           eventId: requestedStamp.eventId,
           provider: PROVIDER,
           createdAt: requestedStamp.createdAt,
+          providerInstanceId: requestedStamp.providerInstanceId,
           threadId: context.session.threadId,
           ...(context.turnState
             ? {
@@ -3218,6 +3244,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           eventId: resolvedStamp.eventId,
           provider: PROVIDER,
           createdAt: resolvedStamp.createdAt,
+          providerInstanceId: resolvedStamp.providerInstanceId,
           threadId: context.session.threadId,
           ...(context.turnState
             ? {
@@ -3321,6 +3348,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           eventId: requestedStamp.eventId,
           provider: PROVIDER,
           createdAt: requestedStamp.createdAt,
+          providerInstanceId: requestedStamp.providerInstanceId,
           threadId: context.session.threadId,
           ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
           requestId: asRuntimeRequestId(requestId),
@@ -3369,6 +3397,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           eventId: resolvedStamp.eventId,
           provider: PROVIDER,
           createdAt: resolvedStamp.createdAt,
+          providerInstanceId: resolvedStamp.providerInstanceId,
           threadId: context.session.threadId,
           ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
           requestId: asRuntimeRequestId(requestId),
@@ -3577,6 +3606,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: sessionStartedStamp.eventId,
         provider: PROVIDER,
         createdAt: sessionStartedStamp.createdAt,
+        providerInstanceId: sessionStartedStamp.providerInstanceId,
         threadId,
         payload: input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
         providerRefs: {},
@@ -3588,6 +3618,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: configuredStamp.eventId,
         provider: PROVIDER,
         createdAt: configuredStamp.createdAt,
+        providerInstanceId: configuredStamp.providerInstanceId,
         threadId,
         payload: {
           config: {
@@ -3607,6 +3638,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: readyStamp.eventId,
         provider: PROVIDER,
         createdAt: readyStamp.createdAt,
+        providerInstanceId: readyStamp.providerInstanceId,
         threadId,
         payload: {
           state: "ready",
@@ -3721,6 +3753,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         eventId: turnStartedStamp.eventId,
         provider: PROVIDER,
         createdAt: turnStartedStamp.createdAt,
+        providerInstanceId: turnStartedStamp.providerInstanceId,
         threadId: context.session.threadId,
         turnId,
         payload: modelSelection?.model ? { model: modelSelection.model } : {},
