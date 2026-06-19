@@ -1129,6 +1129,8 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
+  const [pendingServerThreadFetchOriginByThreadId, setPendingServerThreadFetchOriginByThreadId] =
+    useState<Record<string, boolean>>({});
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -3337,6 +3339,12 @@ function ChatViewContent(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const fetchOrigin = isLocalDraftThread
+    ? (draftThread?.fetchOrigin ?? false)
+    : canOverrideServerThreadEnvMode
+      ? (pendingServerThreadFetchOriginByThreadId[activeThread?.id ?? ""] ??
+        settings.defaultWorktreeFetchOrigin)
+      : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -3899,6 +3907,7 @@ function ChatViewContent(props: ChatViewProps) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
+                      ...(fetchOrigin ? { fetchOrigin: true } : {}),
                     },
                     runSetupScript: true,
                   }
@@ -4600,6 +4609,22 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
+  const onFetchOriginChange = (nextFetchOrigin: boolean) => {
+    if (canOverrideServerThreadEnvMode && activeThread) {
+      setPendingServerThreadFetchOriginByThreadId((current) =>
+        current[activeThread.id] === nextFetchOrigin
+          ? current
+          : { ...current, [activeThread.id]: nextFetchOrigin },
+      );
+      return;
+    }
+    if (isLocalDraftThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        fetchOrigin: nextFetchOrigin,
+      });
+    }
+  };
+
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
@@ -4933,6 +4958,8 @@ function ChatViewContent(props: ChatViewProps) {
                   threadId={activeThread.id}
                   {...(routeKind === "draft" && draftId ? { draftId } : {})}
                   onEnvModeChange={onEnvModeChange}
+                  fetchOrigin={fetchOrigin}
+                  onFetchOriginChange={onFetchOriginChange}
                   {...(canOverrideServerThreadEnvMode ? { effectiveEnvModeOverride: envMode } : {})}
                   {...(canOverrideServerThreadEnvMode
                     ? {

@@ -64,6 +64,18 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   });
 });
 
+describe("ServerSettings worktree defaults", () => {
+  it("defaults fetch origin off for legacy configs", () => {
+    expect(decodeServerSettings({}).defaultWorktreeFetchOrigin).toBe(false);
+  });
+
+  it("accepts fetch origin updates", () => {
+    expect(
+      decodeServerSettingsPatch({ defaultWorktreeFetchOrigin: true }).defaultWorktreeFetchOrigin,
+    ).toBe(true);
+  });
+});
+
 describe("ServerSettingsPatch.providerInstances", () => {
   it("treats providerInstances as an optional whole-map replacement", () => {
     const patch = decodeServerSettingsPatch({});

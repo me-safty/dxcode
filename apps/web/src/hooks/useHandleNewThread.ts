@@ -20,6 +20,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { readThreadShell, useProjects, useThread } from "../state/entities";
+import { resolveNewDraftFetchOrigin } from "../lib/chatThreadActions";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useSettings } from "./useSettings";
@@ -27,6 +28,7 @@ import { useSettings } from "./useSettings";
 export function useNewThreadHandler() {
   const projects = useProjects();
   const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
+  const defaultWorktreeFetchOrigin = useSettings((settings) => settings.defaultWorktreeFetchOrigin);
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
@@ -40,6 +42,7 @@ export function useNewThreadHandler() {
         branch?: string | null;
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
+        fetchOrigin?: boolean;
       },
     ): Promise<void> => {
       const {
@@ -62,6 +65,7 @@ export function useNewThreadHandler() {
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
+      const hasFetchOriginOption = options?.fetchOrigin !== undefined;
       const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
@@ -80,11 +84,17 @@ export function useNewThreadHandler() {
         : null;
       if (reusableStoredDraftThread) {
         return (async () => {
-          if (hasBranchOption || hasWorktreePathOption || hasEnvModeOption) {
+          if (
+            hasBranchOption ||
+            hasWorktreePathOption ||
+            hasEnvModeOption ||
+            hasFetchOriginOption
+          ) {
             setDraftThreadContext(reusableStoredDraftThread.draftId, {
               ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
               ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
               ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
+              ...(hasFetchOriginOption ? { fetchOrigin: options?.fetchOrigin } : {}),
             });
           }
           setLogicalProjectDraftThreadId(
@@ -114,11 +124,12 @@ export function useNewThreadHandler() {
         latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
         latestActiveDraftThread.promotedTo == null
       ) {
-        if (hasBranchOption || hasWorktreePathOption || hasEnvModeOption) {
+        if (hasBranchOption || hasWorktreePathOption || hasEnvModeOption || hasFetchOriginOption) {
           setDraftThreadContext(currentRouteTarget.draftId, {
             ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
             ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
             ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
+            ...(hasFetchOriginOption ? { fetchOrigin: options?.fetchOrigin } : {}),
           });
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, currentRouteTarget.draftId, {
@@ -129,6 +140,7 @@ export function useNewThreadHandler() {
           ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
           ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
+          ...(hasFetchOriginOption ? { fetchOrigin: options?.fetchOrigin } : {}),
         });
         return Promise.resolve();
       }
@@ -136,13 +148,20 @@ export function useNewThreadHandler() {
       const draftId = newDraftId();
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
+      const initialEnvMode = options?.envMode ?? "local";
       return (async () => {
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
           createdAt,
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
-          envMode: options?.envMode ?? "local",
+          envMode: initialEnvMode,
+          fetchOrigin:
+            options?.fetchOrigin ??
+            resolveNewDraftFetchOrigin({
+              envMode: initialEnvMode,
+              defaultWorktreeFetchOrigin,
+            }),
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
         applyStickyState(draftId);
@@ -153,7 +172,7 @@ export function useNewThreadHandler() {
         });
       })();
     },
-    [getCurrentRouteTarget, projectGroupingSettings, router, projects],
+    [defaultWorktreeFetchOrigin, getCurrentRouteTarget, projectGroupingSettings, router, projects],
   );
 }
 

@@ -3,6 +3,7 @@ import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
+  resolveNewDraftFetchOrigin,
   startNewLocalThreadFromContext,
   startNewThreadFromContext,
   type ChatThreadActionContext,
@@ -24,6 +25,21 @@ function createContext(overrides: Partial<ChatThreadActionContext> = {}): ChatTh
 }
 
 describe("chatThreadActions", () => {
+  it("only applies the fetch-origin default to new worktree drafts", () => {
+    expect(
+      resolveNewDraftFetchOrigin({
+        envMode: "worktree",
+        defaultWorktreeFetchOrigin: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolveNewDraftFetchOrigin({
+        envMode: "local",
+        defaultWorktreeFetchOrigin: true,
+      }),
+    ).toBe(false);
+  });
+
   it("prefers the active draft thread project when resolving thread actions", () => {
     const projectRef = resolveThreadActionProjectRef(
       createContext({

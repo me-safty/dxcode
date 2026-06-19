@@ -1035,6 +1035,21 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
+  it("stores the fetch-origin choice with the draft thread", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      envMode: "worktree",
+      fetchOrigin: true,
+    });
+
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)?.fetchOrigin).toBe(true);
+
+    store.setDraftThreadContext(draftId, { fetchOrigin: false });
+
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)?.fetchOrigin).toBe(false);
+  });
+
   it("preserves existing branch and worktree when setProjectDraftThreadId receives undefined", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {

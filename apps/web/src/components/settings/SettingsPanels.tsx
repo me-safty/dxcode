@@ -408,6 +408,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
+      ...(settings.defaultWorktreeFetchOrigin !==
+      DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin
+        ? ["New worktree origin base"]
+        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -426,6 +430,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
+      settings.defaultWorktreeFetchOrigin,
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
       settings.automaticGitFetchInterval,
@@ -456,6 +461,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+      defaultWorktreeFetchOrigin: DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -692,12 +698,15 @@ export function GeneralSettingsPanel() {
           title="New threads"
           description="Pick the default workspace mode for newly created draft threads."
           resetAction={
-            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
+            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ||
+            settings.defaultWorktreeFetchOrigin !==
+              DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin ? (
               <SettingResetButton
                 label="new threads"
                 onClick={() =>
                   updateSettings({
                     defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+                    defaultWorktreeFetchOrigin: DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin,
                   })
                 }
               />
@@ -728,6 +737,37 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        {settings.defaultThreadEnvMode === "worktree" ? (
+          <SettingsRow
+            className="bg-muted/20 sm:pl-9"
+            title="Start from origin"
+            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+            resetAction={
+              settings.defaultWorktreeFetchOrigin !==
+              DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin ? (
+                <SettingResetButton
+                  label="new worktree origin base"
+                  onClick={() =>
+                    updateSettings({
+                      defaultWorktreeFetchOrigin:
+                        DEFAULT_UNIFIED_SETTINGS.defaultWorktreeFetchOrigin,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.defaultWorktreeFetchOrigin}
+                onCheckedChange={(checked) =>
+                  updateSettings({ defaultWorktreeFetchOrigin: Boolean(checked) })
+                }
+                aria-label="Start new worktrees from origin by default"
+              />
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Add project starts in"

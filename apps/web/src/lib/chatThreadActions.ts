@@ -34,6 +34,13 @@ export interface ChatThreadActionContext {
   readonly handleNewThread: NewThreadHandler;
 }
 
+export function resolveNewDraftFetchOrigin(input: {
+  envMode: DraftThreadEnvMode;
+  defaultWorktreeFetchOrigin: boolean;
+}): boolean {
+  return input.envMode === "worktree" && input.defaultWorktreeFetchOrigin;
+}
+
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {
