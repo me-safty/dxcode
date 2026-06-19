@@ -20,6 +20,22 @@ export interface ProviderWorkspaceSkillsState {
 
 const EMPTY_SKILLS: ReadonlyArray<ServerProviderSkill> = [];
 
+export interface ProviderWorkspaceSkillsSnapshotInput {
+  readonly currentKey: string | null;
+  readonly nextKey: string;
+  readonly currentSkills: ReadonlyArray<ServerProviderSkill>;
+}
+
+export interface ProviderWorkspaceSkillsResolutionInput extends ProviderWorkspaceSkillsSnapshotInput {
+  readonly nextSkills: ReadonlyArray<ServerProviderSkill> | null;
+  readonly isPending: boolean;
+}
+
+export interface ProviderWorkspaceSkillsSnapshot {
+  readonly key: string;
+  readonly skills: ReadonlyArray<ServerProviderSkill>;
+}
+
 function targetKey(target: Omit<ProviderWorkspaceSkillsTarget, "fallbackSkills">): string | null {
   if (
     !target.enabled ||
@@ -33,26 +49,35 @@ function targetKey(target: Omit<ProviderWorkspaceSkillsTarget, "fallbackSkills">
   return `${target.environmentId}:${target.instanceId}:${target.cwd.trim()}`;
 }
 
-export function resolvePendingProviderWorkspaceSkills(input: {
-  readonly currentKey: string | null;
-  readonly nextKey: string;
-  readonly currentSkills: ReadonlyArray<ServerProviderSkill>;
-}): ReadonlyArray<ServerProviderSkill> {
+export function resolvePendingProviderWorkspaceSkills(
+  input: ProviderWorkspaceSkillsSnapshotInput,
+): ReadonlyArray<ServerProviderSkill> {
   return input.currentKey === input.nextKey && input.currentSkills.length > 0
     ? input.currentSkills
     : EMPTY_SKILLS;
 }
 
-export function resolveProviderWorkspaceSkills(input: {
-  readonly nextKey: string;
-  readonly nextSkills: ReadonlyArray<ServerProviderSkill> | null;
-  readonly isPending: boolean;
-  readonly currentKey: string | null;
-  readonly currentSkills: ReadonlyArray<ServerProviderSkill>;
-}): ReadonlyArray<ServerProviderSkill> {
+/**
+ * Query result arrays are readonly cache values, so these helpers preserve references
+ * and rely on callers to keep them immutable.
+ */
+export function resolveProviderWorkspaceSkills(
+  input: ProviderWorkspaceSkillsResolutionInput,
+): ReadonlyArray<ServerProviderSkill> {
   if (input.nextSkills !== null) return input.nextSkills;
   if (!input.isPending) return EMPTY_SKILLS;
   return resolvePendingProviderWorkspaceSkills(input);
+}
+
+export function resolveNextProviderWorkspaceSkillsSnapshot(input: {
+  readonly key: string | null;
+  readonly skills: ReadonlyArray<ServerProviderSkill> | null;
+  readonly isPending: boolean;
+  readonly current: ProviderWorkspaceSkillsSnapshot | null;
+}): ProviderWorkspaceSkillsSnapshot | null {
+  if (input.key === null) return null;
+  if (input.skills === null) return input.isPending ? input.current : null;
+  return input.isPending ? input.current : { key: input.key, skills: input.skills };
 }
 
 export function useProviderWorkspaceSkills(
@@ -86,14 +111,16 @@ export function useProviderWorkspaceSkills(
     previousFallbackSkillsRef.current = target.fallbackSkills;
     if (key !== null) query.refresh();
   }, [key, query, target.fallbackSkills]);
-  const previousWorkspaceSkillsRef = useRef<{
-    readonly key: string;
-    readonly skills: ReadonlyArray<ServerProviderSkill>;
-  } | null>(null);
+  const previousWorkspaceSkillsRef = useRef<ProviderWorkspaceSkillsSnapshot | null>(null);
+  const querySkills = query.data?.skills ?? null;
   useEffect(() => {
-    if (key === null || query.data === null) return;
-    previousWorkspaceSkillsRef.current = { key, skills: query.data.skills };
-  }, [key, query.data]);
+    previousWorkspaceSkillsRef.current = resolveNextProviderWorkspaceSkillsSnapshot({
+      key,
+      skills: querySkills,
+      isPending: query.isPending,
+      current: previousWorkspaceSkillsRef.current,
+    });
+  }, [key, query.isPending, querySkills]);
 
   if (key === null) {
     return { skills: target.fallbackSkills, isPending: false, error: null };
@@ -102,7 +129,7 @@ export function useProviderWorkspaceSkills(
   return {
     skills: resolveProviderWorkspaceSkills({
       nextKey: key,
-      nextSkills: query.data?.skills ?? null,
+      nextSkills: querySkills,
       isPending: query.isPending,
       currentKey: previousWorkspaceSkills?.key ?? null,
       currentSkills: previousWorkspaceSkills?.skills ?? EMPTY_SKILLS,
