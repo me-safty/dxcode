@@ -1,6 +1,42 @@
 import { describe, expect, it } from "vitest";
+import type { OrchestrationProjectShell } from "@t3tools/contracts";
 
-import { modelSelectionFromIntakeTags } from "./ExternalIntake.ts";
+import {
+  modelSelectionFromIntakeTags,
+  resolveIntakeProjectRoutingTarget,
+} from "./ExternalIntake.ts";
+import type { IntakeProjectProfile } from "./profiles.ts";
+
+const now = "2026-06-18T00:00:00.000Z";
+
+function projectShell(input: {
+  readonly id: string;
+  readonly title: string;
+  readonly workspaceRoot: string;
+}): OrchestrationProjectShell {
+  return {
+    id: input.id,
+    title: input.title,
+    workspaceRoot: input.workspaceRoot,
+    repositoryIdentity: null,
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: now,
+    updatedAt: now,
+  } as unknown as OrchestrationProjectShell;
+}
+
+function profile(input: {
+  readonly id: string;
+  readonly workspaceRoot: string;
+  readonly aliases?: readonly string[];
+}): IntakeProjectProfile {
+  return {
+    id: input.id,
+    workspaceRoot: input.workspaceRoot,
+    aliases: input.aliases ?? [input.id],
+  };
+}
 
 describe("modelSelectionFromIntakeTags", () => {
   it("returns undefined when no routing tag is present", () => {
@@ -117,5 +153,67 @@ describe("modelSelectionFromIntakeTags", () => {
   it("does not expose ultrathink routing tags", () => {
     expect(modelSelectionFromIntakeTags("[claude-opus-ultrathink] fix the build")).toBeUndefined();
     expect(modelSelectionFromIntakeTags("claude-fable-ultrathink: fix the build")).toBeUndefined();
+  });
+});
+
+describe("resolveIntakeProjectRoutingTarget", () => {
+  it("lets an active project mentioned in the request beat a conflicting source hint", () => {
+    const nextcard = profile({
+      id: "nextcard",
+      workspaceRoot: "/workspace/nextcard",
+      aliases: ["nextcard"],
+    });
+    const t3code = projectShell({
+      id: "project-t3code",
+      title: "t3code",
+      workspaceRoot: "/workspace/t3code",
+    });
+
+    expect(
+      resolveIntakeProjectRoutingTarget({
+        profiles: [nextcard],
+        projects: [
+          projectShell({
+            id: "project-nextcard",
+            title: "nextcard",
+            workspaceRoot: "/workspace/nextcard",
+          }),
+          t3code,
+        ],
+        text: "[claude-opus-ultracode] in t3code, make a dashboard page",
+        projectHintText: "nextcard support triage context",
+        fallbackProfile: nextcard,
+      }),
+    ).toEqual({ type: "project", project: t3code });
+  });
+
+  it("routes to a configured t3code intake profile when the request names it", () => {
+    const t3codeProfile = profile({
+      id: "t3code",
+      workspaceRoot: "/workspace/t3code",
+      aliases: ["t3code", "t3 code"],
+    });
+
+    expect(
+      resolveIntakeProjectRoutingTarget({
+        profiles: [
+          profile({
+            id: "nextcard",
+            workspaceRoot: "/workspace/nextcard",
+            aliases: ["nextcard"],
+          }),
+          t3codeProfile,
+        ],
+        projects: [
+          projectShell({
+            id: "project-t3code",
+            title: "t3code",
+            workspaceRoot: "/workspace/t3code",
+          }),
+        ],
+        text: "please do this in t3 code",
+        projectHintText: "nextcard",
+      }),
+    ).toEqual({ type: "profile", profile: t3codeProfile });
   });
 });

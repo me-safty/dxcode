@@ -55,6 +55,19 @@ type ResolvedProject = Pick<
   "id" | "defaultModelSelection" | "scripts"
 >;
 
+export type ExternalIntakeProjectRoutingTarget =
+  | {
+      readonly type: "profile";
+      readonly profile: IntakeProjectProfile;
+    }
+  | {
+      readonly type: "project";
+      readonly project: OrchestrationProjectShell;
+    }
+  | {
+      readonly type: "unresolved";
+    };
+
 export interface ExternalSlackNotificationLink {
   readonly externalThreadId: string;
   readonly channelId: string;
@@ -292,6 +305,65 @@ function projectChoiceLabel(profile: IntakeProjectProfile) {
   return profile.title ?? profile.id;
 }
 
+function profileMentionedInText(profiles: readonly IntakeProjectProfile[], text: string) {
+  return profiles.find((candidate) =>
+    profileRoutingAliases(candidate).some((alias) => textMentionsAlias(text, alias)),
+  );
+}
+
+function projectMentionedInText(projects: readonly OrchestrationProjectShell[], text: string) {
+  return projects.find((project) => {
+    const aliases = [
+      project.title,
+      project.repositoryIdentity?.displayName,
+      project.repositoryIdentity?.name,
+      project.repositoryIdentity?.locator.remoteName,
+    ].flatMap((alias) => (alias ? [alias] : []));
+    return aliases.some((alias) => textMentionsAlias(text, alias));
+  });
+}
+
+export function resolveIntakeProjectRoutingTarget(input: {
+  readonly profiles: readonly IntakeProjectProfile[];
+  readonly projects: readonly OrchestrationProjectShell[];
+  readonly text: string;
+  readonly projectHintText?: string | undefined;
+  readonly fallbackProfile?: IntakeProjectProfile | undefined;
+}): ExternalIntakeProjectRoutingTarget {
+  const textProfile = profileMentionedInText(input.profiles, input.text);
+  if (textProfile !== undefined) {
+    return { type: "profile", profile: textProfile };
+  }
+
+  const textProject = projectMentionedInText(input.projects, input.text);
+  if (textProject !== undefined) {
+    return { type: "project", project: textProject };
+  }
+
+  const projectHintText = input.projectHintText?.trim();
+  if (projectHintText !== undefined && projectHintText.length > 0) {
+    const hintProfile = profileMentionedInText(input.profiles, projectHintText);
+    if (hintProfile !== undefined) {
+      return { type: "profile", profile: hintProfile };
+    }
+
+    const hintProject = projectMentionedInText(input.projects, projectHintText);
+    if (hintProject !== undefined) {
+      return { type: "project", project: hintProject };
+    }
+  }
+
+  if (input.fallbackProfile !== undefined) {
+    return { type: "profile", profile: input.fallbackProfile };
+  }
+
+  if (input.projects.length === 1) {
+    return { type: "project", project: input.projects[0]! };
+  }
+
+  return { type: "unresolved" };
+}
+
 function projectResolutionErrorMessage(input: {
   readonly profiles: readonly IntakeProjectProfile[];
   readonly projects: readonly OrchestrationProjectShell[];
@@ -431,50 +503,27 @@ const makeExternalIntake = Effect.gen(function* () {
       }
 
       const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
-      const hintText = `${input.projectHintText ?? ""}\n${input.text}`.toLowerCase();
-      const profile = profiles.find((candidate) =>
-        profileRoutingAliases(candidate).some((alias) => textMentionsAlias(hintText, alias)),
-      );
-      if (profile !== undefined) {
-        const existing = yield* projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(
-          profile.workspaceRoot,
-        );
-        return resolvedProfileProject(profile, existing);
-      }
-
-      const mentionedProject = snapshot.projects.find((project) => {
-        const aliases = [
-          project.title,
-          project.repositoryIdentity?.displayName,
-          project.repositoryIdentity?.name,
-          project.repositoryIdentity?.locator.remoteName,
-        ].flatMap((alias) => (alias ? [alias] : []));
-        return aliases.some((alias) => textMentionsAlias(hintText, alias));
+      const routingTarget = resolveIntakeProjectRoutingTarget({
+        profiles,
+        projects: snapshot.projects,
+        text: input.text,
+        projectHintText: input.projectHintText,
+        fallbackProfile: defaultIntakeProfile(profiles),
       });
-      if (mentionedProject !== undefined) {
-        return {
-          profile: null,
-          existing: Option.some(mentionedProject),
-          workspaceRoot: mentionedProject.workspaceRoot,
-          title: mentionedProject.title,
-        };
-      }
 
-      const fallbackProfile = defaultIntakeProfile(profiles);
-      if (fallbackProfile !== undefined) {
+      if (routingTarget.type === "profile") {
         const existing = yield* projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(
-          fallbackProfile.workspaceRoot,
+          routingTarget.profile.workspaceRoot,
         );
-        return resolvedProfileProject(fallbackProfile, existing);
+        return resolvedProfileProject(routingTarget.profile, existing);
       }
 
-      if (snapshot.projects.length === 1) {
-        const onlyProject = snapshot.projects[0]!;
+      if (routingTarget.type === "project") {
         return {
           profile: null,
-          existing: Option.some(onlyProject),
-          workspaceRoot: onlyProject.workspaceRoot,
-          title: onlyProject.title,
+          existing: Option.some(routingTarget.project),
+          workspaceRoot: routingTarget.project.workspaceRoot,
+          title: routingTarget.project.title,
         };
       }
 
