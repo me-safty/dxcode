@@ -92,6 +92,10 @@
       "types": "./src/state/projects.ts",
       "default": "./src/state/projects.ts"
     },
+    "./state/project-grouping": {
+      "types": "./src/state/projectGrouping.ts",
+      "default": "./src/state/projectGrouping.ts"
+    },
     "./state/relay": {
       "types": "./src/state/relayDiscovery.ts",
       "default": "./src/state/relayDiscovery.ts"
@@ -127,6 +131,10 @@
     "./state/threads": {
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"
+    },
+    "./state/thread-sort": {
+      "types": "./src/state/threadSort.ts",
+      "default": "./src/state/threadSort.ts"
     },
     "./state/vcs": {
       "types": "./src/state/vcs.ts",

@@ -50,6 +50,9 @@ const EMPTY_THREAD_PREVIEW_STATE: ThreadPreviewState = Object.freeze({
 });
 
 const revisionByThreadKey = new Map<string, number>();
+const suppressedPreviewSessionKeys = new Set<string>();
+
+const previewSessionKey = (threadKey: string, tabId: string): string => `${threadKey}:${tabId}`;
 
 const bumpPreviewStateRevision = (threadKey: string): void => {
   revisionByThreadKey.set(threadKey, (revisionByThreadKey.get(threadKey) ?? 0) + 1);
@@ -137,6 +140,9 @@ export const usePreviewStateStore = create<PreviewStateStoreState>()((set) => ({
         case "navigated":
           nextByThread = updateThread(state, threadKey, (current) => {
             const snapshot = event.snapshot;
+            if (suppressedPreviewSessionKeys.has(previewSessionKey(threadKey, snapshot.tabId))) {
+              return current;
+            }
             const recentlySeenUrls =
               snapshot.navStatus._tag === "Idle"
                 ? current.recentlySeenUrls
@@ -200,6 +206,9 @@ export const usePreviewStateStore = create<PreviewStateStoreState>()((set) => ({
             desktopOverlay: null,
             desktopByTabId: {},
           };
+        }
+        if (suppressedPreviewSessionKeys.has(previewSessionKey(threadKey, snapshot.tabId))) {
+          return current;
         }
         const existing = current.sessions[snapshot.tabId];
         if (existing && existing.updatedAt > snapshot.updatedAt) {
@@ -285,9 +294,48 @@ export function selectThreadPreviewState(
   return ensureState(byThreadKey, scopedThreadKey(ref));
 }
 
+export function readThreadPreviewState(ref: ScopedThreadRef): ThreadPreviewState {
+  return selectThreadPreviewState(usePreviewStateStore.getState().byThreadKey, ref);
+}
+
+export function applyPreviewServerSnapshot(
+  ref: ScopedThreadRef,
+  snapshot: PreviewSessionSnapshot | null,
+): void {
+  usePreviewStateStore.getState().applyServerSnapshot(ref, snapshot);
+}
+
+export function rememberPreviewUrl(ref: ScopedThreadRef, url: string): void {
+  usePreviewStateStore.getState().rememberUrl(ref, url);
+}
+
+export function beginPreviewSessionClose(ref: ScopedThreadRef, tabId: string): void {
+  const threadKey = scopedThreadKey(ref);
+  suppressedPreviewSessionKeys.add(previewSessionKey(threadKey, tabId));
+  usePreviewStateStore.getState().removeSession(ref, tabId);
+}
+
+export function cancelPreviewSessionClose(
+  ref: ScopedThreadRef,
+  snapshot: PreviewSessionSnapshot | null,
+  tabId: string,
+): void {
+  const threadKey = scopedThreadKey(ref);
+  suppressedPreviewSessionKeys.delete(previewSessionKey(threadKey, tabId));
+  if (snapshot) {
+    usePreviewStateStore.getState().applyServerSnapshot(ref, snapshot);
+  }
+}
+
 export function isPreviewSupportedInRuntime(): boolean {
   if (typeof window === "undefined") return false;
   return Boolean(window.desktopBridge?.preview);
+}
+
+export function resetPreviewStateForTests(): void {
+  usePreviewStateStore.setState({ byThreadKey: {} });
+  revisionByThreadKey.clear();
+  suppressedPreviewSessionKeys.clear();
 }
 
 export const __testing = {

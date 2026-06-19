@@ -4502,6 +4502,8 @@ export default function ChatView(props: ChatViewProps) {
                                       }
                                     : {})}
                                   envLocked={envLocked}
+                                  startFromOrigin={false}
+                                  onStartFromOriginChange={() => undefined}
                                   onComposerFocusRequest={scheduleComposerFocus}
                                   {...(canCheckoutPullRequestIntoThread
                                     ? { onCheckoutPullRequestRequest: openPullRequestDialog }

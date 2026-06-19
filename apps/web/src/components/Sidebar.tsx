@@ -1854,6 +1854,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 branch: currentActiveDraftThread.branch,
                 worktreePath: currentActiveDraftThread.worktreePath,
                 envMode: currentActiveDraftThread.envMode,
+                startFromOrigin: currentActiveDraftThread.startFromOrigin,
               }
             : null,
       });

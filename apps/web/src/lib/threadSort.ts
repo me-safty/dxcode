@@ -1,10 +1,12 @@
 import type { ProjectId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import type { Thread } from "../types";
+import type { ChatMessage, Thread } from "../types";
 
-export type ThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
-  latestUserMessageAt?: string | null;
-  messages?: Pick<Thread["messages"][number], "createdAt" | "role">[];
+export type ThreadSortInput = {
+  createdAt: string;
+  updatedAt?: string | null | undefined;
+  latestUserMessageAt?: string | null | undefined;
+  messages?: ReadonlyArray<Pick<ChatMessage, "createdAt" | "role">> | undefined;
 };
 
 export function toSortableTimestamp(iso: string | undefined): number | null {
@@ -60,7 +62,7 @@ export function getThreadSortTimestamp(
   return getLatestUserMessageTimestamp(thread);
 }
 
-export function sortThreads<T extends Pick<Thread, "id"> & ThreadSortInput>(
+export function sortThreads<T extends { id: string } & ThreadSortInput>(
   threads: readonly T[],
   sortOrder: SidebarThreadSortOrder,
 ): T[] {

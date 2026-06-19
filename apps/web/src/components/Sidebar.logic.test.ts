@@ -18,6 +18,7 @@ import {
   resolveRestingThreadTitleClassName,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -39,6 +40,44 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("resolveSidebarStageBadgeLabel", () => {
+  it("returns Nightly for nightly primary server versions", () => {
+    expect(
+      resolveSidebarStageBadgeLabel({
+        primaryServerVersion: "0.0.28-nightly.20260616.12",
+        fallbackStageLabel: "Alpha",
+      }),
+    ).toBe("Nightly");
+  });
+
+  it("returns the fallback label for stable primary server versions", () => {
+    expect(
+      resolveSidebarStageBadgeLabel({
+        primaryServerVersion: "0.0.27",
+        fallbackStageLabel: "Alpha",
+      }),
+    ).toBe("Alpha");
+  });
+
+  it("returns the fallback label when the primary server version is missing", () => {
+    expect(
+      resolveSidebarStageBadgeLabel({
+        primaryServerVersion: null,
+        fallbackStageLabel: "Dev",
+      }),
+    ).toBe("Dev");
+  });
+
+  it("returns the fallback label for malformed nightly prerelease versions", () => {
+    expect(
+      resolveSidebarStageBadgeLabel({
+        primaryServerVersion: "0.0.28-nightly.20260616",
+        fallbackStageLabel: "Alpha",
+      }),
+    ).toBe("Alpha");
+  });
+});
 
 function makeLatestTurn(overrides?: {
   completedAt?: string | null;
@@ -209,6 +248,7 @@ describe("resolveSidebarNewThreadSeedContext", () => {
           branch: "feature/draft",
           worktreePath: "/repo/.t3/worktrees/draft",
           envMode: "worktree",
+          startFromOrigin: true,
         },
       }),
     ).toEqual({
@@ -250,12 +290,14 @@ describe("resolveSidebarNewThreadSeedContext", () => {
           branch: "feature/new-draft",
           worktreePath: "/repo/worktree",
           envMode: "worktree",
+          startFromOrigin: true,
         },
       }),
     ).toEqual({
       branch: "feature/new-draft",
       worktreePath: "/repo/worktree",
       envMode: "worktree",
+      startFromOrigin: true,
     });
   });
 
