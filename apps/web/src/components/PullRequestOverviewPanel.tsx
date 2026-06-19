@@ -1,5 +1,4 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -10,7 +9,8 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 
-import { gitPullRequestDetailQueryOptions } from "~/lib/gitPRReactQuery";
+import { gitPrEnvironment } from "~/state/gitPr";
+import { useEnvironmentQuery } from "~/state/query";
 import { cn } from "~/lib/utils";
 import ChatMarkdown from "./ChatMarkdown";
 import { Spinner } from "./ui/spinner";
@@ -118,9 +118,13 @@ export default function PullRequestOverviewPanel({
 }: PullRequestOverviewPanelProps) {
   const {
     data: detail,
-    isLoading,
+    isPending,
     error,
-  } = useQuery(gitPullRequestDetailQueryOptions({ environmentId, cwd, prNumber }));
+  } = useEnvironmentQuery(
+    environmentId !== null && cwd !== null
+      ? gitPrEnvironment.pullRequestDetail({ environmentId, input: { cwd, prNumber } })
+      : null,
+  );
 
   const checksGrouped = useMemo(() => {
     if (!detail) return null;
@@ -130,7 +134,7 @@ export default function PullRequestOverviewPanel({
     return { failing, pending, passing };
   }, [detail]);
 
-  if (isLoading) {
+  if (isPending) {
     return (
       <div className="flex h-full items-center justify-center">
         <Spinner className="size-5 text-muted-foreground" />
@@ -138,12 +142,12 @@ export default function PullRequestOverviewPanel({
     );
   }
 
-  if (error || !detail) {
+  if (error !== null || !detail) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
         <AlertCircleIcon className="size-5 text-destructive" />
         <p className="text-sm text-destructive">
-          {error?.message ?? "Failed to load pull request details."}
+          {error ?? "Failed to load pull request details."}
         </p>
       </div>
     );

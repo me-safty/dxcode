@@ -1,7 +1,6 @@
-import { scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitCommitIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
@@ -9,13 +8,10 @@ import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
 import { ensureEnvironmentApi } from "~/environmentApi";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
-import {
-  gitMutationKeys,
-  gitStatusQueryOptions,
-  invalidateGitQueries,
-} from "~/lib/gitPRReactQuery";
-import { useStore } from "~/store";
-import { createThreadSelectorByRef } from "~/storeSelectors";
+import { useThreadShell } from "~/state/entities";
+import { useEnvironmentQuery } from "~/state/query";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { vcsEnvironment } from "~/state/vcs";
 import { DEFAULT_INTERACTION_MODE } from "~/types";
 import { CommitModal } from "./CommitModal";
 
@@ -30,30 +26,37 @@ export default function CommitControl({
   gitCwd,
   activeThreadId,
 }: CommitControlProps) {
-  const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
 
   const threadRef = useMemo(
     () => (environmentId ? scopeThreadRef(environmentId, activeThreadId) : null),
     [environmentId, activeThreadId],
   );
-  const activeThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
+  const activeThread = useThreadShell(threadRef);
 
-  const { data: gitStatus = null } = useQuery(
-    gitStatusQueryOptions({ environmentId, cwd: gitCwd }),
-  );
+  const gitStatus =
+    useEnvironmentQuery(
+      environmentId !== null && gitCwd !== null
+        ? vcsEnvironment.status({ environmentId, input: { cwd: gitCwd } })
+        : null,
+    ).data ?? null;
 
   const isRepo = gitStatus?.isRepo ?? true;
   const hasChanges = !!gitStatus?.hasWorkingTreeChanges;
 
-  const initMutation = useMutation({
-    mutationKey: gitMutationKeys.init(environmentId, gitCwd),
-    mutationFn: async () => {
-      if (!gitCwd || !environmentId) throw new Error("Git init is unavailable.");
-      return ensureEnvironmentApi(environmentId).vcs.init({ cwd: gitCwd });
-    },
-    onSuccess: () => invalidateGitQueries(queryClient, { environmentId, cwd: gitCwd }),
-  });
+  const vcsInit = useAtomCommand(vcsEnvironment.init, { reportFailure: false });
+  const refreshStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
+
+  const handleInit = useCallback(async () => {
+    if (!gitCwd || !environmentId) return;
+    setIsInitializing(true);
+    const result = await vcsInit({ environmentId, input: { cwd: gitCwd } });
+    setIsInitializing(false);
+    if (result._tag === "Success") {
+      void refreshStatus({ environmentId, input: { cwd: gitCwd } });
+    }
+  }, [vcsInit, refreshStatus, environmentId, gitCwd]);
 
   const handleSendToNewChat = useCallback(
     (message: string) => {
@@ -119,10 +122,10 @@ export default function CommitControl({
       <Button
         variant="outline"
         size="xs"
-        disabled={initMutation.isPending || !environmentId}
-        onClick={() => initMutation.mutate()}
+        disabled={isInitializing || !environmentId}
+        onClick={() => void handleInit()}
       >
-        {initMutation.isPending ? "Initializing..." : "Initialize Git"}
+        {isInitializing ? "Initializing..." : "Initialize Git"}
       </Button>
     );
   }

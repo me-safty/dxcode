@@ -1,18 +1,13 @@
 "use client";
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { scopeProjectRef } from "@t3tools/client-runtime";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { type ProviderInteractionMode } from "@t3tools/contracts";
 import { GitBranchIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { getProjectOrderKey } from "../logicalProject";
-import {
-  selectProjectsAcrossEnvironments,
-  selectSidebarThreadsAcrossEnvironments,
-  useStore,
-} from "../store";
+import { useProjects, useThreadShells } from "../state/entities";
 import type { Project } from "../types";
 import { useUiStateStore } from "../uiStateStore";
 import { useWorkspacePickerStore } from "../workspacePickerStore";
@@ -43,8 +38,8 @@ interface WorkspaceGroup {
 
 function getWorktreeLabel(worktreePath: string | null, project: Project): string {
   if (worktreePath === null) {
-    const parts = project.cwd.replace(/\/$/, "").split(/[/\\]/);
-    return parts[parts.length - 1] ?? project.name;
+    const parts = project.workspaceRoot.replace(/\/$/, "").split(/[/\\]/);
+    return parts[parts.length - 1] ?? project.title;
   }
   const parts = worktreePath.replace(/\/$/, "").split(/[/\\]/);
   return parts[parts.length - 1] ?? worktreePath;
@@ -119,8 +114,8 @@ function WorkspacePickerContent({ setOpen }: { setOpen: (open: boolean) => void 
 
   const { handleNewThread } = useHandleNewThread();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const allThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const projects = useProjects();
+  const allThreads = useThreadShells();
 
   const orderedProjects = useMemo(
     () =>
@@ -186,7 +181,7 @@ function WorkspacePickerContent({ setOpen }: { setOpen: (open: boolean) => void 
 
     return workspaceGroups
       .map((group) => {
-        const projectMatches = group.project.name.toLowerCase().includes(query);
+        const projectMatches = group.project.title.toLowerCase().includes(query);
         const filteredItems = projectMatches
           ? group.items
           : group.items.filter((item) => {
@@ -363,9 +358,12 @@ function WorkspaceGroupRow({
     <div>
       {/* Project header */}
       <div className="flex items-center gap-2 px-4 py-2 sticky top-0 bg-popover z-10">
-        <ProjectFavicon environmentId={group.project.environmentId} cwd={group.project.cwd} />
+        <ProjectFavicon
+          environmentId={group.project.environmentId}
+          cwd={group.project.workspaceRoot}
+        />
         <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase font-mono">
-          {group.project.name}
+          {group.project.title}
         </span>
       </div>
 

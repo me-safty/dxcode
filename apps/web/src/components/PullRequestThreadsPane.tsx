@@ -1,11 +1,11 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
+import { scopedProjectKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { BotIcon, ExternalLinkIcon, PlusIcon } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 
-import { selectEnvironmentState, selectProjectsAcrossEnvironments, useStore } from "../store";
+import { useProjects, useThreadShells } from "../state/entities";
 import { buildThreadRouteParams } from "../threadRoutes";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "../lib/utils";
@@ -97,7 +97,7 @@ export function PullRequestThreadsPane({
 
   const prViewStore = usePrViewStore(useShallow((s) => ({ projectKey: s.projectKey })));
 
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const projects = useProjects();
 
   const activeProject = useMemo(() => {
     if (prViewStore.projectKey) {
@@ -109,28 +109,23 @@ export function PullRequestThreadsPane({
     return projects[0] ?? null;
   }, [projects, prViewStore.projectKey]);
 
-  const threads = useStore(
-    useShallow((state) => {
-      if (!environmentId || !activeProject) return [];
-      const envState = selectEnvironmentState(state, environmentId);
-      const projectThreadIds = envState.threadIdsByProjectId[activeProject.id] ?? [];
-      const pattern = `PR #${prNumber}`;
-      const result: SidebarThreadSummary[] = [];
-      for (const threadId of projectThreadIds) {
-        const thread = envState.sidebarThreadSummaryById[threadId];
-        if (!thread || thread.archivedAt !== null) continue;
-        if (thread.title.includes(pattern)) {
-          result.push(thread);
-        }
-      }
-      result.sort((a, b) => {
-        const aTime = a.updatedAt ?? a.createdAt;
-        const bTime = b.updatedAt ?? b.createdAt;
-        return bTime.localeCompare(aTime);
-      });
-      return result;
-    }),
-  );
+  const allThreads = useThreadShells();
+  const threads = useMemo(() => {
+    if (!environmentId || !activeProject) return [];
+    const pattern = `PR #${prNumber}`;
+    const result: SidebarThreadSummary[] = allThreads.filter(
+      (thread) =>
+        thread.environmentId === environmentId &&
+        thread.projectId === activeProject.id &&
+        thread.archivedAt === null &&
+        thread.title.includes(pattern),
+    );
+    return [...result].sort((a, b) => {
+      const aTime = a.updatedAt ?? a.createdAt;
+      const bTime = b.updatedAt ?? b.createdAt;
+      return bTime.localeCompare(aTime);
+    });
+  }, [allThreads, environmentId, activeProject, prNumber]);
 
   const handleNavigate = useCallback(
     (ref: ScopedThreadRef) => {

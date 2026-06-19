@@ -6,7 +6,7 @@ import type {
   PullRequestIssueComment,
   PullRequestReviewComment,
 } from "@t3tools/contracts";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AlertCircleIcon,
   BotIcon,
@@ -23,17 +23,10 @@ import {
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import { useTheme } from "~/hooks/useTheme";
-import {
-  gitPostPullRequestIssueCommentMutationOptions,
-  gitPreparePullRequestThreadMutationOptions,
-  gitPullRequestBodyQueryOptions,
-  gitPullRequestDiffQueryOptions,
-  gitPullRequestFileDiffQueryOptions,
-  gitPullRequestIssueCommentsQueryOptions,
-  gitPullRequestReviewCommentsQueryOptions,
-  gitPullRequestViewedFilesQueryOptions,
-  gitSetPullRequestFileViewedMutationOptions,
-} from "~/lib/gitPRReactQuery";
+import { gitEnvironment } from "~/state/git";
+import { gitPrEnvironment, refreshPullRequestComments, refreshPullRequests } from "~/state/gitPr";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useEnvironmentQuery } from "~/state/query";
 import { buildPatchCacheKey, resolveDiffThemeName } from "~/lib/diffRendering";
 import { usePullRequestViewedFiles } from "~/lib/pullRequestViewedFiles";
 import { cn } from "~/lib/utils";
@@ -175,75 +168,93 @@ export function PullRequestReviewView({
   openFilePath = null,
   onFilePathChange,
 }: PullRequestReviewViewProps) {
-  const queryClient = useQueryClient();
   const { resolvedTheme } = useTheme();
 
-  const diffQuery = useQuery(gitPullRequestDiffQueryOptions({ environmentId, cwd, prNumber }));
-  const bodyQuery = useQuery(gitPullRequestBodyQueryOptions({ environmentId, cwd, prNumber }));
-  const viewedFilesQuery = useQuery(
-    gitPullRequestViewedFilesQueryOptions({ environmentId, cwd, prNumber }),
+  const queryTarget =
+    environmentId !== null && cwd !== null && prNumber !== null
+      ? { environmentId, input: { cwd, prNumber } }
+      : null;
+  const diffQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestDiff(queryTarget) : null,
   );
-  const setFileViewedMutation = useMutation(
-    gitSetPullRequestFileViewedMutationOptions({ environmentId, cwd, prNumber }),
+  const bodyQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestBody(queryTarget) : null,
   );
-  const [reviewCommentsQuery, issueCommentsQuery] = useQueries({
-    queries: [
-      gitPullRequestReviewCommentsQueryOptions({ environmentId, cwd, prNumber }),
-      gitPullRequestIssueCommentsQueryOptions({ environmentId, cwd, prNumber }),
-    ],
+  const viewedFilesQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestViewedFiles(queryTarget) : null,
+  );
+  const reviewCommentsQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestReviewComments(queryTarget) : null,
+  );
+  const issueCommentsQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestIssueComments(queryTarget) : null,
+  );
+
+  const setFileViewed = useAtomCommand(gitPrEnvironment.setPullRequestFileViewed, {
+    reportFailure: false,
   });
-
-  const postIssueCommentMutation = useMutation(
-    gitPostPullRequestIssueCommentMutationOptions({ environmentId, cwd, prNumber, queryClient }),
-  );
-
-  const preparePrMutation = useMutation(
-    gitPreparePullRequestThreadMutationOptions({ environmentId, cwd, queryClient }),
-  );
+  const postIssueComment = useAtomCommand(gitPrEnvironment.postPullRequestIssueComment, {
+    reportFailure: false,
+  });
+  const preparePullRequestThread = useAtomCommand(gitEnvironment.preparePullRequestThread, {
+    reportFailure: false,
+  });
   const [checkoutPending, setCheckoutPending] = useState<"local" | "worktree" | null>(null);
 
   const handleCheckout = useCallback(
     async (mode: "local" | "worktree") => {
       if (prNumber === null || !cwd || !environmentId) return;
       setCheckoutPending(mode);
-      try {
-        const result = await preparePrMutation.mutateAsync({
-          reference: String(prNumber),
-          mode,
-        });
+      const result = await preparePullRequestThread({
+        environmentId,
+        input: { cwd, reference: String(prNumber), mode },
+      });
+      setCheckoutPending(null);
+      if (result._tag === "Success") {
+        refreshPullRequests({ environmentId, cwd });
         toastManager.add({
           type: "success",
           title: mode === "local" ? "Branch checked out" : "Worktree created",
           description:
             mode === "local"
-              ? `Switched to branch ${result.branch}`
-              : `Worktree created at ${result.worktreePath ?? result.branch}`,
+              ? `Switched to branch ${result.value.branch}`
+              : `Worktree created at ${result.value.worktreePath ?? result.value.branch}`,
         });
-      } catch (err) {
+        return;
+      }
+      if (!isAtomCommandInterrupted(result)) {
+        const failure = squashAtomCommandFailure(result);
         toastManager.add({
           type: "error",
           title: mode === "local" ? "Checkout failed" : "Worktree creation failed",
-          description: err instanceof Error ? err.message : "An error occurred.",
+          description: failure instanceof Error ? failure.message : "An error occurred.",
         });
-      } finally {
-        setCheckoutPending(null);
       }
     },
-    [cwd, environmentId, preparePrMutation, prNumber],
+    [cwd, environmentId, preparePullRequestThread, prNumber],
   );
 
   const [draftComment, setDraftComment] = useState("");
+  const [isPostingComment, setIsPostingComment] = useState(false);
+  const [postCommentError, setPostCommentError] = useState<string | null>(null);
 
   const handleSubmitComment = useCallback(async () => {
     const body = draftComment.trim();
-    if (!body || prNumber === null) return;
-    try {
-      await postIssueCommentMutation.mutateAsync({ body });
+    if (!body || prNumber === null || environmentId === null || cwd === null) return;
+    setIsPostingComment(true);
+    setPostCommentError(null);
+    const result = await postIssueComment({ environmentId, input: { cwd, prNumber, body } });
+    setIsPostingComment(false);
+    if (result._tag === "Success") {
       setDraftComment("");
-    } catch {
-      // Error surfaced via mutation state below.
+      refreshPullRequestComments({ environmentId, cwd, prNumber });
+      return;
     }
-  }, [draftComment, postIssueCommentMutation, prNumber]);
+    if (!isAtomCommandInterrupted(result)) {
+      const failure = squashAtomCommandFailure(result);
+      setPostCommentError(failure instanceof Error ? failure.message : "Failed to post comment");
+    }
+  }, [draftComment, postIssueComment, prNumber, environmentId, cwd]);
 
   const files = useMemo(() => diffQuery.data?.files ?? [], [diffQuery.data?.files]);
   const filePaths = useMemo(() => files.map((file) => file.path), [files]);
@@ -257,9 +268,13 @@ export function PullRequestReviewView({
     githubViewedPaths: viewedFilesQuery.data?.viewedPaths,
     onSetViewed: useCallback(
       (filePath: string, viewed: boolean) => {
-        setFileViewedMutation.mutate({ path: filePath, viewed });
+        if (environmentId === null || cwd === null || prNumber === null) return;
+        void setFileViewed({
+          environmentId,
+          input: { cwd, prNumber, path: filePath, viewed },
+        });
       },
-      [setFileViewedMutation],
+      [setFileViewed, environmentId, cwd, prNumber],
     ),
   });
 
@@ -303,15 +318,15 @@ export function PullRequestReviewView({
   // Shared file list scroll area used in both normal and sidebar modes.
   const fileListScrollArea = (
     <div className="min-h-0 flex-1 overflow-y-auto p-2">
-      {diffQuery.isLoading ? (
+      {diffQuery.isPending ? (
         <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
           <Spinner className="mr-2 size-3.5" />
           Loading files...
         </div>
-      ) : diffQuery.isError ? (
+      ) : diffQuery.error !== null ? (
         <div className="flex flex-col items-center gap-1 px-3 py-6 text-center text-xs text-destructive">
           <AlertCircleIcon className="size-4" aria-hidden="true" />
-          {diffQuery.error instanceof Error ? diffQuery.error.message : "Failed to load diff."}
+          {diffQuery.error ?? "Failed to load diff."}
         </div>
       ) : files.length === 0 ? (
         <p className="px-3 py-6 text-center text-xs text-muted-foreground">No files changed.</p>
@@ -535,7 +550,7 @@ export function PullRequestReviewView({
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               <div className="space-y-3">
-                {bodyQuery.isLoading ? (
+                {bodyQuery.isPending ? (
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Spinner className="size-3" />
                     Loading PR body...
@@ -550,16 +565,16 @@ export function PullRequestReviewView({
                   </article>
                 ) : null}
 
-                {reviewCommentsQuery.isError ? (
+                {reviewCommentsQuery.error !== null ? (
                   <p className="text-xs text-destructive">Failed to load review comments.</p>
                 ) : null}
-                {issueCommentsQuery.isError ? (
+                {issueCommentsQuery.error !== null ? (
                   <p className="text-xs text-destructive">Failed to load issue comments.</p>
                 ) : null}
 
                 {comments.length === 0 &&
-                !reviewCommentsQuery.isLoading &&
-                !issueCommentsQuery.isLoading ? (
+                !reviewCommentsQuery.isPending &&
+                !issueCommentsQuery.isPending ? (
                   <p className="px-1 text-xs text-muted-foreground">No comments yet.</p>
                 ) : null}
                 {comments.map((item) => (
@@ -584,22 +599,16 @@ export function PullRequestReviewView({
                 rows={3}
                 placeholder="Write a comment..."
                 className="w-full resize-none rounded-md border border-border/70 bg-background p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
-                disabled={postIssueCommentMutation.isPending}
+                disabled={isPostingComment}
               />
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] text-muted-foreground">
-                  {postIssueCommentMutation.error instanceof Error
-                    ? postIssueCommentMutation.error.message
-                    : postIssueCommentMutation.isError
-                      ? "Failed to post comment."
-                      : ""}
-                </span>
+                <span className="text-[11px] text-muted-foreground">{postCommentError ?? ""}</span>
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={draftComment.trim().length === 0 || postIssueCommentMutation.isPending}
+                  disabled={draftComment.trim().length === 0 || isPostingComment}
                 >
-                  {postIssueCommentMutation.isPending ? (
+                  {isPostingComment ? (
                     <Spinner className="size-3" />
                   ) : (
                     <SendIcon className="size-3.5" aria-hidden="true" />
@@ -647,8 +656,10 @@ function PullRequestFileDiffView({
   const { resolvedTheme } = useTheme();
   const [diffStyle, setDiffStyle] = useState<"unified" | "split">("unified");
 
-  const fileDiffQuery = useQuery(
-    gitPullRequestFileDiffQueryOptions({ environmentId, cwd, prNumber, filePath }),
+  const fileDiffQuery = useEnvironmentQuery(
+    environmentId !== null && cwd !== null && prNumber !== null
+      ? gitPrEnvironment.pullRequestFileDiff({ environmentId, input: { cwd, prNumber, filePath } })
+      : null,
   );
 
   const patchRender = useMemo(
@@ -748,17 +759,15 @@ function PullRequestFileDiffView({
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">
-        {fileDiffQuery.isLoading ? (
+        {fileDiffQuery.isPending ? (
           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
             <Spinner className="mr-2 size-3.5" />
             Loading diff...
           </div>
-        ) : fileDiffQuery.isError ? (
+        ) : fileDiffQuery.error !== null ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 px-3 text-center text-xs text-destructive">
             <AlertCircleIcon className="size-4" aria-hidden="true" />
-            {fileDiffQuery.error instanceof Error
-              ? fileDiffQuery.error.message
-              : "Failed to load file diff."}
+            {fileDiffQuery.error ?? "Failed to load file diff."}
           </div>
         ) : patchRender?.kind === "files" ? (
           <div className="diff-render-surface">

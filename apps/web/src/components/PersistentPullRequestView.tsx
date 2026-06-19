@@ -1,37 +1,37 @@
-import { scopeProjectRef, scopedProjectKey } from "@t3tools/client-runtime";
+import { scopeProjectRef, scopedProjectKey } from "@t3tools/client-runtime/environment";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { ModelSelection, PullRequestSummary } from "@t3tools/contracts";
 import { DEFAULT_MODEL, DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useCallback, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { buildPullRequestReviewPrompt } from "./PullRequestReviewView";
-import { PullRequestWorkspace, type PullRequestWorkspaceView } from "./PullRequestWorkspace";
+import { PullRequestWorkspace } from "./PullRequestWorkspace";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
 import { toastManager } from "./ui/toast";
 import { ensureEnvironmentApi } from "../environmentApi";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
-import {
-  gitPreparePullRequestThreadMutationOptions,
-  gitPullRequestsQueryOptions,
-} from "../lib/gitPRReactQuery";
+import { gitEnvironment } from "../state/git";
+import { gitPrEnvironment, refreshPullRequests } from "../state/gitPr";
+import { useAtomCommand } from "../state/use-atom-command";
+import { useEnvironmentQuery } from "../state/query";
 import { readLocalApi } from "../localApi";
-import { selectEnvironmentState, selectProjectsAcrossEnvironments, useStore } from "../store";
-import type { Project } from "../types";
+import { readThreadRefs, readThreadShell, useProjects } from "../state/entities";
 import { DEFAULT_INTERACTION_MODE } from "../types";
 import { usePrViewStore } from "../prViewStore";
 
-function resolveReviewModelSelection(project: Project): ModelSelection {
-  const envState = selectEnvironmentState(useStore.getState(), project.environmentId);
-  const projectThreadIds = envState.threadIdsByProjectId[project.id] ?? [];
-
+function resolveReviewModelSelection(project: EnvironmentProject): ModelSelection {
   let mostRecentSelection: ModelSelection | null = null;
   let mostRecentTimestamp = "";
-  for (const threadId of projectThreadIds) {
-    const shell = envState.threadShellById[threadId];
-    if (!shell || shell.archivedAt !== null) continue;
+  for (const ref of readThreadRefs()) {
+    const shell = readThreadShell(ref);
+    if (!shell || shell.environmentId !== project.environmentId || shell.projectId !== project.id) {
+      continue;
+    }
+    if (shell.archivedAt !== null) continue;
     const timestamp = shell.updatedAt ?? shell.createdAt;
     if (timestamp > mostRecentTimestamp) {
       mostRecentTimestamp = timestamp;
@@ -74,15 +74,13 @@ export function PersistentPullRequestView({ visible }: { visible: boolean }) {
 }
 
 function PersistentPullRequestViewInner() {
-  const queryClient = useQueryClient();
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const projects = useProjects();
 
   const {
     projectKey: storeProjectKey,
     prNumber: selectedPrNumber,
     filePath: selectedFilePath,
     view: selectedView,
-    selectPr,
     setView: handleViewChange,
     setFilePath,
     setProjectKey,
@@ -92,7 +90,6 @@ function PersistentPullRequestViewInner() {
       prNumber: s.prNumber,
       filePath: s.filePath,
       view: s.view,
-      selectPr: s.selectPr,
       setView: s.setView,
       setFilePath: s.setFilePath,
       setProjectKey: s.setProjectKey,
@@ -115,9 +112,13 @@ function PersistentPullRequestViewInner() {
     : null;
 
   const environmentId = activeProject?.environmentId ?? null;
-  const cwd = activeProject?.cwd ?? null;
+  const cwd = activeProject?.workspaceRoot ?? null;
 
-  const pullRequestsQuery = useQuery(gitPullRequestsQueryOptions({ environmentId, cwd }));
+  const pullRequestsQuery = useEnvironmentQuery(
+    environmentId !== null && cwd !== null
+      ? gitPrEnvironment.pullRequests({ environmentId, input: { cwd } })
+      : null,
+  );
 
   const selectedPullRequest = useMemo<PullRequestSummary | null>(() => {
     if (selectedPrNumber === null || !pullRequestsQuery.data) return null;
@@ -133,7 +134,7 @@ function PersistentPullRequestViewInner() {
     () =>
       projects.map((project) => ({
         value: scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
-        label: project.name,
+        label: project.title,
       })),
     [projects],
   );
@@ -234,39 +235,42 @@ function PersistentPullRequestViewInner() {
   }, [activeProject, selectedPrNumber, selectedPullRequest, handleViewChange]);
 
   // Checkout / worktree
-  const preparePrMutation = useMutation(
-    gitPreparePullRequestThreadMutationOptions({ environmentId, cwd, queryClient }),
-  );
+  const preparePullRequestThread = useAtomCommand(gitEnvironment.preparePullRequestThread, {
+    reportFailure: false,
+  });
   const [checkoutPending, setCheckoutPending] = useState<"local" | "worktree" | null>(null);
 
   const handleCheckout = useCallback(
     async (mode: "local" | "worktree") => {
       if (selectedPrNumber === null || !cwd || !environmentId) return;
       setCheckoutPending(mode);
-      try {
-        const result = await preparePrMutation.mutateAsync({
-          reference: String(selectedPrNumber),
-          mode,
-        });
+      const result = await preparePullRequestThread({
+        environmentId,
+        input: { cwd, reference: String(selectedPrNumber), mode },
+      });
+      setCheckoutPending(null);
+      if (result._tag === "Success") {
+        refreshPullRequests({ environmentId, cwd });
         toastManager.add({
           type: "success",
           title: mode === "local" ? "Branch checked out" : "Worktree created",
           description:
             mode === "local"
-              ? `Switched to branch ${result.branch}`
-              : `Worktree created at ${result.worktreePath ?? result.branch}`,
+              ? `Switched to branch ${result.value.branch}`
+              : `Worktree created at ${result.value.worktreePath ?? result.value.branch}`,
         });
-      } catch (err) {
+        return;
+      }
+      if (!isAtomCommandInterrupted(result)) {
+        const failure = squashAtomCommandFailure(result);
         toastManager.add({
           type: "error",
           title: mode === "local" ? "Checkout failed" : "Worktree creation failed",
-          description: err instanceof Error ? err.message : "An error occurred.",
+          description: failure instanceof Error ? failure.message : "An error occurred.",
         });
-      } finally {
-        setCheckoutPending(null);
       }
     },
-    [cwd, environmentId, preparePrMutation, selectedPrNumber],
+    [cwd, environmentId, preparePullRequestThread, selectedPrNumber],
   );
 
   return (
@@ -294,9 +298,9 @@ function PersistentPullRequestViewInner() {
                     return (
                       <SelectItem key={key} value={key}>
                         <span className="flex flex-col">
-                          <span className="text-xs">{project.name}</span>
+                          <span className="text-xs">{project.title}</span>
                           <span className="truncate text-[10px] text-muted-foreground">
-                            {project.cwd}
+                            {project.workspaceRoot}
                           </span>
                         </span>
                       </SelectItem>

@@ -1,5 +1,4 @@
 import type { EnvironmentId, PullRequestSummary } from "@t3tools/contracts";
-import { useQuery } from "@tanstack/react-query";
 import {
   BotIcon,
   ExternalLinkIcon,
@@ -9,7 +8,8 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 
-import { gitPullRequestReviewCommentsQueryOptions } from "~/lib/gitPRReactQuery";
+import { gitPrEnvironment } from "~/state/gitPr";
+import { useEnvironmentQuery } from "~/state/query";
 import { cn } from "~/lib/utils";
 import { PullRequestConversationPane } from "./PullRequestConversationPane";
 import { PullRequestFilesPane } from "./PullRequestFilesPane";
@@ -57,14 +57,16 @@ export function PullRequestWorkspace({
   onCheckout,
   isCheckoutPending,
 }: PullRequestWorkspaceProps) {
-  const reviewCommentsQuery = useQuery(
-    gitPullRequestReviewCommentsQueryOptions({ environmentId, cwd, prNumber }),
+  const reviewCommentsQuery = useEnvironmentQuery(
+    environmentId !== null && cwd !== null
+      ? gitPrEnvironment.pullRequestReviewComments({ environmentId, input: { cwd, prNumber } })
+      : null,
   );
 
   const reviewComments = reviewCommentsQuery.data?.comments;
 
   const handleJumpToFile = useMemo(
-    () => (filePath: string, line?: number) => {
+    () => (filePath: string, _line?: number) => {
       onFilePathChange(filePath);
       onViewChange("files");
     },

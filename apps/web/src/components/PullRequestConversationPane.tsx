@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   FileCodeIcon,
   MessageCircleIcon,
@@ -9,12 +9,9 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 
-import {
-  gitPostPullRequestIssueCommentMutationOptions,
-  gitPullRequestBodyQueryOptions,
-  gitPullRequestIssueCommentsQueryOptions,
-  gitPullRequestReviewCommentsQueryOptions,
-} from "~/lib/gitPRReactQuery";
+import { gitPrEnvironment, refreshPullRequestComments } from "~/state/gitPr";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useEnvironmentQuery } from "~/state/query";
 import { cn } from "~/lib/utils";
 import ChatMarkdown from "./ChatMarkdown";
 import { Button } from "./ui/button";
@@ -133,32 +130,34 @@ function CommentComposer({
   cwd: string | null;
   prNumber: number;
 }) {
-  const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
+  const [isPending, setIsPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const mutation = useMutation(
-    gitPostPullRequestIssueCommentMutationOptions({
-      environmentId,
-      cwd,
-      prNumber,
-      queryClient,
-    }),
-  );
+  const postIssueComment = useAtomCommand(gitPrEnvironment.postPullRequestIssueComment, {
+    reportFailure: false,
+  });
 
   const handleSubmit = useCallback(() => {
     const body = draft.trim();
-    if (!body) return;
-    mutation.mutate(
-      { body },
-      {
-        onSuccess: () => {
-          setDraft("");
-          textareaRef.current?.focus();
-        },
-      },
-    );
-  }, [draft, mutation]);
+    if (!body || environmentId === null || cwd === null) return;
+    setIsPending(true);
+    setError(null);
+    void postIssueComment({ environmentId, input: { cwd, prNumber, body } }).then((result) => {
+      setIsPending(false);
+      if (result._tag === "Success") {
+        setDraft("");
+        textareaRef.current?.focus();
+        refreshPullRequestComments({ environmentId, cwd, prNumber });
+        return;
+      }
+      if (!isAtomCommandInterrupted(result)) {
+        const failure = squashAtomCommandFailure(result);
+        setError(failure instanceof Error ? failure.message : "Failed to post comment");
+      }
+    });
+  }, [draft, postIssueComment, environmentId, cwd, prNumber]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -179,7 +178,7 @@ function CommentComposer({
         onKeyDown={handleKeyDown}
         rows={3}
         placeholder="Leave a comment..."
-        disabled={mutation.isPending}
+        disabled={isPending}
         className={cn(
           "w-full resize-none rounded-md border border-border/70 bg-background p-2 text-sm outline-none",
           "placeholder:text-muted-foreground",
@@ -189,21 +188,19 @@ function CommentComposer({
       />
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-muted-foreground">
-          {mutation.isPending ? "Posting..." : "Ctrl+Enter to submit"}
+          {isPending ? "Posting..." : "Ctrl+Enter to submit"}
         </span>
         <div className="flex items-center gap-2">
-          {mutation.isError && (
-            <span className="text-xs text-destructive">
-              {mutation.error?.message ?? "Failed to post comment"}
-            </span>
+          {error !== null && (
+            <span className="text-xs text-destructive">{error ?? "Failed to post comment"}</span>
           )}
           <Button
             type="button"
             size="sm"
             onClick={handleSubmit}
-            disabled={draft.trim().length === 0 || mutation.isPending}
+            disabled={draft.trim().length === 0 || isPending}
           >
-            {mutation.isPending ? (
+            {isPending ? (
               <Spinner className="size-3.5" />
             ) : (
               <SendIcon className="size-3.5" aria-hidden="true" />
@@ -223,14 +220,23 @@ export const PullRequestConversationPane = memo(function PullRequestConversation
   authorLogin,
   onJumpToFile,
 }: PullRequestConversationPaneProps) {
-  const queryInput = { environmentId, cwd, prNumber };
+  const queryTarget =
+    environmentId !== null && cwd !== null
+      ? { environmentId, input: { cwd, prNumber } }
+      : null;
 
-  const bodyQuery = useQuery(gitPullRequestBodyQueryOptions(queryInput));
-  const issueCommentsQuery = useQuery(gitPullRequestIssueCommentsQueryOptions(queryInput));
-  const reviewCommentsQuery = useQuery(gitPullRequestReviewCommentsQueryOptions(queryInput));
+  const bodyQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestBody(queryTarget) : null,
+  );
+  const issueCommentsQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestIssueComments(queryTarget) : null,
+  );
+  const reviewCommentsQuery = useEnvironmentQuery(
+    queryTarget ? gitPrEnvironment.pullRequestReviewComments(queryTarget) : null,
+  );
 
   const isLoading =
-    bodyQuery.isLoading || issueCommentsQuery.isLoading || reviewCommentsQuery.isLoading;
+    bodyQuery.isPending || issueCommentsQuery.isPending || reviewCommentsQuery.isPending;
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];

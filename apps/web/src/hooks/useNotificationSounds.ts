@@ -1,9 +1,7 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
-import { useShallow } from "zustand/react/shallow";
-import { selectSidebarThreadsAcrossEnvironments, useStore } from "../store";
+import { useThreadShells } from "../state/entities";
 import { playDoneSound, playQuestionSound } from "../notificationSound";
-import type { SidebarThreadSummary } from "../types";
 
 interface TrackedThreadState {
   sessionRunning: boolean;
@@ -15,7 +13,7 @@ interface TrackedThreadState {
  * waiting for user input / approval (attention chime).
  */
 export function useNotificationSounds() {
-  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const threads = useThreadShells();
   const prevStateRef = useRef<Map<ThreadId, TrackedThreadState>>(new Map());
   // Skip sound playback on the very first render so we don't flood sounds on app load.
   const initializedRef = useRef(false);
@@ -26,7 +24,7 @@ export function useNotificationSounds() {
     let playDone = false;
     let playQuestion = false;
 
-    for (const thread of threads as SidebarThreadSummary[]) {
+    for (const thread of threads) {
       const sessionRunning = thread.session?.status === "running";
       const needsAttention = thread.hasPendingApprovals || thread.hasPendingUserInput;
 

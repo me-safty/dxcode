@@ -1,9 +1,10 @@
 import type { EnvironmentId, PullRequestMergeMethod } from "@t3tools/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { GitMergeIcon } from "lucide-react";
 import { useState } from "react";
 
-import { gitMergePullRequestMutationOptions } from "~/lib/gitPRReactQuery";
+import { gitPrEnvironment, refreshPullRequestDetail, refreshPullRequests } from "~/state/gitPr";
+import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Spinner } from "./ui/spinner";
@@ -30,30 +31,40 @@ export function PullRequestMergeButton({
   disabled,
   disabledReason,
 }: PullRequestMergeButtonProps) {
-  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<PullRequestMergeMethod>("squash");
   const [deleteBranch, setDeleteBranch] = useState(true);
+  const [isMerging, setIsMerging] = useState(false);
 
-  const mergeMutation = useMutation(
-    gitMergePullRequestMutationOptions({ environmentId, cwd, prNumber, queryClient }),
-  );
+  const mergePullRequest = useAtomCommand(gitPrEnvironment.mergePullRequest, {
+    reportFailure: false,
+  });
 
   const handleMerge = async () => {
     if (!cwd || prNumber === null || !environmentId) return;
-    try {
-      await mergeMutation.mutateAsync({ method, deleteBranch });
+    setIsMerging(true);
+    const result = await mergePullRequest({
+      environmentId,
+      input: { cwd, prNumber, method, deleteBranch },
+    });
+    setIsMerging(false);
+    if (result._tag === "Success") {
+      refreshPullRequestDetail({ environmentId, cwd, prNumber });
+      refreshPullRequests({ environmentId, cwd });
       toastManager.add({
         type: "success",
         title: "Pull request merged",
         description: `Merged with method "${method}"`,
       });
       setOpen(false);
-    } catch (err) {
+      return;
+    }
+    if (!isAtomCommandInterrupted(result)) {
+      const failure = squashAtomCommandFailure(result);
       toastManager.add({
         type: "error",
         title: "Failed to merge",
-        description: err instanceof Error ? err.message : "An error occurred.",
+        description: failure instanceof Error ? failure.message : "An error occurred.",
       });
     }
   };
@@ -73,7 +84,7 @@ export function PullRequestMergeButton({
       <Dialog
         open={open}
         onOpenChange={(next) => {
-          if (!mergeMutation.isPending) setOpen(next);
+          if (!isMerging) setOpen(next);
         }}
       >
         <DialogContent className="max-w-md">
@@ -96,7 +107,7 @@ export function PullRequestMergeButton({
                     value={entry.value}
                     checked={method === entry.value}
                     onChange={() => setMethod(entry.value)}
-                    disabled={mergeMutation.isPending}
+                    disabled={isMerging}
                     className="mt-0.5"
                   />
                   <div className="min-w-0">
@@ -111,7 +122,7 @@ export function PullRequestMergeButton({
                 type="checkbox"
                 checked={deleteBranch}
                 onChange={(event) => setDeleteBranch(event.target.checked)}
-                disabled={mergeMutation.isPending}
+                disabled={isMerging}
               />
               Delete branch after merge
             </label>
@@ -122,7 +133,7 @@ export function PullRequestMergeButton({
               variant="ghost"
               size="sm"
               onClick={() => setOpen(false)}
-              disabled={mergeMutation.isPending}
+              disabled={isMerging}
             >
               Cancel
             </Button>
@@ -130,9 +141,9 @@ export function PullRequestMergeButton({
               type="button"
               size="sm"
               onClick={() => void handleMerge()}
-              disabled={mergeMutation.isPending}
+              disabled={isMerging}
             >
-              {mergeMutation.isPending ? <Spinner className="size-3.5" /> : null}
+              {isMerging ? <Spinner className="size-3.5" /> : null}
               Merge
             </Button>
           </DialogFooter>

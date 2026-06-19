@@ -1,5 +1,4 @@
 import type { EnvironmentId, PullRequestSummary } from "@t3tools/contracts";
-import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -9,7 +8,8 @@ import {
 } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import { gitPullRequestsQueryOptions } from "~/lib/gitPRReactQuery";
+import { gitPrEnvironment } from "~/state/gitPr";
+import { useEnvironmentQuery } from "~/state/query";
 import { cn } from "~/lib/utils";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
@@ -198,7 +198,11 @@ export function PullRequestListPanel({
   onSelect,
   onOpenExternal,
 }: PullRequestListPanelProps) {
-  const pullRequestsQuery = useQuery(gitPullRequestsQueryOptions({ environmentId, cwd }));
+  const pullRequestsQuery = useEnvironmentQuery(
+    environmentId !== null && cwd !== null
+      ? gitPrEnvironment.pullRequests({ environmentId, input: { cwd } })
+      : null,
+  );
   const data = pullRequestsQuery.data;
 
   const sortedReview = useMemo(
@@ -215,7 +219,7 @@ export function PullRequestListPanel({
     );
   }
 
-  if (pullRequestsQuery.isLoading) {
+  if (pullRequestsQuery.isPending) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-xs text-muted-foreground">
         <Spinner className="size-4" />
@@ -224,20 +228,16 @@ export function PullRequestListPanel({
     );
   }
 
-  if (pullRequestsQuery.isError) {
+  if (pullRequestsQuery.error !== null) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-xs text-destructive">
         <AlertCircleIcon className="size-4" aria-hidden="true" />
-        <span>
-          {pullRequestsQuery.error instanceof Error
-            ? pullRequestsQuery.error.message
-            : "Failed to load pull requests."}
-        </span>
+        <span>{pullRequestsQuery.error ?? "Failed to load pull requests."}</span>
         <Button
           variant="outline"
           size="sm"
           onClick={() => {
-            void pullRequestsQuery.refetch();
+            pullRequestsQuery.refresh();
           }}
         >
           Retry
@@ -263,11 +263,11 @@ export function PullRequestListPanel({
           variant="outline"
           size="sm"
           onClick={() => {
-            void pullRequestsQuery.refetch();
+            pullRequestsQuery.refresh();
           }}
-          disabled={pullRequestsQuery.isFetching}
+          disabled={pullRequestsQuery.isPending}
         >
-          {pullRequestsQuery.isFetching ? <Spinner className="size-3" /> : "Refresh"}
+          {pullRequestsQuery.isPending ? <Spinner className="size-3" /> : "Refresh"}
         </Button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3">

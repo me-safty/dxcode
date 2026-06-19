@@ -1,5 +1,5 @@
 import type { EnvironmentId, PullRequestReviewEvent } from "@t3tools/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   BotIcon,
   CheckCircle2Icon,
@@ -12,10 +12,9 @@ import {
 } from "lucide-react";
 import { useCallback, useState } from "react";
 
-import {
-  gitPullRequestDetailQueryOptions,
-  gitSubmitPullRequestReviewMutationOptions,
-} from "~/lib/gitPRReactQuery";
+import { gitPrEnvironment, refreshAllPullRequestData } from "~/state/gitPr";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useEnvironmentQuery } from "~/state/query";
 import { cn } from "~/lib/utils";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
@@ -65,29 +64,32 @@ export function PullRequestReviewSidebar({
   onCheckout,
   isCheckoutPending,
 }: PullRequestReviewSidebarProps) {
-  const queryClient = useQueryClient();
   const [reviewBody, setReviewBody] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const detailQuery = useQuery(gitPullRequestDetailQueryOptions({ environmentId, cwd, prNumber }));
-
-  const reviewMutation = useMutation(
-    gitSubmitPullRequestReviewMutationOptions({
-      environmentId,
-      cwd,
-      prNumber,
-      queryClient,
-    }),
+  const detailQuery = useEnvironmentQuery(
+    environmentId !== null && cwd !== null
+      ? gitPrEnvironment.pullRequestDetail({ environmentId, input: { cwd, prNumber } })
+      : null,
   );
+
+  const submitReview = useAtomCommand(gitPrEnvironment.submitPullRequestReview, {
+    reportFailure: false,
+  });
 
   const handleSubmitReview = useCallback(
     async (event: PullRequestReviewEvent) => {
-      try {
-        const trimmed = reviewBody.trim();
-        await reviewMutation.mutateAsync({
-          event,
-          ...(trimmed ? { body: trimmed } : {}),
-        });
+      if (environmentId === null || cwd === null) return;
+      const trimmed = reviewBody.trim();
+      setIsSubmitting(true);
+      const result = await submitReview({
+        environmentId,
+        input: { cwd, prNumber, event, ...(trimmed ? { body: trimmed } : {}) },
+      });
+      setIsSubmitting(false);
+      if (result._tag === "Success") {
         setReviewBody("");
+        refreshAllPullRequestData({ environmentId, cwd, prNumber });
         toastManager.add({
           type: "success",
           title: "Review submitted",
@@ -98,15 +100,18 @@ export function PullRequestReviewSidebar({
                 ? "Changes requested"
                 : "Comment posted",
         });
-      } catch (err) {
+        return;
+      }
+      if (!isAtomCommandInterrupted(result)) {
+        const failure = squashAtomCommandFailure(result);
         toastManager.add({
           type: "error",
           title: "Failed to submit review",
-          description: err instanceof Error ? err.message : "An error occurred.",
+          description: failure instanceof Error ? failure.message : "An error occurred.",
         });
       }
     },
-    [reviewBody, reviewMutation],
+    [reviewBody, submitReview, environmentId, cwd, prNumber],
   );
 
   const detail = detailQuery.data;
@@ -124,7 +129,7 @@ export function PullRequestReviewSidebar({
           onChange={(e) => setReviewBody(e.target.value)}
           rows={2}
           placeholder="Leave a review summary..."
-          disabled={reviewMutation.isPending}
+          disabled={isSubmitting}
           className="w-full resize-none rounded-md border border-border/70 bg-background p-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
         />
         <div className="flex flex-col gap-1.5">
@@ -133,9 +138,9 @@ export function PullRequestReviewSidebar({
             size="sm"
             className="w-full"
             onClick={() => void handleSubmitReview("APPROVE")}
-            disabled={reviewMutation.isPending}
+            disabled={isSubmitting}
           >
-            {reviewMutation.isPending ? (
+            {isSubmitting ? (
               <Spinner className="size-3.5" />
             ) : (
               <CheckCircle2Icon className="size-3.5" aria-hidden="true" />
@@ -148,7 +153,7 @@ export function PullRequestReviewSidebar({
             size="sm"
             className="w-full"
             onClick={() => void handleSubmitReview("COMMENT")}
-            disabled={reviewMutation.isPending}
+            disabled={isSubmitting}
           >
             <MessageSquareIcon className="size-3.5" aria-hidden="true" />
             Comment
@@ -159,7 +164,7 @@ export function PullRequestReviewSidebar({
             size="sm"
             className="w-full"
             onClick={() => void handleSubmitReview("REQUEST_CHANGES")}
-            disabled={reviewMutation.isPending}
+            disabled={isSubmitting}
           >
             <XCircleIcon className="size-3.5" aria-hidden="true" />
             Request changes
@@ -172,7 +177,7 @@ export function PullRequestReviewSidebar({
         <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           Merge readiness
         </h3>
-        {detailQuery.isLoading ? (
+        {detailQuery.isPending ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner className="size-3.5" />
             Loading...

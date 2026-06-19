@@ -1,5 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAtomValue } from "@effect/atom-react";
+import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -16,9 +17,11 @@ import {
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { toastManager } from "~/components/ui/toast";
-import { gitStatusQueryOptions, invalidateGitQueries } from "~/lib/gitPRReactQuery";
-import { openInPreferredEditor } from "~/editorPreferences";
-import { readLocalApi } from "~/localApi";
+import { useOpenInPreferredEditor } from "~/editorPreferences";
+import { serverEnvironment } from "~/state/server";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useEnvironmentQuery } from "~/state/query";
+import { vcsEnvironment } from "~/state/vcs";
 import { resolvePathLinkTarget } from "~/terminal-links";
 
 interface WorkingTreeFile {
@@ -43,12 +46,20 @@ export function CommitModal({
   gitCwd,
   onSendToChat,
 }: CommitModalProps) {
-  const queryClient = useQueryClient();
+  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  const openInPreferredEditor = useOpenInPreferredEditor(
+    environmentId,
+    serverConfig?.availableEditors ?? [],
+  );
+  const refreshStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
 
-  const { data: gitStatus = null, isLoading: statusLoading } = useQuery({
-    ...gitStatusQueryOptions({ environmentId, cwd: gitCwd }),
-    enabled: open && !!gitCwd && !!environmentId,
-  });
+  const statusQuery = useEnvironmentQuery(
+    open && environmentId !== null && gitCwd !== null
+      ? vcsEnvironment.status({ environmentId, input: { cwd: gitCwd } })
+      : null,
+  );
+  const gitStatus = statusQuery.data ?? null;
+  const statusLoading = statusQuery.isPending;
 
   const allFiles = useMemo(
     (): readonly WorkingTreeFile[] => gitStatus?.workingTree.files ?? [],
@@ -63,9 +74,11 @@ export function CommitModal({
       setExcluded(new Set());
       setNewBranch(false);
       setNewBranchName("");
-      void invalidateGitQueries(queryClient, { environmentId, cwd: gitCwd });
+      if (environmentId !== null && gitCwd !== null) {
+        void refreshStatus({ environmentId, input: { cwd: gitCwd } });
+      }
     }
-  }, [open, queryClient, environmentId, gitCwd]);
+  }, [open, refreshStatus, environmentId, gitCwd]);
 
   const branch = gitStatus?.refName ?? null;
   const isDefaultBranch = gitStatus?.isDefaultRef ?? false;
@@ -95,16 +108,12 @@ export function CommitModal({
   };
 
   const openFile = (filePath: string) => {
-    const api = readLocalApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Editor opening is unavailable.",
-      });
-      return;
-    }
     const target = resolvePathLinkTarget(filePath, gitCwd);
-    void openInPreferredEditor(api, target).catch((error) => {
+    void openInPreferredEditor(target).then((result) => {
+      if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
+        return;
+      }
+      const error = squashAtomCommandFailure(result);
       toastManager.add({
         type: "error",
         title: "Unable to open file",
