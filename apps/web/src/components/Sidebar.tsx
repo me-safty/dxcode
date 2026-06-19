@@ -2149,7 +2149,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         if (!worktreePath) {
           return;
         }
-        useWorktreeRenameStore.getState().openWorktreeRename(worktreePath);
+        useWorktreeRenameStore.getState().openWorktreeRename(thread.environmentId, worktreePath);
         return;
       }
 

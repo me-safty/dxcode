@@ -27,7 +27,7 @@ import {
   getOrphanedWorktreePathForThread,
   worktreeDisplayName,
 } from "../worktreeCleanup";
-import { useUiStateStore } from "../uiStateStore";
+import { resolveWorktreeLabel, useUiStateStore } from "../uiStateStore";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -183,8 +183,15 @@ export function useThreadActions() {
         survivingThreads,
         threadRef.threadId,
       );
+      const worktreeLabel = orphanedWorktreePath
+        ? resolveWorktreeLabel(
+            useUiStateStore.getState(),
+            threadRef.environmentId,
+            orphanedWorktreePath,
+          )
+        : null;
       const displayWorktreePath = orphanedWorktreePath
-        ? worktreeDisplayName(orphanedWorktreePath, useUiStateStore.getState().worktreeLabelByPath)
+        ? worktreeDisplayName(orphanedWorktreePath, worktreeLabel)
         : null;
       const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== null;
       const localApi = readLocalApi();
@@ -192,10 +199,7 @@ export function useThreadActions() {
       if (canDeleteWorktree && localApi) {
         const confirmationResult = await settlePromise(() =>
           localApi.dialogs.confirm(
-            formatWorktreeDeleteConfirmation(
-              orphanedWorktreePath,
-              useUiStateStore.getState().worktreeLabelByPath,
-            ),
+            formatWorktreeDeleteConfirmation(orphanedWorktreePath, worktreeLabel),
           ),
         );
         if (confirmationResult._tag === "Failure") {
@@ -291,7 +295,9 @@ export function useThreadActions() {
         },
       });
       if (removeResult._tag === "Success") {
-        useUiStateStore.getState().setWorktreeLabel(orphanedWorktreePath, "");
+        useUiStateStore
+          .getState()
+          .setWorktreeLabel(threadRef.environmentId, orphanedWorktreePath, "");
       }
       const refreshResult =
         removeResult._tag === "Success"

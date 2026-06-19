@@ -46,16 +46,16 @@ export function formatWorktreePathForDisplay(worktreePath: string): string {
 
 /**
  * Resolve the name to show for a worktree: the user-assigned label if one exists
- * for this path, otherwise the path-derived display name. Labels are keyed by
- * worktree PATH (not thread) so threads sharing a worktree show the same name.
+ * for this path, otherwise the path-derived display name. The caller resolves
+ * the custom label using the worktree's environment and path.
  *
  * Use this everywhere a worktree name renders so the UI stays consistent.
  */
 export function worktreeDisplayName(
   worktreePath: string,
-  labelByPath: Readonly<Record<string, string>>,
+  customLabel: string | null | undefined,
 ): string {
-  const trimmedLabel = labelByPath[worktreePath]?.trim();
+  const trimmedLabel = customLabel?.trim();
   if (trimmedLabel && trimmedLabel.length > 0) {
     return trimmedLabel;
   }
@@ -64,11 +64,11 @@ export function worktreeDisplayName(
 
 export function formatWorktreeDeleteConfirmation(
   worktreePath: string,
-  labelByPath: Readonly<Record<string, string>>,
+  customLabel: string | null | undefined,
 ): string {
   return [
     "This thread is the only one linked to this worktree:",
-    `Name: ${worktreeDisplayName(worktreePath, labelByPath)}`,
+    `Name: ${worktreeDisplayName(worktreePath, customLabel)}`,
     `Path: ${worktreePath}`,
     "",
     "Delete the worktree too?",

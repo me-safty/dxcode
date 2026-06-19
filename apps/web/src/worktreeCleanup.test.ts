@@ -118,19 +118,19 @@ describe("worktreeDisplayName", () => {
   const path = "/Users/julius/.t3/worktrees/t3code-mvp/t3code-4e609bb8";
 
   it("returns the custom label when one is set for the path", () => {
-    expect(worktreeDisplayName(path, { [path]: "Checkout UI" })).toBe("Checkout UI");
+    expect(worktreeDisplayName(path, "Checkout UI")).toBe("Checkout UI");
   });
 
   it("falls back to the path-derived name when no label is set", () => {
-    expect(worktreeDisplayName(path, {})).toBe("t3code-4e609bb8");
+    expect(worktreeDisplayName(path, null)).toBe("t3code-4e609bb8");
   });
 
   it("falls back to the path-derived name when the label is blank", () => {
-    expect(worktreeDisplayName(path, { [path]: "   " })).toBe("t3code-4e609bb8");
+    expect(worktreeDisplayName(path, "   ")).toBe("t3code-4e609bb8");
   });
 
   it("trims surrounding whitespace from the custom label", () => {
-    expect(worktreeDisplayName(path, { [path]: "  Checkout UI  " })).toBe("Checkout UI");
+    expect(worktreeDisplayName(path, "  Checkout UI  ")).toBe("Checkout UI");
   });
 });
 
@@ -138,7 +138,7 @@ describe("formatWorktreeDeleteConfirmation", () => {
   it("shows both a custom label and the full path for the destructive target", () => {
     const path = "/Users/julius/.t3/worktrees/t3code-mvp/t3code-4e609bb8";
 
-    expect(formatWorktreeDeleteConfirmation(path, { [path]: "Checkout UI" })).toBe(
+    expect(formatWorktreeDeleteConfirmation(path, "Checkout UI")).toBe(
       [
         "This thread is the only one linked to this worktree:",
         "Name: Checkout UI",

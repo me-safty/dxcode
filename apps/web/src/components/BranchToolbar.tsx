@@ -83,8 +83,8 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     () => availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null,
     [availableEnvironments, environmentId],
   );
-  const worktreeLabel = useWorktreeLabel(activeWorktreePath);
-  const renameTrigger = useWorktreeRenameTrigger(activeWorktreePath);
+  const worktreeLabel = useWorktreeLabel(environmentId, activeWorktreePath);
+  const renameTrigger = useWorktreeRenameTrigger(environmentId, activeWorktreePath);
   const WorkspaceIcon =
     effectiveEnvMode === "worktree"
       ? FolderGit2Icon
@@ -277,6 +277,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           )}
           <BranchToolbarEnvModeSelector
             envLocked={envModeLocked}
+            environmentId={environmentId}
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
             onEnvModeChange={onEnvModeChange}

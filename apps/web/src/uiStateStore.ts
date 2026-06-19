@@ -1,4 +1,5 @@
 import { Debouncer } from "@tanstack/react-pacer";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 
@@ -25,7 +26,7 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
-  worktreeLabelByPath?: Record<string, string>;
+  worktreeLabelByEnvironment?: Record<string, Record<string, string>>;
 }
 
 export interface UiProjectState {
@@ -43,7 +44,7 @@ export interface UiEndpointState {
 }
 
 export interface UiWorktreeState {
-  worktreeLabelByPath: Record<string, string>;
+  worktreeLabelByEnvironment: Record<string, Record<string, string>>;
 }
 
 export interface UiState extends UiProjectState, UiThreadState, UiEndpointState, UiWorktreeState {}
@@ -54,7 +55,7 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
-  worktreeLabelByPath: {},
+  worktreeLabelByEnvironment: {},
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -138,7 +139,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       parsed.defaultAdvertisedEndpointKey.length > 0
         ? parsed.defaultAdvertisedEndpointKey
         : null,
-    worktreeLabelByPath: sanitizePersistedWorktreeLabels(parsed.worktreeLabelByPath),
+    worktreeLabelByEnvironment: sanitizePersistedWorktreeLabels(parsed.worktreeLabelByEnvironment),
   };
 }
 
@@ -165,22 +166,32 @@ function readPersistedState(): UiState {
 }
 
 function sanitizePersistedWorktreeLabels(
-  value: PersistedUiState["worktreeLabelByPath"],
-): Record<string, string> {
+  value: PersistedUiState["worktreeLabelByEnvironment"],
+): Record<string, Record<string, string>> {
   if (!value || typeof value !== "object") {
     return {};
   }
-  const labels: Record<string, string> = {};
-  for (const [path, label] of Object.entries(value)) {
-    if (!path || typeof label !== "string") {
+  const labelsByEnvironment: Record<string, Record<string, string>> = {};
+  for (const [environmentId, valueByPath] of Object.entries(value)) {
+    if (!environmentId || !valueByPath || typeof valueByPath !== "object") {
       continue;
     }
-    const trimmedLabel = label.trim();
-    if (trimmedLabel.length > 0) {
-      labels[path] = trimmedLabel;
+
+    const labelsByPath: Record<string, string> = {};
+    for (const [path, label] of Object.entries(valueByPath)) {
+      if (!path || typeof label !== "string") {
+        continue;
+      }
+      const trimmedLabel = label.trim();
+      if (trimmedLabel.length > 0) {
+        labelsByPath[path] = trimmedLabel;
+      }
+    }
+    if (Object.keys(labelsByPath).length > 0) {
+      labelsByEnvironment[environmentId] = labelsByPath;
     }
   }
-  return labels;
+  return labelsByEnvironment;
 }
 
 function sanitizePersistedThreadChangedFilesExpanded(
@@ -237,7 +248,7 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpandedById,
-        worktreeLabelByPath: state.worktreeLabelByPath,
+        worktreeLabelByEnvironment: state.worktreeLabelByEnvironment,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -361,21 +372,32 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
-export function setWorktreeLabel(state: UiState, worktreePath: string, label: string): UiState {
-  // Paths are exact identifiers, so writers and readers use the verbatim value.
+export function setWorktreeLabel(
+  state: UiState,
+  environmentId: EnvironmentId,
+  worktreePath: string,
+  label: string,
+): UiState {
   if (!worktreePath.trim()) {
     return state;
   }
   const trimmedLabel = label.trim();
-  const currentLabel = state.worktreeLabelByPath[worktreePath];
+  const labelsByPath = state.worktreeLabelByEnvironment[environmentId] ?? {};
+  const currentLabel = labelsByPath[worktreePath];
 
   if (trimmedLabel.length === 0) {
     if (currentLabel === undefined) {
       return state;
     }
-    const worktreeLabelByPath = { ...state.worktreeLabelByPath };
-    delete worktreeLabelByPath[worktreePath];
-    return { ...state, worktreeLabelByPath };
+    const nextLabelsByPath = { ...labelsByPath };
+    delete nextLabelsByPath[worktreePath];
+    const worktreeLabelByEnvironment = { ...state.worktreeLabelByEnvironment };
+    if (Object.keys(nextLabelsByPath).length === 0) {
+      delete worktreeLabelByEnvironment[environmentId];
+    } else {
+      worktreeLabelByEnvironment[environmentId] = nextLabelsByPath;
+    }
+    return { ...state, worktreeLabelByEnvironment };
   }
 
   if (currentLabel === trimmedLabel) {
@@ -383,11 +405,24 @@ export function setWorktreeLabel(state: UiState, worktreePath: string, label: st
   }
   return {
     ...state,
-    worktreeLabelByPath: {
-      ...state.worktreeLabelByPath,
-      [worktreePath]: trimmedLabel,
+    worktreeLabelByEnvironment: {
+      ...state.worktreeLabelByEnvironment,
+      [environmentId]: {
+        ...labelsByPath,
+        [worktreePath]: trimmedLabel,
+      },
     },
   };
+}
+
+export function resolveWorktreeLabel(
+  state: UiWorktreeState,
+  environmentId: EnvironmentId,
+  worktreePath: string | null | undefined,
+): string | null {
+  return worktreePath
+    ? (state.worktreeLabelByEnvironment[environmentId]?.[worktreePath] ?? null)
+    : null;
 }
 
 export function resolveProjectExpanded(
@@ -472,7 +507,7 @@ interface UiStateStore extends UiState {
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
-  setWorktreeLabel: (worktreePath: string, label: string) => void;
+  setWorktreeLabel: (environmentId: EnvironmentId, worktreePath: string, label: string) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
@@ -491,8 +526,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
-  setWorktreeLabel: (worktreePath, label) =>
-    set((state) => setWorktreeLabel(state, worktreePath, label)),
+  setWorktreeLabel: (environmentId, worktreePath, label) =>
+    set((state) => setWorktreeLabel(state, environmentId, worktreePath, label)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
@@ -501,10 +536,11 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     ),
 }));
 
-export function useWorktreeLabel(worktreePath: string | null | undefined): string | null {
-  return useUiStateStore((state) =>
-    worktreePath ? (state.worktreeLabelByPath[worktreePath] ?? null) : null,
-  );
+export function useWorktreeLabel(
+  environmentId: EnvironmentId,
+  worktreePath: string | null | undefined,
+): string | null {
+  return useUiStateStore((state) => resolveWorktreeLabel(state, environmentId, worktreePath));
 }
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

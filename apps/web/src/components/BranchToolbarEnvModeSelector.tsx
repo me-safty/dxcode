@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
@@ -21,6 +22,7 @@ import {
 
 interface BranchToolbarEnvModeSelectorProps {
   envLocked: boolean;
+  environmentId: EnvironmentId;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
@@ -28,14 +30,15 @@ interface BranchToolbarEnvModeSelectorProps {
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
   envLocked,
+  environmentId,
   effectiveEnvMode,
   activeWorktreePath,
   onEnvModeChange,
 }: BranchToolbarEnvModeSelectorProps) {
-  const worktreeLabel = useWorktreeLabel(activeWorktreePath);
+  const worktreeLabel = useWorktreeLabel(environmentId, activeWorktreePath);
   // Double-click or right-click the workspace label to rename the active
   // worktree (cosmetic label only). No-op when the thread isn't on a worktree.
-  const renameTrigger = useWorktreeRenameTrigger(activeWorktreePath);
+  const renameTrigger = useWorktreeRenameTrigger(environmentId, activeWorktreePath);
   const envModeItems = useMemo(
     () => [
       { value: "local", label: resolveCurrentWorkspaceLabel(activeWorktreePath, worktreeLabel) },
