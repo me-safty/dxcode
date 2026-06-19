@@ -1,22 +1,47 @@
 import type {
   ContextMenuItem,
+  EditorId,
   EnvironmentId,
+  VcsCreateRefResult,
+  VcsPanelAddRemoteInput,
+  VcsPanelBranchActionInput,
   VcsPanelBranchCommitsInput,
+  VcsPanelBranchCommitsResult,
   ThreadId,
   VcsPanelBranchDetails,
+  VcsPanelBranchDetailsInput,
   VcsPanelChangeGroup,
+  VcsPanelCommitActionInput,
+  VcsPanelCommitInput,
+  VcsPanelCompareInput,
+  VcsPanelCompareResult,
   VcsPanelCommitSummary,
+  VcsPanelDeleteBranchInput,
   VcsPanelFileDiffInput,
+  VcsPanelFileDiffResult,
   VcsPanelFileChange,
+  VcsPanelFileActionInput,
+  VcsPanelRefActionInput,
+  VcsPanelRemoteInput,
   VcsPanelRemote,
+  VcsPanelSnapshotInput,
   VcsPanelSnapshotResult,
   VcsPanelStash,
+  VcsPanelStashInput,
   VcsPanelStashDetails,
+  VcsPanelStashDetailsInput,
+  VcsPanelUndoCommitInput,
+  VcsPanelWorkingTreeFileEnrichmentInput,
   VcsPanelWorkingTreeFileEnrichmentResult,
   VcsRef,
+  VcsSwitchRefInput,
+  VcsSwitchRefResult,
 } from "@t3tools/contracts";
 import { LegendList } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
+import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import * as Cause from "effect/Cause";
+import { AsyncResult } from "effect/unstable/reactivity";
 import {
   Archive,
   AlertTriangle,
@@ -48,15 +73,17 @@ import type {
 } from "react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
-import { openInPreferredEditor } from "~/editorPreferences";
-import { readEnvironmentApi } from "~/environmentApi";
+import { useOpenInPreferredEditor } from "~/editorPreferences";
 import { useTheme } from "~/hooks/useTheme";
 import { readLocalApi } from "~/localApi";
 import { getRenderablePatch, resolveDiffThemeName } from "~/lib/diffRendering";
-import { invalidateSourceControlState, useGitStackedAction } from "~/lib/sourceControlActions";
+import { useGitStackedAction } from "~/lib/sourceControlActions";
 import { cn, newCommandId } from "~/lib/utils";
 import { useRightPanelStore } from "~/rightPanelStore";
-import { useVcsStatus } from "~/lib/vcsStatusState";
+import { useEnvironmentQuery } from "~/state/query";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
+import { vcsEnvironment } from "~/state/vcs";
 import { resolvePathLinkTarget } from "~/terminal-links";
 
 import { shouldIncludeBranchPickerItem } from "../BranchToolbar.logic";
@@ -87,6 +114,7 @@ import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface SourceControlPanelProps {
+  readonly availableEditors: readonly EditorId[];
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly cwd: string;
@@ -131,6 +159,17 @@ const commitDateFormatter = new Intl.DateTimeFormat(undefined, {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Source control action failed.";
+}
+
+function unwrapAtomResult<A, E>(result: AtomCommandResult<A, E>): A {
+  if (AsyncResult.isSuccess(result)) {
+    return result.value;
+  }
+  throw Cause.squash(result.cause);
+}
+
+function unwrapAtomVoidResult<A, E>(result: AtomCommandResult<A, E>): void {
+  unwrapAtomResult(result);
 }
 
 interface PanelChangedFile extends VcsPanelFileChange {
@@ -1049,19 +1088,195 @@ function InlineFileDiff({
   );
 }
 
+interface SourceControlPanelApi {
+  readonly vcs: {
+    readonly panelSnapshot: (input: VcsPanelSnapshotInput) => Promise<VcsPanelSnapshotResult>;
+    readonly branchDetails: (input: VcsPanelBranchDetailsInput) => Promise<VcsPanelBranchDetails>;
+    readonly branchCommits: (
+      input: VcsPanelBranchCommitsInput,
+    ) => Promise<VcsPanelBranchCommitsResult>;
+    readonly stashDetails: (input: VcsPanelStashDetailsInput) => Promise<VcsPanelStashDetails>;
+    readonly enrichWorkingTreeFiles: (
+      input: VcsPanelWorkingTreeFileEnrichmentInput,
+    ) => Promise<VcsPanelWorkingTreeFileEnrichmentResult>;
+    readonly readFileDiff: (input: VcsPanelFileDiffInput) => Promise<VcsPanelFileDiffResult>;
+    readonly compare: (input: VcsPanelCompareInput) => Promise<VcsPanelCompareResult>;
+    readonly stageFiles: (input: VcsPanelFileActionInput) => Promise<void>;
+    readonly unstageFiles: (input: VcsPanelFileActionInput) => Promise<void>;
+    readonly discardFiles: (input: VcsPanelFileActionInput) => Promise<void>;
+    readonly commitStaged: (input: VcsPanelCommitInput) => Promise<void>;
+    readonly pullBranch: (input: VcsPanelBranchActionInput) => Promise<void>;
+    readonly pushBranch: (input: VcsPanelBranchActionInput) => Promise<void>;
+    readonly deleteBranch: (input: VcsPanelDeleteBranchInput) => Promise<void>;
+    readonly undoLatestCommit: (input: VcsPanelUndoCommitInput) => Promise<void>;
+    readonly revertCommit: (input: VcsPanelCommitActionInput) => Promise<void>;
+    readonly checkoutCommit: (input: VcsPanelCommitActionInput) => Promise<VcsSwitchRefResult>;
+    readonly createBranchFromCommit: (
+      input: VcsPanelCommitActionInput,
+    ) => Promise<VcsCreateRefResult>;
+    readonly mergeBranchIntoCurrent: (input: VcsPanelRefActionInput) => Promise<void>;
+    readonly rebaseCurrentOnto: (input: VcsPanelRefActionInput) => Promise<void>;
+    readonly fetchBranch: (input: VcsPanelBranchActionInput) => Promise<void>;
+    readonly fetchRemote: (input: VcsPanelRemoteInput) => Promise<void>;
+    readonly fetchAllRemotes: (input: VcsPanelSnapshotInput) => Promise<void>;
+    readonly addRemote: (input: VcsPanelAddRemoteInput) => Promise<void>;
+    readonly removeRemote: (input: VcsPanelRemoteInput) => Promise<void>;
+    readonly createStash: (input: VcsPanelStashInput) => Promise<void>;
+    readonly applyStash: (input: VcsPanelStashInput) => Promise<void>;
+    readonly popStash: (input: VcsPanelStashInput) => Promise<void>;
+    readonly dropStash: (input: VcsPanelStashInput) => Promise<void>;
+    readonly switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
+  };
+}
+
+function useSourceControlPanelApi(environmentId: EnvironmentId): SourceControlPanelApi {
+  const panelSnapshot = useAtomQueryRunner(vcsEnvironment.panelSnapshot, { reportFailure: false });
+  const branchDetails = useAtomQueryRunner(vcsEnvironment.panelBranchDetails, {
+    reportFailure: false,
+  });
+  const branchCommits = useAtomQueryRunner(vcsEnvironment.panelBranchCommits, {
+    reportFailure: false,
+  });
+  const stashDetails = useAtomQueryRunner(vcsEnvironment.panelStashDetails, {
+    reportFailure: false,
+  });
+  const enrichWorkingTreeFiles = useAtomQueryRunner(vcsEnvironment.panelEnrichWorkingTreeFiles, {
+    reportFailure: false,
+  });
+  const readFileDiff = useAtomQueryRunner(vcsEnvironment.panelReadFileDiff, {
+    reportFailure: false,
+  });
+  const compare = useAtomQueryRunner(vcsEnvironment.panelCompare, { reportFailure: false });
+  const stageFiles = useAtomCommand(vcsEnvironment.panelStageFiles, { reportFailure: false });
+  const unstageFiles = useAtomCommand(vcsEnvironment.panelUnstageFiles, { reportFailure: false });
+  const discardFiles = useAtomCommand(vcsEnvironment.panelDiscardFiles, { reportFailure: false });
+  const commitStaged = useAtomCommand(vcsEnvironment.panelCommitStaged, { reportFailure: false });
+  const pullBranch = useAtomCommand(vcsEnvironment.panelPullBranch, { reportFailure: false });
+  const pushBranch = useAtomCommand(vcsEnvironment.panelPushBranch, { reportFailure: false });
+  const deleteBranch = useAtomCommand(vcsEnvironment.panelDeleteBranch, { reportFailure: false });
+  const undoLatestCommit = useAtomCommand(vcsEnvironment.panelUndoLatestCommit, {
+    reportFailure: false,
+  });
+  const revertCommit = useAtomCommand(vcsEnvironment.panelRevertCommit, { reportFailure: false });
+  const checkoutCommit = useAtomCommand(vcsEnvironment.panelCheckoutCommit, {
+    reportFailure: false,
+  });
+  const createBranchFromCommit = useAtomCommand(vcsEnvironment.panelCreateBranchFromCommit, {
+    reportFailure: false,
+  });
+  const mergeBranchIntoCurrent = useAtomCommand(vcsEnvironment.panelMergeBranchIntoCurrent, {
+    reportFailure: false,
+  });
+  const rebaseCurrentOnto = useAtomCommand(vcsEnvironment.panelRebaseCurrentOnto, {
+    reportFailure: false,
+  });
+  const fetchBranch = useAtomCommand(vcsEnvironment.panelFetchBranch, { reportFailure: false });
+  const fetchRemote = useAtomCommand(vcsEnvironment.panelFetchRemote, { reportFailure: false });
+  const fetchAllRemotes = useAtomCommand(vcsEnvironment.panelFetchAllRemotes, {
+    reportFailure: false,
+  });
+  const addRemote = useAtomCommand(vcsEnvironment.panelAddRemote, { reportFailure: false });
+  const removeRemote = useAtomCommand(vcsEnvironment.panelRemoveRemote, { reportFailure: false });
+  const createStash = useAtomCommand(vcsEnvironment.panelCreateStash, { reportFailure: false });
+  const applyStash = useAtomCommand(vcsEnvironment.panelApplyStash, { reportFailure: false });
+  const popStash = useAtomCommand(vcsEnvironment.panelPopStash, { reportFailure: false });
+  const dropStash = useAtomCommand(vcsEnvironment.panelDropStash, { reportFailure: false });
+  const switchRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
+
+  return useMemo(
+    () => ({
+      vcs: {
+        panelSnapshot: (input) => panelSnapshot({ environmentId, input }).then(unwrapAtomResult),
+        branchDetails: (input) => branchDetails({ environmentId, input }).then(unwrapAtomResult),
+        branchCommits: (input) => branchCommits({ environmentId, input }).then(unwrapAtomResult),
+        stashDetails: (input) => stashDetails({ environmentId, input }).then(unwrapAtomResult),
+        enrichWorkingTreeFiles: (input) =>
+          enrichWorkingTreeFiles({ environmentId, input }).then(unwrapAtomResult),
+        readFileDiff: (input) => readFileDiff({ environmentId, input }).then(unwrapAtomResult),
+        compare: (input) => compare({ environmentId, input }).then(unwrapAtomResult),
+        stageFiles: (input) => stageFiles({ environmentId, input }).then(unwrapAtomVoidResult),
+        unstageFiles: (input) => unstageFiles({ environmentId, input }).then(unwrapAtomVoidResult),
+        discardFiles: (input) => discardFiles({ environmentId, input }).then(unwrapAtomVoidResult),
+        commitStaged: (input) => commitStaged({ environmentId, input }).then(unwrapAtomVoidResult),
+        pullBranch: (input) => pullBranch({ environmentId, input }).then(unwrapAtomVoidResult),
+        pushBranch: (input) => pushBranch({ environmentId, input }).then(unwrapAtomVoidResult),
+        deleteBranch: (input) => deleteBranch({ environmentId, input }).then(unwrapAtomVoidResult),
+        undoLatestCommit: (input) =>
+          undoLatestCommit({ environmentId, input }).then(unwrapAtomVoidResult),
+        revertCommit: (input) => revertCommit({ environmentId, input }).then(unwrapAtomVoidResult),
+        checkoutCommit: (input) => checkoutCommit({ environmentId, input }).then(unwrapAtomResult),
+        createBranchFromCommit: (input) =>
+          createBranchFromCommit({ environmentId, input }).then(unwrapAtomResult),
+        mergeBranchIntoCurrent: (input) =>
+          mergeBranchIntoCurrent({ environmentId, input }).then(unwrapAtomVoidResult),
+        rebaseCurrentOnto: (input) =>
+          rebaseCurrentOnto({ environmentId, input }).then(unwrapAtomVoidResult),
+        fetchBranch: (input) => fetchBranch({ environmentId, input }).then(unwrapAtomVoidResult),
+        fetchRemote: (input) => fetchRemote({ environmentId, input }).then(unwrapAtomVoidResult),
+        fetchAllRemotes: (input) =>
+          fetchAllRemotes({ environmentId, input }).then(unwrapAtomVoidResult),
+        addRemote: (input) => addRemote({ environmentId, input }).then(unwrapAtomVoidResult),
+        removeRemote: (input) => removeRemote({ environmentId, input }).then(unwrapAtomVoidResult),
+        createStash: (input) => createStash({ environmentId, input }).then(unwrapAtomVoidResult),
+        applyStash: (input) => applyStash({ environmentId, input }).then(unwrapAtomVoidResult),
+        popStash: (input) => popStash({ environmentId, input }).then(unwrapAtomVoidResult),
+        dropStash: (input) => dropStash({ environmentId, input }).then(unwrapAtomVoidResult),
+        switchRef: (input) => switchRef({ environmentId, input }).then(unwrapAtomResult),
+      },
+    }),
+    [
+      addRemote,
+      applyStash,
+      branchCommits,
+      branchDetails,
+      checkoutCommit,
+      commitStaged,
+      compare,
+      createBranchFromCommit,
+      createStash,
+      deleteBranch,
+      discardFiles,
+      dropStash,
+      enrichWorkingTreeFiles,
+      environmentId,
+      fetchAllRemotes,
+      fetchBranch,
+      fetchRemote,
+      mergeBranchIntoCurrent,
+      panelSnapshot,
+      popStash,
+      pullBranch,
+      pushBranch,
+      readFileDiff,
+      rebaseCurrentOnto,
+      removeRemote,
+      revertCommit,
+      stageFiles,
+      stashDetails,
+      switchRef,
+      undoLatestCommit,
+      unstageFiles,
+    ],
+  );
+}
+
 export function SourceControlPanel({
+  availableEditors,
   cwd,
   environmentId,
   onThreadRefChange,
   threadId,
   worktreePath,
 }: SourceControlPanelProps) {
-  const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
+  const api = useSourceControlPanelApi(environmentId);
   const { resolvedTheme } = useTheme();
   const gitActionScope = useMemo(() => ({ environmentId, cwd }), [cwd, environmentId]);
   const threadRef = useMemo(() => ({ environmentId, threadId }), [environmentId, threadId]);
   const gitAction = useGitStackedAction(gitActionScope);
-  const vcsStatus = useVcsStatus(gitActionScope);
+  const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors);
+  const vcsStatus = useEnvironmentQuery(vcsEnvironment.status({ environmentId, input: { cwd } }));
+  const refreshVcsStatusQuery = vcsStatus.refresh;
+  const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const expandedTreeRef = useRef<ReadonlySet<string>>(new Set());
   const lastFocusRefreshAtRef = useRef(0);
@@ -1415,7 +1630,9 @@ export function SourceControlPanel({
       setError(null);
       try {
         await action();
-        void invalidateSourceControlState({ environmentId, cwd });
+        void refreshVcsStatus({ environmentId, input: { cwd } }).then(() => {
+          refreshVcsStatusQuery();
+        });
         await refresh();
       } catch (nextError) {
         setError(errorMessage(nextError));
@@ -1427,7 +1644,7 @@ export function SourceControlPanel({
         });
       }
     },
-    [cwd, environmentId, refresh],
+    [cwd, environmentId, refresh, refreshVcsStatus, refreshVcsStatusQuery],
   );
 
   const openFilePanel = useCallback(
@@ -1439,18 +1656,12 @@ export function SourceControlPanel({
 
   const openInVsCode = useCallback(
     async (path: string) => {
-      const localApi = readLocalApi();
-      if (!localApi) {
-        setError("No local editor bridge is available.");
-        return;
-      }
-      try {
-        await openInPreferredEditor(localApi, resolvePathLinkTarget(path, cwd));
-      } catch (nextError) {
-        setError(errorMessage(nextError));
+      const result = await openInPreferredEditor(resolvePathLinkTarget(path, cwd));
+      if (AsyncResult.isFailure(result)) {
+        setError(errorMessage(Cause.squash(result.cause)));
       }
     },
-    [cwd],
+    [cwd, openInPreferredEditor],
   );
 
   const confirm = useCallback(async (message: string) => {
