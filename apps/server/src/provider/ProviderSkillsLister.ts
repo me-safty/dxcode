@@ -75,6 +75,33 @@ function describeCodexSkillListFailure(
   return `Failed to list Codex skills (provider: '${input.instanceId}', cwd: '${input.cwd}').`;
 }
 
+export const listCodexProviderSkillsWithTimeout = Effect.fn("listCodexProviderSkillsWithTimeout")(
+  function* (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly binaryPath: string;
+    readonly homePath?: string;
+    readonly cwd: string;
+    readonly environment: NodeJS.ProcessEnv;
+  }) {
+    return yield* listCodexProviderSkills({
+      binaryPath: input.binaryPath,
+      ...(input.homePath ? { homePath: input.homePath } : {}),
+      cwd: input.cwd,
+      environment: input.environment,
+    }).pipe(
+      Effect.scoped,
+      Effect.timeout(CODEX_SKILL_LIST_TIMEOUT),
+      Effect.mapError(
+        (cause) =>
+          new ServerProviderSkillsListError({
+            message: describeCodexSkillListFailure(cause, input),
+            cause,
+          }),
+      ),
+    );
+  },
+);
+
 function requestKey(input: ProviderSkillsListInput): string {
   return JSON.stringify([input.instanceId, input.cwd]);
 }
@@ -162,26 +189,13 @@ export const makeProviderSkillsLister = Effect.fn("makeProviderSkillsLister")(fu
           }),
       ),
     );
-    const skills = yield* listCodexProviderSkills({
+    const skills = yield* listCodexProviderSkillsWithTimeout({
+      instanceId: input.instanceId,
       binaryPath: effectiveConfig.binaryPath,
       ...(homeLayout.effectiveHomePath ? { homePath: homeLayout.effectiveHomePath } : {}),
       cwd: normalizedCwd,
       environment: mergeProviderInstanceEnvironment(instanceConfig.environment ?? []),
-    }).pipe(
-      Effect.scoped,
-      Effect.timeout(CODEX_SKILL_LIST_TIMEOUT),
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
-      Effect.mapError(
-        (cause) =>
-          new ServerProviderSkillsListError({
-            message: describeCodexSkillListFailure(cause, {
-              instanceId: input.instanceId,
-              cwd: normalizedCwd,
-            }),
-            cause,
-          }),
-      ),
-    );
+    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner));
     return { skills };
   });
 
