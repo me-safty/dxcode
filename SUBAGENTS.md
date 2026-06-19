@@ -68,7 +68,7 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 7. Child stop/interrupt handling routes through the provider-bound root session while targeting the selected child thread/turn. Parent stop remains scoped to the requested parent thread and does not cascade to active children.
 
-8. Completed child detail remains tied to the root parent lifecycle. The web action layer dispatches archive/delete lifecycle actions for the root and collected descendant subagent threads, with root actions last. Delete also attempts to stop and close terminal state for involved lifecycle thread ids.
+8. Completed child detail remains tied to the root parent lifecycle. The orchestration decider cascades root parent archive/delete actions through active descendant subagent threads before applying the parent event, with deepest children first. Force-deleting a project delegates through lifecycle root threads so descendant subagents are deleted once through their parent root instead of being planned twice. The web action layer still performs stop, terminal-close, navigation, draft cleanup, and currently materialized descendant cleanup around those server lifecycle commands.
 
 9. Unsupported providers keep the previous fallback behavior. No durable nested-thread behavior should be inferred for Claude, Cursor, OpenCode, or other providers until their event streams expose enough lineage to make child routing reliable.
 
@@ -107,7 +107,7 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 The implementation and review fixes have been covered by focused automated tests and Playwright regression checks:
 
-- Server tests cover Codex subagent ingestion, child terminal status, parent-relation persistence, projection upsert preservation, and child stop/interrupt routing through the provider-bound root session.
+- Server tests cover Codex subagent ingestion, child terminal status, parent-relation persistence, projection upsert preservation, child stop/interrupt routing through the provider-bound root session, and archive/delete lifecycle cascades through subagent descendants.
 - Server tests cover raw subagent prompt projection into child threads, including start-then-complete late prompt updates and whitespace-only prompt suppression.
 - Web tests cover sidebar/thread state behavior, duplicate parent subagent control-row removal, child composer suppression, subagent stop control behavior, and duration fallback labels.
 - Playwright checked Codex subagent behavior with marker prompts: before the prompt projection fix, the child view showed the output marker but not the initial prompt marker; after the fix, the child view showed the initial prompt marker followed by the output marker. Earlier Playwright coverage also checked that the parent showed exactly one compact subagent block, child output/actions did not leak into the parent, the child view was reachable from the parent block, the child view showed the child command/output, and the child view did not expose a prompt composer.
@@ -127,7 +127,7 @@ pnpm exec vp run lint:mobile
 
 ## Remaining Risks And Hardening Items
 
-1. Root lifecycle cascade should be hardened server-side for hidden descendants that are not materialized in the current client environment. The client currently dispatches archive/delete for collected descendants, but a database/root-thread cascade would be more robust across reconnects and multi-client gaps.
+1. Archive/delete lifecycle is now planned server-side for active descendant subagents, but archived descendant visibility and historical tombstone browsing should still be audited across reconnects and multi-client gaps.
 
 2. Diff/checkpoint aggregation is intentionally parent-visible at the workspace level, but the exact UI for aggregate root diffs should be audited separately. Per-action diff rendering is scoped to the child timeline.
 
