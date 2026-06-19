@@ -1,10 +1,11 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef } from "@t3tools/contracts";
+import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   type DraftThreadEnvMode,
+  type DraftId,
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
@@ -21,7 +22,18 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { useSettings } from "./useSettings";
 
-function useNewThreadState() {
+export interface CreateThreadDraftResult {
+  draftId: DraftId;
+  threadId: ThreadId;
+}
+
+type CreateThreadDraftOptions = {
+  branch?: string | null;
+  worktreePath?: string | null;
+  envMode?: DraftThreadEnvMode;
+};
+
+function useCreateThreadDraftState() {
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
   const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
   const router = useRouter();
@@ -33,12 +45,10 @@ function useNewThreadState() {
   return useCallback(
     (
       projectRef: ScopedProjectRef,
-      options?: {
-        branch?: string | null;
-        worktreePath?: string | null;
-        envMode?: DraftThreadEnvMode;
-      },
-    ): Promise<void> => {
+      options?: CreateThreadDraftOptions,
+      behavior?: { navigate?: boolean },
+    ): Promise<CreateThreadDraftResult> => {
+      const shouldNavigate = behavior?.navigate ?? false;
       const {
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
@@ -78,15 +88,25 @@ function useNewThreadState() {
             threadId: storedDraftThread.threadId,
           });
           if (
+            shouldNavigate &&
             currentRouteTarget?.kind === "draft" &&
             currentRouteTarget.draftId === storedDraftThread.draftId
           ) {
-            return;
+            return {
+              draftId: storedDraftThread.draftId,
+              threadId: storedDraftThread.threadId,
+            };
           }
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId: storedDraftThread.draftId },
-          });
+          if (shouldNavigate) {
+            await router.navigate({
+              to: "/draft/$draftId",
+              params: { draftId: storedDraftThread.draftId },
+            });
+          }
+          return {
+            draftId: storedDraftThread.draftId,
+            threadId: storedDraftThread.threadId,
+          };
         })();
       }
 
@@ -112,7 +132,10 @@ function useNewThreadState() {
           ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
         });
-        return Promise.resolve();
+        return Promise.resolve({
+          draftId: currentRouteTarget.draftId,
+          threadId: latestActiveDraftThread.threadId,
+        });
       }
 
       const draftId = newDraftId();
@@ -129,14 +152,31 @@ function useNewThreadState() {
         });
         applyStickyState(draftId);
 
-        await router.navigate({
-          to: "/draft/$draftId",
-          params: { draftId },
-        });
+        if (shouldNavigate) {
+          await router.navigate({
+            to: "/draft/$draftId",
+            params: { draftId },
+          });
+        }
+        return { draftId, threadId };
       })();
     },
     [getCurrentRouteTarget, projectGroupingSettings, router, projects],
   );
+}
+
+function useNewThreadState() {
+  const createThreadDraft = useCreateThreadDraftState();
+
+  return useCallback(
+    (projectRef: ScopedProjectRef, options?: CreateThreadDraftOptions): Promise<void> =>
+      createThreadDraft(projectRef, options, { navigate: true }).then(() => undefined),
+    [createThreadDraft],
+  );
+}
+
+export function useCreateThreadDraft() {
+  return useCreateThreadDraftState();
 }
 
 export function useNewThreadHandler() {

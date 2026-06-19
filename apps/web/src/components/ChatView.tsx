@@ -38,7 +38,14 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  parseDiffRouteSearch,
+  parseSideChatTarget,
+  parseSideChatTargets,
+  serializeSideChatTarget,
+  serializeSideChatTargets,
+  stripDiffSearchParams,
+} from "../diffRouteSearch";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -67,7 +74,7 @@ import {
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { selectProjectsAcrossEnvironments, useStore } from "../store";
+import { selectEnvironmentState, selectProjectsAcrossEnvironments, useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -91,7 +98,12 @@ import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  MessageSquarePlusIcon,
+  TriangleAlertIcon,
+  WifiOffIcon,
+} from "lucide-react";
 import { cn, randomHex } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -104,6 +116,7 @@ import {
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
+import { useCreateThreadDraft } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -133,6 +146,12 @@ import { Group as PanelGroup, Panel } from "react-resizable-panels";
 import { Sidebar, SidebarProvider, SidebarRail, useOptionalSidebar } from "./ui/sidebar";
 import { BottomDock } from "./BottomDock";
 import { useThreadDockPanels } from "../hooks/useThreadDockPanels";
+import {
+  chatTargetsEqual,
+  usePanelLayoutStore,
+  type PanelChatTarget,
+  type PanelTab,
+} from "../panelLayoutStore";
 import { toggleProjectSidebar } from "../projectSidebarToggleStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../terminalSessionState";
 import { subscribePreviewAction } from "./preview/previewActionBus";
@@ -394,6 +413,7 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      embedded?: boolean;
       routeKind: "server";
       draftId?: never;
     }
@@ -402,6 +422,7 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      embedded?: boolean;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -538,6 +559,204 @@ function serverTerminalIdsStrictSubsetOfClient(
   return true;
 }
 
+function sideChatRouteKey(input: {
+  sideChats: string | undefined;
+  sideChatActive: string | undefined;
+}) {
+  return `${input.sideChats ?? ""}|${input.sideChatActive ?? ""}`;
+}
+
+function SideChatPanel(props: {
+  tab: PanelTab;
+  visible: boolean;
+  activeThread: Thread;
+  onSelectTarget: (target: PanelChatTarget) => void;
+}) {
+  const { activeThread, onSelectTarget, tab, visible } = props;
+  const target = tab.chatTarget;
+  const createThreadDraft = useCreateThreadDraft();
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const draftSession = useComposerDraftStore((store) =>
+    target?.kind === "draft" ? store.getDraftSession(target.draftId) : null,
+  );
+  const candidateThreads = useStore(
+    useShallow(
+      useMemo(
+        () => (state) => {
+          const environment = selectEnvironmentState(state, activeThread.environmentId);
+          const threadIds = environment.threadIdsByProjectId[activeThread.projectId] ?? [];
+          return threadIds
+            .flatMap((threadId) => {
+              const shell = environment.threadShellById[threadId];
+              if (!shell || shell.archivedAt !== null || shell.id === activeThread.id) {
+                return [];
+              }
+              if (activeThread.worktreePath) {
+                return shell.worktreePath === activeThread.worktreePath ? [shell] : [];
+              }
+              return [shell];
+            })
+            .sort((left, right) => {
+              const leftTime = Date.parse(left.updatedAt ?? left.createdAt);
+              const rightTime = Date.parse(right.updatedAt ?? right.createdAt);
+              return (
+                (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime)
+              );
+            });
+        },
+        [
+          activeThread.environmentId,
+          activeThread.id,
+          activeThread.projectId,
+          activeThread.worktreePath,
+        ],
+      ),
+    ),
+  );
+
+  useEffect(() => {
+    if (!draftSession?.promotedTo) {
+      return;
+    }
+    onSelectTarget({
+      kind: "server",
+      environmentId: draftSession.promotedTo.environmentId,
+      threadId: draftSession.promotedTo.threadId,
+    });
+  }, [draftSession?.promotedTo, onSelectTarget]);
+
+  const createSideDraft = useCallback(async () => {
+    if (creatingDraft) {
+      return;
+    }
+    setCreatingDraft(true);
+    try {
+      const result = await createThreadDraft(
+        scopeProjectRef(activeThread.environmentId, activeThread.projectId),
+        {
+          branch: activeThread.branch,
+          worktreePath: activeThread.worktreePath,
+          envMode: activeThread.worktreePath ? "worktree" : "local",
+        },
+        { navigate: false },
+      );
+      onSelectTarget({ kind: "draft", draftId: result.draftId });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to create side chat",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    } finally {
+      setCreatingDraft(false);
+    }
+  }, [
+    activeThread.branch,
+    activeThread.environmentId,
+    activeThread.projectId,
+    activeThread.worktreePath,
+    createThreadDraft,
+    creatingDraft,
+    onSelectTarget,
+  ]);
+
+  if (!visible) {
+    return null;
+  }
+
+  if (target?.kind === "server") {
+    return (
+      <ChatView
+        environmentId={target.environmentId}
+        threadId={target.threadId}
+        routeKind="server"
+        reserveTitleBarControlInset={false}
+        embedded
+      />
+    );
+  }
+
+  if (target?.kind === "draft") {
+    if (!draftSession) {
+      return (
+        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6 text-center">
+          <MessageSquarePlusIcon className="size-6 text-muted-foreground/70" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Draft is unavailable</p>
+            <p className="max-w-64 text-xs text-muted-foreground">
+              This side chat draft no longer exists.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <ChatView
+        environmentId={draftSession.environmentId}
+        threadId={draftSession.threadId}
+        routeKind="draft"
+        draftId={target.draftId}
+        reserveTitleBarControlInset={false}
+        embedded
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <div className="shrink-0 border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Open side chat</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {activeThread.worktreePath ? "Same worktree" : "Same project"}
+            </p>
+          </div>
+          <Button size="xs" variant="outline" onClick={createSideDraft} disabled={creatingDraft}>
+            <MessageSquarePlusIcon className="size-3.5" />
+            New
+          </Button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {candidateThreads.length > 0 ? (
+          <div className="space-y-1">
+            {candidateThreads.map((thread) => (
+              <button
+                key={thread.id}
+                type="button"
+                className="flex w-full min-w-0 flex-col gap-1 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
+                onClick={() =>
+                  onSelectTarget({
+                    kind: "server",
+                    environmentId: thread.environmentId,
+                    threadId: thread.id,
+                  })
+                }
+              >
+                <span className="w-full truncate text-sm font-medium text-foreground">
+                  {thread.title || "Untitled thread"}
+                </span>
+                <span className="w-full truncate text-xs text-muted-foreground">
+                  {thread.branch ?? "local"}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex h-full min-h-0 items-center justify-center p-6 text-center">
+            <p className="max-w-64 text-xs text-muted-foreground">
+              No other matching threads yet. Create a new side chat for this context.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ChatView(props: ChatViewProps) {
   const {
     environmentId,
@@ -546,6 +765,7 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
   } = props;
+  const embedded = props.embedded ?? false;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -657,6 +877,8 @@ export default function ChatView(props: ChatViewProps) {
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
+  const hydratedSideChatRouteKeyRef = useRef<string | null>(null);
+  const sideChatRouteAppliedRef = useRef(false);
 
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef),
@@ -664,6 +886,7 @@ export default function ChatView(props: ChatViewProps) {
   const storeSetTerminalOpen = useTerminalUiStateStore((s) => s.setTerminalOpen);
   const storeNewTerminal = useTerminalUiStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
+  const syncChatTabsFromRoute = usePanelLayoutStore((state) => state.syncChatTabsFromRoute);
   const fallbackDraftProjectRef = draftThread
     ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
     : null;
@@ -1702,7 +1925,7 @@ export default function ChatView(props: ChatViewProps) {
   // renders. Driven by whether a diff tab exists in any dock slot.
   const ensureDiffRouteOpen = useCallback(
     (open: boolean) => {
-      if (!isServerThread) return;
+      if (embedded || !isServerThread) return;
       if (open) {
         onDiffPanelOpen?.();
       }
@@ -1716,7 +1939,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
     },
-    [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
+    [embedded, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
   );
 
   const envLocked = Boolean(
@@ -1790,9 +2013,25 @@ export default function ChatView(props: ChatViewProps) {
     },
     [activeThreadRef, storeSetTerminalOpen],
   );
+  const renderChatTab = useCallback(
+    (input: {
+      tab: PanelTab;
+      visible: boolean;
+      onSelectTarget: (target: PanelChatTarget) => void;
+    }) =>
+      activeThread ? (
+        <SideChatPanel
+          tab={input.tab}
+          visible={input.visible}
+          activeThread={activeThread}
+          onSelectTarget={input.onSelectTarget}
+        />
+      ) : null,
+    [activeThread],
+  );
 
   const dockPanels = useThreadDockPanels({
-    threadRef: activeThreadRef,
+    threadRef: embedded ? null : activeThreadRef,
     threadId: activeThreadId,
     project: activeProject ? { cwd: activeProject.cwd } : null,
     worktreePath: activeThreadWorktreePath,
@@ -1804,6 +2043,7 @@ export default function ChatView(props: ChatViewProps) {
     timestampFormat,
     markdownCwd: gitCwd ?? undefined,
     workspaceRoot: activeWorkspaceRoot,
+    renderChatTab,
   });
   const toggleTerminalVisibility = dockPanels.toggleTerminal;
   const onToggleDiff = dockPanels.toggleDiff;
@@ -1902,13 +2142,92 @@ export default function ChatView(props: ChatViewProps) {
   // Keep the `?diff=1` route in sync with whether a diff dock tab exists, so
   // the diff content (which self-resolves from the route) mounts/unmounts.
   useEffect(() => {
-    if (!isServerThread) return;
+    if (embedded || !isServerThread) return;
     if (dockPanels.hasDiffTab && !diffOpen) {
       ensureDiffRouteOpen(true);
     } else if (!dockPanels.hasDiffTab && diffOpen) {
       ensureDiffRouteOpen(false);
     }
-  }, [diffOpen, dockPanels.hasDiffTab, ensureDiffRouteOpen, isServerThread]);
+  }, [diffOpen, dockPanels.hasDiffTab, embedded, ensureDiffRouteOpen, isServerThread]);
+
+  useEffect(() => {
+    if (embedded || !isServerThread || !activeThreadRef) {
+      return;
+    }
+    const routeKey = sideChatRouteKey({
+      sideChats: rawSearch.sideChats,
+      sideChatActive: rawSearch.sideChatActive,
+    });
+    if (hydratedSideChatRouteKeyRef.current !== routeKey) {
+      hydratedSideChatRouteKeyRef.current = routeKey;
+      sideChatRouteAppliedRef.current = false;
+    }
+    const targets = parseSideChatTargets(rawSearch.sideChats);
+    const activeTarget = rawSearch.sideChatActive
+      ? parseSideChatTarget(rawSearch.sideChatActive)
+      : null;
+    syncChatTabsFromRoute(activeThreadRef, targets, activeTarget);
+  }, [
+    activeThreadRef,
+    embedded,
+    isServerThread,
+    rawSearch.sideChatActive,
+    rawSearch.sideChats,
+    syncChatTabsFromRoute,
+  ]);
+
+  useEffect(() => {
+    if (embedded || !isServerThread) {
+      return;
+    }
+    const sideChats = serializeSideChatTargets(dockPanels.rightChatTargets);
+    const activeTarget = dockPanels.activeRightChatTarget;
+    const sideChatActive =
+      activeTarget &&
+      dockPanels.rightChatTargets.some((target) => chatTargetsEqual(target, activeTarget))
+        ? serializeSideChatTarget(activeTarget)
+        : undefined;
+    const routeKey = sideChatRouteKey({
+      sideChats: rawSearch.sideChats,
+      sideChatActive: rawSearch.sideChatActive,
+    });
+    const layoutKey = sideChatRouteKey({ sideChats, sideChatActive });
+
+    if (!sideChatRouteAppliedRef.current) {
+      if (layoutKey !== routeKey) {
+        return;
+      }
+      sideChatRouteAppliedRef.current = true;
+    }
+
+    if (
+      (rawSearch.sideChats ?? undefined) === sideChats &&
+      (rawSearch.sideChatActive ?? undefined) === sideChatActive
+    ) {
+      return;
+    }
+
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId },
+      replace: true,
+      search: (previous) => ({
+        ...previous,
+        sideChats,
+        sideChatActive,
+      }),
+    });
+  }, [
+    dockPanels.activeRightChatTarget,
+    dockPanels.rightChatTargets,
+    embedded,
+    environmentId,
+    isServerThread,
+    navigate,
+    rawSearch.sideChatActive,
+    rawSearch.sideChats,
+    threadId,
+  ]);
 
   // Keep the legacy single terminal-open flag aligned with terminal tab
   // presence so other UI (e.g. shortcut labels) reflects terminal visibility.
@@ -3871,7 +4190,7 @@ export default function ChatView(props: ChatViewProps) {
   }, []);
   const onOpenTurnDiff = useCallback(
     (turnId: TurnId, filePath?: string) => {
-      if (!isServerThread) {
+      if (embedded || !isServerThread) {
         return;
       }
       onDiffPanelOpen?.();
@@ -3889,10 +4208,10 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
     },
-    [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
+    [embedded, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
   );
   const onOpenLastTurnDiff = useCallback(() => {
-    if (!isServerThread) {
+    if (embedded || !isServerThread) {
       return;
     }
     onDiffPanelOpen?.();
@@ -3907,7 +4226,7 @@ export default function ChatView(props: ChatViewProps) {
         return { ...rest, diff: "1", diffSource: "last-turn" as const };
       },
     });
-  }, [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
+  }, [embedded, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -4164,33 +4483,37 @@ export default function ChatView(props: ChatViewProps) {
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}
                             onExpandImage={onExpandTimelineImage}
+                            footerAccessory={
+                              isGitRepo ? (
+                                <BranchToolbar
+                                  variant="inline"
+                                  environmentId={activeThread.environmentId}
+                                  threadId={activeThread.id}
+                                  {...(routeKind === "draft" && draftId ? { draftId } : {})}
+                                  onEnvModeChange={onEnvModeChange}
+                                  {...(canOverrideServerThreadEnvMode
+                                    ? { effectiveEnvModeOverride: envMode }
+                                    : {})}
+                                  {...(canOverrideServerThreadEnvMode
+                                    ? {
+                                        activeThreadBranchOverride: activeThreadBranch,
+                                        onActiveThreadBranchOverrideChange:
+                                          setPendingServerThreadBranch,
+                                      }
+                                    : {})}
+                                  envLocked={envLocked}
+                                  onComposerFocusRequest={scheduleComposerFocus}
+                                  {...(canCheckoutPullRequestIntoThread
+                                    ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+                                    : {})}
+                                  {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                                  availableEnvironments={logicalProjectEnvironments}
+                                />
+                              ) : null
+                            }
                           />
                         </div>
                       </div>
-                      {isGitRepo && (
-                        <BranchToolbar
-                          environmentId={activeThread.environmentId}
-                          threadId={activeThread.id}
-                          {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                          onEnvModeChange={onEnvModeChange}
-                          {...(canOverrideServerThreadEnvMode
-                            ? { effectiveEnvModeOverride: envMode }
-                            : {})}
-                          {...(canOverrideServerThreadEnvMode
-                            ? {
-                                activeThreadBranchOverride: activeThreadBranch,
-                                onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-                              }
-                            : {})}
-                          envLocked={envLocked}
-                          onComposerFocusRequest={scheduleComposerFocus}
-                          {...(canCheckoutPullRequestIntoThread
-                            ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                            : {})}
-                          {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                          availableEnvironments={logicalProjectEnvironments}
-                        />
-                      )}
                     </div>
 
                     {pullRequestDialogState ? (
@@ -4233,28 +4556,30 @@ export default function ChatView(props: ChatViewProps) {
           <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
         )}
       </div>
-      <div
-        className={cn(
-          "fixed top-0 z-50 flex h-11 items-center [-webkit-app-region:no-drag]",
-          isElectron
-            ? "right-3 wco:right-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+0.5rem)]"
-            : "right-[calc(env(safe-area-inset-right)+0.75rem)]",
-        )}
-      >
-        <DockToggles
-          terminalAvailable={activeProject !== undefined}
-          terminalOpen={dockPanels.bottomOpen}
-          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          isGitRepo={isGitRepo}
-          diffOpen={dockPanels.rightOpen}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
-          rightDockExpanded={rightDockExpanded}
-          {...(isMobile ? {} : { onToggleRightDockExpanded: toggleRightDockExpanded })}
-        />
-      </div>
-      {dockPanels.rightHasTabs ? (
+      {!embedded ? (
+        <div
+          className={cn(
+            "fixed top-0 z-50 flex h-11 items-center [-webkit-app-region:no-drag]",
+            isElectron
+              ? "right-3 wco:right-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+0.5rem)]"
+              : "right-[calc(env(safe-area-inset-right)+0.75rem)]",
+          )}
+        >
+          <DockToggles
+            terminalAvailable={activeProject !== undefined}
+            terminalOpen={dockPanels.bottomOpen}
+            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+            isGitRepo={isGitRepo}
+            diffOpen={dockPanels.rightOpen}
+            diffToggleShortcutLabel={diffPanelShortcutLabel}
+            onToggleTerminal={toggleTerminalVisibility}
+            onToggleDiff={onToggleDiff}
+            rightDockExpanded={rightDockExpanded}
+            {...(isMobile ? {} : { onToggleRightDockExpanded: toggleRightDockExpanded })}
+          />
+        </div>
+      ) : null}
+      {!embedded && dockPanels.rightHasTabs ? (
         isMobile ? (
           // Mobile/narrow: no split view. When open, the right dock fills the
           // screen (chat is hidden) and the floating dock toggles stay above it

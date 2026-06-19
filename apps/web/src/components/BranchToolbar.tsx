@@ -26,6 +26,7 @@ import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { Button } from "./ui/button";
+import { cn } from "~/lib/utils";
 import {
   Menu,
   MenuGroup,
@@ -51,6 +52,8 @@ interface BranchToolbarProps {
   onComposerFocusRequest?: () => void;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+  variant?: "default" | "inline";
+  className?: string;
 }
 
 interface MobileRunContextSelectorProps {
@@ -202,6 +205,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
+  variant = "default",
+  className,
 }: BranchToolbarProps) {
   const threadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -240,8 +245,50 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   if (!hasActiveThread || !activeProject) return null;
 
+  if (variant === "inline") {
+    return (
+      <div className={cn("flex min-w-0 shrink-0 items-center gap-1", className)}>
+        {showEnvironmentPicker && availableEnvironments && onEnvironmentChange ? (
+          <>
+            <BranchToolbarEnvironmentSelector
+              envLocked={envLocked}
+              environmentId={environmentId}
+              availableEnvironments={availableEnvironments}
+              onEnvironmentChange={onEnvironmentChange}
+            />
+            <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
+          </>
+        ) : null}
+        <BranchToolbarEnvModeSelector
+          envLocked={envModeLocked}
+          effectiveEnvMode={effectiveEnvMode}
+          activeWorktreePath={activeWorktreePath}
+          onEnvModeChange={onEnvModeChange}
+        />
+        <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
+        <BranchToolbarBranchSelector
+          className="min-w-0 max-w-48 justify-start"
+          environmentId={environmentId}
+          threadId={threadId}
+          {...(draftId ? { draftId } : {})}
+          envLocked={envLocked}
+          {...(effectiveEnvModeOverride ? { effectiveEnvModeOverride } : {})}
+          {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
+          {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
+          {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
+          {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
+    <div
+      className={cn(
+        "mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3",
+        className,
+      )}
+    >
       {isMobile ? (
         <MobileRunContextSelector
           envLocked={envLocked}

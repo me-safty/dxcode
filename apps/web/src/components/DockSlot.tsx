@@ -48,7 +48,6 @@ const KIND_META: Record<PanelContentKind, KindMeta> = {
     label: "Side chat",
     description: "Start a side conversation",
     Icon: (props) => <IconMessage {...props} />,
-    disabled: true,
   },
   files: {
     label: "Files",
@@ -229,7 +228,10 @@ export function DockSlotTabBar(props: {
       <Tooltip>
         <TooltipTrigger
           render={
-            <MenuTrigger className="no-drag-region inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring" />
+            <MenuTrigger
+              aria-label="New tab"
+              className="no-drag-region inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+            />
           }
         >
           <IconPlus className="size-4" />

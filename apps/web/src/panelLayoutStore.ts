@@ -11,19 +11,33 @@
  */
 
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime";
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { type EnvironmentId, type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { DraftId } from "./composerDraftStore";
 import { resolveStorage } from "./lib/storage";
 
 export type PanelSlot = "bottom" | "right";
 export type PanelContentKind = "terminal" | "browser" | "diff" | "chat" | "files" | "tasks";
+
+export type PanelChatTarget =
+  | {
+      kind: "server";
+      environmentId: EnvironmentId;
+      threadId: ThreadId;
+    }
+  | {
+      kind: "draft";
+      draftId: DraftId;
+    };
 
 export interface PanelTab {
   id: string;
   kind: PanelContentKind;
   /** Set for terminal tabs; references a session in the terminal store. */
   terminalId?: string;
+  /** Set for chat tabs after the user chooses a side thread. */
+  chatTarget?: PanelChatTarget;
 }
 
 export interface PanelSlotState {
@@ -88,9 +102,35 @@ function tabsEqual(left: PanelTab[], right: PanelTab[]): boolean {
     const a = left[i];
     const b = right[i];
     if (!a || !b) return false;
-    if (a.id !== b.id || a.kind !== b.kind || a.terminalId !== b.terminalId) return false;
+    if (
+      a.id !== b.id ||
+      a.kind !== b.kind ||
+      a.terminalId !== b.terminalId ||
+      !chatTargetsEqual(a.chatTarget, b.chatTarget)
+    ) {
+      return false;
+    }
   }
   return true;
+}
+
+export function chatTargetsEqual(
+  left: PanelChatTarget | null | undefined,
+  right: PanelChatTarget | null | undefined,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  if (left.kind === "server" && right.kind === "server") {
+    return left.environmentId === right.environmentId && left.threadId === right.threadId;
+  }
+  if (left.kind === "draft" && right.kind === "draft") {
+    return left.draftId === right.draftId;
+  }
+  return false;
 }
 
 function slotStateEqual(left: PanelSlotState, right: PanelSlotState): boolean {
@@ -208,7 +248,18 @@ interface PanelLayoutStoreState {
   addTab: (
     threadRef: ScopedThreadRef,
     slot: PanelSlot,
-    tab: { kind: PanelContentKind; terminalId?: string },
+    tab: { kind: PanelContentKind; terminalId?: string; chatTarget?: PanelChatTarget },
+  ) => void;
+  setChatTabTarget: (
+    threadRef: ScopedThreadRef,
+    slot: PanelSlot,
+    tabId: string,
+    chatTarget: PanelChatTarget,
+  ) => void;
+  syncChatTabsFromRoute: (
+    threadRef: ScopedThreadRef,
+    targets: readonly PanelChatTarget[],
+    activeTarget: PanelChatTarget | null,
   ) => void;
   closeTab: (threadRef: ScopedThreadRef, slot: PanelSlot, tabId: string) => void;
   setActiveTab: (threadRef: ScopedThreadRef, slot: PanelSlot, tabId: string) => void;
@@ -255,16 +306,83 @@ export const usePanelLayoutStore = create<PanelLayoutStoreState>()(
                   return { ...slotState, open: true, activeTabId: existing.id };
                 }
               }
+              if (tab.kind === "chat" && tab.chatTarget) {
+                const existing = slotState.tabs.find(
+                  (existingTab) =>
+                    existingTab.kind === "chat" &&
+                    chatTargetsEqual(existingTab.chatTarget, tab.chatTarget),
+                );
+                if (existing) {
+                  return { ...slotState, open: true, activeTabId: existing.id };
+                }
+              }
               const newTab: PanelTab = {
                 id: nextTabId(),
                 kind: tab.kind,
                 ...(tab.terminalId !== undefined ? { terminalId: tab.terminalId } : {}),
+                ...(tab.chatTarget !== undefined ? { chatTarget: tab.chatTarget } : {}),
               };
               return {
                 ...slotState,
                 open: true,
                 tabs: [...slotState.tabs, newTab],
                 activeTabId: newTab.id,
+              };
+            }),
+          ),
+        setChatTabTarget: (threadRef, slot, tabId, chatTarget) =>
+          update(threadRef, (state) =>
+            updateSlot(state, slot, (slotState) => {
+              const tab = slotState.tabs.find((candidate) => candidate.id === tabId);
+              if (!tab || tab.kind !== "chat") {
+                return slotState;
+              }
+              const existing = slotState.tabs.find(
+                (candidate) =>
+                  candidate.id !== tabId &&
+                  candidate.kind === "chat" &&
+                  chatTargetsEqual(candidate.chatTarget, chatTarget),
+              );
+              if (existing) {
+                return removeTabFromSlot({ ...slotState, activeTabId: existing.id }, tabId);
+              }
+              const tabs = slotState.tabs.map((candidate) =>
+                candidate.id === tabId ? { ...candidate, chatTarget } : candidate,
+              );
+              return { ...slotState, open: true, tabs, activeTabId: tabId };
+            }),
+          ),
+        syncChatTabsFromRoute: (threadRef, targets, activeTarget) =>
+          update(threadRef, (state) =>
+            updateSlot(state, "right", (slotState) => {
+              const nonChatTabs = slotState.tabs.filter((tab) => tab.kind !== "chat");
+              const existingChatTabs = slotState.tabs.filter((tab) => tab.kind === "chat");
+              const localPickerChatTabs = existingChatTabs.filter((tab) => tab.chatTarget == null);
+              const nextChatTabs = targets.map((target) => {
+                const existing = existingChatTabs.find((tab) =>
+                  chatTargetsEqual(tab.chatTarget, target),
+                );
+                return existing
+                  ? { ...existing, chatTarget: target }
+                  : { id: nextTabId(), kind: "chat" as const, chatTarget: target };
+              });
+              const tabs = [...nonChatTabs, ...localPickerChatTabs, ...nextChatTabs];
+              const activeChatTab = activeTarget
+                ? nextChatTabs.find((tab) => chatTargetsEqual(tab.chatTarget, activeTarget))
+                : undefined;
+              const activeTabId =
+                activeChatTab?.id ??
+                (tabs.some((tab) => tab.id === slotState.activeTabId)
+                  ? slotState.activeTabId
+                  : (tabs[tabs.length - 1]?.id ?? ""));
+              if (tabs.length === 0) {
+                return { ...slotState, open: false, tabs: [], activeTabId: "" };
+              }
+              return {
+                ...slotState,
+                open: true,
+                tabs,
+                activeTabId,
               };
             }),
           ),

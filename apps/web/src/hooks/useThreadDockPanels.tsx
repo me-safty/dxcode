@@ -6,11 +6,12 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
-import { useCallback, useMemo } from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 
 import { readEnvironmentApi } from "../environmentApi";
 import {
   type PanelContentKind,
+  type PanelChatTarget,
   type PanelSlot,
   type PanelTab,
   selectThreadPanelLayout,
@@ -40,6 +41,11 @@ type DockPanelInput = {
   timestampFormat: TimestampFormat;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
+  renderChatTab: (input: {
+    tab: PanelTab;
+    visible: boolean;
+    onSelectTarget: (target: PanelChatTarget) => void;
+  }) => ReactNode;
 };
 
 export function useThreadDockPanels(input: DockPanelInput) {
@@ -48,6 +54,7 @@ export function useThreadDockPanels(input: DockPanelInput) {
   );
   const addTab = usePanelLayoutStore((state) => state.addTab);
   const closeTab = usePanelLayoutStore((state) => state.closeTab);
+  const setChatTabTarget = usePanelLayoutStore((state) => state.setChatTabTarget);
   const setActiveTab = usePanelLayoutStore((state) => state.setActiveTab);
   const setSlotOpen = usePanelLayoutStore((state) => state.setSlotOpen);
   const terminalUiState = useTerminalUiStateStore((state) =>
@@ -186,7 +193,7 @@ export function useThreadDockPanels(input: DockPanelInput) {
   );
 
   const renderTab = useCallback(
-    (tab: PanelTab, visible: boolean) => {
+    (slot: PanelSlot, tab: PanelTab, visible: boolean) => {
       if (!input.threadRef || !input.threadId) return null;
       if (tab.kind === "browser") {
         return <PreviewPanel mode="embedded" threadRef={input.threadRef} visible={visible} />;
@@ -209,6 +216,13 @@ export function useThreadDockPanels(input: DockPanelInput) {
             mode="embedded"
           />
         );
+      }
+      if (tab.kind === "chat") {
+        return input.renderChatTab({
+          tab,
+          visible,
+          onSelectTarget: (target) => setChatTabTarget(input.threadRef!, slot, tab.id, target),
+        });
       }
       if (tab.kind === "terminal") {
         if (!input.project) return null;
@@ -252,12 +266,14 @@ export function useThreadDockPanels(input: DockPanelInput) {
       input.markdownCwd,
       input.onAddTerminalContext,
       input.project,
+      input.renderChatTab,
       input.threadId,
       input.threadRef,
       input.timestampFormat,
       input.workspaceRoot,
       input.worktreePath,
       setActiveTerminal,
+      setChatTabTarget,
       setTerminalHeight,
       terminalLabelsById,
       terminalUiState.activeTerminalId,
@@ -284,6 +300,7 @@ export function useThreadDockPanels(input: DockPanelInput) {
           isKindAvailable={(kind) =>
             kind === "terminal" ||
             kind === "browser" ||
+            kind === "chat" ||
             kind === "tasks" ||
             (kind === "diff" && input.isServerThread && input.project !== null)
           }
@@ -291,7 +308,7 @@ export function useThreadDockPanels(input: DockPanelInput) {
           onSelectTab={(tabId) => setActiveTab(input.threadRef!, slot, tabId)}
           onCloseTab={(tabId) => closeTab(input.threadRef!, slot, tabId)}
           onClose={() => setSlotOpen(input.threadRef!, slot, false)}
-          renderTab={renderTab}
+          renderTab={(tab, visible) => renderTab(slot, tab, visible)}
           reserveToggleSpace={slot === "right"}
           {...(options?.reserveLeadingInset !== undefined
             ? { reserveLeadingInset: options.reserveLeadingInset }
@@ -321,6 +338,12 @@ export function useThreadDockPanels(input: DockPanelInput) {
     rightOpen: layout.right.open,
     hasTerminalTab: layout.bottom.tabs.some((tab) => tab.kind === "terminal"),
     hasDiffTab: layout.right.tabs.some((tab) => tab.kind === "diff"),
+    rightChatTargets: layout.right.tabs.flatMap((tab) =>
+      tab.kind === "chat" && tab.chatTarget ? [tab.chatTarget] : [],
+    ),
+    activeRightChatTarget:
+      layout.right.tabs.find((tab) => tab.id === layout.right.activeTabId && tab.kind === "chat")
+        ?.chatTarget ?? null,
     rightHasTabs: layout.right.tabs.length > 0,
     addTerminal,
     toggleTerminal,

@@ -6,7 +6,7 @@ import ChatView from "../components/ChatView";
 import { threadHasStarted } from "../components/ChatView.logic";
 import { resolveProjectFaviconUrl } from "../components/ProjectFavicon";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
-import { type DiffRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
+import { type ChatRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
 import { useDocumentFavicon } from "../lib/documentFavicon";
 import {
   buildThreadTitleSegment,
@@ -109,7 +109,7 @@ function ChatThreadRouteView() {
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
   validateSearch: (search) => parseDiffRouteSearch(search),
   search: {
-    middlewares: [retainSearchParams<DiffRouteSearch>(["diff"])],
+    middlewares: [retainSearchParams<ChatRouteSearch>(["diff", "sideChats", "sideChatActive"])],
   },
   component: ChatThreadRouteView,
 });
