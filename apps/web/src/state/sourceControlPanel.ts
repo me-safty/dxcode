@@ -262,7 +262,7 @@ export function resolveSourceControlPanelPresentationState(input: {
     };
   }
 
-  if (input.loading || input.statusPending) {
+  if (input.loading) {
     return {
       status: "ready",
       syncMessage: "Refreshing repository state...",
