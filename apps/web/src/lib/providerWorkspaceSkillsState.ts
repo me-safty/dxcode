@@ -43,6 +43,18 @@ export function resolvePendingProviderWorkspaceSkills(input: {
     : EMPTY_SKILLS;
 }
 
+export function resolveProviderWorkspaceSkills(input: {
+  readonly nextKey: string;
+  readonly nextSkills: ReadonlyArray<ServerProviderSkill> | null;
+  readonly isPending: boolean;
+  readonly currentKey: string | null;
+  readonly currentSkills: ReadonlyArray<ServerProviderSkill>;
+}): ReadonlyArray<ServerProviderSkill> {
+  if (input.nextSkills !== null) return input.nextSkills;
+  if (!input.isPending) return EMPTY_SKILLS;
+  return resolvePendingProviderWorkspaceSkills(input);
+}
+
 export function useProviderWorkspaceSkills(
   target: ProviderWorkspaceSkillsTarget,
 ): ProviderWorkspaceSkillsState {
@@ -74,12 +86,27 @@ export function useProviderWorkspaceSkills(
     previousFallbackSkillsRef.current = target.fallbackSkills;
     if (key !== null) query.refresh();
   }, [key, query, target.fallbackSkills]);
+  const previousWorkspaceSkillsRef = useRef<{
+    readonly key: string;
+    readonly skills: ReadonlyArray<ServerProviderSkill>;
+  } | null>(null);
+  useEffect(() => {
+    if (key === null || query.data === null) return;
+    previousWorkspaceSkillsRef.current = { key, skills: query.data.skills };
+  }, [key, query.data]);
 
   if (key === null) {
     return { skills: target.fallbackSkills, isPending: false, error: null };
   }
+  const previousWorkspaceSkills = previousWorkspaceSkillsRef.current;
   return {
-    skills: query.data?.skills ?? EMPTY_SKILLS,
+    skills: resolveProviderWorkspaceSkills({
+      nextKey: key,
+      nextSkills: query.data?.skills ?? null,
+      isPending: query.isPending,
+      currentKey: previousWorkspaceSkills?.key ?? null,
+      currentSkills: previousWorkspaceSkills?.skills ?? EMPTY_SKILLS,
+    }),
     isPending: query.isPending,
     error: query.error,
   };
