@@ -3,6 +3,7 @@
 - `bun run dev` — Starts contracts, server, and web in `turbo watch` mode.
 - `bun run dev:server` — Starts just the WebSocket server (uses Bun TypeScript execution).
 - `bun run dev:web` — Starts just the Vite dev server for the web app.
+- `vp run dev:sandbox` — Starts desktop dev with isolated ports, isolated `~/.t3-dev` data, and the workspace-layout feature flag enabled.
 - Dev commands default `T3CODE_STATE_DIR` to `~/.t3/dev` to keep dev state isolated from desktop/prod state.
 - Override server CLI-equivalent flags from root dev commands with `--`, for example:
   `bun run dev -- --base-dir ~/.t3-2`
@@ -40,3 +41,25 @@ Set `T3CODE_DEV_INSTANCE` to any value to deterministically shift all dev ports 
 - Example: `T3CODE_DEV_INSTANCE=branch-a bun run dev:desktop`
 
 If you want full control instead of hashing, set `T3CODE_PORT_OFFSET` to a numeric offset.
+
+## Running the sandbox app
+
+Use the sandbox command when developing experimental workspace or migration flows while keeping your installed/current T3 Code data untouched:
+
+```bash
+vp run dev:sandbox
+```
+
+The wrapper defaults to:
+
+- `T3CODE_DEV_INSTANCE=dev`
+- `T3CODE_HOME=$HOME/.t3-dev`
+- `T3CODE_WORKSPACE_LAYOUT=1`
+
+It refuses to use `$HOME/.t3` unless `T3CODE_ALLOW_PROD_HOME=1` is set, because `$HOME/.t3` is the normal app data directory.
+
+You can still override any of those values explicitly:
+
+```bash
+T3CODE_HOME="$HOME/.t3-dev-migration-test" vp run dev:sandbox
+```
