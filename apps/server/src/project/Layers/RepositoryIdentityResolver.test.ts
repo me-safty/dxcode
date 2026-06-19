@@ -6,6 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import { TestClock } from "effect/testing";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ProcessRunner from "../../processRunner.ts";
 import { RepositoryIdentityResolver } from "../Services/RepositoryIdentityResolver.ts";
@@ -25,6 +26,33 @@ const git = (cwd: string, args: ReadonlyArray<string>) =>
       args: ["-C", cwd, ...args],
     });
   }).pipe(Effect.provide(ProcessRunner.layer));
+
+const makeCallCountingProcessRunner = (
+  state: { revParseCalls: number; remoteCalls: number },
+  fixture: { readonly topLevel: string; readonly remotesStdout: string },
+) =>
+  ProcessRunner.ProcessRunner.of({
+    run: (input) => {
+      const succeed = (stdout: string) =>
+        Effect.succeed({
+          stdout,
+          stderr: "",
+          code: ChildProcessSpawner.ExitCode(0),
+          timedOut: false,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        } satisfies ProcessRunner.ProcessRunOutput);
+      if (input.args.includes("rev-parse") && input.args.includes("--show-toplevel")) {
+        state.revParseCalls += 1;
+        return succeed(fixture.topLevel);
+      }
+      if (input.args.includes("remote") && input.args.includes("-v")) {
+        state.remoteCalls += 1;
+        return succeed(fixture.remotesStdout);
+      }
+      return succeed("");
+    },
+  });
 
 const makeRepositoryIdentityResolverTestLayer = (options: {
   readonly positiveCacheTtl?: Duration.Input;
@@ -235,5 +263,43 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         ),
       ),
     ),
+  );
+
+  it.effect(
+    "resolves the git top-level only once across repeated resolves of the same workspace",
+    () =>
+      Effect.gen(function* () {
+        const state = { revParseCalls: 0, remoteCalls: 0 };
+        const cwd = "/workspace/project";
+        const resolverLayer = Layer.effect(
+          RepositoryIdentityResolver,
+          makeRepositoryIdentityResolver({ cacheCapacity: 16 }),
+        ).pipe(
+          Layer.provide(
+            Layer.succeed(
+              ProcessRunner.ProcessRunner,
+              makeCallCountingProcessRunner(state, {
+                topLevel: cwd,
+                remotesStdout:
+                  "origin\tgit@github.com:T3Tools/t3code.git (fetch)\n" +
+                  "origin\tgit@github.com:T3Tools/t3code.git (push)\n",
+              }),
+            ),
+          ),
+        );
+
+        yield* Effect.gen(function* () {
+          const resolver = yield* RepositoryIdentityResolver;
+          const first = yield* resolver.resolve(cwd);
+          const second = yield* resolver.resolve(cwd);
+
+          expect(first?.canonicalKey).toBe("github.com/t3tools/t3code");
+          expect(second?.canonicalKey).toBe("github.com/t3tools/t3code");
+          // The top-level lookup must be memoised: replaying many events for the
+          // same workspace should not re-spawn `git rev-parse --show-toplevel`.
+          expect(state.revParseCalls).toBe(1);
+          expect(state.remoteCalls).toBe(1);
+        }).pipe(Effect.provide(resolverLayer));
+      }),
   );
 });
