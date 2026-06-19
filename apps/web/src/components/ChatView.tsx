@@ -144,6 +144,7 @@ import {
   buildNewDraftExecutionDefaults,
   resolveNewDraftStartFromOrigin,
 } from "../lib/chatThreadActions";
+import { getNewThreadRuntimeMode } from "../lib/newThreadSettings";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -175,6 +176,7 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import {
   primaryServerAvailableEditorsAtom,
+  primaryServerConfigAtom,
   primaryServerKeybindingsAtom,
   serverEnvironment,
 } from "../state/server";
@@ -1030,6 +1032,7 @@ function ChatViewContent(props: ChatViewProps) {
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
   const settings = useSettings();
+  const serverSettings = useAtomValue(primaryServerConfigAtom)?.settings ?? null;
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -1529,12 +1532,17 @@ function ChatViewContent(props: ChatViewProps) {
         return activeDraftSession.threadId;
       }
 
+      const defaultRuntimeMode = getNewThreadRuntimeMode(serverSettings);
+      if (!defaultRuntimeMode) {
+        return null;
+      }
+
       const nextDraftId = newDraftId();
       const nextThreadId = newThreadId();
       setLogicalProjectDraftThreadId(logicalProjectKey, activeProjectRef, nextDraftId, {
         threadId: nextThreadId,
         createdAt: new Date().toISOString(),
-        ...buildNewDraftExecutionDefaults(settings.defaultRuntimeMode),
+        ...buildNewDraftExecutionDefaults(defaultRuntimeMode),
         ...input,
       });
       await navigate({
@@ -1552,9 +1560,9 @@ function ChatViewContent(props: ChatViewProps) {
       navigate,
       projectGroupingSettings,
       routeKind,
+      serverSettings,
       setDraftThreadContext,
       setLogicalProjectDraftThreadId,
-      settings.defaultRuntimeMode,
     ],
   );
 

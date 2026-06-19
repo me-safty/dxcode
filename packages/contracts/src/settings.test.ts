@@ -3,29 +3,20 @@ import * as Schema from "effect/Schema";
 
 import { DEFAULT_RUNTIME_MODE } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
-import {
-  ClientSettingsPatch,
-  ClientSettingsSchema,
-  DEFAULT_CLIENT_SETTINGS,
-  DEFAULT_SERVER_SETTINGS,
-  ServerSettings,
-  ServerSettingsPatch,
-} from "./settings.ts";
+import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 
-const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
-const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
-describe("ClientSettings default runtime mode", () => {
+describe("ServerSettings default runtime mode", () => {
   it("defaults new thread access mode to the existing runtime default", () => {
-    expect(DEFAULT_CLIENT_SETTINGS.defaultRuntimeMode).toBe(DEFAULT_RUNTIME_MODE);
-    expect(decodeClientSettings({}).defaultRuntimeMode).toBe(DEFAULT_RUNTIME_MODE);
+    expect(DEFAULT_SERVER_SETTINGS.defaultRuntimeMode).toBe(DEFAULT_RUNTIME_MODE);
+    expect(decodeServerSettings({}).defaultRuntimeMode).toBe(DEFAULT_RUNTIME_MODE);
   });
 
   it("accepts runtime mode patches", () => {
-    const patch = decodeClientSettingsPatch({ defaultRuntimeMode: "approval-required" });
+    const patch = decodeServerSettingsPatch({ defaultRuntimeMode: "approval-required" });
 
     expect(patch.defaultRuntimeMode).toBe("approval-required");
   });
