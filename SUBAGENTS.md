@@ -90,6 +90,8 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 8. Shared subagent display helpers keep duration and fallback labels consistent across parent blocks and child controls. Terminal child rows with missing completion timestamps show an explicit unknown-duration fallback instead of implying successful completion, and active children use `working` wording instead of `running` wording.
 
+9. Thread list and detail state now share the client-runtime idle retention TTL, so short route/sidebar unmount gaps should not immediately drop hidden child-thread detail or active subagent sidebar state.
+
 ## Decisions Captured
 
 - Persistence retention: child detail is tied to parent lifecycle.
@@ -110,6 +112,7 @@ The implementation and review fixes have been covered by focused automated tests
 - Server tests cover Codex subagent ingestion, child terminal status, parent-relation persistence, projection upsert preservation, child stop/interrupt routing through the provider-bound root session, and archive/delete lifecycle cascades through subagent descendants.
 - Server tests cover raw subagent prompt projection into child threads, including start-then-complete late prompt updates and whitespace-only prompt suppression.
 - Web tests cover sidebar/thread state behavior, duplicate parent subagent control-row removal, child composer suppression, subagent stop control behavior, and duration fallback labels.
+- Client-runtime tests cover shared idle retention for stream-backed thread state across short subscriber gaps.
 - Playwright checked Codex subagent behavior with marker prompts: before the prompt projection fix, the child view showed the output marker but not the initial prompt marker; after the fix, the child view showed the initial prompt marker followed by the output marker. Earlier Playwright coverage also checked that the parent showed exactly one compact subagent block, child output/actions did not leak into the parent, the child view was reachable from the parent block, the child view showed the child command/output, and the child view did not expose a prompt composer.
 
 Current completion gates for this repo remain:
