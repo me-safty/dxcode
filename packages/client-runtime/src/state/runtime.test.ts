@@ -140,18 +140,32 @@ describe("atom command result helpers", () => {
 });
 
 describe("environmentRpcKey", () => {
-  it("isolates subscription state by environment and cwd", () => {
+  it("isolates query state by environment and full rpc input", () => {
     const environmentId = EnvironmentId.make("environment-1");
     const originalTarget = {
       environmentId,
-      input: { cwd: "/repo/original" },
+      input: {
+        instanceId: "codex",
+        cwd: "/repo/original",
+      },
     };
     const nextTarget = {
       environmentId,
-      input: { cwd: "/repo/next" },
+      input: {
+        instanceId: "codex",
+        cwd: "/repo/next",
+      },
+    };
+    const nextProviderTarget = {
+      environmentId,
+      input: {
+        instanceId: "claude",
+        cwd: "/repo/original",
+      },
     };
 
     expect(environmentRpcKey(originalTarget)).not.toBe(environmentRpcKey(nextTarget));
+    expect(environmentRpcKey(originalTarget)).not.toBe(environmentRpcKey(nextProviderTarget));
     expect(environmentRpcKey(originalTarget)).toBe(environmentRpcKey({ ...originalTarget }));
     expect(
       environmentRpcKey({

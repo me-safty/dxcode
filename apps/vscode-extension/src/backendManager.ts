@@ -7,6 +7,10 @@ import { spawn as spawnChildProcess } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_MCP_TOOL_TIMEOUT_SEC, normalizeMcpToolTimeoutSec } from "@t3tools/shared/mcp";
 import {
+  resolveActiveWorkspaceFolder as resolveActiveWorkspaceFolderByKey,
+  workspaceFolderIdentityKey,
+} from "@t3tools/shared/workspaceFolders";
+import {
   cleanupDesktopBackendAdvertisements,
   readDesktopBackendAdvertisements,
 } from "@t3tools/shared/desktopBackendAdvertisement";
@@ -509,11 +513,9 @@ function resolveActiveWorkspaceFolder(
   if (activeUri) {
     const activeWorkspaceFolder = vscode.workspace.getWorkspaceFolder(activeUri);
     const activeKey = activeWorkspaceFolder ? workspaceFolderKey(activeWorkspaceFolder) : null;
-    if (activeKey) {
-      return workspaceFolders.find((folder) => folder.key === activeKey);
-    }
+    return resolveActiveWorkspaceFolderByKey(workspaceFolders, activeKey);
   }
-  return workspaceFolders[0];
+  return resolveActiveWorkspaceFolderByKey(workspaceFolders);
 }
 
 async function resolveBootstrapWorkspaceFolders(input: {
@@ -577,7 +579,11 @@ async function resolveBootstrapWorkspaceFolder(
 }
 
 function workspaceFolderKey(folder: vscode.WorkspaceFolder): string {
-  return `${folder.uri.scheme || "file"}:${folder.uri.authority || ""}:${folder.uri.fsPath}`;
+  return workspaceFolderIdentityKey({
+    uriScheme: folder.uri.scheme,
+    uriAuthority: folder.uri.authority,
+    fsPath: folder.uri.fsPath,
+  });
 }
 
 export function resolveT3Home(): string {

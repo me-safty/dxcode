@@ -117,6 +117,33 @@ describe("host MCP advertisements", () => {
     expect(result.advertisements.map((entry) => entry.hostId)).toEqual(["live"]);
   });
 
+  it("orders active workspace hosts before inactive hosts", () => {
+    const t3Home = makeT3Home();
+    writeHostMcpAdvertisement({
+      t3Home,
+      advertisement: createHostMcpAdvertisement({
+        hostId: "host-a",
+        nowMs,
+        mcpServer: server,
+        workspaceFolders: [workspace],
+      }),
+    });
+    writeHostMcpAdvertisement({
+      t3Home,
+      advertisement: createHostMcpAdvertisement({
+        hostId: "host-b",
+        nowMs,
+        mcpServer: { ...server, name: "t3code-vscode-b" },
+        workspaceFolders: [workspace],
+        activeWorkspaceFolderKey: workspace.key,
+      }),
+    });
+
+    expect(
+      readHostMcpAdvertisements({ t3Home, nowMs }).advertisements.map((entry) => entry.hostId),
+    ).toEqual(["host-b", "host-a"]);
+  });
+
   it("cleans expired files only after the grace period", () => {
     const t3Home = makeT3Home();
     writeHostMcpAdvertisement({

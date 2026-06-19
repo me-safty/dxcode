@@ -12,9 +12,9 @@ import {
   readAdvertisementFilenames,
   readAdvertisementJson,
   sanitizeAdvertisementId,
-  workspaceRootsMatch,
   writeAdvertisementJson,
 } from "./advertisementFiles.ts";
+import { hasActiveWorkspaceFolder, workspaceFoldersIncludeRoot } from "./workspaceFolders.ts";
 
 export const LOCAL_BACKEND_ADVERTISEMENT_TTL_MS = 30_000;
 export const LOCAL_BACKEND_ADVERTISEMENT_HEARTBEAT_MS = 10_000;
@@ -146,10 +146,7 @@ export function readLocalBackendAdvertisements(
     }
     const workspaceRoot = input.workspaceRoot;
     if (workspaceRoot) {
-      const matchesWorkspaceRoot = advertisement.workspaceFolders.some((folder) =>
-        workspaceRootsMatch(folder.cwd, workspaceRoot),
-      );
-      if (!matchesWorkspaceRoot) {
+      if (!workspaceFoldersIncludeRoot(advertisement.workspaceFolders, workspaceRoot)) {
         continue;
       }
     }
@@ -215,12 +212,8 @@ function compareLocalBackendAdvertisements(
   left: LocalBackendAdvertisement,
   right: LocalBackendAdvertisement,
 ): number {
-  const activeLeft = left.workspaceFolders.some(
-    (folder) => folder.key === left.activeWorkspaceFolderKey,
-  );
-  const activeRight = right.workspaceFolders.some(
-    (folder) => folder.key === right.activeWorkspaceFolderKey,
-  );
+  const activeLeft = hasActiveWorkspaceFolder(left);
+  const activeRight = hasActiveWorkspaceFolder(right);
   if (activeLeft !== activeRight) {
     return activeLeft ? -1 : 1;
   }

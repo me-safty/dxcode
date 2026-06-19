@@ -11,8 +11,9 @@ Concrete conflict notes from this merge:
 - `pnpm-lock.yaml` was regenerated from the merged manifests and `pnpm install` was run so upstream's new mobile `expo-network` dependency and the VS Code extension's explicit `@t3tools/shared` workspace dependency are linked.
 - The local workspace-scoped provider skill picker now uses `serverEnvironment.listProviderSkills` from `packages/client-runtime/src/state/server.ts` instead of the deleted web runtime connection object.
 - The local Version Control panel now calls the existing `vcs.panel.*` RPCs through `vcsEnvironment` atom commands instead of the removed `EnvironmentApi` object, while keeping its right-panel surface and live VCS status integration.
+- Shared workspace-folder identity and matching now lives in `@t3tools/shared/workspaceFolders` so VS Code bootstrap, host-MCP discovery, and local-backend advertisement discovery use the same active-folder and workspace-root rules.
 - VS Code webview scoping was preserved on the new project shell model by matching project `workspaceRoot` values, keeping the button-based sidebar wordmark, and retaining hosted/settings back-target behavior.
-- Terminal host gating, stable project-action terminal IDs, subagent parent navigation, and disabled-terminal cleanup were carried forward into the upstream `ChatView` atom state.
+- Terminal host gating, stable project-action terminal IDs, subagent parent navigation, server-side subagent archive/delete cascades, and disabled-terminal cleanup were carried forward into the upstream runtime/orchestration state.
 - Validation for this merge used `pnpm exec vp check`, `pnpm exec vp run typecheck`, and `pnpm exec vp run lint:mobile`. `vp check` still reports warning-only schema-hoisting notices in upstream-added mobile connection files; `lint:mobile` also warns that optional local `swiftlint`, `ktlint`, and `detekt` binaries are not installed.
 
 ## Debug Browser Launch
@@ -176,25 +177,25 @@ Expected behavior:
 - The server exposes a workspace-aware `server.listProviderSkills` path and validates enabled Codex skill-listing requests against the requested cwd.
 - The Codex provider requests `skills/list` with the current workspace cwd and supports forced refreshes when the workspace skill cache needs to be invalidated.
 - Non-Codex or disabled providers keep returning provider snapshot skills instead of failing workspace skill search.
-- The web composer keeps provider skills keyed by active workspace, clears stale snapshot skills when the workspace changes, and surfaces skill-listing failures instead of silently reusing stale results.
+- The client runtime keys provider-skill query state by environment, provider instance, and cwd, with a short stale window so reconnects refresh workspace-local skills without reusing another workspace's snapshot.
 
 Primary files:
 
 - `apps/server/src/ws.ts`
 - `apps/server/src/provider/Layers/CodexProvider.ts`
-- `apps/web/src/lib/providerWorkspaceSkillsState.ts`
-- `apps/web/src/components/chat/ChatComposer.tsx`
 - `packages/contracts/src/server.ts`
 - `packages/client-runtime/src/state/server.ts`
 
 Relevant tests live in:
 
 - `apps/server/src/server.test.ts`
-- `apps/web/src/lib/providerWorkspaceSkillsState.test.ts`
+- `packages/client-runtime/src/state/runtime.test.ts`
 
 ## VS Code Extension Work
 
 This branch also carries the VS Code extension work that is not assumed to exist on `main`. Treat the VS Code extension, its desktop-backed integration model, workspace-scoped webview behavior, host MCP bridge, release packaging, and related tests as part of this branch's customization set during upstream merges.
+
+VS Code workspace-folder identity should stay aligned with the shared desktop/host-MCP workspace helpers in `packages/shared/src/workspaceFolders.ts`; do not reintroduce independent active-folder matching in the extension.
 
 The implementation details are intentionally kept in `apps/vscode-extension/IMPLEMENTATION.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the extension work unless `main` has gained an equivalent VS Code extension architecture, then reconcile against the detailed implementation note.
 
@@ -205,6 +206,8 @@ Primary reference:
 ## Subagent Threading Work
 
 This branch also carries the Codex subagent-threading work that is not assumed to exist on `main`. Treat Codex subagent lineage, child-thread projection, nested active sidebar rows, parent subagent reference blocks, child-thread output isolation, child stop behavior, and related tests as part of this branch's customization set during upstream merges.
+
+Thread archive/delete lifecycle behavior is enforced server-side in the orchestration decider: archiving or deleting a parent thread cascades through active subagent descendants before the parent event, and force-deleting a project delegates through lifecycle roots so descendant subagents are not double-deleted.
 
 The implementation details are intentionally kept in `SUBAGENTS.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the subagent threading work unless `main` has gained an equivalent UI-aware subagent architecture, then reconcile against the detailed subagent note.
 
@@ -217,6 +220,8 @@ Primary reference:
 This branch includes a first-class Version Control panel that is not assumed to exist on `main`. Treat the Version Control singleton right-panel surface, VS Code host display setting, live VCS status watcher, Actionable and Remotes panel model, selected-file commit/stash flow, branch/commit/stash/remote actions, and Version Control panel RPC/contracts as part of this branch's customization set during upstream merges.
 
 Preserve the branch-local idle-power safeguards for VCS status: ignore internal `.git/` watcher events before refreshing local status, and keep the default automatic remote Git fetch interval conservative unless upstream provides equivalent lower-churn VCS status behavior.
+
+Provider-backed change-request lookups remain best-effort in the panel service. Provider/auth/CLI failures must not fail the whole panel snapshot or hide git-derived actionable branch rows.
 
 The implementation details are intentionally kept in `SOURCE_CONTROL.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the Version Control panel work unless `main` has gained an equivalent agent-aware version-control panel, then reconcile against the detailed source-control note.
 

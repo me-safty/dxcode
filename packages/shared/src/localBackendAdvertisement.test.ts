@@ -119,6 +119,37 @@ describe("local backend advertisements", () => {
     expect(result.advertisements.map((entry) => entry.backendId)).toEqual(["live"]);
   });
 
+  it("orders active workspace backends before inactive backends", () => {
+    const t3Home = makeT3Home();
+    writeLocalBackendAdvertisement({
+      t3Home,
+      advertisement: createLocalBackendAdvertisement({
+        backendId: "backend-a",
+        nowMs,
+        httpBaseUrl: "http://127.0.0.1:49111",
+        bearerToken: "token-a",
+        workspaceFolders: [workspace],
+      }),
+    });
+    writeLocalBackendAdvertisement({
+      t3Home,
+      advertisement: createLocalBackendAdvertisement({
+        backendId: "backend-b",
+        nowMs,
+        httpBaseUrl: "http://127.0.0.1:49112",
+        bearerToken: "token-b",
+        workspaceFolders: [workspace],
+        activeWorkspaceFolderKey: workspace.key,
+      }),
+    });
+
+    expect(
+      readLocalBackendAdvertisements({ t3Home, nowMs }).advertisements.map(
+        (entry) => entry.backendId,
+      ),
+    ).toEqual(["backend-b", "backend-a"]);
+  });
+
   it("cleans expired files only after the grace period", () => {
     const t3Home = makeT3Home();
     writeLocalBackendAdvertisement({

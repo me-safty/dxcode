@@ -13,9 +13,9 @@ import {
   readAdvertisementFilenames,
   readAdvertisementJson,
   sanitizeAdvertisementId,
-  workspaceRootsMatch as workspaceRootsMatchShared,
   writeAdvertisementJson,
 } from "./advertisementFiles.ts";
+import { hasActiveWorkspaceFolder, workspaceFoldersIncludeRoot } from "./workspaceFolders.ts";
 
 export const HOST_MCP_ADVERTISEMENT_TTL_MS = 30_000;
 export const HOST_MCP_ADVERTISEMENT_HEARTBEAT_MS = 10_000;
@@ -132,10 +132,7 @@ export function readHostMcpAdvertisements(
     }
     const workspaceRoot = input.workspaceRoot;
     if (workspaceRoot) {
-      const matchesWorkspaceRoot = advertisement.workspaceFolders.some((folder) =>
-        workspaceRootsMatch(folder.cwd, workspaceRoot),
-      );
-      if (!matchesWorkspaceRoot) {
+      if (!workspaceFoldersIncludeRoot(advertisement.workspaceFolders, workspaceRoot)) {
         continue;
       }
     }
@@ -201,7 +198,7 @@ export function mergeHostMcpServers(
 }
 
 export function workspaceRootsMatch(left: string, right: string): boolean {
-  return workspaceRootsMatchShared(left, right);
+  return workspaceFoldersIncludeRoot([{ cwd: left }], right);
 }
 
 function sanitizeHostId(hostId: string): string {
@@ -221,12 +218,8 @@ function compareHostMcpAdvertisements(
   left: HostMcpAdvertisement,
   right: HostMcpAdvertisement,
 ): number {
-  const activeLeft = left.workspaceFolders.some(
-    (folder) => folder.key === left.activeWorkspaceFolderKey,
-  );
-  const activeRight = right.workspaceFolders.some(
-    (folder) => folder.key === right.activeWorkspaceFolderKey,
-  );
+  const activeLeft = hasActiveWorkspaceFolder(left);
+  const activeRight = hasActiveWorkspaceFolder(right);
   if (activeLeft !== activeRight) {
     return activeLeft ? -1 : 1;
   }

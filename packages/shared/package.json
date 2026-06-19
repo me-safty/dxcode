@@ -163,6 +163,10 @@
       "types": "./src/hostMcp.ts",
       "import": "./src/hostMcp.ts"
     },
+    "./workspaceFolders": {
+      "types": "./src/workspaceFolders.ts",
+      "import": "./src/workspaceFolders.ts"
+    },
     "./desktopBackendAdvertisement": {
       "types": "./src/desktopBackendAdvertisement.ts",
       "import": "./src/desktopBackendAdvertisement.ts"
