@@ -61,27 +61,20 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
     ...(clerkOrigin ? [clerkOrigin] : []),
     "https://challenges.cloudflare.com",
   ];
-  const connectSources = new Set(["'self'", ...(clerkOrigin ? [clerkOrigin] : [])]);
 
-  const addConnectOrigin = (url: URL) => {
-    connectSources.add(url.origin);
-    if (url.protocol === "http:" || url.protocol === "https:") {
-      const webSocketProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-      connectSources.add(`${webSocketProtocol}//${url.host}`);
-    }
-  };
-
-  addConnectOrigin(input.backendOrigin);
-  if (input.scheme === DESKTOP_DEVELOPMENT_SCHEME) {
-    addConnectOrigin(input.targetOrigin);
-  }
+  // The renderer connects directly to user-configured environments in addition to
+  // the build-configured Clerk, relay, and OTLP endpoints. Those environment
+  // origins are not known when this response policy is created, so restrict
+  // connections by the network schemes the client supports instead of by host.
+  const connectSources = ["'self'", "http:", "https:", "ws:", "wss:"];
 
   return [
     "default-src 'self'",
     `script-src ${scriptSources.join(" ")}`,
-    `connect-src ${[...connectSources].join(" ")}`,
-    "img-src 'self' https://img.clerk.com data:",
+    `connect-src ${connectSources.join(" ")}`,
+    `img-src 'self' ${input.scheme}: blob: data: http: https:`,
     "style-src 'self' 'unsafe-inline'",
+    `font-src 'self' ${input.scheme}: data:`,
     "worker-src 'self' blob:",
     "frame-src 'self' https://challenges.cloudflare.com",
     "form-action 'self'",

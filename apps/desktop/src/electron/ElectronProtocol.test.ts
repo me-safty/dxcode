@@ -51,7 +51,15 @@ describe("ElectronProtocol", () => {
           );
           assert.include(
             response.headers.get("content-security-policy") ?? "",
-            "connect-src 'self' https://clerk.t3.codes http://127.0.0.1:3774 ws://127.0.0.1:3774 http://127.0.0.1:3773 ws://127.0.0.1:3773",
+            "connect-src 'self' http: https: ws: wss:",
+          );
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "img-src 'self' t3code-dev: blob: data: http: https:",
+          );
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "font-src 'self' t3code-dev: data:",
           );
         }),
       );
@@ -89,4 +97,36 @@ describe("ElectronProtocol", () => {
       assert.equal(netFetchMock.mock.calls.length, 0);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
+
+  it("keeps executable sources host-restricted while allowing runtime network resources", () => {
+    const policy = ElectronProtocol.makeDesktopContentSecurityPolicy({
+      scheme: "t3code",
+      targetOrigin: new URL("http://127.0.0.1:3773/"),
+      backendOrigin: new URL("http://127.0.0.1:3773/"),
+      clerkFrontendApiHostname: "clerk.t3.codes",
+    });
+    const directives = Object.fromEntries(
+      policy.split("; ").map((directive) => {
+        const [name, ...sources] = directive.split(" ");
+        return [name, sources];
+      }),
+    );
+
+    assert.deepEqual(directives["script-src"], [
+      "'self'",
+      "'unsafe-inline'",
+      "https://clerk.t3.codes",
+      "https://challenges.cloudflare.com",
+    ]);
+    assert.deepEqual(directives["connect-src"], ["'self'", "http:", "https:", "ws:", "wss:"]);
+    assert.deepEqual(directives["img-src"], [
+      "'self'",
+      "t3code:",
+      "blob:",
+      "data:",
+      "http:",
+      "https:",
+    ]);
+    assert.deepEqual(directives["font-src"], ["'self'", "t3code:", "data:"]);
+  });
 });
