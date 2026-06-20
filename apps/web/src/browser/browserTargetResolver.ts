@@ -1,11 +1,48 @@
-import type {
-  BrowserNavigationTarget,
+import {
+  type BrowserNavigationTarget,
   EnvironmentId,
-  PreviewUrlResolution,
+  type PreviewUrlResolution,
 } from "@t3tools/contracts";
 import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
+import * as Schema from "effect/Schema";
 
 import { readPreparedConnection } from "~/state/session";
+
+export class BrowserTargetEnvironmentDisconnectedError extends Schema.TaggedErrorClass<BrowserTargetEnvironmentDisconnectedError>()(
+  "BrowserTargetEnvironmentDisconnectedError",
+  {
+    environmentId: EnvironmentId,
+  },
+) {
+  override get message(): string {
+    return `Environment ${this.environmentId} is not connected.`;
+  }
+}
+
+export class BrowserTargetEnvironmentUrlInvalidError extends Schema.TaggedErrorClass<BrowserTargetEnvironmentUrlInvalidError>()(
+  "BrowserTargetEnvironmentUrlInvalidError",
+  {
+    environmentId: EnvironmentId,
+    httpBaseUrl: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Environment ${this.environmentId} has an invalid HTTP base URL: ${this.httpBaseUrl}.`;
+  }
+}
+
+export class BrowserTargetPrivateNetworkRequiredError extends Schema.TaggedErrorClass<BrowserTargetPrivateNetworkRequiredError>()(
+  "BrowserTargetPrivateNetworkRequiredError",
+  {
+    environmentId: EnvironmentId,
+    hostname: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Environment ${this.environmentId} host ${this.hostname} needs the planned authenticated preview gateway because it is not directly private-network reachable.`;
+  }
+}
 
 const isPrivateNetworkHost = (host: string): boolean => {
   const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
@@ -37,12 +74,24 @@ export function resolveBrowserNavigationTarget(
     };
   }
   const connection = readPreparedConnection(environmentId);
-  if (!connection) throw new Error(`Environment ${environmentId} is not connected.`);
-  const environmentUrl = new URL(connection.httpBaseUrl);
+  if (!connection) {
+    throw new BrowserTargetEnvironmentDisconnectedError({ environmentId });
+  }
+  let environmentUrl: URL;
+  try {
+    environmentUrl = new URL(connection.httpBaseUrl);
+  } catch (cause) {
+    throw new BrowserTargetEnvironmentUrlInvalidError({
+      environmentId,
+      httpBaseUrl: connection.httpBaseUrl,
+      cause,
+    });
+  }
   if (!isPrivateNetworkHost(environmentUrl.hostname)) {
-    throw new Error(
-      "This environment port needs the planned authenticated preview gateway; its server address is not directly private-network reachable.",
-    );
+    throw new BrowserTargetPrivateNetworkRequiredError({
+      environmentId,
+      hostname: environmentUrl.hostname,
+    });
   }
   const protocol = target.protocol ?? "http";
   const path = target.path?.startsWith("/") ? target.path : `/${target.path ?? ""}`;
