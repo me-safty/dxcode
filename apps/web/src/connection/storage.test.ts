@@ -74,4 +74,25 @@ describe("makeCatalogBackend", () => {
       expect(setConnectionCatalog).toHaveBeenCalledWith("{}");
     }),
   );
+
+  it.effect("preserves secure-storage write failures without exposing them in the message", () =>
+    Effect.gen(function* () {
+      const cause = new Error("credential vault path leaked");
+      vi.stubGlobal("window", {
+        desktopBridge: {
+          getConnectionCatalog: vi.fn().mockResolvedValue(null),
+          setConnectionCatalog: vi.fn().mockRejectedValue(cause),
+        },
+      });
+      const backend = makeCatalogBackend({} as IDBDatabase);
+
+      const error = yield* backend.write("{}").pipe(Effect.flip);
+
+      expect(error.cause).toBe(cause);
+      expect(error.message).toBe(
+        "Could not save the local connection catalog to desktop secure storage.",
+      );
+      expect(error.message).not.toContain(cause.message);
+    }),
+  );
 });

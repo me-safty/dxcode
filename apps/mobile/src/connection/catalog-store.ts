@@ -15,30 +15,36 @@ import { migrateLegacyConnectionCatalog } from "./migration";
 export const CONNECTION_CATALOG_KEY = "t3code.connection-catalog.v1";
 export const LEGACY_CONNECTIONS_KEY = "t3code.connections";
 
-function catalogError(operation: string, cause: unknown) {
-  return new ConnectionTransientError({
-    reason: "remote-unavailable",
-    detail: `Could not ${operation} the local connection catalog: ${String(cause)}`,
-  });
-}
+const ConnectionCatalogDocumentJson = Schema.fromJsonString(ConnectionCatalogDocument);
+const decodeConnectionCatalogDocument = Schema.decodeUnknownEffect(ConnectionCatalogDocumentJson);
+const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDocumentJson);
 
 const decodeCatalog = Effect.fn("mobile.connectionStorage.decodeCatalog")(function* (raw: string) {
-  const parsed = yield* Effect.try({
-    try: () => JSON.parse(raw) as unknown,
-    catch: (cause) => catalogError("decode", cause),
-  });
-  return yield* Effect.fromResult(
-    Schema.decodeUnknownResult(ConnectionCatalogDocument)(parsed),
-  ).pipe(Effect.mapError((cause) => catalogError("decode", cause)));
+  return yield* decodeConnectionCatalogDocument(raw).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConnectionTransientError({
+          reason: "remote-unavailable",
+          detail: "Could not decode the local connection catalog.",
+          cause,
+        }),
+    ),
+  );
 });
 
 const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(function* (
   catalog: ConnectionCatalogDocumentType,
 ) {
-  const encoded = yield* Effect.fromResult(
-    Schema.encodeUnknownResult(ConnectionCatalogDocument)(catalog),
-  ).pipe(Effect.mapError((cause) => catalogError("encode", cause)));
-  return JSON.stringify(encoded);
+  return yield* encodeConnectionCatalogDocument(catalog).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConnectionTransientError({
+          reason: "remote-unavailable",
+          detail: "Could not encode the local connection catalog.",
+          cause,
+        }),
+    ),
+  );
 });
 
 interface CatalogStore {
@@ -66,12 +72,20 @@ export const makeCatalogStore = Effect.fn("mobile.connectionStorage.makeCatalogS
       legacyRaw === null || legacyRaw.trim() === ""
         ? EMPTY_CONNECTION_CATALOG_DOCUMENT
         : yield* migrateLegacyConnectionCatalog(legacyRaw).pipe(
-            Effect.mapError((cause) => catalogError("migrate", cause)),
-            Effect.catch((error) =>
-              Effect.logWarning("Discarding corrupt legacy mobile connections", error).pipe(
-                Effect.as(EMPTY_CONNECTION_CATALOG_DOCUMENT),
-              ),
+            Effect.mapError(
+              (cause) =>
+                new ConnectionTransientError({
+                  reason: "remote-unavailable",
+                  detail: "Could not migrate the legacy local connection catalog.",
+                  cause,
+                }),
             ),
+            Effect.catchTags({
+              ConnectionTransientError: (error) =>
+                Effect.logWarning("Discarding corrupt legacy mobile connections", error).pipe(
+                  Effect.as(EMPTY_CONNECTION_CATALOG_DOCUMENT),
+                ),
+            }),
           );
     if (legacyRaw !== null && legacyRaw.trim() !== "") {
       const encoded = yield* encodeCatalog(catalog);
@@ -90,12 +104,13 @@ export const makeCatalogStore = Effect.fn("mobile.connectionStorage.makeCatalogS
     let catalog: ConnectionCatalogDocumentType;
     if (raw !== null && raw.trim() !== "") {
       catalog = yield* decodeCatalog(raw).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Discarding corrupt mobile connection catalog", error).pipe(
-            Effect.andThen(storage.deleteItem(CONNECTION_CATALOG_KEY)),
-            Effect.andThen(loadLegacyCatalog()),
-          ),
-        ),
+        Effect.catchTags({
+          ConnectionTransientError: (error) =>
+            Effect.logWarning("Discarding corrupt mobile connection catalog", error).pipe(
+              Effect.andThen(storage.deleteItem(CONNECTION_CATALOG_KEY)),
+              Effect.andThen(loadLegacyCatalog()),
+            ),
+        }),
       );
     } else {
       catalog = yield* loadLegacyCatalog();

@@ -60,37 +60,16 @@ const encodeStoredShellSnapshot = Schema.encodeEffect(StoredShellSnapshotJson);
 const decodeStoredThreadSnapshot = Schema.decodeUnknownEffect(StoredThreadSnapshotJson);
 const encodeStoredThreadSnapshot = Schema.encodeEffect(StoredThreadSnapshotJson);
 
-function catalogError(operation: string, cause: unknown) {
-  return new ConnectionTransientError({
-    reason: "remote-unavailable",
-    detail: `Could not ${operation} the local connection catalog: ${String(cause)}`,
-  });
-}
-
-function persistenceError(
-  operation:
-    | "list-targets"
-    | "register-connection"
-    | "remove-connection"
-    | "load-shell"
-    | "save-shell"
-    | "load-thread"
-    | "save-thread"
-    | "remove-thread"
-    | "clear-environment",
-  cause: unknown,
-) {
-  return new ConnectionPersistenceError({
-    operation,
-    message: `Could not ${operation.replaceAll("-", " ")}: ${String(cause)}`,
-  });
-}
-
 const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* () {
   return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume) => {
     if (typeof indexedDB === "undefined") {
       resume(
-        Effect.fail(catalogError("open", "IndexedDB is unavailable in this browser context.")),
+        Effect.fail(
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "IndexedDB is unavailable in this browser context.",
+          }),
+        ),
       );
       return;
     }
@@ -107,7 +86,15 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
       }
     });
     request.addEventListener("error", () => {
-      resume(Effect.fail(catalogError("open", request.error ?? "Unknown IndexedDB error")));
+      resume(
+        Effect.fail(
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "Could not open the local connection catalog database.",
+            cause: request.error ?? undefined,
+          }),
+        ),
+      );
     });
     request.addEventListener("success", () => {
       resume(Effect.succeed(request.result));
@@ -119,7 +106,15 @@ function readDatabaseValue(database: IDBDatabase, storeName: string, key: IDBVal
   return Effect.callback<unknown, ConnectionTransientError>((resume) => {
     const request = database.transaction(storeName, "readonly").objectStore(storeName).get(key);
     request.addEventListener("error", () => {
-      resume(Effect.fail(catalogError("read", request.error ?? "Unknown IndexedDB read error")));
+      resume(
+        Effect.fail(
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "Could not read the local connection database.",
+            cause: request.error ?? undefined,
+          }),
+        ),
+      );
     });
     request.addEventListener("success", () => {
       resume(Effect.succeed(request.result));
@@ -137,7 +132,13 @@ function writeDatabaseValue(
     const transaction = database.transaction(storeName, "readwrite");
     transaction.addEventListener("error", () => {
       resume(
-        Effect.fail(catalogError("write", transaction.error ?? "Unknown IndexedDB write error")),
+        Effect.fail(
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "Could not write the local connection database.",
+            cause: transaction.error ?? undefined,
+          }),
+        ),
       );
     });
     transaction.addEventListener("complete", () => {
@@ -152,7 +153,13 @@ function removeDatabaseValue(database: IDBDatabase, storeName: string, key: IDBV
     const transaction = database.transaction(storeName, "readwrite");
     transaction.addEventListener("error", () => {
       resume(
-        Effect.fail(catalogError("remove", transaction.error ?? "Unknown IndexedDB remove error")),
+        Effect.fail(
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "Could not remove data from the local connection database.",
+            cause: transaction.error ?? undefined,
+          }),
+        ),
       );
     });
     transaction.addEventListener("complete", () => {
@@ -167,7 +174,13 @@ function removeDatabaseValuesInRange(database: IDBDatabase, storeName: string, r
     const transaction = database.transaction(storeName, "readwrite");
     transaction.addEventListener("error", () => {
       resume(
-        Effect.fail(catalogError("remove", transaction.error ?? "Unknown IndexedDB cursor error")),
+        Effect.fail(
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "Could not remove data from the local connection database.",
+            cause: transaction.error ?? undefined,
+          }),
+        ),
       );
     });
     transaction.addEventListener("complete", () => {
@@ -176,7 +189,13 @@ function removeDatabaseValuesInRange(database: IDBDatabase, storeName: string, r
     const request = transaction.objectStore(storeName).openCursor(range);
     request.addEventListener("error", () => {
       resume(
-        Effect.fail(catalogError("remove", request.error ?? "Unknown IndexedDB cursor error")),
+        Effect.fail(
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "Could not scan the local connection database for removal.",
+            cause: request.error ?? undefined,
+          }),
+        ),
       );
     });
     request.addEventListener("success", () => {
@@ -196,7 +215,14 @@ function threadCacheKey(environmentId: EnvironmentId, threadId: ThreadId) {
 
 const decodeCatalog = Effect.fn("web.connectionStorage.decodeCatalog")(function* (raw: string) {
   return yield* decodeConnectionCatalogDocument(raw).pipe(
-    Effect.mapError((cause) => catalogError("decode", cause)),
+    Effect.mapError(
+      (cause) =>
+        new ConnectionTransientError({
+          reason: "remote-unavailable",
+          detail: "Could not decode the local connection catalog.",
+          cause,
+        }),
+    ),
   );
 });
 
@@ -204,7 +230,14 @@ const encodeCatalog = Effect.fn("web.connectionStorage.encodeCatalog")(function*
   catalog: ConnectionCatalogDocumentType,
 ) {
   return yield* encodeConnectionCatalogDocument(catalog).pipe(
-    Effect.mapError((cause) => catalogError("encode", cause)),
+    Effect.mapError(
+      (cause) =>
+        new ConnectionTransientError({
+          reason: "remote-unavailable",
+          detail: "Could not encode the local connection catalog.",
+          cause,
+        }),
+    ),
   );
 });
 
@@ -220,21 +253,31 @@ export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
     return {
       read: Effect.tryPromise({
         try: () => bridge.getConnectionCatalog!(),
-        catch: (cause) => catalogError("load", cause),
+        catch: (cause) =>
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: "Could not load the local connection catalog from desktop secure storage.",
+            cause,
+          }),
       }),
       write: (raw) =>
         Effect.tryPromise({
           try: () => bridge.setConnectionCatalog!(raw),
-          catch: (cause) => catalogError("save", cause),
+          catch: (cause) =>
+            new ConnectionTransientError({
+              reason: "remote-unavailable",
+              detail: "Could not save the local connection catalog to desktop secure storage.",
+              cause,
+            }),
         }).pipe(
           Effect.flatMap((stored) =>
             stored
               ? Effect.void
               : Effect.fail(
-                  catalogError(
-                    "save",
-                    "Desktop secure storage is unavailable in this system context.",
-                  ),
+                  new ConnectionTransientError({
+                    reason: "remote-unavailable",
+                    detail: "Desktop secure storage is unavailable in this system context.",
+                  }),
                 ),
           ),
         ),
@@ -273,31 +316,33 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
     let catalog = EMPTY_CONNECTION_CATALOG_DOCUMENT;
     if (raw !== null && raw.trim() !== "") {
       catalog = yield* decodeCatalog(raw).pipe(
-        Effect.catch((error) =>
-          Effect.gen(function* () {
-            yield* Effect.logWarning("Discarding a corrupt web connection catalog.", {
-              error: error.message,
-            });
-            if (backend.quarantine !== undefined) {
-              yield* backend.quarantine(raw).pipe(
-                Effect.catch((cause) =>
-                  Effect.logWarning("Could not quarantine the corrupt web connection catalog.", {
-                    error: cause.message,
+        Effect.catchTags({
+          ConnectionTransientError: (error) =>
+            Effect.gen(function* () {
+              yield* Effect.logWarning("Discarding a corrupt web connection catalog.", { error });
+              if (backend.quarantine !== undefined) {
+                yield* backend.quarantine(raw).pipe(
+                  Effect.catchTags({
+                    ConnectionTransientError: (error) =>
+                      Effect.logWarning(
+                        "Could not quarantine the corrupt web connection catalog.",
+                        { error },
+                      ),
                   }),
-                ),
-              );
-            }
-            const encoded = yield* encodeCatalog(EMPTY_CONNECTION_CATALOG_DOCUMENT);
-            yield* backend.write(encoded).pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("Could not persist the recovered web connection catalog.", {
-                  error: cause.message,
+                );
+              }
+              const encoded = yield* encodeCatalog(EMPTY_CONNECTION_CATALOG_DOCUMENT);
+              yield* backend.write(encoded).pipe(
+                Effect.catchTags({
+                  ConnectionTransientError: (error) =>
+                    Effect.logWarning("Could not persist the recovered web connection catalog.", {
+                      error,
+                    }),
                 }),
-              ),
-            );
-            return EMPTY_CONNECTION_CATALOG_DOCUMENT;
-          }),
-        ),
+              );
+              return EMPTY_CONNECTION_CATALOG_DOCUMENT;
+            }),
+        }),
       );
     }
     yield* Ref.set(state, Option.some(catalog));
@@ -330,18 +375,48 @@ export const connectionStorageLayer = Layer.effectContext(
     const targetStore = ConnectionTargetStore.of({
       list: catalog.read.pipe(
         Effect.map((document) => document.targets),
-        Effect.mapError((cause) => persistenceError("list-targets", cause)),
+        Effect.mapError(
+          (cause) =>
+            new ConnectionPersistenceError({
+              operation: "list-targets",
+              stage: "read",
+              resource: "connection-catalog",
+              cause,
+            }),
+        ),
       ),
     });
     const registrationStore = ConnectionRegistrationStore.of({
       register: (registration) =>
         catalog
           .update((document) => registerConnectionInCatalog(document, registration))
-          .pipe(Effect.mapError((cause) => persistenceError("register-connection", cause))),
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConnectionPersistenceError({
+                  operation: "register-connection",
+                  stage: "write",
+                  resource: "connection-catalog",
+                  environmentId: registration.target.environmentId,
+                  cause,
+                }),
+            ),
+          ),
       remove: (target) =>
         catalog
           .update((document) => removeConnectionFromCatalog(document, target))
-          .pipe(Effect.mapError((cause) => persistenceError("remove-connection", cause))),
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConnectionPersistenceError({
+                  operation: "remove-connection",
+                  stage: "write",
+                  resource: "connection-catalog",
+                  environmentId: target.environmentId,
+                  cause,
+                }),
+            ),
+          ),
     });
     const profileStore = ProfileStore.make({
       get: (connectionId) =>
@@ -425,12 +500,31 @@ export const connectionStorageLayer = Layer.effectContext(
     const cacheStore = EnvironmentCacheStore.of({
       loadShell: (environmentId) =>
         readDatabaseValue(database, SHELL_STORE_NAME, environmentId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ConnectionPersistenceError({
+                operation: "load-shell",
+                stage: "read",
+                resource: "shell-cache",
+                environmentId,
+                cause,
+              }),
+          ),
           Effect.flatMap((raw) => {
             if (typeof raw !== "string") {
               return Effect.succeed(Option.none());
             }
             return decodeStoredShellSnapshot(raw).pipe(
-              Effect.mapError((cause) => persistenceError("load-shell", cause)),
+              Effect.mapError(
+                (cause) =>
+                  new ConnectionPersistenceError({
+                    operation: "load-shell",
+                    stage: "decode",
+                    resource: "shell-cache",
+                    environmentId,
+                    cause,
+                  }),
+              ),
               Effect.map((stored) =>
                 stored.environmentId === environmentId
                   ? Option.some(stored.snapshot)
@@ -438,11 +532,6 @@ export const connectionStorageLayer = Layer.effectContext(
               ),
             );
           }),
-          Effect.mapError((cause) =>
-            cause._tag === "ConnectionPersistenceError"
-              ? cause
-              : persistenceError("load-shell", cause),
-          ),
         ),
       saveShell: (environmentId, snapshot) =>
         Effect.gen(function* () {
@@ -450,27 +539,64 @@ export const connectionStorageLayer = Layer.effectContext(
             schemaVersion: SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION,
             environmentId,
             snapshot,
-          }).pipe(Effect.mapError((cause) => persistenceError("save-shell", cause)));
-          yield* writeDatabaseValue(database, SHELL_STORE_NAME, environmentId, encoded);
-        }).pipe(
-          Effect.mapError((cause) =>
-            cause._tag === "ConnectionPersistenceError"
-              ? cause
-              : persistenceError("save-shell", cause),
-          ),
-        ),
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConnectionPersistenceError({
+                  operation: "save-shell",
+                  stage: "encode",
+                  resource: "shell-cache",
+                  environmentId,
+                  cause,
+                }),
+            ),
+          );
+          yield* writeDatabaseValue(database, SHELL_STORE_NAME, environmentId, encoded).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConnectionPersistenceError({
+                  operation: "save-shell",
+                  stage: "write",
+                  resource: "shell-cache",
+                  environmentId,
+                  cause,
+                }),
+            ),
+          );
+        }),
       loadThread: (environmentId, threadId) =>
         readDatabaseValue(
           database,
           THREAD_STORE_NAME,
           threadCacheKey(environmentId, threadId),
         ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ConnectionPersistenceError({
+                operation: "load-thread",
+                stage: "read",
+                resource: "thread-cache",
+                environmentId,
+                threadId,
+                cause,
+              }),
+          ),
           Effect.flatMap((raw) => {
             if (typeof raw !== "string") {
               return Effect.succeed(Option.none());
             }
             return decodeStoredThreadSnapshot(raw).pipe(
-              Effect.mapError((cause) => persistenceError("load-thread", cause)),
+              Effect.mapError(
+                (cause) =>
+                  new ConnectionPersistenceError({
+                    operation: "load-thread",
+                    stage: "decode",
+                    resource: "thread-cache",
+                    environmentId,
+                    threadId,
+                    cause,
+                  }),
+              ),
               Effect.map((stored) =>
                 stored.environmentId === environmentId && stored.threadId === threadId
                   ? Option.some(stored.thread)
@@ -478,11 +604,6 @@ export const connectionStorageLayer = Layer.effectContext(
               ),
             );
           }),
-          Effect.mapError((cause) =>
-            cause._tag === "ConnectionPersistenceError"
-              ? cause
-              : persistenceError("load-thread", cause),
-          ),
         ),
       saveThread: (environmentId, thread) =>
         Effect.gen(function* () {
@@ -491,38 +612,90 @@ export const connectionStorageLayer = Layer.effectContext(
             environmentId,
             threadId: thread.id,
             thread,
-          }).pipe(Effect.mapError((cause) => persistenceError("save-thread", cause)));
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConnectionPersistenceError({
+                  operation: "save-thread",
+                  stage: "encode",
+                  resource: "thread-cache",
+                  environmentId,
+                  threadId: thread.id,
+                  cause,
+                }),
+            ),
+          );
           yield* writeDatabaseValue(
             database,
             THREAD_STORE_NAME,
             threadCacheKey(environmentId, thread.id),
             encoded,
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConnectionPersistenceError({
+                  operation: "save-thread",
+                  stage: "write",
+                  resource: "thread-cache",
+                  environmentId,
+                  threadId: thread.id,
+                  cause,
+                }),
+            ),
           );
-        }).pipe(
-          Effect.mapError((cause) =>
-            cause._tag === "ConnectionPersistenceError"
-              ? cause
-              : persistenceError("save-thread", cause),
-          ),
-        ),
+        }),
       removeThread: (environmentId, threadId) =>
         removeDatabaseValue(
           database,
           THREAD_STORE_NAME,
           threadCacheKey(environmentId, threadId),
-        ).pipe(Effect.mapError((cause) => persistenceError("remove-thread", cause))),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ConnectionPersistenceError({
+                operation: "remove-thread",
+                stage: "remove",
+                resource: "thread-cache",
+                environmentId,
+                threadId,
+                cause,
+              }),
+          ),
+        ),
       clear: (environmentId) =>
         Effect.all(
           [
-            removeDatabaseValue(database, SHELL_STORE_NAME, environmentId),
+            removeDatabaseValue(database, SHELL_STORE_NAME, environmentId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ConnectionPersistenceError({
+                    operation: "clear-environment",
+                    stage: "remove",
+                    resource: "shell-cache",
+                    environmentId,
+                    cause,
+                  }),
+              ),
+            ),
             removeDatabaseValuesInRange(
               database,
               THREAD_STORE_NAME,
               IDBKeyRange.bound(`${environmentId}:`, `${environmentId}:\uffff`),
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ConnectionPersistenceError({
+                    operation: "clear-environment",
+                    stage: "remove",
+                    resource: "thread-cache",
+                    environmentId,
+                    cause,
+                  }),
+              ),
             ),
           ],
           { concurrency: "unbounded", discard: true },
-        ).pipe(Effect.mapError((cause) => persistenceError("clear-environment", cause))),
+        ),
     });
 
     return Context.make(ConnectionTargetStore, targetStore).pipe(
