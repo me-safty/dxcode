@@ -906,11 +906,7 @@ function mergeTextOutput(
   if (next.startsWith(previous)) {
     return next;
   }
-  if (previous.startsWith(next)) {
-    return previous;
-  }
-  const separator = /\s$/u.test(previous) || /^\s/u.test(next) ? "" : "\n";
-  return `${previous}${separator}${next}`;
+  return `${previous}${next}`;
 }
 
 function mergeChangedFiles(
@@ -1210,9 +1206,12 @@ function extractCommandResult(
     firstCommandOutputStringFromRecord(itemResult, ["stderr"]) ??
     firstCommandOutputStringFromRecord(data, ["stderr"]) ??
     firstCommandOutputStringFromRecord(payload, ["stderr"]);
+  const rawOutputContent = options.preserveBlankRawOutputStreams
+    ? firstRawStringFromRecord(rawOutput, ["content", "output", "text", "result"])
+    : firstCommandOutputStringFromRecord(rawOutput, ["content", "output", "text", "result"]);
   const content =
     stdout ??
-    firstCommandOutputStringFromRecord(rawOutput, ["content", "output", "text", "result"]) ??
+    rawOutputContent ??
     firstCommandOutputStringFromRecord(itemResult, ["content", "output", "text", "result"]) ??
     firstCommandOutputStringFromRecord(item, ["aggregatedOutput", "output", "text", "result"]);
   const strippedContent = content ? stripTrailingExitCode(content) : null;
@@ -1408,7 +1407,7 @@ function firstCommandOutputStringFromRecord(
   keys: ReadonlyArray<string>,
 ): string | null {
   const value = firstRawStringFromRecord(record, keys);
-  return value !== null && value.trim().length > 0 ? value : null;
+  return value !== null && /\S/u.test(value) ? value : null;
 }
 
 function looksLikeUnifiedDiff(value: string): boolean {
