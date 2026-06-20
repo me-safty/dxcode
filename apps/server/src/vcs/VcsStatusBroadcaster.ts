@@ -24,12 +24,14 @@ import type {
 import { mergeGitStatusParts } from "@t3tools/shared/git";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import { localWatchRefreshSignals, watchEventPath } from "./VcsLocalWatch.ts";
 import * as VcsProcess from "./VcsProcess.ts";
+
+export { localWatchRefreshSignals, shouldIgnoreWatchEventPath } from "./VcsLocalWatch.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_MAX_DELAY = Duration.minutes(15);
-const VCS_STATUS_WATCH_IGNORED_ROOTS = new Set([".git"]);
 
 interface VcsStatusChange {
   readonly cwd: string;
@@ -100,33 +102,6 @@ const normalizeCwd = (cwd: string) =>
     Effect.flatMap((fs) => fs.realPath(cwd)),
     Effect.orElseSucceed(() => cwd),
   );
-
-function watchEventPath(path: Path.Path, rawCwd: string, eventPath: string): string | null {
-  const relativePath = path.isAbsolute(eventPath) ? path.relative(rawCwd, eventPath) : eventPath;
-  if (!relativePath || relativePath === ".") return null;
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) return null;
-  return relativePath.split(path.sep).join("/");
-}
-
-export function shouldIgnoreWatchEventPath(relativePath: string): boolean {
-  const [rootSegment] = relativePath.split("/");
-  return rootSegment ? VCS_STATUS_WATCH_IGNORED_ROOTS.has(rootSegment) : false;
-}
-
-export function localWatchRefreshSignals<E, R, R2>(
-  relativePaths: Stream.Stream<string, E, R>,
-  shouldRefreshForPaths: (relativePaths: readonly string[]) => Effect.Effect<boolean, never, R2>,
-  debounceDuration: Duration.Duration = Duration.millis(150),
-): Stream.Stream<void, E, R | R2> {
-  return relativePaths.pipe(
-    Stream.filter((relativePath) => !shouldIgnoreWatchEventPath(relativePath)),
-    Stream.groupedWithin(512, debounceDuration),
-    Stream.map((paths) => [...new Set(paths)]),
-    Stream.filter((paths) => paths.length > 0),
-    Stream.filterEffect(shouldRefreshForPaths),
-    Stream.map(() => undefined),
-  );
-}
 
 export const make = Effect.gen(function* () {
   const workflow = yield* GitWorkflowService.GitWorkflowService;

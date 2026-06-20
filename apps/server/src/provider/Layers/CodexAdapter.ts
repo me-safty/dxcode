@@ -52,7 +52,7 @@ import {
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { resolveHostMcpServersForProviderStart } from "../hostMcpDiscovery.ts";
+import { resolveHostMcpServersForProviderStartEffect } from "../hostMcpDiscovery.ts";
 import {
   type CodexMcpServerConfig,
   CodexResumeCursorSchema,
@@ -1647,9 +1647,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
-        const hostMcpServers = yield* Effect.promise(() =>
-          resolveHostMcpServersForProviderStart({ serverConfig, sessionInput: input }),
-        );
+        const hostMcpServers = yield* resolveHostMcpServersForProviderStartEffect({
+          serverConfig,
+          sessionInput: input,
+        });
         const serviceTier =
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)

@@ -17,6 +17,7 @@ Primary implementation files:
 - `apps/web/src/components/RightPanelTabs.tsx`
 - `apps/server/src/sourceControl/SourceControlPanelService.ts`
 - `apps/server/src/vcs/VcsStatusBroadcaster.ts`
+- `apps/server/src/vcs/VcsLocalWatch.ts`
 - `apps/server/src/ws.ts`
 - `packages/contracts/src/rpc.ts`
 - `packages/contracts/src/ipc.ts`
@@ -49,7 +50,7 @@ The repository summary shows the current ref, upstream status, changed-file coun
 
 ## Live Updates
 
-The panel refreshes from the VCS status stream, explicit panel operations, window focus, and document visibility changes. `VcsStatusBroadcaster` also maintains ref-counted filesystem watchers per cwd while a repository is subscribed. Internal `.git/` events are ignored before any refresh decision, file events are debounced, remaining paths are checked against Git ignore rules when possible, and only publish a new status when the working-tree fingerprint actually changes.
+The panel refreshes from the VCS status stream, explicit panel operations, window focus, and document visibility changes. `VcsStatusBroadcaster` also maintains ref-counted filesystem watchers per cwd while a repository is subscribed, with local path filtering and debounced refresh signal handling factored into `VcsLocalWatch`. Internal `.git/` events are ignored before any refresh decision, file events are debounced, remaining paths are checked against Git ignore rules when possible, and only publish a new status when the working-tree fingerprint actually changes.
 
 This keeps externally-created changes visible without requiring a window blur/refocus cycle, while avoiding repeated no-op refreshes for gitignored files or unchanged status.
 

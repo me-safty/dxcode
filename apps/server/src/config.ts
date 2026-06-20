@@ -51,41 +51,45 @@ export interface ServerDerivedPaths {
   readonly secretsDir: string;
 }
 
+export interface ServerHostIntegrationConfig {
+  readonly hostIntegration?: HostIntegration | undefined;
+  readonly autoBootstrapProjectFromCwd: boolean;
+  readonly autoBootstrapWorkspaceFolders: ReadonlyArray<DesktopBootstrapWorkspaceFolder>;
+  readonly activeBootstrapWorkspaceFolderKey: string | undefined;
+  readonly hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>;
+}
+
 /**
  * ServerConfig - Service tag for server runtime configuration.
  */
 export class ServerConfig extends Context.Service<
   ServerConfig,
-  ServerDerivedPaths & {
-    readonly logLevel: LogLevel.LogLevel;
-    readonly traceMinLevel: LogLevel.LogLevel;
-    readonly traceTimingEnabled: boolean;
-    readonly traceBatchWindowMs: number;
-    readonly traceMaxBytes: number;
-    readonly traceMaxFiles: number;
-    readonly otlpTracesUrl: string | undefined;
-    readonly otlpMetricsUrl: string | undefined;
-    readonly otlpExportIntervalMs: number;
-    readonly otlpServiceName: string;
-    readonly mode: RuntimeMode;
-    readonly port: number;
-    readonly host: string | undefined;
-    readonly cwd: string;
-    readonly baseDir: string;
-    readonly staticDir: string | undefined;
-    readonly devUrl: URL | undefined;
-    readonly noBrowser: boolean;
-    readonly startupPresentation: StartupPresentation;
-    readonly desktopBootstrapToken: string | undefined;
-    readonly hostIntegration?: HostIntegration | undefined;
-    readonly autoBootstrapProjectFromCwd: boolean;
-    readonly autoBootstrapWorkspaceFolders: ReadonlyArray<DesktopBootstrapWorkspaceFolder>;
-    readonly activeBootstrapWorkspaceFolderKey: string | undefined;
-    readonly hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>;
-    readonly logWebSocketEvents: boolean;
-    readonly tailscaleServeEnabled: boolean;
-    readonly tailscaleServePort: number;
-  }
+  ServerDerivedPaths &
+    ServerHostIntegrationConfig & {
+      readonly logLevel: LogLevel.LogLevel;
+      readonly traceMinLevel: LogLevel.LogLevel;
+      readonly traceTimingEnabled: boolean;
+      readonly traceBatchWindowMs: number;
+      readonly traceMaxBytes: number;
+      readonly traceMaxFiles: number;
+      readonly otlpTracesUrl: string | undefined;
+      readonly otlpMetricsUrl: string | undefined;
+      readonly otlpExportIntervalMs: number;
+      readonly otlpServiceName: string;
+      readonly mode: RuntimeMode;
+      readonly port: number;
+      readonly host: string | undefined;
+      readonly cwd: string;
+      readonly baseDir: string;
+      readonly staticDir: string | undefined;
+      readonly devUrl: URL | undefined;
+      readonly noBrowser: boolean;
+      readonly startupPresentation: StartupPresentation;
+      readonly desktopBootstrapToken: string | undefined;
+      readonly logWebSocketEvents: boolean;
+      readonly tailscaleServeEnabled: boolean;
+      readonly tailscaleServePort: number;
+    }
 >()("t3/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
   static readonly layerTest = (
@@ -93,8 +97,6 @@ export class ServerConfig extends Context.Service<
     baseDirOrPrefix: string | { readonly prefix: string },
   ) => layerTest(cwd, baseDirOrPrefix);
 }
-
-export type ServerConfigShape = ServerConfig["Service"];
 
 export const make = (config: ServerConfig["Service"]) => ServerConfig.of(config);
 
