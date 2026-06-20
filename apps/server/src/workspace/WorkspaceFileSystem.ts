@@ -7,7 +7,7 @@
  *
  * @module WorkspaceFileSystem
  */
-import * as NodeFSP from "node:fs/promises";
+import { open, realpath } from "node:fs/promises";
 
 import type {
   ProjectReadFileInput,
@@ -86,8 +86,8 @@ export const make = Effect.gen(function* () {
     return yield* Effect.tryPromise({
       try: async () => {
         const [realWorkspaceRoot, realTargetPath] = await Promise.all([
-          NodeFSP.realpath(input.cwd),
-          NodeFSP.realpath(target.absolutePath),
+          realpath(input.cwd),
+          realpath(target.absolutePath),
         ]);
         const relativeRealPath = path.relative(realWorkspaceRoot, realTargetPath);
         if (
@@ -98,7 +98,7 @@ export const make = Effect.gen(function* () {
           throw new Error("Workspace file path resolves outside the project root.");
         }
 
-        const handle = await NodeFSP.open(realTargetPath, "r");
+        const handle = await open(realTargetPath, "r");
         try {
           const stat = await handle.stat();
           if (!stat.isFile()) {

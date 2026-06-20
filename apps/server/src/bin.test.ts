@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - CLI integration exercises Node HTTP and filesystem boundaries.
-import * as NodeHttp from "node:http";
+import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,7 +124,7 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
       ),
       Layer.provideMerge(makeProjectPersistenceLayer(config)),
       Layer.provideMerge(
-        NodeHttpServer.layer(NodeHttp.createServer, {
+        NodeHttpServer.layer(createServer, {
           host: "127.0.0.1",
           port: 0,
         }),

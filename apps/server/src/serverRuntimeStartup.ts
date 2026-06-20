@@ -49,10 +49,7 @@ export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRun
   },
 ) {
   override get message(): string {
-    switch (this.stage) {
-      case "command-readiness":
-        return "Server runtime startup failed before command readiness.";
-    }
+    return "Server runtime startup failed before command readiness.";
   }
 }
 
@@ -289,7 +286,7 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
     Effect.withSpan(`server.startup.${phase}`),
   );
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const keybindings = yield* Keybindings.Keybindings;
   const orchestrationReactor = yield* OrchestrationReactor.OrchestrationReactor;
