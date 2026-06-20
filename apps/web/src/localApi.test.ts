@@ -75,20 +75,27 @@ describe("LocalApi", () => {
 
   it("preserves desktop bridge failures when opening external URLs", async () => {
     const cause = new Error("shell rejected request");
+    const url =
+      "https://user:password@example.com/pull/42?access_token=signed-secret-token#private";
     testWindow().desktopBridge = {
       openExternal: vi.fn().mockRejectedValue(cause),
     } as unknown as DesktopBridge;
 
     const { createLocalApi } = await import("./localApi");
-    const promise = createLocalApi().shell.openExternal("https://example.com/pull/42");
+    const promise = createLocalApi().shell.openExternal(url);
 
-    await expect(promise).rejects.toMatchObject({
+    const error = await promise.catch((error: unknown) => error);
+    expect(error).toMatchObject({
       _tag: "LocalExternalUrlOpenError",
-      url: "https://example.com/pull/42",
+      urlHostname: "example.com",
+      urlLength: url.length,
+      urlProtocol: "https:",
       cause,
-      message:
-        "Unable to open external URL https://example.com/pull/42 through the desktop bridge.",
+      message: `Unable to open an external URL for example.com through the desktop bridge (https:, input length ${url.length}).`,
     });
+    expect(error).not.toHaveProperty("url");
+    expect(String(error)).not.toContain("user:password");
+    expect(String(error)).not.toContain("signed-secret-token");
   });
 
   it("uses the browser context-menu fallback without a desktop bridge", async () => {

@@ -35,12 +35,14 @@ export class LocalBackendUnavailableError extends Schema.TaggedErrorClass<LocalB
 export class LocalExternalUrlOpenError extends Schema.TaggedErrorClass<LocalExternalUrlOpenError>()(
   "LocalExternalUrlOpenError",
   {
-    url: Schema.String,
+    urlHostname: Schema.NullOr(Schema.String),
+    urlLength: Schema.Number,
+    urlProtocol: Schema.NullOr(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Unable to open external URL ${this.url} through the desktop bridge.`;
+    return `Unable to open an external URL for ${this.urlHostname ?? "an unknown host"} through the desktop bridge (${this.urlProtocol ?? "unknown protocol"}, input length ${this.urlLength}).`;
   }
 }
 
@@ -51,6 +53,23 @@ export class LocalApiUnavailableError extends Schema.TaggedErrorClass<LocalApiUn
   override get message(): string {
     return "Local API is unavailable in the server runtime.";
   }
+}
+
+function describeExternalUrl(url: string) {
+  let urlHostname: string | null = null;
+  let urlProtocol: string | null = null;
+  try {
+    const parsed = new URL(url);
+    urlHostname = parsed.hostname || null;
+    urlProtocol = parsed.protocol || null;
+  } catch {
+    // Invalid URLs still retain their nonsecret input length for diagnostics.
+  }
+  return {
+    urlHostname,
+    urlLength: url.length,
+    urlProtocol,
+  };
 }
 
 function createBrowserLocalApi(): LocalApi {
@@ -77,14 +96,12 @@ function createBrowserLocalApi(): LocalApi {
             opened = await window.desktopBridge.openExternal(url);
           } catch (cause) {
             throw new LocalExternalUrlOpenError({
-              url,
+              ...describeExternalUrl(url),
               cause,
             });
           }
           if (!opened) {
-            throw new LocalExternalUrlOpenError({
-              url,
-            });
+            throw new LocalExternalUrlOpenError(describeExternalUrl(url));
           }
           return;
         }
