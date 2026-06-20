@@ -53,6 +53,7 @@ export const relayDpopSignerLayer = Layer.effect(
           Effect.mapError(
             (error) =>
               new ManagedRelay.ManagedRelayDpopProofCreationError({
+                stage: "load-key",
                 method: input.method,
                 url: input.url,
                 cause: error,
@@ -65,6 +66,7 @@ export const relayDpopSignerLayer = Layer.effect(
           Effect.mapError(
             (error) =>
               new ManagedRelay.ManagedRelayDpopProofCreationError({
+                stage: "create-proof",
                 method: input.method,
                 url: input.url,
                 cause: error,

@@ -64,6 +64,7 @@ export class ManagedRelayDpopKeyLoadError extends Schema.TaggedErrorClass<Manage
 export class ManagedRelayDpopProofCreationError extends Schema.TaggedErrorClass<ManagedRelayDpopProofCreationError>()(
   "ManagedRelayDpopProofCreationError",
   {
+    stage: Schema.Literals(["load-key", "create-proof"]),
     method: Schema.String,
     url: Schema.String,
     cause: Schema.Defect(),
