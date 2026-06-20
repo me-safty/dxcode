@@ -476,7 +476,7 @@ export const openCodexThread = (input: {
           requestedRuntimeMode: input.runtimeMode,
           resumeThreadId,
           recoverable: true,
-          cause: error.message,
+          cause: error,
         }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
       ),
     );
