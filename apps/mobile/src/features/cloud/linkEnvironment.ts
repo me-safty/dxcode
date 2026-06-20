@@ -18,7 +18,6 @@ import {
   type RelayDpopAccessTokenScope,
   type RelayClientEnvironmentRecord,
   type RelayEnvironmentStatusResponse as RelayEnvironmentStatusResponseType,
-  RelayManagedEndpoint,
   RelayManagedEndpointProviderKind,
   RelayProtectedError,
 } from "@t3tools/contracts/relay";
@@ -27,6 +26,7 @@ import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/enviro
 import { findErrorTraceId } from "@t3tools/client-runtime/errors";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime/rpc";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 
 import { authClientMetadata } from "../../lib/authClientMetadata";
 import type { SavedRemoteConnection } from "../../lib/connection";
@@ -81,13 +81,41 @@ export const CloudEnvironmentLinkAction = Schema.Literals([
 ]);
 export type CloudEnvironmentLinkAction = typeof CloudEnvironmentLinkAction.Type;
 
+function relayUrlDiagnosticFields(relayUrl: string | undefined) {
+  if (relayUrl === undefined) {
+    return {};
+  }
+  const diagnostics = getUrlDiagnostics(relayUrl);
+  return {
+    relayUrlInputLength: diagnostics.inputLength,
+    ...(diagnostics.protocol === undefined ? {} : { relayUrlProtocol: diagnostics.protocol }),
+    ...(diagnostics.hostname === undefined ? {} : { relayUrlHostname: diagnostics.hostname }),
+  };
+}
+
+function httpBaseUrlDiagnosticFields(httpBaseUrl: string | undefined) {
+  if (httpBaseUrl === undefined) {
+    return {};
+  }
+  const diagnostics = getUrlDiagnostics(httpBaseUrl);
+  return {
+    httpBaseUrlInputLength: diagnostics.inputLength,
+    ...(diagnostics.protocol === undefined ? {} : { httpBaseUrlProtocol: diagnostics.protocol }),
+    ...(diagnostics.hostname === undefined ? {} : { httpBaseUrlHostname: diagnostics.hostname }),
+  };
+}
+
 export class CloudEnvironmentLinkOperationError extends Schema.TaggedErrorClass<CloudEnvironmentLinkOperationError>()(
   "CloudEnvironmentLinkOperationError",
   {
     action: CloudEnvironmentLinkAction,
     environmentId: Schema.optionalKey(Schema.String),
-    relayUrl: Schema.optionalKey(Schema.String),
-    httpBaseUrl: Schema.optionalKey(Schema.String),
+    relayUrlInputLength: Schema.optionalKey(Schema.Number),
+    relayUrlProtocol: Schema.optionalKey(Schema.String),
+    relayUrlHostname: Schema.optionalKey(Schema.String),
+    httpBaseUrlInputLength: Schema.optionalKey(Schema.Number),
+    httpBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    httpBaseUrlHostname: Schema.optionalKey(Schema.String),
     traceId: Schema.optionalKey(Schema.String),
     relayError: Schema.optionalKey(RelayProtectedError),
     environmentError: Schema.optionalKey(EnvironmentCloudApiError),
@@ -110,8 +138,8 @@ export class CloudEnvironmentLinkOperationError extends Schema.TaggedErrorClass<
       action: input.action,
       cause: input.cause,
       ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
-      ...(input.relayUrl === undefined ? {} : { relayUrl: input.relayUrl }),
-      ...(input.httpBaseUrl === undefined ? {} : { httpBaseUrl: input.httpBaseUrl }),
+      ...relayUrlDiagnosticFields(input.relayUrl),
+      ...httpBaseUrlDiagnosticFields(input.httpBaseUrl),
       ...(traceId === null || traceId === undefined ? {} : { traceId }),
       ...(relayFailure?.relayError === undefined ? {} : { relayError: relayFailure.relayError }),
       ...(environmentError === undefined ? {} : { environmentError }),
@@ -151,9 +179,24 @@ export class CloudEnvironmentLocalBearerRequiredError extends Schema.TaggedError
   "CloudEnvironmentLocalBearerRequiredError",
   {
     environmentId: Schema.String,
-    httpBaseUrl: Schema.String,
+    httpBaseUrlInputLength: Schema.Number,
+    httpBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    httpBaseUrlHostname: Schema.optionalKey(Schema.String),
   },
 ) {
+  static fromConnection(input: {
+    readonly environmentId: string;
+    readonly httpBaseUrl: string;
+  }): CloudEnvironmentLocalBearerRequiredError {
+    const diagnostics = getUrlDiagnostics(input.httpBaseUrl);
+    return new CloudEnvironmentLocalBearerRequiredError({
+      environmentId: input.environmentId,
+      httpBaseUrlInputLength: diagnostics.inputLength,
+      ...(diagnostics.protocol === undefined ? {} : { httpBaseUrlProtocol: diagnostics.protocol }),
+      ...(diagnostics.hostname === undefined ? {} : { httpBaseUrlHostname: diagnostics.hostname }),
+    });
+  }
+
   override get message(): string {
     return "Only a locally paired bearer connection can be linked to the cloud.";
   }
@@ -183,10 +226,64 @@ export class CloudEnvironmentEndpointMismatchError extends Schema.TaggedErrorCla
   {
     source: Schema.Literals(["environment status response", "environment connect response"]),
     environmentId: Schema.String,
-    expectedEndpoint: RelayManagedEndpoint,
-    actualEndpoint: RelayManagedEndpoint,
+    expectedProviderKind: RelayManagedEndpointProviderKind,
+    expectedHttpBaseUrlInputLength: Schema.Number,
+    expectedHttpBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    expectedHttpBaseUrlHostname: Schema.optionalKey(Schema.String),
+    expectedWsBaseUrlInputLength: Schema.Number,
+    expectedWsBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    expectedWsBaseUrlHostname: Schema.optionalKey(Schema.String),
+    actualProviderKind: RelayManagedEndpointProviderKind,
+    actualHttpBaseUrlInputLength: Schema.Number,
+    actualHttpBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    actualHttpBaseUrlHostname: Schema.optionalKey(Schema.String),
+    actualWsBaseUrlInputLength: Schema.Number,
+    actualWsBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    actualWsBaseUrlHostname: Schema.optionalKey(Schema.String),
   },
 ) {
+  static fromEndpoints(input: {
+    readonly source: "environment status response" | "environment connect response";
+    readonly environmentId: string;
+    readonly expectedEndpoint: RelayClientEnvironmentRecord["endpoint"];
+    readonly actualEndpoint: RelayClientEnvironmentRecord["endpoint"];
+  }): CloudEnvironmentEndpointMismatchError {
+    const expectedHttp = getUrlDiagnostics(input.expectedEndpoint.httpBaseUrl);
+    const expectedWs = getUrlDiagnostics(input.expectedEndpoint.wsBaseUrl);
+    const actualHttp = getUrlDiagnostics(input.actualEndpoint.httpBaseUrl);
+    const actualWs = getUrlDiagnostics(input.actualEndpoint.wsBaseUrl);
+    return new CloudEnvironmentEndpointMismatchError({
+      source: input.source,
+      environmentId: input.environmentId,
+      expectedProviderKind: input.expectedEndpoint.providerKind,
+      expectedHttpBaseUrlInputLength: expectedHttp.inputLength,
+      ...(expectedHttp.protocol === undefined
+        ? {}
+        : { expectedHttpBaseUrlProtocol: expectedHttp.protocol }),
+      ...(expectedHttp.hostname === undefined
+        ? {}
+        : { expectedHttpBaseUrlHostname: expectedHttp.hostname }),
+      expectedWsBaseUrlInputLength: expectedWs.inputLength,
+      ...(expectedWs.protocol === undefined
+        ? {}
+        : { expectedWsBaseUrlProtocol: expectedWs.protocol }),
+      ...(expectedWs.hostname === undefined
+        ? {}
+        : { expectedWsBaseUrlHostname: expectedWs.hostname }),
+      actualProviderKind: input.actualEndpoint.providerKind,
+      actualHttpBaseUrlInputLength: actualHttp.inputLength,
+      ...(actualHttp.protocol === undefined
+        ? {}
+        : { actualHttpBaseUrlProtocol: actualHttp.protocol }),
+      ...(actualHttp.hostname === undefined
+        ? {}
+        : { actualHttpBaseUrlHostname: actualHttp.hostname }),
+      actualWsBaseUrlInputLength: actualWs.inputLength,
+      ...(actualWs.protocol === undefined ? {} : { actualWsBaseUrlProtocol: actualWs.protocol }),
+      ...(actualWs.hostname === undefined ? {} : { actualWsBaseUrlHostname: actualWs.hostname }),
+    });
+  }
+
   override get message(): string {
     return `The ${this.source} returned a different endpoint for environment "${this.environmentId}".`;
   }
@@ -310,7 +407,7 @@ function ensureStatusMatchesEnvironment(input: {
     });
   }
   if (!endpointMatches(input.status.endpoint, input.environment.endpoint)) {
-    return new CloudEnvironmentEndpointMismatchError({
+    return CloudEnvironmentEndpointMismatchError.fromEndpoints({
       source: "environment status response",
       environmentId: input.environment.environmentId,
       expectedEndpoint: input.environment.endpoint,
@@ -335,7 +432,7 @@ function ensureConnectEndpointMatchesEnvironment(input: {
   readonly connect: RelayEnvironmentConnectResponseType;
 }): Effect.Effect<void, CloudEnvironmentLinkError> {
   if (!endpointMatches(input.connect.endpoint, input.environment.endpoint)) {
-    return new CloudEnvironmentEndpointMismatchError({
+    return CloudEnvironmentEndpointMismatchError.fromEndpoints({
       source: "environment connect response",
       environmentId: input.environment.environmentId,
       expectedEndpoint: input.environment.endpoint,
@@ -355,7 +452,7 @@ export function linkEnvironmentToCloud(input: {
 > {
   return Effect.gen(function* () {
     if (!input.connection.bearerToken) {
-      return yield* new CloudEnvironmentLocalBearerRequiredError({
+      return yield* CloudEnvironmentLocalBearerRequiredError.fromConnection({
         environmentId: input.connection.environmentId,
         httpBaseUrl: input.connection.httpBaseUrl,
       });

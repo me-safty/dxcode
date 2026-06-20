@@ -9,6 +9,7 @@ import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import { HttpClient } from "effect/unstable/http";
 
 import {
+  CloudEnvironmentLinkOperationError,
   cloudEnvironmentsPendingStatus,
   linkEnvironmentToCloud,
   connectCloudEnvironment,
@@ -149,6 +150,47 @@ describe("mobile cloud link environment client", () => {
     createProofMock.mockClear();
   });
 
+  it("keeps URL secrets out of operation errors while preserving the cause", () => {
+    const relayUrl =
+      "https://relay-user:relay-password@relay.example.test/private/workspace?access_token=relay-secret#relay-fragment";
+    const httpBaseUrl =
+      "https://desktop-user:desktop-password@desktop.example.test/private/workspace?access_token=desktop-secret#desktop-fragment";
+    const cause = new Error("request failed");
+
+    const error = CloudEnvironmentLinkOperationError.fromCause({
+      action: "link the environment",
+      cause,
+      environmentId: "env-1",
+      relayUrl,
+      httpBaseUrl,
+    });
+
+    expect(error).toMatchObject({
+      relayUrlInputLength: relayUrl.length,
+      relayUrlProtocol: "https:",
+      relayUrlHostname: "relay.example.test",
+      httpBaseUrlInputLength: httpBaseUrl.length,
+      httpBaseUrlProtocol: "https:",
+      httpBaseUrlHostname: "desktop.example.test",
+    });
+    expect(error.cause).toBe(cause);
+    const serialized = JSON.stringify(error);
+    for (const secret of [
+      "relay-user",
+      "relay-password",
+      "relay-secret",
+      "relay-fragment",
+      "/private/workspace",
+      "desktop-user",
+      "desktop-password",
+      "desktop-secret",
+      "desktop-fragment",
+    ]) {
+      expect(serialized).not.toContain(secret);
+      expect(error.message).not.toContain(secret);
+    }
+  });
+
   it("normalizes configured relay base URLs before building DPoP-bound requests", () => {
     expect(normalizeRelayBaseUrl(" https://relay.example.test/// ")).toBe(
       "https://relay.example.test",
@@ -238,7 +280,9 @@ describe("mobile cloud link environment client", () => {
       expect(error).toMatchObject({
         _tag: "CloudEnvironmentLinkOperationError",
         action: "list cloud environments",
-        relayUrl: "https://relay.example.test",
+        relayUrlInputLength: "https://relay.example.test".length,
+        relayUrlProtocol: "https:",
+        relayUrlHostname: "relay.example.test",
         cause: {
           _tag: "ManagedRelayRequestFailedError",
         },
@@ -614,12 +658,14 @@ describe("mobile cloud link environment client", () => {
         vi.fn(() => Promise.resolve(Response.json(validLinkChallengeResponse()))),
       );
 
+      const httpBaseUrl =
+        "https://desktop-user:desktop-password@[invalid-host]/private/workspace?access_token=desktop-secret#desktop-fragment";
       const error = yield* withCloudServices(
         linkEnvironmentToCloud({
           clerkToken: "clerk-token",
           connection: {
             ...savedConnection,
-            httpBaseUrl: "not a URL",
+            httpBaseUrl,
           },
         }),
       ).pipe(Effect.flip);
@@ -628,9 +674,23 @@ describe("mobile cloud link environment client", () => {
         _tag: "CloudEnvironmentLinkOperationError",
         action: "derive the environment endpoint origin",
         environmentId: "env-1",
-        httpBaseUrl: "not a URL",
+        httpBaseUrlInputLength: httpBaseUrl.length,
       });
       expect(error.cause).toBeInstanceOf(TypeError);
+      expect(error).not.toHaveProperty("httpBaseUrl");
+      const { cause: preservedCause, ...diagnostics } = error;
+      expect(preservedCause).toBe(error.cause);
+      const serialized = JSON.stringify(diagnostics);
+      for (const secret of [
+        "desktop-user",
+        "desktop-password",
+        "/private/workspace",
+        "desktop-secret",
+        "desktop-fragment",
+      ]) {
+        expect(serialized).not.toContain(secret);
+        expect(error.message).not.toContain(secret);
+      }
     }),
   );
 
@@ -663,7 +723,9 @@ describe("mobile cloud link environment client", () => {
         _tag: "CloudEnvironmentLinkOperationError",
         action: "obtain an environment link proof",
         environmentId: "env-1",
-        httpBaseUrl: "https://desktop.example.test/",
+        httpBaseUrlInputLength: "https://desktop.example.test/".length,
+        httpBaseUrlProtocol: "https:",
+        httpBaseUrlHostname: "desktop.example.test",
         environmentError: {
           _tag: "EnvironmentHttpUnauthorizedError",
           message: "Invalid environment bearer session.",
@@ -710,7 +772,9 @@ describe("mobile cloud link environment client", () => {
         _tag: "CloudEnvironmentLinkOperationError",
         action: "link the environment",
         environmentId: "env-1",
-        relayUrl: "https://relay.example.test",
+        relayUrlInputLength: "https://relay.example.test".length,
+        relayUrlProtocol: "https:",
+        relayUrlHostname: "relay.example.test",
         traceId: "trace-test",
         relayError: {
           _tag: "RelayEnvironmentLinkProofInvalidError",
@@ -1069,7 +1133,9 @@ describe("mobile cloud link environment client", () => {
         _tag: "CloudEnvironmentLinkOperationError",
         action: "connect to the cloud environment",
         environmentId: "env-1",
-        relayUrl: "https://relay.example.test",
+        relayUrlInputLength: "https://relay.example.test".length,
+        relayUrlProtocol: "https:",
+        relayUrlHostname: "relay.example.test",
         traceId: "trace-connect",
         relayError: {
           _tag: "RelayAuthInvalidError",
@@ -1126,14 +1192,20 @@ describe("mobile cloud link environment client", () => {
         _tag: "CloudEnvironmentEndpointMismatchError",
         source: "environment connect response",
         environmentId: "env-1",
-        expectedEndpoint: {
-          httpBaseUrl: "https://desktop.example.test/",
-          wsBaseUrl: "wss://desktop.example.test/ws",
-        },
-        actualEndpoint: {
-          httpBaseUrl: "https://other-desktop.example.test/",
-          wsBaseUrl: "wss://other-desktop.example.test/ws",
-        },
+        expectedProviderKind: "cloudflare_tunnel",
+        expectedHttpBaseUrlInputLength: "https://desktop.example.test/".length,
+        expectedHttpBaseUrlProtocol: "https:",
+        expectedHttpBaseUrlHostname: "desktop.example.test",
+        expectedWsBaseUrlInputLength: "wss://desktop.example.test/ws".length,
+        expectedWsBaseUrlProtocol: "wss:",
+        expectedWsBaseUrlHostname: "desktop.example.test",
+        actualProviderKind: "cloudflare_tunnel",
+        actualHttpBaseUrlInputLength: "https://other-desktop.example.test/".length,
+        actualHttpBaseUrlProtocol: "https:",
+        actualHttpBaseUrlHostname: "other-desktop.example.test",
+        actualWsBaseUrlInputLength: "wss://other-desktop.example.test/ws".length,
+        actualWsBaseUrlProtocol: "wss:",
+        actualWsBaseUrlHostname: "other-desktop.example.test",
       });
     }),
   );
