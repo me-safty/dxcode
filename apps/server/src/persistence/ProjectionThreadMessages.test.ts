@@ -3,18 +3,17 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { ProjectionThreadMessageRepository } from "../Services/ProjectionThreadMessages.ts";
-import { ProjectionThreadMessageRepositoryLive } from "./ProjectionThreadMessages.ts";
-import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import * as ProjectionThreadMessages from "./ProjectionThreadMessages.ts";
+import { SqlitePersistenceMemory } from "./Layers/Sqlite.ts";
 
 const layer = it.layer(
-  ProjectionThreadMessageRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  ProjectionThreadMessages.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
 );
 
 layer("ProjectionThreadMessageRepository", (it) => {
   it.effect("preserves existing attachments when upsert omits attachments", () =>
     Effect.gen(function* () {
-      const repository = yield* ProjectionThreadMessageRepository;
+      const repository = yield* ProjectionThreadMessages.ProjectionThreadMessageRepository;
       const threadId = ThreadId.make("thread-preserve-attachments");
       const messageId = MessageId.make("message-preserve-attachments");
       const createdAt = "2026-02-28T19:00:00.000Z";
@@ -68,7 +67,7 @@ layer("ProjectionThreadMessageRepository", (it) => {
 
   it.effect("allows explicit attachment clearing with an empty array", () =>
     Effect.gen(function* () {
-      const repository = yield* ProjectionThreadMessageRepository;
+      const repository = yield* ProjectionThreadMessages.ProjectionThreadMessageRepository;
       const threadId = ThreadId.make("thread-clear-attachments");
       const messageId = MessageId.make("message-clear-attachments");
       const createdAt = "2026-02-28T19:10:00.000Z";

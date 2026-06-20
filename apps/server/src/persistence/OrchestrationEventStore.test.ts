@@ -6,20 +6,19 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { PersistenceDecodeError } from "../Errors.ts";
-import { OrchestrationEventStore } from "../Services/OrchestrationEventStore.ts";
-import { OrchestrationEventStoreLive } from "./OrchestrationEventStore.ts";
-import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { PersistenceDecodeError } from "./Errors.ts";
+import * as OrchestrationEventStore from "./OrchestrationEventStore.ts";
+import { SqlitePersistenceMemory } from "./Layers/Sqlite.ts";
 const isPersistenceDecodeError = Schema.is(PersistenceDecodeError);
 
 const layer = it.layer(
-  OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  OrchestrationEventStore.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
 );
 
 layer("OrchestrationEventStore", (it) => {
   it.effect("stores json columns as strings and replays decoded events", () =>
     Effect.gen(function* () {
-      const eventStore = yield* OrchestrationEventStore;
+      const eventStore = yield* OrchestrationEventStore.OrchestrationEventStore;
       const sql = yield* SqlClient.SqlClient;
       const now = "2026-01-01T00:00:00.000Z";
 
@@ -71,7 +70,7 @@ layer("OrchestrationEventStore", (it) => {
 
   it.effect("fails with PersistenceDecodeError when stored json is invalid", () =>
     Effect.gen(function* () {
-      const eventStore = yield* OrchestrationEventStore;
+      const eventStore = yield* OrchestrationEventStore.OrchestrationEventStore;
       const sql = yield* SqlClient.SqlClient;
       const now = "2026-01-01T00:00:00.000Z";
 
