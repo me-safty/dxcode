@@ -3359,8 +3359,26 @@ export function SourceControlPanel({
     );
   };
 
+  const showRefreshSpinner =
+    loading && presentationState.status === "ready" && presentationState.syncMessage !== null;
+  const syncBannerMessage = showRefreshSpinner ? null : presentationState.syncMessage;
   const repositorySummary = (
-    <div className="relative shrink-0 border-b border-border/70 px-2 py-1.5 text-xs">
+    <div className="relative shrink-0 border-b border-border/70 px-2 py-1.5 pr-9 text-xs">
+      {showRefreshSpinner ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                aria-label={presentationState.syncMessage ?? "Refreshing repository state..."}
+                className="absolute right-2 top-2 inline-flex size-5 items-center justify-center text-muted-foreground"
+              >
+                <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+              </span>
+            }
+          />
+          <TooltipPopup side="left">{presentationState.syncMessage}</TooltipPopup>
+        </Tooltip>
+      ) : null}
       <div className="flex min-w-0 items-center gap-2">
         <span className="min-w-0 truncate font-medium">
           {snapshot.status.refName ?? "Detached HEAD"}
@@ -3383,7 +3401,7 @@ export function SourceControlPanel({
           <span>{snapshot.status.aheadOfDefaultCount} ahead of default</span>
         ) : null}
       </div>
-      {presentationState.syncMessage ? (
+      {syncBannerMessage ? (
         <div
           className={cn(
             "relative mt-1 rounded border py-1.5 pl-2 pr-8",
@@ -3393,7 +3411,7 @@ export function SourceControlPanel({
           )}
         >
           <div className="max-h-20 overflow-auto whitespace-pre-wrap break-words">
-            {presentationState.syncMessage}
+            {syncBannerMessage}
           </div>
           <div className="absolute right-1 top-1">
             <IconButton
