@@ -87,6 +87,14 @@ describe("AssetAccess", () => {
         workspaceRoot: root,
       }).pipe(Effect.flip);
       expect(error.message).toBe("Workspace file path must be relative to the project root.");
+      expect(error).toMatchObject({
+        operation: "validate-workspace-path",
+        resource: {
+          _tag: "workspace-file",
+          threadId: "thread-1",
+          path: htmlPath,
+        },
+      });
       expect(error.cause).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
     }).pipe(Effect.provide(testLayer)),
   );
@@ -121,6 +129,14 @@ describe("AssetAccess", () => {
       }).pipe(Effect.provideService(FileSystem.FileSystem, failingFileSystem), Effect.flip);
 
       expect(error.message).toBe("Failed to inspect the workspace asset.");
+      expect(error).toMatchObject({
+        operation: "inspect-workspace-asset",
+        resource: {
+          _tag: "workspace-file",
+          threadId: "thread-1",
+          path: htmlPath,
+        },
+      });
       expect(error.cause).toBe(cause);
     }).pipe(Effect.provide(testLayer)),
   );

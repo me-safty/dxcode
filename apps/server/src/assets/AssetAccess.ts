@@ -165,12 +165,18 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   switch (input.resource._tag) {
     case "workspace-file": {
       if (!input.workspaceRoot) {
-        return yield* new AssetAccessError({ message: "Workspace context was not found." });
+        return yield* new AssetAccessError({
+          operation: "resolve-workspace-context",
+          resource: input.resource,
+          message: "Workspace context was not found.",
+        });
       }
       const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.workspaceRoot).pipe(
         Effect.mapError(
           (cause) =>
             new AssetAccessError({
+              operation: "normalize-workspace-root",
+              resource: input.resource,
               message: "Failed to normalize the workspace root.",
               cause,
             }),
@@ -185,6 +191,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
           Effect.mapError(
             (cause) =>
               new AssetAccessError({
+                operation: "validate-workspace-path",
+                resource: input.resource,
                 message: "Workspace file path must be relative to the project root.",
                 cause,
               }),
@@ -192,6 +200,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         );
       if (!isWorkspacePreviewEntryPath(resolved.relativePath)) {
         return yield* new AssetAccessError({
+          operation: "validate-preview-type",
+          resource: input.resource,
           message: "Only browser documents and images can be previewed.",
         });
       }
@@ -202,18 +212,26 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         Effect.mapError(
           (cause) =>
             new AssetAccessError({
+              operation: "inspect-workspace-asset",
+              resource: input.resource,
               message: "Failed to inspect the workspace asset.",
               cause,
             }),
         ),
       );
       if (!canonicalFile) {
-        return yield* new AssetAccessError({ message: "Workspace asset was not found." });
+        return yield* new AssetAccessError({
+          operation: "locate-workspace-asset",
+          resource: input.resource,
+          message: "Workspace asset was not found.",
+        });
       }
       const canonicalWorkspaceRoot = yield* fileSystem.realPath(workspaceRoot).pipe(
         Effect.mapError(
           (cause) =>
             new AssetAccessError({
+              operation: "resolve-workspace",
+              resource: input.resource,
               message: "Failed to resolve workspace.",
               cause,
             }),
@@ -244,7 +262,11 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         attachmentId: input.resource.attachmentId,
       });
       if (!attachmentPath) {
-        return yield* new AssetAccessError({ message: "Attachment was not found." });
+        return yield* new AssetAccessError({
+          operation: "locate-attachment",
+          resource: input.resource,
+          message: "Attachment was not found.",
+        });
       }
       claims = {
         version: 1,
@@ -260,6 +282,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         Effect.mapError(
           (cause) =>
             new AssetAccessError({
+              operation: "normalize-workspace-root",
+              resource: input.resource,
               message: "Failed to normalize the workspace root.",
               cause,
             }),
@@ -270,6 +294,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         Effect.mapError(
           (cause) =>
             new AssetAccessError({
+              operation: "resolve-project-favicon",
+              resource: input.resource,
               message: "Failed to resolve project favicon.",
               cause,
             }),
@@ -282,13 +308,19 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
           Effect.mapError(
             (cause) =>
               new AssetAccessError({
+                operation: "inspect-project-favicon",
+                resource: input.resource,
                 message: "Failed to inspect the project favicon.",
                 cause,
               }),
           ),
         ))
       ) {
-        return yield* new AssetAccessError({ message: "Project favicon was not found." });
+        return yield* new AssetAccessError({
+          operation: "locate-project-favicon",
+          resource: input.resource,
+          message: "Project favicon was not found.",
+        });
       }
       claims = {
         version: 1,
@@ -297,6 +329,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
           Effect.mapError(
             (cause) =>
               new AssetAccessError({
+                operation: "resolve-workspace",
+                resource: input.resource,
                 message: "Failed to resolve workspace.",
                 cause,
               }),
@@ -315,6 +349,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     Effect.mapError(
       (cause) =>
         new AssetAccessError({
+          operation: "load-signing-key",
+          resource: input.resource,
           message: "Failed to load the asset signing key.",
           cause,
         }),
