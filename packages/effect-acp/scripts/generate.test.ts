@@ -34,11 +34,12 @@ function processHandle(exitCode: number) {
 }
 
 describe("ACP schema generator errors", () => {
-  it.effect("retains the URL, output path, and HTTP cause when a download fails", () =>
+  it.effect("retains safe URL diagnostics, output path, and HTTP cause when a download fails", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "acp-generator-test-" });
-      const url = "https://example.test/schema.json";
+      const url =
+        "https://generator-user:generator-password@example.test/private/schema.json?token=generator-secret#fragment";
       const outputPath = `${directory}/schema.json`;
       const error = yield* Generator.downloadFile(url, outputPath).pipe(
         Effect.provideService(
@@ -49,11 +50,20 @@ describe("ACP schema generator errors", () => {
       );
 
       assert(isDownloadError(error));
-      expect(error.url).toBe(url);
+      expect(error).toMatchObject({
+        urlInputLength: url.length,
+        urlProtocol: "https:",
+        urlHostname: "example.test",
+      });
+      expect(error).not.toHaveProperty("url");
       expect(error.outputPath).toBe(outputPath);
       expect(error.stage).toBe("request");
       expect(error.cause).toBeDefined();
       expect(error.message).toContain(outputPath);
+      const { cause: _, ...directDiagnostics } = error;
+      expect(JSON.stringify(directDiagnostics)).not.toMatch(
+        /generator-user|generator-password|private|token|generator-secret|fragment/,
+      );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -71,7 +81,12 @@ describe("ACP schema generator errors", () => {
       );
 
       assert(isDownloadFileError(error));
-      expect(error.url).toBe(url);
+      expect(error).toMatchObject({
+        urlInputLength: url.length,
+        urlProtocol: "https:",
+        urlHostname: "example.test",
+      });
+      expect(error).not.toHaveProperty("url");
       expect(error.outputPath).toBe(outputPath);
       expect(error.stage).toBe("write-file");
       expect(error.cause).toBeDefined();
@@ -116,12 +131,13 @@ describe("ACP schema generator errors", () => {
 
       assert(isFormatExitError(error));
       expect(error.command).toBe("bun");
-      expect(error.args).toEqual(["oxfmt", generatedDir]);
+      expect(error.argumentCount).toBe(2);
+      expect(error).not.toHaveProperty("args");
       expect(error.generatedDir).toBe(generatedDir);
       expect(error.exitCode).toBe(23);
       expect(error.message).toContain("23");
       expect(spawned?.command).toBe("bun");
-      expect(spawned?.args).toEqual(error.args);
+      expect(spawned?.args).toEqual(["oxfmt", generatedDir]);
     }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
   });
 });

@@ -3,6 +3,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { make as makeJsonSchemaGenerator } from "@effect/openapi-generator/JsonSchemaGenerator";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -23,31 +24,47 @@ interface GeneratedPaths {
   readonly metaOutputPath: string;
 }
 
+const urlDiagnosticsSchema = {
+  urlInputLength: Schema.Number,
+  urlProtocol: Schema.optionalKey(Schema.String),
+  urlHostname: Schema.optionalKey(Schema.String),
+};
+
+function urlDiagnosticFields(url: string) {
+  const diagnostics = getUrlDiagnostics(url);
+  return {
+    urlInputLength: diagnostics.inputLength,
+    ...(diagnostics.protocol === undefined ? {} : { urlProtocol: diagnostics.protocol }),
+    ...(diagnostics.hostname === undefined ? {} : { urlHostname: diagnostics.hostname }),
+  };
+}
+
 export class AcpGeneratorDownloadError extends Schema.TaggedErrorClass<AcpGeneratorDownloadError>()(
   "AcpGeneratorDownloadError",
   {
-    url: Schema.String,
+    ...urlDiagnosticsSchema,
     outputPath: Schema.String,
     stage: Schema.Literals(["request", "read-response"]),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to download ${this.url} to ${this.outputPath} during ${this.stage}.`;
+    const source = this.urlHostname === undefined ? "the configured source" : this.urlHostname;
+    return `Failed to download the ACP generator input from ${source} to ${this.outputPath} during ${this.stage}.`;
   }
 }
 
 export class AcpGeneratorDownloadFileError extends Schema.TaggedErrorClass<AcpGeneratorDownloadFileError>()(
   "AcpGeneratorDownloadFileError",
   {
-    url: Schema.String,
+    ...urlDiagnosticsSchema,
     outputPath: Schema.String,
     stage: Schema.Literals(["create-directory", "write-file"]),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to store the download from ${this.url} at ${this.outputPath} during ${this.stage}.`;
+    return `Failed to store the ACP generator download at ${this.outputPath} during ${this.stage}.`;
   }
 }
 
@@ -69,13 +86,13 @@ export class AcpGeneratorFormatProcessError extends Schema.TaggedErrorClass<AcpG
   {
     stage: Schema.Literals(["spawn", "wait-for-exit"]),
     command: Schema.String,
-    args: Schema.Array(Schema.String),
+    argumentCount: Schema.Number,
     generatedDir: Schema.String,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `ACP generator formatting command ${JSON.stringify([this.command, ...this.args])} failed during ${this.stage} for ${this.generatedDir}.`;
+    return `ACP generator formatting command ${this.command} failed during ${this.stage} for ${this.generatedDir}.`;
   }
 }
 
@@ -83,13 +100,13 @@ export class AcpGeneratorFormatExitError extends Schema.TaggedErrorClass<AcpGene
   "AcpGeneratorFormatExitError",
   {
     command: Schema.String,
-    args: Schema.Array(Schema.String),
+    argumentCount: Schema.Number,
     generatedDir: Schema.String,
     exitCode: Schema.Number,
   },
 ) {
   override get message(): string {
-    return `ACP generator formatting command ${JSON.stringify([this.command, ...this.args])} exited with code ${this.exitCode} for ${this.generatedDir}.`;
+    return `ACP generator formatting command ${this.command} exited with code ${this.exitCode} for ${this.generatedDir}.`;
   }
 }
 
@@ -157,7 +174,7 @@ export const downloadFile = Effect.fn("downloadFile")(function* (url: string, ou
     Effect.mapError(
       (cause) =>
         new AcpGeneratorDownloadFileError({
-          url,
+          ...urlDiagnosticFields(url),
           outputPath,
           stage: "create-directory",
           cause,
@@ -168,14 +185,20 @@ export const downloadFile = Effect.fn("downloadFile")(function* (url: string, ou
   const response = yield* HttpClient.get(url).pipe(
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.mapError(
-      (cause) => new AcpGeneratorDownloadError({ url, outputPath, stage: "request", cause }),
+      (cause) =>
+        new AcpGeneratorDownloadError({
+          ...urlDiagnosticFields(url),
+          outputPath,
+          stage: "request",
+          cause,
+        }),
     ),
   );
   const text = yield* response.text.pipe(
     Effect.mapError(
       (cause) =>
         new AcpGeneratorDownloadError({
-          url,
+          ...urlDiagnosticFields(url),
           outputPath,
           stage: "read-response",
           cause,
@@ -187,7 +210,7 @@ export const downloadFile = Effect.fn("downloadFile")(function* (url: string, ou
     Effect.mapError(
       (cause) =>
         new AcpGeneratorDownloadFileError({
-          url,
+          ...urlDiagnosticFields(url),
           outputPath,
           stage: "write-file",
           cause,
@@ -250,7 +273,7 @@ export const formatGeneratedFiles = Effect.fn("formatGeneratedFiles")(function* 
         new AcpGeneratorFormatProcessError({
           stage: "spawn",
           command,
-          args,
+          argumentCount: args.length,
           generatedDir,
           cause,
         }),
@@ -262,7 +285,7 @@ export const formatGeneratedFiles = Effect.fn("formatGeneratedFiles")(function* 
         new AcpGeneratorFormatProcessError({
           stage: "wait-for-exit",
           command,
-          args,
+          argumentCount: args.length,
           generatedDir,
           cause,
         }),
@@ -272,7 +295,7 @@ export const formatGeneratedFiles = Effect.fn("formatGeneratedFiles")(function* 
   if (exitCode !== 0) {
     return yield* new AcpGeneratorFormatExitError({
       command,
-      args,
+      argumentCount: args.length,
       generatedDir,
       exitCode,
     });
