@@ -183,7 +183,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       _tag: "ClientProtocolError",
       error: new RpcClientError.RpcClientError({
         reason: new RpcClientError.RpcClientDefect({
-          message: error.message,
+          message: "ACP protocol terminated.",
           cause: error,
         }),
       }),
@@ -449,7 +449,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           (error) =>
             new RpcClientError.RpcClientError({
               reason: new RpcClientError.RpcClientDefect({
-                message: error.message,
+                message: "Failed to send ACP protocol message.",
                 cause: error,
               }),
             }),

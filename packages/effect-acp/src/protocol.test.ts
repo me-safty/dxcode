@@ -461,9 +461,11 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
       assert.equal((message as { readonly _tag?: string })._tag, "ClientProtocolError");
       const defect = (message as { readonly error: { readonly reason: unknown } }).error.reason as {
         readonly _tag: string;
+        readonly message: string;
         readonly cause: unknown;
       };
       assert.equal(defect._tag, "RpcClientDefect");
+      assert.equal(defect.message, "ACP protocol terminated.");
       assert.instanceOf(defect.cause, AcpError.AcpProcessExitedError);
       assert.equal((defect.cause as AcpError.AcpProcessExitedError).code, 7);
     }),
@@ -512,9 +514,40 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
       assert.equal((message as { readonly _tag?: string })._tag, "ClientProtocolError");
       const defect = (message as { readonly error: { readonly reason: unknown } }).error.reason as {
         readonly _tag: string;
+        readonly message: string;
         readonly cause: unknown;
       };
       assert.equal(defect._tag, "RpcClientDefect");
+      assert.equal(defect.message, "ACP protocol terminated.");
+      assert.instanceOf(defect.cause, AcpError.AcpProtocolParseError);
+    }),
+  );
+
+  it.effect("keeps client send failure messages independent from the cause", () =>
+    Effect.gen(function* () {
+      const { stdio } = yield* makeInMemoryStdio();
+      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        serverRequestMethods: new Set(),
+      });
+
+      const failure = yield* transport.clientProtocol
+        .send(0, {
+          _tag: "Request",
+          id: "request-1",
+          tag: "x/test",
+          payload: 1n,
+          headers: [],
+        })
+        .pipe(Effect.flip);
+      const defect = failure.reason as {
+        readonly _tag: string;
+        readonly message: string;
+        readonly cause: unknown;
+      };
+
+      assert.equal(defect._tag, "RpcClientDefect");
+      assert.equal(defect.message, "Failed to send ACP protocol message.");
       assert.instanceOf(defect.cause, AcpError.AcpProtocolParseError);
     }),
   );
