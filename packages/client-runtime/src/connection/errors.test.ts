@@ -4,7 +4,10 @@ import { describe, expect, it } from "@effect/vitest";
 
 import { mapManagedRelayError, mapRemoteEnvironmentError } from "./errors.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
-import { RemoteEnvironmentAuthFetchError } from "../rpc/http.ts";
+import {
+  RemoteEnvironmentAuthFetchError,
+  RemoteEnvironmentAuthUndeclaredStatusError,
+} from "../rpc/http.ts";
 
 describe("connection error mapping", () => {
   it("retains the managed relay request as the cause when classifying a protected error", () => {
@@ -65,15 +68,14 @@ describe("connection error mapping", () => {
 
   it("retains local transport failures without deriving their message from the cause", () => {
     const transportCause = new Error("sensitive transport implementation detail");
-    const source = new RemoteEnvironmentAuthFetchError({
-      requestUrl: "https://environment.example.test/api/auth/session",
-      cause: transportCause,
-    });
+    const requestUrl =
+      "https://environment-user:environment-password@environment.example.test/private/session?access_token=environment-secret#environment-fragment";
+    const source = RemoteEnvironmentAuthFetchError.fromRequestUrl(requestUrl, transportCause);
 
     const error = mapRemoteEnvironmentError(source);
 
     expect(source.message).toBe(
-      "Failed to fetch remote environment endpoint https://environment.example.test/api/auth/session.",
+      `Failed to fetch remote environment endpoint at host environment.example.test (${requestUrl.length} URL characters).`,
     );
     expect(source.message).not.toContain(transportCause.message);
     expect(error).toMatchObject({
@@ -82,5 +84,37 @@ describe("connection error mapping", () => {
     });
     expect(error.cause).toBe(source);
     expect(source.cause).toBe(transportCause);
+    expect(source).toMatchObject({
+      requestUrlInputLength: requestUrl.length,
+      requestUrlProtocol: "https:",
+      requestUrlHostname: "environment.example.test",
+    });
+    const diagnostics = JSON.stringify(source);
+    for (const secret of [
+      "environment-user",
+      "environment-password",
+      "/private/session",
+      "environment-secret",
+      "environment-fragment",
+    ]) {
+      expect(diagnostics).not.toContain(secret);
+      expect(source.message).not.toContain(secret);
+    }
+  });
+
+  it("retains the HTTP client cause for undeclared statuses", () => {
+    const cause = new Error("upstream response metadata");
+    const requestUrl =
+      "https://environment-user:environment-password@environment.example.test/private/session?access_token=environment-secret#environment-fragment";
+    const error = RemoteEnvironmentAuthUndeclaredStatusError.fromRequestUrl(requestUrl, 502, cause);
+
+    expect(error).toMatchObject({
+      status: 502,
+      requestUrlInputLength: requestUrl.length,
+      requestUrlProtocol: "https:",
+      requestUrlHostname: "environment.example.test",
+    });
+    expect(error.cause).toBe(cause);
+    expect(error).not.toHaveProperty("requestUrl");
   });
 });
