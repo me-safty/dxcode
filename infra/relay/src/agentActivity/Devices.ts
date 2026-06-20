@@ -118,7 +118,7 @@ export const make = Effect.gen(function* () {
                 )
             : Effect.void,
         ],
-        { concurrency: 2, discard: true },
+        { discard: true },
       );
 
       yield* db
@@ -209,7 +209,7 @@ export const make = Effect.gen(function* () {
               ),
             ),
         ],
-        { concurrency: 2, discard: true },
+        { discard: true },
       );
     }),
     listForUser: Effect.fn("relay.devices.listForUser")(function* (input) {
