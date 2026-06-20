@@ -97,7 +97,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.deepInclude(error, {
           _tag: "GitCommandError",
           operation: "GitVcsDriver.test.missingCwd",
-          command: "git status --short",
+          command: "git",
+          argumentCount: 2,
           cwd,
           detail: "Failed to spawn Git process.",
         });
@@ -106,6 +107,37 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         }
         assert.equal(error.cause.reason._tag, "NotFound");
         assert.notInclude(error.detail, error.cause.message);
+      }),
+    );
+
+    it.effect("does not retain git arguments or stderr in command failures", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.initRepo({ cwd });
+
+        const secret = "secret-token-value";
+        const error = yield* driver
+          .execute({
+            operation: "GitVcsDriver.test.redactedFailure",
+            cwd,
+            args: ["status", `--unknown-option=${secret}`],
+          })
+          .pipe(Effect.flip);
+
+        assert.deepInclude(error, {
+          _tag: "GitCommandError",
+          operation: "GitVcsDriver.test.redactedFailure",
+          command: "git",
+          argumentCount: 2,
+          cwd,
+        });
+        assert.isNumber(error.exitCode);
+        assert.isAbove(error.stderrLength ?? 0, 0);
+        assert.notInclude(error.detail, secret);
+        assert.notInclude(error.message, secret);
+        assert.notProperty(error, "args");
+        assert.notProperty(error, "stderr");
       }),
     );
 
@@ -144,7 +176,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.deepInclude(error, {
           _tag: "GitCommandError",
           operation: "GitVcsDriver.removeWorktree",
-          command: `git worktree remove ${missingWorktree}`,
+          command: "git",
+          argumentCount: 3,
           cwd,
         });
         assert.notProperty(error, "cause");
