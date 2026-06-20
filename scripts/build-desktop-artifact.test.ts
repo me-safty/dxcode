@@ -10,6 +10,9 @@ import {
   createStagePnpmConfig,
   createBuildConfig,
   DESKTOP_ASAR_UNPACK,
+  InvalidMacPasskeyRpDomainError,
+  InvalidMacPasskeyPublishableKeyError,
+  MissingMacPasskeyProvisioningProfileError,
   renderMacPasskeyEntitlements,
   resolveClerkPasskeyNativeArtifacts,
   resolveMacPasskeySigningConfiguration,
@@ -214,22 +217,35 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("rejects incomplete macOS passkey signing configuration", () => {
-    assert.throws(
-      () =>
-        resolveMacPasskeySigningConfiguration({
-          T3CODE_APPLE_TEAM_ID: "ABC1234567",
-          T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
-        }),
-      /T3CODE_MACOS_PROVISIONING_PROFILE/u,
+    const captureError = (env: Readonly<Record<string, string | undefined>>) => {
+      try {
+        resolveMacPasskeySigningConfiguration(env);
+      } catch (error) {
+        return error;
+      }
+      return assert.fail("Expected passkey signing configuration to fail.");
+    };
+
+    const missingProfileError = captureError({
+      T3CODE_APPLE_TEAM_ID: "ABC1234567",
+      T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
+    });
+    assert.instanceOf(missingProfileError, MissingMacPasskeyProvisioningProfileError);
+    assert.equal(
+      missingProfileError.message,
+      "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.",
     );
-    assert.throws(
-      () =>
-        resolveMacPasskeySigningConfiguration({
-          T3CODE_APPLE_TEAM_ID: "ABC1234567",
-          T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-          T3CODE_CLERK_PASSKEY_RP_DOMAINS: "https://example.clerk.accounts.dev/path",
-        }),
-      /Invalid passkey RP domain/u,
+
+    const invalidDomainError = captureError({
+      T3CODE_APPLE_TEAM_ID: "ABC1234567",
+      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
+      T3CODE_CLERK_PASSKEY_RP_DOMAINS: "https://example.clerk.accounts.dev/path",
+    });
+    assert.instanceOf(invalidDomainError, InvalidMacPasskeyRpDomainError);
+    assert.equal(invalidDomainError.domain, "https://example.clerk.accounts.dev/path");
+    assert.equal(
+      invalidDomainError.message,
+      "Invalid passkey RP domain: https://example.clerk.accounts.dev/path",
     );
     assert.throws(
       () =>
@@ -240,6 +256,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         }),
       /Invalid passkey RP domain/u,
     );
+    const invalidPublishableKeyError = captureError({
+      T3CODE_APPLE_TEAM_ID: "ABC1234567",
+      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
+      T3CODE_CLERK_PUBLISHABLE_KEY: "pk_test_%",
+    });
+    assert.instanceOf(invalidPublishableKeyError, InvalidMacPasskeyPublishableKeyError);
+    assert.ok(invalidPublishableKeyError.cause);
+    assert.equal(invalidPublishableKeyError.message, "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.");
   });
 
   it.effect("adds passkey entitlements and both renderer protocols to signed macOS builds", () =>

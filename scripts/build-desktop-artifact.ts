@@ -306,13 +306,74 @@ export interface MacPasskeySigningConfiguration {
   readonly provisioningProfilePath: string;
 }
 
+export class InvalidMacPasskeyRpDomainError extends Schema.TaggedErrorClass<InvalidMacPasskeyRpDomainError>()(
+  "InvalidMacPasskeyRpDomainError",
+  {
+    domain: Schema.String,
+    cause: Schema.optionalKey(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Invalid passkey RP domain: ${this.domain}`;
+  }
+}
+
+export class InvalidAppleTeamIdError extends Schema.TaggedErrorClass<InvalidAppleTeamIdError>()(
+  "InvalidAppleTeamIdError",
+  {
+    teamId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `T3CODE_APPLE_TEAM_ID '${this.teamId}' must be a 10-character Apple Developer Team ID.`;
+  }
+}
+
+export class MissingMacPasskeyProvisioningProfileError extends Schema.TaggedErrorClass<MissingMacPasskeyProvisioningProfileError>()(
+  "MissingMacPasskeyProvisioningProfileError",
+  {},
+) {
+  override get message(): string {
+    return "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.";
+  }
+}
+
+export class MissingMacPasskeyDomainConfigurationError extends Schema.TaggedErrorClass<MissingMacPasskeyDomainConfigurationError>()(
+  "MissingMacPasskeyDomainConfigurationError",
+  {},
+) {
+  override get message(): string {
+    return "T3CODE_CLERK_PUBLISHABLE_KEY or T3CODE_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
+  }
+}
+
+export class InvalidMacPasskeyPublishableKeyError extends Schema.TaggedErrorClass<InvalidMacPasskeyPublishableKeyError>()(
+  "InvalidMacPasskeyPublishableKeyError",
+  {
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.";
+  }
+}
+
+export class MissingMacPasskeyRpDomainError extends Schema.TaggedErrorClass<MissingMacPasskeyRpDomainError>()(
+  "MissingMacPasskeyRpDomainError",
+  {},
+) {
+  override get message(): string {
+    return "At least one Clerk passkey RP domain is required.";
+  }
+}
+
 function normalizePasskeyRpDomain(value: string): string {
   const normalized = value.trim().toLowerCase();
   let parsed: URL;
   try {
     parsed = new URL(`https://${normalized}`);
-  } catch {
-    throw new Error(`Invalid passkey RP domain: ${value}`);
+  } catch (cause) {
+    throw new InvalidMacPasskeyRpDomainError({ domain: value, cause });
   }
 
   if (
@@ -325,7 +386,7 @@ function normalizePasskeyRpDomain(value: string): string {
     parsed.search.length > 0 ||
     parsed.hash.length > 0
   ) {
-    throw new Error(`Invalid passkey RP domain: ${value}`);
+    throw new InvalidMacPasskeyRpDomainError({ domain: value });
   }
 
   return parsed.hostname;
@@ -336,14 +397,12 @@ export function resolveMacPasskeySigningConfiguration(
 ): MacPasskeySigningConfiguration {
   const teamId = env.T3CODE_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
   if (!APPLE_TEAM_ID_PATTERN.test(teamId)) {
-    throw new Error("T3CODE_APPLE_TEAM_ID must be a 10-character Apple Developer Team ID.");
+    throw new InvalidAppleTeamIdError({ teamId });
   }
 
   const provisioningProfilePath = env.T3CODE_MACOS_PROVISIONING_PROFILE?.trim() ?? "";
   if (provisioningProfilePath.length === 0) {
-    throw new Error(
-      "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.",
-    );
+    throw new MissingMacPasskeyProvisioningProfileError();
   }
 
   const configuredRpDomains = env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim();
@@ -353,18 +412,20 @@ export function resolveMacPasskeySigningConfiguration(
   } else {
     const publishableKey = env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim();
     if (!publishableKey) {
-      throw new Error(
-        "T3CODE_CLERK_PUBLISHABLE_KEY or T3CODE_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.",
-      );
+      throw new MissingMacPasskeyDomainConfigurationError();
     }
-    rpDomains = [
-      normalizePasskeyRpDomain(clerkFrontendApiHostnameFromPublishableKey(publishableKey)),
-    ];
+    let hostname: string;
+    try {
+      hostname = clerkFrontendApiHostnameFromPublishableKey(publishableKey);
+    } catch (cause) {
+      throw new InvalidMacPasskeyPublishableKeyError({ cause });
+    }
+    rpDomains = [normalizePasskeyRpDomain(hostname)];
   }
 
   const uniqueRpDomains = [...new Set(rpDomains)];
   if (uniqueRpDomains.length === 0) {
-    throw new Error("At least one Clerk passkey RP domain is required.");
+    throw new MissingMacPasskeyRpDomainError();
   }
 
   return {
