@@ -28,6 +28,13 @@ import {
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "./traceRelayRequest.ts";
 
+const encodeEnvironmentHttpInternalServerError = Schema.encodeUnknownSync(
+  EnvironmentHttpInternalServerError,
+);
+const decodeEnvironmentHttpInternalServerError = Schema.decodeUnknownSync(
+  EnvironmentHttpInternalServerError,
+);
+
 const storeFailure = (tag: "AlreadyExists" | "PermissionDenied") =>
   new ServerSecretStore.SecretStorePersistError({
     operation: "create",
@@ -210,19 +217,29 @@ describe("CloudRelayRequestError", () => {
   });
 });
 
-it("preserves internal causes without encoding them into HTTP error bodies", () => {
+it("keeps internal causes out of encoded HTTP error bodies", () => {
   const cause = new Error("private upstream detail");
   const error = new EnvironmentHttpInternalServerError({
-    message: "Stable public failure.",
+    operation: "generate_link_proof",
     cause,
   });
-  const encodeError = Schema.encodeUnknownSync(EnvironmentHttpInternalServerError);
 
   expect(error.cause).toBe(cause);
-  expect(encodeError(error)).toEqual({
+  expect(encodeEnvironmentHttpInternalServerError(error)).toEqual({
     _tag: "EnvironmentHttpInternalServerError",
-    message: "Stable public failure.",
+    operation: "generate_link_proof",
+    message: "Could not generate environment link proof.",
   });
+});
+
+it("decodes legacy message-only HTTP errors during rolling deployments", () => {
+  const error = decodeEnvironmentHttpInternalServerError({
+    _tag: "EnvironmentHttpInternalServerError",
+    message: "Legacy environment server failure.",
+  });
+
+  expect(error.operation).toBeUndefined();
+  expect(error.message).toBe("Legacy environment server failure.");
 });
 
 describe("relay request tracing", () => {
@@ -298,6 +315,7 @@ describe("reconcileDesiredCloudLink", () => {
 
       expect(error).toMatchObject({
         _tag: "EnvironmentHttpUnauthorizedError",
+        reason: "cloud_cli_authorization_required",
         message: "Run `t3 connect link` to authorize this environment.",
       });
     }),
@@ -334,6 +352,9 @@ describe("reconcileDesiredCloudLink", () => {
 
       expect(error).toMatchObject({
         _tag: "EnvironmentHttpInternalServerError",
+        operation: "relay_request",
+        relayOperation: "create-link-challenge",
+        relayPhase: "send-request",
         message: "T3 Connect relay create-link-challenge failed during send-request.",
         cause: {
           _tag: "CloudRelayRequestError",
@@ -346,7 +367,12 @@ describe("reconcileDesiredCloudLink", () => {
       const logFields = capturedLogs[0]?.find(
         (value): value is Record<string, unknown> => typeof value === "object" && value !== null,
       );
-      expect(logFields).toMatchObject({ causeTag: "CloudRelayRequestError" });
+      expect(logFields).toMatchObject({
+        operation: "relay_request",
+        relayOperation: "create-link-challenge",
+        relayPhase: "send-request",
+        causeTag: "CloudRelayRequestError",
+      });
       expect(logFields).not.toHaveProperty("cause");
       expect(capturedLogs[0]?.filter((value) => typeof value === "string").join(" ")).not.toContain(
         transportCause.message,
