@@ -13,6 +13,10 @@ const isGeneratorSchemaDocumentDecodeError = Schema.is(
   Generator.GeneratorSchemaDocumentDecodeError,
 );
 const isGeneratorFormatExitError = Schema.is(Generator.GeneratorFormatExitError);
+const isGeneratorSchemaNameParseError = Schema.is(Generator.GeneratorSchemaNameParseError);
+const isGeneratorSchemaValueDeclarationMissingError = Schema.is(
+  Generator.GeneratorSchemaValueDeclarationMissingError,
+);
 
 const httpClient = (response: Response) =>
   HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, response)));
@@ -56,7 +60,10 @@ describe("Codex schema generator errors", () => {
       expect(error.stage).toBe("request");
       expect(error.cause).toBeDefined();
       const { cause: _, ...directDiagnostics } = error;
-      expect(JSON.stringify(directDiagnostics)).not.toMatch(
+      expect(directDiagnostics).not.toHaveProperty("url");
+      expect(directDiagnostics.urlProtocol).toBe("https:");
+      expect(directDiagnostics.urlHostname).toBe("example.test");
+      expect(error.message).not.toMatch(
         /generator-user|generator-password|private|token|generator-secret|fragment/,
       );
     }),
@@ -132,4 +139,29 @@ describe("Codex schema generator errors", () => {
       expect(spawned?.args).toEqual(["fmt", generatedDir, "--write"]);
     }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
   });
+
+  it.effect("returns malformed generated schema declarations as typed failures", () =>
+    Effect.gen(function* () {
+      const missingValueError = yield* Generator.collectSchemaEntries(
+        "export type Session = string;",
+      ).pipe(Effect.flip);
+      assert(isGeneratorSchemaValueDeclarationMissingError(missingValueError));
+      expect(missingValueError).toMatchObject({
+        lineIndex: 0,
+        typeDeclarationLength: 29,
+        nextLinePresent: false,
+      });
+      expect(missingValueError).not.toHaveProperty("typeDeclaration");
+
+      const nameParseError = yield* Generator.collectSchemaEntries(
+        "export type @ = string;\nexport const invalid = Schema.String;",
+      ).pipe(Effect.flip);
+      assert(isGeneratorSchemaNameParseError(nameParseError));
+      expect(nameParseError).toMatchObject({
+        lineIndex: 0,
+        typeDeclarationLength: 23,
+      });
+      expect(nameParseError).not.toHaveProperty("typeDeclaration");
+    }),
+  );
 });

@@ -149,19 +149,27 @@ export class GeneratorFormatExitError extends Schema.TaggedErrorClass<GeneratorF
 
 export class GeneratorSchemaValueDeclarationMissingError extends Schema.TaggedErrorClass<GeneratorSchemaValueDeclarationMissingError>()(
   "GeneratorSchemaValueDeclarationMissingError",
-  { typeDeclaration: Schema.String },
+  {
+    lineIndex: Schema.Number,
+    typeDeclarationLength: Schema.Number,
+    nextLinePresent: Schema.Boolean,
+    nextLineLength: Schema.optional(Schema.Number),
+  },
 ) {
   override get message(): string {
-    return `Generated schema type declaration has no following value declaration: ${this.typeDeclaration}`;
+    return `Generated schema type declaration at line ${this.lineIndex + 1} has no following value declaration.`;
   }
 }
 
 export class GeneratorSchemaNameParseError extends Schema.TaggedErrorClass<GeneratorSchemaNameParseError>()(
   "GeneratorSchemaNameParseError",
-  { typeDeclaration: Schema.String },
+  {
+    lineIndex: Schema.Number,
+    typeDeclarationLength: Schema.Number,
+  },
 ) {
   override get message(): string {
-    return `Could not extract a schema name from generated declaration: ${this.typeDeclaration}`;
+    return `Could not extract a schema name from generated declaration at line ${this.lineIndex + 1}.`;
   }
 }
 
@@ -383,9 +391,7 @@ export const formatGeneratedFiles = Effect.fn("formatGeneratedFiles")(function* 
   }
 });
 
-function collectSchemaEntries(
-  chunk: string,
-): ReadonlyArray<{ readonly name: string; readonly code: string }> {
+export const collectSchemaEntries = Effect.fn("collectSchemaEntries")(function* (chunk: string) {
   const lines = chunk
     .split("\n")
     .map((line) => line.trim())
@@ -400,12 +406,20 @@ function collectSchemaEntries(
 
     const constLine = lines[index + 1];
     if (!constLine?.startsWith("export const ")) {
-      throw new GeneratorSchemaValueDeclarationMissingError({ typeDeclaration: typeLine });
+      return yield* new GeneratorSchemaValueDeclarationMissingError({
+        lineIndex: index,
+        typeDeclarationLength: typeLine.length,
+        nextLinePresent: constLine !== undefined,
+        ...(constLine === undefined ? {} : { nextLineLength: constLine.length }),
+      });
     }
 
     const match = /^export type ([A-Za-z0-9_]+)/.exec(typeLine);
     if (!match?.[1]) {
-      throw new GeneratorSchemaNameParseError({ typeDeclaration: typeLine });
+      return yield* new GeneratorSchemaNameParseError({
+        lineIndex: index,
+        typeDeclarationLength: typeLine.length,
+      });
     }
 
     entries.push({
@@ -416,7 +430,7 @@ function collectSchemaEntries(
   }
 
   return entries;
-}
+});
 
 function normalizeNullableTypes(value: Schema.Json): Schema.Json {
   if (Array.isArray(value)) {
@@ -811,7 +825,8 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
   const generatedEntries = new Map<string, string>();
   const output = generator.generate("openapi-3.1", aggregateSchemas as never, false).trim();
   if (output.length > 0) {
-    for (const entry of collectSchemaEntries(output)) {
+    const schemaEntries = yield* collectSchemaEntries(output);
+    for (const entry of schemaEntries) {
       if (!generatedEntries.has(entry.name)) {
         generatedEntries.set(entry.name, entry.code);
       }
