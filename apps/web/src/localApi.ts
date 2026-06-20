@@ -1,4 +1,5 @@
 import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Schema from "effect/Schema";
 
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
@@ -56,19 +57,11 @@ export class LocalApiUnavailableError extends Schema.TaggedErrorClass<LocalApiUn
 }
 
 function describeExternalUrl(url: string) {
-  let urlHostname: string | null = null;
-  let urlProtocol: string | null = null;
-  try {
-    const parsed = new URL(url);
-    urlHostname = parsed.hostname || null;
-    urlProtocol = parsed.protocol || null;
-  } catch {
-    // Invalid URLs still retain their nonsecret input length for diagnostics.
-  }
+  const diagnostics = getUrlDiagnostics(url);
   return {
-    urlHostname,
-    urlLength: url.length,
-    urlProtocol,
+    urlHostname: diagnostics.hostname ?? null,
+    urlLength: diagnostics.inputLength,
+    urlProtocol: diagnostics.protocol ?? null,
   };
 }
 
