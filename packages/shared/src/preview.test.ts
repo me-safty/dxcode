@@ -66,7 +66,8 @@ describe("normalizePreviewUrl", () => {
       expect.unreachable("expected URL normalization to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(PreviewUrlNormalizationError);
-      expect(error).toMatchObject({ rawUrl: "   ", reason: "empty" });
+      expect(error).toMatchObject({ inputLength: 3, reason: "empty" });
+      expect(error).not.toHaveProperty("rawUrl");
       expect("cause" in (error as object)).toBe(false);
     }
   });
@@ -78,23 +79,32 @@ describe("normalizePreviewUrl", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(PreviewUrlNormalizationError);
       expect(error).toMatchObject({
-        rawUrl: "ftp://example.com",
+        inputLength: "ftp://example.com".length,
         reason: "unsupported-protocol",
         protocol: "ftp:",
       });
     }
   });
 
-  it("rejects unparseable junk", () => {
+  it("rejects unparseable input without retaining credentials or tokens", () => {
+    const rawUrl = "https://user:password@example.com:bad/path?access_token=secret#fragment";
     try {
-      normalizePreviewUrl("http://");
+      normalizePreviewUrl(rawUrl);
       expect.unreachable("expected URL normalization to fail");
     } catch (error) {
       expect(error).toBeInstanceOf(PreviewUrlNormalizationError);
-      expect(error).toMatchObject({ rawUrl: "http://", reason: "parse" });
+      expect(error).toMatchObject({
+        inputLength: rawUrl.length,
+        reason: "parse",
+        protocol: "https:",
+      });
+      expect(error).not.toHaveProperty("rawUrl");
       expect((error as PreviewUrlNormalizationError).cause).toBeInstanceOf(Error);
       expect((error as PreviewUrlNormalizationError).message).not.toContain(
         ((error as PreviewUrlNormalizationError).cause as Error).message,
+      );
+      expect((error as PreviewUrlNormalizationError).message).not.toMatch(
+        /user|password|access_token|secret|fragment/,
       );
     }
   });

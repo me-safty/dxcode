@@ -50,7 +50,7 @@ export function isPreviewableUrl(rawUrl: string): boolean {
 export class PreviewUrlNormalizationError extends Schema.TaggedErrorClass<PreviewUrlNormalizationError>()(
   "PreviewUrlNormalizationError",
   {
-    rawUrl: Schema.String,
+    inputLength: Schema.Number,
     reason: Schema.Literals(["empty", "parse", "unsupported-protocol"]),
     protocol: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
@@ -58,11 +58,15 @@ export class PreviewUrlNormalizationError extends Schema.TaggedErrorClass<Previe
 ) {
   override get message(): string {
     const protocol = this.protocol === undefined ? "" : `: ${this.protocol}`;
-    return `Invalid preview URL "${this.rawUrl}" (${this.reason}${protocol}).`;
+    return `Invalid preview URL (${this.reason}${protocol}; input length ${this.inputLength}).`;
   }
 }
 
 export const isPreviewUrlNormalizationError = Schema.is(PreviewUrlNormalizationError);
+
+function previewUrlProtocol(rawUrl: string): string | undefined {
+  return /^([A-Za-z][A-Za-z\d+.-]*):/.exec(rawUrl)?.[1]?.toLowerCase().concat(":");
+}
 
 /**
  * Normalise a free-form URL string into a fully-qualified `http(s)://` URL.
@@ -77,7 +81,7 @@ export const isPreviewUrlNormalizationError = Schema.is(PreviewUrlNormalizationE
 export function normalizePreviewUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
   if (trimmed.length === 0) {
-    throw new PreviewUrlNormalizationError({ rawUrl, reason: "empty" });
+    throw new PreviewUrlNormalizationError({ inputLength: rawUrl.length, reason: "empty" });
   }
   const useHttp = LOOPBACK_PREFIX_PATTERN.test(trimmed);
   const candidate = trimmed.includes("://")
@@ -87,11 +91,16 @@ export function normalizePreviewUrl(rawUrl: string): string {
   try {
     parsed = new URL(candidate);
   } catch (cause) {
-    throw new PreviewUrlNormalizationError({ rawUrl, reason: "parse", cause });
+    throw new PreviewUrlNormalizationError({
+      inputLength: rawUrl.length,
+      reason: "parse",
+      protocol: previewUrlProtocol(candidate),
+      cause,
+    });
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new PreviewUrlNormalizationError({
-      rawUrl,
+      inputLength: rawUrl.length,
       reason: "unsupported-protocol",
       protocol: parsed.protocol,
     });

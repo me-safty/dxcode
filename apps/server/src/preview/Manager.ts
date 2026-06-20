@@ -85,14 +85,18 @@ const normalizeUrl = (rawUrl: string): Effect.Effect<string, PreviewInvalidUrlEr
     catch: (cause) => {
       if (isPreviewUrlNormalizationError(cause)) {
         return new PreviewInvalidUrlError({
-          rawUrl: cause.rawUrl,
+          inputLength: cause.inputLength,
           reason: cause.reason,
           protocol: cause.protocol,
           cause,
         });
       }
 
-      return new PreviewInvalidUrlError({ rawUrl, reason: "unexpected", cause });
+      return new PreviewInvalidUrlError({
+        inputLength: rawUrl.length,
+        reason: "unexpected",
+        cause,
+      });
     },
   });
 
