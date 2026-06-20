@@ -69,7 +69,7 @@ import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
-import { TerminalManager } from "./terminal/Services/Manager.ts";
+import * as TerminalManager from "./terminal/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
@@ -239,7 +239,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const review = yield* ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
-      const terminalManager = yield* TerminalManager;
+      const terminalManager = yield* TerminalManager.TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig;

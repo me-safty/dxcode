@@ -96,7 +96,7 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/provid
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
-import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
+import * as TerminalManager from "./terminal/Manager.ts";
 import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
@@ -351,7 +351,7 @@ const buildAppUnderTest = (options?: {
     reviewService?: Partial<ReviewService.ReviewServiceShape>;
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
-    terminalManager?: Partial<TerminalManagerShape>;
+    terminalManager?: Partial<TerminalManager.TerminalManager["Service"]>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
@@ -660,7 +660,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(TerminalManager)({
+        Layer.mock(TerminalManager.TerminalManager)({
           ...options?.layers?.terminalManager,
         }),
       ),
