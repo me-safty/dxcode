@@ -96,37 +96,67 @@ export class EnvironmentConnectNotAuthorized extends Schema.TaggedErrorClass<Env
 export class EnvironmentMintRequestFailed extends Schema.TaggedErrorClass<EnvironmentMintRequestFailed>()(
   "EnvironmentMintRequestFailed",
   {
+    userId: Schema.String,
     environmentId: Schema.String,
     operation: Schema.Literals(["connect", "status"]),
+    stage: Schema.Literals(["generate_nonce", "generate_request_id", "sign_proof", "send_request"]),
+    httpBaseUrl: Schema.String,
+    deviceId: Schema.optional(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Environment '${this.environmentId}' ${this.operation} request failed`;
+    return `Environment '${this.environmentId}' ${this.operation} request failed during ${this.stage}`;
   }
 }
 
 export class EnvironmentMintRequestTimedOut extends Schema.TaggedErrorClass<EnvironmentMintRequestTimedOut>()(
   "EnvironmentMintRequestTimedOut",
   {
+    userId: Schema.String,
     environmentId: Schema.String,
+    httpBaseUrl: Schema.String,
+    deviceId: Schema.optional(Schema.String),
     timeoutMs: Schema.Number,
   },
 ) {
   override get message(): string {
-    return `Environment '${this.environmentId}' mint request timed out after ${this.timeoutMs}ms`;
+    return `Environment '${this.environmentId}' mint request to '${this.httpBaseUrl}' timed out after ${this.timeoutMs}ms`;
   }
 }
+
+export const EnvironmentMintResponseInvalidReason = Schema.Literals([
+  "environment_public_key_missing",
+  "proof_verification_failed",
+  "response_environment_id_mismatch",
+  "proof_environment_id_mismatch",
+  "request_nonce_mismatch",
+  "client_proof_key_thumbprint_mismatch",
+  "credential_mismatch",
+  "expires_at_invalid",
+  "expires_at_mismatch",
+  "status_mismatch",
+  "checked_at_invalid",
+  "checked_at_mismatch",
+  "descriptor_mismatch",
+  "checked_at_out_of_range",
+]);
+export type EnvironmentMintResponseInvalidReason = typeof EnvironmentMintResponseInvalidReason.Type;
 
 export class EnvironmentMintResponseInvalid extends Schema.TaggedErrorClass<EnvironmentMintResponseInvalid>()(
   "EnvironmentMintResponseInvalid",
   {
+    userId: Schema.String,
     environmentId: Schema.String,
     operation: Schema.Literals(["connect", "status"]),
+    httpBaseUrl: Schema.String,
+    deviceId: Schema.optional(Schema.String),
+    reason: EnvironmentMintResponseInvalidReason,
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Environment '${this.environmentId}' returned an invalid ${this.operation} response`;
+    return `Environment '${this.environmentId}' returned an invalid ${this.operation} response (${this.reason})`;
   }
 }
 
@@ -210,17 +240,24 @@ const verifyWithEnvironmentKeys = Effect.fnUntraced(function* <A, E>(input: {
   readonly decodePayload: (input: unknown) => Effect.Effect<A, E>;
 }) {
   const { decodePayload, ...rest } = input;
+  let lastFailure: { readonly cause: unknown } | undefined;
   for (const publicKey of input.environmentPublicKeys) {
-    const proof = yield* verifyRelayJwt({ ...rest, publicKey }).pipe(
+    const result = yield* verifyRelayJwt({ ...rest, publicKey }).pipe(
       Effect.flatMap(decodePayload),
-      Effect.option,
+      Effect.match({
+        onFailure: (cause) => ({ _tag: "Failure" as const, cause }),
+        onSuccess: (proof) => ({ _tag: "Success" as const, proof }),
+      }),
     );
-    if (Option.isSome(proof)) {
-      return proof.value;
+    if (result._tag === "Success") {
+      return result;
     }
+    lastFailure = result;
     // A linked environment can have rotated keys; try the remaining active keys.
   }
-  return null;
+  return lastFailure
+    ? { _tag: "Failure" as const, cause: lastFailure.cause }
+    : { _tag: "MissingPublicKey" as const };
 });
 
 function verifyEnvironmentResponse(input: {
@@ -241,18 +278,35 @@ function verifyEnvironmentResponse(input: {
     environmentPublicKeys: input.environmentPublicKeys,
     decodePayload: decodeMintResponseProof,
   }).pipe(
-    Effect.map(
-      (proof) =>
-        proof !== null &&
-        proof.environmentId === input.environmentId &&
-        proof.requestNonce === input.requestNonce &&
-        proof.clientProofKeyThumbprint === input.clientProofKeyThumbprint &&
-        proof.credential === input.response.credential &&
-        Option.match(DateTime.make(input.response.expiresAt), {
-          onNone: () => false,
-          onSome: (expiresAt) => Math.floor(expiresAt.epochMilliseconds / 1_000) === proof.exp,
-        }),
-    ),
+    Effect.map((verification) => {
+      if (verification._tag === "MissingPublicKey") {
+        return { reason: "environment_public_key_missing" as const };
+      }
+      if (verification._tag === "Failure") {
+        return { reason: "proof_verification_failed" as const, cause: verification.cause };
+      }
+      const proof = verification.proof;
+      if (proof.environmentId !== input.environmentId) {
+        return { reason: "proof_environment_id_mismatch" as const };
+      }
+      if (proof.requestNonce !== input.requestNonce) {
+        return { reason: "request_nonce_mismatch" as const };
+      }
+      if (proof.clientProofKeyThumbprint !== input.clientProofKeyThumbprint) {
+        return { reason: "client_proof_key_thumbprint_mismatch" as const };
+      }
+      if (proof.credential !== input.response.credential) {
+        return { reason: "credential_mismatch" as const };
+      }
+      const expiresAt = DateTime.make(input.response.expiresAt);
+      if (Option.isNone(expiresAt)) {
+        return { reason: "expires_at_invalid" as const };
+      }
+      if (Math.floor(expiresAt.value.epochMilliseconds / 1_000) !== proof.exp) {
+        return { reason: "expires_at_mismatch" as const };
+      }
+      return null;
+    }),
   );
 }
 
@@ -274,28 +328,45 @@ function verifyEnvironmentHealthResponse(input: {
     environmentPublicKeys: input.environmentPublicKeys,
     decodePayload: decodeHealthResponseProof,
   }).pipe(
-    Effect.map((proof) => {
-      if (
-        proof === null ||
-        input.response.environmentId !== input.environmentId ||
-        proof.environmentId !== input.environmentId ||
-        proof.requestNonce !== input.requestNonce ||
-        proof.status !== input.response.status ||
-        proof.checkedAt !== input.response.checkedAt ||
-        stableStringify(proof.descriptor) !== stableStringify(input.response.descriptor)
-      ) {
-        return false;
+    Effect.map((verification) => {
+      if (verification._tag === "MissingPublicKey") {
+        return { reason: "environment_public_key_missing" as const };
+      }
+      if (verification._tag === "Failure") {
+        return { reason: "proof_verification_failed" as const, cause: verification.cause };
+      }
+      const proof = verification.proof;
+      if (input.response.environmentId !== input.environmentId) {
+        return { reason: "response_environment_id_mismatch" as const };
+      }
+      if (proof.environmentId !== input.environmentId) {
+        return { reason: "proof_environment_id_mismatch" as const };
+      }
+      if (proof.requestNonce !== input.requestNonce) {
+        return { reason: "request_nonce_mismatch" as const };
+      }
+      if (proof.status !== input.response.status) {
+        return { reason: "status_mismatch" as const };
+      }
+      if (proof.checkedAt !== input.response.checkedAt) {
+        return { reason: "checked_at_mismatch" as const };
+      }
+      if (stableStringify(proof.descriptor) !== stableStringify(input.response.descriptor)) {
+        return { reason: "descriptor_mismatch" as const };
       }
       const checkedAt = DateTime.make(input.response.checkedAt);
       if (Option.isNone(checkedAt)) {
-        return false;
+        return { reason: "checked_at_invalid" as const };
       }
-      return (
-        checkedAt.value.epochMilliseconds >=
-          input.requestIssuedAt.epochMilliseconds - ENVIRONMENT_HEALTH_CLOCK_SKEW_MILLIS &&
-        checkedAt.value.epochMilliseconds <=
+      if (
+        checkedAt.value.epochMilliseconds <
+          input.requestIssuedAt.epochMilliseconds - ENVIRONMENT_HEALTH_CLOCK_SKEW_MILLIS ||
+        checkedAt.value.epochMilliseconds >
           input.now.epochMilliseconds + ENVIRONMENT_HEALTH_CLOCK_SKEW_MILLIS
-      );
+      ) {
+        return { reason: "checked_at_out_of_range" as const };
+      }
+      return null;
     }),
   );
 }
@@ -434,8 +505,11 @@ const make = Effect.gen(function* () {
         Effect.mapError(
           (cause) =>
             new EnvironmentMintRequestFailed({
+              userId: input.userId,
               environmentId: input.environmentId,
               operation: "status",
+              stage: "generate_nonce",
+              httpBaseUrl: endpoint.httpBaseUrl,
               cause,
             }),
         ),
@@ -448,8 +522,11 @@ const make = Effect.gen(function* () {
           Effect.mapError(
             (cause) =>
               new EnvironmentMintRequestFailed({
+                userId: input.userId,
                 environmentId: input.environmentId,
                 operation: "status",
+                stage: "generate_request_id",
+                httpBaseUrl: endpoint.httpBaseUrl,
                 cause,
               }),
           ),
@@ -468,8 +545,11 @@ const make = Effect.gen(function* () {
         Effect.mapError(
           (cause) =>
             new EnvironmentMintRequestFailed({
+              userId: input.userId,
               environmentId: input.environmentId,
               operation: "status",
+              stage: "sign_proof",
+              httpBaseUrl: endpoint.httpBaseUrl,
               cause,
             }),
         ),
@@ -527,7 +607,7 @@ const make = Effect.gen(function* () {
         };
       }
       const decoded = responseOption.value.response;
-      const verified = yield* verifyEnvironmentHealthResponse({
+      const invalidResponse = yield* verifyEnvironmentHealthResponse({
         response: decoded,
         environmentId: input.environmentId,
         requestNonce: nonce,
@@ -536,10 +616,14 @@ const make = Effect.gen(function* () {
         relayIssuer,
         now: yield* DateTime.now,
       });
-      if (!verified) {
+      if (invalidResponse) {
         return yield* new EnvironmentMintResponseInvalid({
+          userId: input.userId,
           environmentId: input.environmentId,
           operation: "status",
+          httpBaseUrl: endpoint.httpBaseUrl,
+          reason: invalidResponse.reason,
+          ...(invalidResponse.cause !== undefined ? { cause: invalidResponse.cause } : {}),
         });
       }
       return {
@@ -589,8 +673,12 @@ const make = Effect.gen(function* () {
         Effect.mapError(
           (cause) =>
             new EnvironmentMintRequestFailed({
+              userId: input.userId,
               environmentId: input.environmentId,
               operation: "connect",
+              stage: "generate_nonce",
+              httpBaseUrl: endpoint.httpBaseUrl,
+              ...(input.deviceId ? { deviceId: input.deviceId } : {}),
               cause,
             }),
         ),
@@ -603,8 +691,12 @@ const make = Effect.gen(function* () {
           Effect.mapError(
             (cause) =>
               new EnvironmentMintRequestFailed({
+                userId: input.userId,
                 environmentId: input.environmentId,
                 operation: "connect",
+                stage: "generate_request_id",
+                httpBaseUrl: endpoint.httpBaseUrl,
+                ...(input.deviceId ? { deviceId: input.deviceId } : {}),
                 cause,
               }),
           ),
@@ -626,8 +718,12 @@ const make = Effect.gen(function* () {
         Effect.mapError(
           (cause) =>
             new EnvironmentMintRequestFailed({
+              userId: input.userId,
               environmentId: input.environmentId,
               operation: "connect",
+              stage: "sign_proof",
+              httpBaseUrl: endpoint.httpBaseUrl,
+              ...(input.deviceId ? { deviceId: input.deviceId } : {}),
               cause,
             }),
         ),
@@ -640,8 +736,12 @@ const make = Effect.gen(function* () {
           Effect.mapError(
             (cause) =>
               new EnvironmentMintRequestFailed({
+                userId: input.userId,
                 environmentId: input.environmentId,
                 operation: "connect",
+                stage: "send_request",
+                httpBaseUrl: endpoint.httpBaseUrl,
+                ...(input.deviceId ? { deviceId: input.deviceId } : {}),
                 cause,
               }),
           ),
@@ -651,7 +751,10 @@ const make = Effect.gen(function* () {
               onNone: () =>
                 Effect.fail(
                   new EnvironmentMintRequestTimedOut({
+                    userId: input.userId,
                     environmentId: input.environmentId,
+                    httpBaseUrl: endpoint.httpBaseUrl,
+                    ...(input.deviceId ? { deviceId: input.deviceId } : {}),
                     timeoutMs: ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS,
                   }),
                 ),
@@ -659,7 +762,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-      const verified = yield* verifyEnvironmentResponse({
+      const invalidResponse = yield* verifyEnvironmentResponse({
         response: decoded,
         environmentId: input.environmentId,
         requestNonce: nonce,
@@ -668,10 +771,15 @@ const make = Effect.gen(function* () {
         relayIssuer,
         nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
       });
-      if (!verified) {
+      if (invalidResponse) {
         return yield* new EnvironmentMintResponseInvalid({
+          userId: input.userId,
           environmentId: input.environmentId,
           operation: "connect",
+          httpBaseUrl: endpoint.httpBaseUrl,
+          ...(input.deviceId ? { deviceId: input.deviceId } : {}),
+          reason: invalidResponse.reason,
+          ...(invalidResponse.cause !== undefined ? { cause: invalidResponse.cause } : {}),
         });
       }
       return {

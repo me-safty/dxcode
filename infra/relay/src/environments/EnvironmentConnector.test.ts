@@ -56,6 +56,10 @@ const decodeMintRequestBody = Schema.decodeUnknownSync(
 const isEnvironmentConnectNotAuthorized = Schema.is(
   EnvironmentConnector.EnvironmentConnectNotAuthorized,
 );
+const isEnvironmentMintRequestFailed = Schema.is(EnvironmentConnector.EnvironmentMintRequestFailed);
+const isEnvironmentMintResponseInvalid = Schema.is(
+  EnvironmentConnector.EnvironmentMintResponseInvalid,
+);
 
 function requestBodyText(request: HttpClientRequest.HttpClientRequest): string {
   return request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "{}";
@@ -700,7 +704,7 @@ describe("EnvironmentConnector", () => {
 
     return Effect.gen(function* () {
       const connector = yield* EnvironmentConnector.EnvironmentConnector;
-      const result = yield* Effect.exit(
+      const result = yield* Effect.result(
         connector.connect({
           userId: "user_123",
           environmentId: "env-connector-test",
@@ -708,9 +712,19 @@ describe("EnvironmentConnector", () => {
         }),
       );
 
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.cause.toString()).toContain("EnvironmentMintResponseInvalid");
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(isEnvironmentMintResponseInvalid(result.failure)).toBe(true);
+        if (isEnvironmentMintResponseInvalid(result.failure)) {
+          expect(result.failure).toMatchObject({
+            userId: "user_123",
+            environmentId: "env-connector-test",
+            operation: "connect",
+            httpBaseUrl: "https://env.example.test/",
+            reason: "proof_verification_failed",
+            cause: { _tag: "RelayJwtError" },
+          });
+        }
       }
     }).pipe(Effect.provide(connectorTestLayer(execute)));
   });
@@ -780,6 +794,50 @@ describe("EnvironmentConnector", () => {
     }).pipe(Effect.provide(connectorTestLayer(execute)));
   });
 
+  it.effect("preserves context and cause when the mint request fails", () => {
+    const execute = (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json(
+            {
+              _tag: "EnvironmentHttpInternalServerError",
+              message: "Environment is unavailable.",
+            },
+            { status: 500 },
+          ),
+        ),
+      );
+
+    return Effect.gen(function* () {
+      const connector = yield* EnvironmentConnector.EnvironmentConnector;
+      const result = yield* Effect.result(
+        connector.connect({
+          userId: "user_123",
+          environmentId: "env-connector-test",
+          clientProofKeyThumbprint: "client-proof-key-thumbprint",
+          deviceId: "device-123",
+        }),
+      );
+
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(isEnvironmentMintRequestFailed(result.failure)).toBe(true);
+        if (isEnvironmentMintRequestFailed(result.failure)) {
+          expect(result.failure).toMatchObject({
+            userId: "user_123",
+            environmentId: "env-connector-test",
+            operation: "connect",
+            stage: "send_request",
+            httpBaseUrl: "https://env.example.test/",
+            deviceId: "device-123",
+            cause: { _tag: "EnvironmentHttpInternalServerError" },
+          });
+        }
+      }
+    }).pipe(Effect.provide(connectorTestLayer(execute)));
+  });
+
   it.effect("times out hung managed endpoint mint requests", () => {
     let resolveRequestStarted: (() => void) | undefined;
     const requestStarted = new Promise<void>((resolve) => {
@@ -810,7 +868,9 @@ describe("EnvironmentConnector", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("EnvironmentMintRequestTimedOut");
         expect(result.failure).toMatchObject({
+          userId: "user_123",
           environmentId: "env-connector-test",
+          httpBaseUrl: "https://env.example.test/",
           timeoutMs: EnvironmentConnector.ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS,
         });
       }
