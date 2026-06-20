@@ -12,7 +12,9 @@ import {
   TerminalError,
   TerminalHistoryError,
   TerminalNotRunningError,
+  TerminalResizeError,
   TerminalSessionLookupError,
+  TerminalWriteError,
   type TerminalAttachInput,
   type TerminalAttachStreamEvent,
   type TerminalClearInput,
@@ -61,7 +63,9 @@ export {
   TerminalError,
   TerminalHistoryError,
   TerminalNotRunningError,
+  TerminalResizeError,
   TerminalSessionLookupError,
+  TerminalWriteError,
 };
 
 const DEFAULT_HISTORY_LINE_LIMIT = 5_000;
@@ -189,6 +193,25 @@ interface TerminalSubprocessInspector {
     terminalPid: number,
   ): Effect.Effect<TerminalSubprocessInspectResult, TerminalSubprocessCheckError>;
 }
+
+const resizePtyProcess = (
+  session: TerminalSessionState,
+  process: PtyAdapter.PtyProcess,
+  cols: number,
+  rows: number,
+) =>
+  Effect.try({
+    try: () => process.resize(cols, rows),
+    catch: (cause) =>
+      new TerminalResizeError({
+        threadId: session.threadId,
+        terminalId: session.terminalId,
+        terminalPid: process.pid,
+        cols,
+        rows,
+        cause,
+      }),
+  });
 
 export interface ShellCandidate {
   shell: string;
@@ -2168,10 +2191,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }
 
     if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
+      yield* resizePtyProcess(liveSession, liveSession.process, targetCols, targetRows);
       liveSession.cols = targetCols;
       liveSession.rows = targetRows;
       liveSession.updatedAt = yield* nowIso;
-      liveSession.process.resize(targetCols, targetRows);
     }
 
     return snapshot(liveSession);
@@ -2219,10 +2242,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           session.status === "running" &&
           (session.cols !== targetCols || session.rows !== targetRows)
         ) {
+          const process = session.process;
+          yield* resizePtyProcess(session, process, targetCols, targetRows);
           session.cols = targetCols;
           session.rows = targetRows;
           session.updatedAt = yield* nowIso;
-          yield* Effect.sync(() => session.process?.resize(targetCols, targetRows));
         }
 
         return snapshot(session);
@@ -2409,7 +2433,16 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         terminalId,
       });
     }
-    yield* Effect.sync(() => process.write(input.data));
+    yield* Effect.try({
+      try: () => process.write(input.data),
+      catch: (cause) =>
+        new TerminalWriteError({
+          threadId: input.threadId,
+          terminalId,
+          terminalPid: process.pid,
+          cause,
+        }),
+    });
   });
 
   const resizeLocked = Effect.fn("terminal.resize")(function* (input: TerminalResizeInput) {
@@ -2422,10 +2455,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     if (!process || session.value.status !== "running") {
       return;
     }
+    yield* resizePtyProcess(session.value, process, input.cols, input.rows);
     session.value.cols = input.cols;
     session.value.rows = input.rows;
     session.value.updatedAt = yield* nowIso;
-    yield* Effect.sync(() => process.resize(input.cols, input.rows));
   });
 
   const resize: TerminalManager["Service"]["resize"] = (input) =>
