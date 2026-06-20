@@ -184,6 +184,29 @@ layer("GitLabCli.layer", (it) => {
     }),
   );
 
+  it.effect("preserves structured process failures when normalizing CLI errors", () =>
+    Effect.gen(function* () {
+      const cause = {
+        _tag: "VcsProcessSpawnError",
+        detail: "Command not found: glab",
+      };
+      mockedRun.mockReturnValueOnce(Effect.fail(cause) as never);
+
+      const error = yield* Effect.gen(function* () {
+        const glab = yield* GitLabCli.GitLabCli;
+        return yield* glab
+          .execute({
+            cwd: "/repo",
+            args: ["mr", "list"],
+          })
+          .pipe(Effect.flip);
+      });
+
+      expect(error.detail).toBe("GitLab CLI (`glab`) is required but not available on PATH.");
+      expect(error.cause).toBe(cause);
+    }),
+  );
+
   it.effect("creates merge requests through the GitLab API without placing the body in argv", () =>
     Effect.gen(function* () {
       mockedRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));

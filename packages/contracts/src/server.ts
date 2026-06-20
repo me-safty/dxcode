@@ -102,10 +102,27 @@ export const ServerProviderSkillsListResult = Schema.Struct({
 });
 export type ServerProviderSkillsListResult = typeof ServerProviderSkillsListResult.Type;
 
+export const ServerProviderSkillsListFailureReason = Schema.Literals([
+  "provider-not-found",
+  "provider-not-configured",
+  "settings-read-failed",
+  "settings-decode-failed",
+  "invalid-cwd",
+  "home-prepare-failed",
+  "probe-timeout",
+  "probe-failed",
+]);
+export type ServerProviderSkillsListFailureReason =
+  typeof ServerProviderSkillsListFailureReason.Type;
+
 export class ServerProviderSkillsListError extends Schema.TaggedErrorClass<ServerProviderSkillsListError>()(
   "ServerProviderSkillsListError",
   {
     message: TrimmedNonEmptyString,
+    reason: Schema.optional(ServerProviderSkillsListFailureReason),
+    operation: Schema.optional(TrimmedNonEmptyString),
+    instanceId: Schema.optional(ProviderInstanceId),
+    cwd: Schema.optional(TrimmedNonEmptyString),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}

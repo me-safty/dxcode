@@ -20,6 +20,22 @@ export interface ResolveHostMcpServersInput {
   readonly bootstrapServers: readonly DesktopBootstrapMcpServer[];
   readonly probe?: (socketPath: string) => Promise<boolean>;
   readonly socketPathExists?: (socketPath: string) => boolean;
+  readonly onDiagnostic?: (diagnostic: HostMcpDiscoveryDiagnostic) => void;
+}
+
+export type HostMcpDiscoveryDiagnosticReason =
+  | "advertisements-read-failed"
+  | "duplicate-server-name"
+  | "socket-check-failed"
+  | "socket-missing"
+  | "probe-failed"
+  | "probe-rejected";
+
+export interface HostMcpDiscoveryDiagnostic {
+  readonly reason: HostMcpDiscoveryDiagnosticReason;
+  readonly detail?: string;
+  readonly serverName?: string;
+  readonly socketPath?: string;
 }
 
 export const resolveHostMcpServersForWorkspaceEffect = Effect.fn(
@@ -36,38 +52,43 @@ export const resolveHostMcpServersForWorkspaceEffect = Effect.fn(
         t3Home: input.t3Home,
         workspaceRoot: input.workspaceRoot,
       });
-    } catch {
+    } catch (cause) {
+      reportHostMcpDiagnostic(input, {
+        reason: "advertisements-read-failed",
+        detail: describeUnknownCause(cause),
+      });
       return null;
     }
   });
   if (readResult === null) {
     return input.bootstrapServers;
   }
-  const socketPathExists = input.socketPathExists
-    ? (socketPath: string) =>
-        Effect.try({
-          try: () => input.socketPathExists!(socketPath) === true,
-          catch: () => false,
-        }).pipe(Effect.orElseSucceed(() => false))
-    : defaultSocketPathExistsEffect;
-  const probe = input.probe
-    ? (socketPath: string) =>
-        Effect.tryPromise({
-          try: () => input.probe!(socketPath),
-          catch: () => false,
-        }).pipe(Effect.orElseSucceed(() => false))
-    : probeMcpSocketEffect;
   const bootstrapNames = new Set(input.bootstrapServers.map((server) => server.name));
 
   for (const advertisement of readResult.advertisements) {
     const server = advertisement.mcpServer;
     if (bootstrapNames.has(server.name)) {
+      reportHostMcpDiagnostic(input, {
+        reason: "duplicate-server-name",
+        serverName: server.name,
+        socketPath: server.socketPath,
+      });
       continue;
     }
-    if (!(yield* socketPathExists(server.socketPath))) {
+    if (!(yield* hostMcpSocketPathExists(input, server))) {
+      reportHostMcpDiagnostic(input, {
+        reason: "socket-missing",
+        serverName: server.name,
+        socketPath: server.socketPath,
+      });
       continue;
     }
-    if (!(yield* probe(server.socketPath))) {
+    if (!(yield* probeHostMcpSocket(input, server))) {
+      reportHostMcpDiagnostic(input, {
+        reason: "probe-failed",
+        serverName: server.name,
+        socketPath: server.socketPath,
+      });
       continue;
     }
     return mergeHostMcpServers(input.bootstrapServers, [server]);
@@ -103,6 +124,60 @@ export function resolveHostMcpServersForProviderStart(input: {
   readonly sessionInput: Pick<ProviderSessionStartInput, "cwd" | "projectWorkspaceRoot">;
 }): Promise<readonly DesktopBootstrapMcpServer[]> {
   return Effect.runPromise(resolveHostMcpServersForProviderStartEffect(input));
+}
+
+function reportHostMcpDiagnostic(
+  input: Pick<ResolveHostMcpServersInput, "onDiagnostic">,
+  diagnostic: HostMcpDiscoveryDiagnostic,
+) {
+  try {
+    input.onDiagnostic?.(diagnostic);
+  } catch {
+    // Diagnostics are best-effort and must not alter provider startup.
+  }
+}
+
+function describeUnknownCause(cause: unknown): string {
+  if (cause instanceof Error && cause.message.length > 0) return cause.message;
+  if (typeof cause === "string" && cause.length > 0) return cause;
+  return "Unknown host MCP discovery failure.";
+}
+
+function hostMcpSocketPathExists(
+  input: ResolveHostMcpServersInput,
+  server: DesktopBootstrapMcpServer,
+) {
+  if (!input.socketPathExists) return defaultSocketPathExistsEffect(server.socketPath);
+  return Effect.sync(() => {
+    try {
+      return input.socketPathExists?.(server.socketPath) === true;
+    } catch (cause) {
+      reportHostMcpDiagnostic(input, {
+        reason: "socket-check-failed",
+        serverName: server.name,
+        socketPath: server.socketPath,
+        detail: describeUnknownCause(cause),
+      });
+      return false;
+    }
+  });
+}
+
+function probeHostMcpSocket(input: ResolveHostMcpServersInput, server: DesktopBootstrapMcpServer) {
+  if (!input.probe) return probeMcpSocketEffect(server.socketPath);
+  return Effect.promise(async () => {
+    try {
+      return (await input.probe?.(server.socketPath)) === true;
+    } catch (cause) {
+      reportHostMcpDiagnostic(input, {
+        reason: "probe-rejected",
+        serverName: server.name,
+        socketPath: server.socketPath,
+        detail: describeUnknownCause(cause),
+      });
+      return false;
+    }
+  });
 }
 
 export const defaultSocketPathExistsEffect = Effect.fn("HostMcpDiscovery.defaultSocketPathExists")(

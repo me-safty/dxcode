@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import { createHostMcpAdvertisement, writeHostMcpAdvertisement } from "@t3tools/shared/hostMcp";
 
 import {
+  type HostMcpDiscoveryDiagnostic,
   resolveHostMcpServersForProviderStart,
   resolveHostMcpServersForWorkspace,
 } from "./hostMcpDiscovery.ts";
@@ -90,6 +91,7 @@ describe("host MCP discovery", () => {
   it("ignores duplicate names, missing sockets, and failed probes", async () => {
     const t3Home = makeT3Home();
     const nowMs = Date.now();
+    const diagnostics: HostMcpDiscoveryDiagnostic[] = [];
     const bootstrapServer = {
       name: "t3code-vscode-bootstrap",
       socketPath: "/tmp/bootstrap.sock",
@@ -125,13 +127,18 @@ describe("host MCP discovery", () => {
         bootstrapServers: [bootstrapServer],
         socketPathExists: (socketPath) => socketPath !== "/tmp/missing.sock",
         probe: async (socketPath) => socketPath !== "/tmp/failed.sock",
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       }),
     ).resolves.toEqual([bootstrapServer]);
+    expect(diagnostics.map((diagnostic) => diagnostic.reason).toSorted()).toEqual(
+      ["duplicate-server-name", "probe-failed", "socket-missing"].toSorted(),
+    );
   });
 
   it("treats injected socket existence failures as unavailable advertisements", async () => {
     const t3Home = makeT3Home();
     const nowMs = Date.now();
+    const diagnostics: HostMcpDiscoveryDiagnostic[] = [];
     const bootstrapServer = {
       name: "bootstrap",
       socketPath: "/tmp/bootstrap.sock",
@@ -166,13 +173,28 @@ describe("host MCP discovery", () => {
           throw new Error("socket check failed");
         },
         probe: async () => true,
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       }),
     ).resolves.toEqual([bootstrapServer]);
+    expect(diagnostics).toEqual([
+      {
+        reason: "socket-check-failed",
+        serverName: "throws",
+        socketPath: "/tmp/throws.sock",
+        detail: "socket check failed",
+      },
+      {
+        reason: "socket-missing",
+        serverName: "throws",
+        socketPath: "/tmp/throws.sock",
+      },
+    ]);
   });
 
   it("treats injected probe rejections as failed probes", async () => {
     const t3Home = makeT3Home();
     const nowMs = Date.now();
+    const diagnostics: HostMcpDiscoveryDiagnostic[] = [];
     const bootstrapServer = {
       name: "bootstrap",
       socketPath: "/tmp/bootstrap.sock",
@@ -207,8 +229,22 @@ describe("host MCP discovery", () => {
         probe: async () => {
           throw new Error("probe failed");
         },
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       }),
     ).resolves.toEqual([bootstrapServer]);
+    expect(diagnostics).toEqual([
+      {
+        reason: "probe-rejected",
+        serverName: "rejects",
+        socketPath: "/tmp/rejects.sock",
+        detail: "probe failed",
+      },
+      {
+        reason: "probe-failed",
+        serverName: "rejects",
+        socketPath: "/tmp/rejects.sock",
+      },
+    ]);
   });
 
   it("uses the advertised socket path without deriving an HTTP MCP endpoint", async () => {

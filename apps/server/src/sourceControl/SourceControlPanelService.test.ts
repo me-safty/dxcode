@@ -4,6 +4,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import {
   GitCommandError,
   SourceControlProviderError,
@@ -34,6 +35,7 @@ const branchRef: VcsRef = {
   isDefault: false,
   worktreePath: null,
 };
+const isGitCommandError = Schema.is(GitCommandError);
 
 const success = (stdout = ""): ExecuteGitResult => ({
   exitCode: ChildProcessSpawner.ExitCode(0),
@@ -206,6 +208,34 @@ describe("SourceControlPanelService", () => {
             calls.push(input);
             return success(input.args[0] === "rev-list" ? "0" : "");
           }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("preserves original causes when wrapping git execution failures", () => {
+    const cause = new Error("transport closed");
+    return Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const error = yield* service
+        .branchCommits({
+          cwd: "/repo",
+          branch: branchRef,
+          baseRef: "main",
+          kind: "history",
+          skip: 0,
+          limit: 10,
+        })
+        .pipe(Effect.flip);
+
+      assert.strictEqual(isGitCommandError(error), true);
+      assert.strictEqual(error.detail, "transport closed");
+      assert.strictEqual(error.cause, cause);
+    }).pipe(
+      Effect.provide(
+        makeTestLayer(
+          () => Effect.fail(cause) as unknown as Effect.Effect<ExecuteGitResult, never>,
         ),
       ),
     );

@@ -205,6 +205,10 @@ describe("listCodexProviderSkills", () => {
       expect(error.message).toBe(
         `Timed out listing Codex skills after 15s (provider: 'codex', cwd: '${fixture.cwd}').`,
       );
+      expect(error.reason).toBe("probe-timeout");
+      expect(error.operation).toBe("ProviderSkillsLister.listCodexProviderSkills");
+      expect(error.instanceId).toBe("codex");
+      expect(error.cwd).toBe(fixture.cwd);
       expect(yield* waitForFileContent(fixture.exitLogPath)).toContain("SIGTERM");
     }).pipe(Effect.provide(NodeServices.layer)),
   );

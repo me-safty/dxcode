@@ -22,7 +22,7 @@ Still-relevant conflict-prone areas from the previous upstream merge:
 - `apps/server/src/vcs/VcsStatusBroadcaster.ts` and `apps/server/src/vcs/VcsLocalWatch.ts` keep the local git-ignore-aware filesystem watcher for local status refresh while accepting upstream's exported `make` service constructor and remote poller changes; the Version Control panel still does not add an independent periodic fetch timer.
 - `apps/web/src/components/ChatView.tsx`, `apps/web/src/rightPanelStore.test.ts`, `apps/web/src/components/Sidebar.tsx`, and `apps/web/src/components/Sidebar.logic.ts` keep the custom Source Control panel, VS Code project scoping, `primaryServerWelcomeAtom` workspace scoping, and exported sidebar home button while accepting upstream's `diffPanelStore`, environment-scoped settings hooks, server-backed stage labels, and sidebar/server config state.
 
-Post-merge consistency refactor: host MCP discovery now exposes Effect-native helpers plus compatibility Promise wrappers, provider adapters call the Effect path directly, VS Code workspace bootstrap logic is split out of the HTTP route, the host-integration portion of `ServerConfig` has a named shape, and local VCS filesystem watch filtering lives in `apps/server/src/vcs/VcsLocalWatch.ts`. These are intended to reduce future conflict pressure with upstream's service-module conventions without changing the preserved custom behavior.
+Post-merge consistency refactor: host MCP discovery now exposes Effect-native helpers plus compatibility Promise wrappers, provider adapters call the Effect path directly, VS Code workspace bootstrap logic is split out of the HTTP route, the host-integration portion of `ServerConfig` has a named shape, and local VCS filesystem watch filtering lives in `apps/server/src/vcs/VcsLocalWatch.ts`. A follow-up diagnostic alignment keeps provider skill-list failures, host MCP discovery skips, and source-control provider/panel failures structured with stable user-facing messages, operation/reason metadata where available, and preserved causes. These are intended to reduce future conflict pressure with upstream's service-module and structured-error conventions without changing the preserved custom behavior.
 
 ## Latest Worktree Port
 
@@ -212,6 +212,7 @@ Expected behavior:
 - The server exposes a workspace-aware `server.listProviderSkills` path and validates enabled Codex skill-listing requests against the requested cwd.
 - The server routes skill listing through a bounded request lister that coalesces concurrent requests for the same provider/cwd, limits cross-workspace concurrency, and applies a short TTL so reconnects or repeated composer renders do not repeatedly spawn Codex app-server probes.
 - The Codex provider requests `skills/list` with the current workspace cwd, times out hung app-server probes, and terminates the probe process when a timeout occurs.
+- Provider skill-list failures preserve structured reason, operation, provider instance, cwd, and cause metadata for missing providers, invalid cwd, settings failures, Codex home preparation, probe timeouts, and probe failures while keeping stable user-facing messages.
 - Non-Codex or disabled providers keep returning provider snapshot skills instead of failing workspace skill search.
 - The client runtime keys provider-skill query state by environment, provider instance, and cwd, with a bounded stale window so reconnects refresh workspace-local skills without reusing another workspace's snapshot.
 - The composer preserves already loaded repo-local skills while refreshing the same workspace, treats an empty loaded skill list as authoritative data, and clears stale skills during workspace switches or settled failures.
@@ -266,6 +267,8 @@ VS Code workspace-folder identity should stay aligned with the shared desktop/ho
 
 The VS Code webview is a host-managed workspace surface, not a normal hosted web app. The web app should register the primary environment directly from `window.t3HostBridge.getLocalEnvironmentBootstrap()` when that bootstrap includes the environment id, label, HTTP URL, WebSocket URL, and bearer token. Do not reintroduce a dependency on `/.well-known/t3/environment` before the VS Code sidebar can load workspace threads.
 
+Host MCP discovery remains best-effort during provider startup, but skipped advertisements should retain diagnostics for duplicate server names, missing sockets, socket-check failures, failed probes, and rejected probes so the desktop/VS Code bridge can be debugged without turning stale advertisements into provider-start failures.
+
 The implementation details are intentionally kept in `apps/vscode-extension/IMPLEMENTATION.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the extension work unless `main` has gained an equivalent VS Code extension architecture, then reconcile against the detailed implementation note.
 
 Primary reference:
@@ -293,6 +296,8 @@ This branch includes a first-class Version Control panel that is not assumed to 
 Preserve the branch-local idle-power safeguards for VCS status: ignore internal `.git/` watcher events before refreshing local status, and keep the default automatic remote Git fetch interval conservative unless upstream provides equivalent lower-churn VCS status behavior.
 
 Provider-backed change-request lookups remain best-effort in the panel service. Provider/auth/CLI failures must not fail the whole panel snapshot or hide git-derived actionable branch rows.
+
+Version Control and source-control provider failures should preserve structured causes when normalized for panel RPC errors. GitLab, GitHub, Azure DevOps, and Bitbucket provider paths should keep provider-specific not-found/auth/missing-CLI details without collapsing structured process failures into generic strings.
 
 Preserve the panel's review-hardened edge cases: the current default branch remains a valid default compare ref, diverged normal merge sync is available only for the current branch, tracked discard restore failures surface instead of being swallowed, fallback rename parsing preserves original paths, merged staged-plus-unstaged row stats are summed, and late-month relative dates do not fall through to `0 years ago`.
 

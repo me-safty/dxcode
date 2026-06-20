@@ -58,6 +58,7 @@ The intended model is host-MCP discovery, not a VS Code-only provider special ca
 - Matching follows the same project/workspace scoping rules the VS Code extension uses for startup selection. The extension resolves workspace folders into stable keys and executable `cwd`s, the server maps those folders to T3 projects in `bootstrapProjects[]`, and discovery uses shared workspace-folder helpers from `@t3tools/shared/workspaceFolders` so VS Code bootstrap, host-MCP advertisements, and local-backend advertisements share active-folder and workspace-root matching semantics.
 - If multiple VS Code windows advertise the same project, use the first live match. This is an acceptable edge case and does not need special UI or selection semantics initially.
 - If no matching live advertisement exists, no VS Code MCP server is injected. The provider should fail normally if the user asks for a VS Code MCP tool that is unavailable.
+- Discovery remains best-effort, but skipped advertisements can be reported through structured diagnostics for duplicate server names, missing sockets, socket-check failures, failed probes, rejected probes, and advertisement-read failures. These diagnostics are for local troubleshooting and must not turn stale VS Code host records into provider-start failures.
 - Discovery is local-machine only. A web client can use a VS Code MCP bridge only when the backend it is connected to can reach the advertised local socket. Remote browsers or remote saved environments cannot use a socket that exists only on the user's workstation.
 
 Advertisement storage:
@@ -126,7 +127,7 @@ Security boundaries:
 
 Remaining follow-up work:
 
-- Add desktop-local diagnostics or admin surfaces for VS Code MCP source labels if troubleshooting needs it. Remote clients should not require or depend on those labels.
+- Add desktop-local UI/admin surfaces for VS Code MCP source labels or host MCP discovery diagnostics if troubleshooting needs more than logs/tests. Remote clients should not require or depend on those labels.
 
 Implemented:
 
@@ -135,10 +136,11 @@ Implemented:
 - The desktop backend writes and heartbeats `DesktopBackendAdvertisement` records after HTTP readiness succeeds. The VS Code extension reads those records before rendering a webview and shows a manual-start fallback with a reconnect button when no live desktop backend is available.
 - The VS Code extension writes and heartbeats its per-instance host MCP advertisement after `VsCodeMcpBridge.ensureStarted()` succeeds. The advertised workspace folders come from the same `resolveBootstrapWorkspaceFolders(...)` output used for desktop connection scoping, with the same active workspace folder key selected by `resolveActiveWorkspaceFolder(...)`.
 - Provider startup receives the thread's project workspace root, scans live advertisements through the Effect-native host MCP discovery path, matches the target against advertised workspace folders, probes the first live match, and merges it with bootstrap-provided `hostMcpServers`.
+- Discovery diagnostics are emitted without changing fallback behavior, so duplicate names, missing sockets, failed probes, rejected probes, and unreadable advertisement state can be inspected while provider startup continues with the configured bootstrap MCP servers.
 - Producers and consumers run opportunistic advertisement garbage collection. Producers sweep after writing their own heartbeat, and consumers sweep during discovery scans. Both paths cap work per pass and treat deletion failures as non-fatal.
 - The existing per-window MCP server name is preserved. When merging bootstrap and discovered MCP servers, duplicate names are skipped.
 - Initial injection stays at session creation/resume and next-turn startup boundaries. Dynamic MCP registration remains deferred until a provider-specific reliability pass shows it is safe.
-- Tests cover concurrent per-window advertisement writes, stale and malformed advertisement filtering, expired-file cleanup, missing-socket and failed-probe handling, duplicate-name merging, and the no-match/provider-native failure path.
+- Tests cover concurrent per-window advertisement writes, stale and malformed advertisement filtering, expired-file cleanup, missing-socket and failed-probe handling, rejected-probe and socket-check diagnostics, duplicate-name merging, and the no-match/provider-native failure path.
 
 Provider mappings:
 
@@ -462,7 +464,7 @@ Implemented behavior:
 
 - The VS Code extension advertises its MCP socket, timeout, unique MCP server name, active workspace folder key, and bootstrapped workspace folder metadata in `<T3 home>/host-mcp/advertisements/<host-id>.json`.
 - Each extension host writes only its own advertisement file by atomic replace, heartbeats it while alive, and best-effort removes it on shutdown. Consumers rely on expiry for crash and update flows.
-- Local backends scan advertisements at provider session creation/resume or next-turn startup, ignore expired, malformed, missing-socket, or failed-probe records, and inject the first live endpoint matching the target thread project.
+- Local backends scan advertisements at provider session creation/resume or next-turn startup, ignore expired, malformed, missing-socket, or failed-probe records, emit structured diagnostics for skipped live records where available, and inject the first live endpoint matching the target thread project.
 - Producers and consumers opportunistically delete expired advertisement files after a conservative grace period. Cleanup is bounded, best-effort, and not required for security because expired records are ignored before cleanup.
 - Duplicate matching VS Code windows are intentionally resolved by first live match for the first implementation.
 - If no matching endpoint exists, no VS Code MCP server is injected and provider-native failure behavior is allowed when the user asks for unavailable VS Code tools.

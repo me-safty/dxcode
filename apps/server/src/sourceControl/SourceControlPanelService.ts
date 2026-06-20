@@ -121,8 +121,20 @@ function commandLabel(args: readonly string[]): string {
   return `git ${args.join(" ")}`;
 }
 
-function gitError(operation: string, cwd: string, args: readonly string[], detail: string) {
-  return new GitCommandError({ operation, command: commandLabel(args), cwd, detail });
+function gitError(
+  operation: string,
+  cwd: string,
+  args: readonly string[],
+  detail: string,
+  cause?: unknown,
+) {
+  return new GitCommandError({
+    operation,
+    command: commandLabel(args),
+    cwd,
+    detail,
+    ...(cause === undefined ? {} : { cause }),
+  });
 }
 
 function detailFromUnknown(cause: unknown): string {
@@ -136,7 +148,9 @@ function detailFromUnknown(cause: unknown): string {
 
 function asGitCommandError(operation: string, cwd: string, args: readonly string[]) {
   return (cause: unknown) =>
-    isGitCommandError(cause) ? cause : gitError(operation, cwd, args, detailFromUnknown(cause));
+    isGitCommandError(cause)
+      ? cause
+      : gitError(operation, cwd, args, detailFromUnknown(cause), cause);
 }
 
 function parseCount(value: string | undefined): number {

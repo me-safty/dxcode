@@ -114,52 +114,58 @@ function isVcsProcessSpawnError(error: unknown): boolean {
   );
 }
 
+function errorText(error: unknown): string {
+  if (typeof error === "object" && error !== null) {
+    const tag = "_tag" in error && typeof error._tag === "string" ? error._tag : "";
+    const detail = "detail" in error && typeof error.detail === "string" ? error.detail : "";
+    const message = "message" in error && typeof error.message === "string" ? error.message : "";
+    const text = [tag, detail, message].filter(Boolean).join("\n");
+    if (text.length > 0) return text;
+  }
+  if (typeof error === "string") return error;
+  return "Unknown GitLab CLI failure.";
+}
+
 function normalizeGitLabCliError(operation: "execute" | "stdout", error: unknown): GitLabCliError {
-  if (error instanceof Error) {
-    if (error.message.includes("Command not found: glab") || isVcsProcessSpawnError(error)) {
-      return new GitLabCliError({
-        operation,
-        detail: "GitLab CLI (`glab`) is required but not available on PATH.",
-        cause: error,
-      });
-    }
+  const text = errorText(error);
+  const lower = text.toLowerCase();
 
-    const lower = error.message.toLowerCase();
-    if (
-      lower.includes("authentication failed") ||
-      lower.includes("not logged in") ||
-      lower.includes("glab auth login") ||
-      lower.includes("token")
-    ) {
-      return new GitLabCliError({
-        operation,
-        detail: "GitLab CLI is not authenticated. Run `glab auth login` and retry.",
-        cause: error,
-      });
-    }
-
-    if (
-      lower.includes("merge request not found") ||
-      lower.includes("not found") ||
-      lower.includes("404")
-    ) {
-      return new GitLabCliError({
-        operation,
-        detail: "Merge request not found. Check the MR number or URL and try again.",
-        cause: error,
-      });
-    }
-
+  if (lower.includes("command not found: glab") || isVcsProcessSpawnError(error)) {
     return new GitLabCliError({
       operation,
-      detail: `GitLab CLI command failed: ${error.message}`,
+      detail: "GitLab CLI (`glab`) is required but not available on PATH.",
+      cause: error,
+    });
+  }
+
+  if (
+    lower.includes("authentication failed") ||
+    lower.includes("not logged in") ||
+    lower.includes("glab auth login") ||
+    lower.includes("token")
+  ) {
+    return new GitLabCliError({
+      operation,
+      detail: "GitLab CLI is not authenticated. Run `glab auth login` and retry.",
+      cause: error,
+    });
+  }
+
+  if (
+    lower.includes("merge request not found") ||
+    lower.includes("not found") ||
+    lower.includes("404")
+  ) {
+    return new GitLabCliError({
+      operation,
+      detail: "Merge request not found. Check the MR number or URL and try again.",
       cause: error,
     });
   }
 
   return new GitLabCliError({
     operation,
-    detail: "GitLab CLI command failed.",
+    detail: `GitLab CLI command failed: ${text}`,
     cause: error,
   });
 }
