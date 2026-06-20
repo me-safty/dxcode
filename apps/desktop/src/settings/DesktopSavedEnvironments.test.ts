@@ -37,7 +37,6 @@ const SavedEnvironmentRegistryDocumentProbe = Schema.Struct({
 const decodeSavedEnvironmentRegistryDocumentProbe = Schema.decodeEffect(
   Schema.fromJsonString(SavedEnvironmentRegistryDocumentProbe),
 );
-
 function makeSafeStorageLayer(input: {
   readonly available: boolean;
   readonly availabilityError?: unknown;
@@ -80,7 +79,7 @@ function makeSafeStorageLayer(input: {
       }
       return Effect.succeed(decoded.slice("enc:".length));
     },
-  } satisfies ElectronSafeStorage.ElectronSafeStorageShape);
+  } satisfies ElectronSafeStorage.ElectronSafeStorage["Service"]);
 }
 
 function makeLayer(

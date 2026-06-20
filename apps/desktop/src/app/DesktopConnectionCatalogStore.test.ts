@@ -21,7 +21,6 @@ const textEncoder = new TextEncoder();
 const decodeConnectionCatalog = Schema.decodeEffect(
   Schema.fromJsonString(ConnectionCatalogDocument),
 );
-
 function makeSafeStorageLayer(available: boolean, failDecrypt: Ref.Ref<boolean> | null = null) {
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
     isEncryptionAvailable: Effect.succeed(available),
@@ -40,7 +39,7 @@ function makeSafeStorageLayer(available: boolean, failDecrypt: Ref.Ref<boolean> 
         return decoded.slice("encrypted:".length);
       });
     },
-  } satisfies ElectronSafeStorage.ElectronSafeStorageShape);
+  } satisfies ElectronSafeStorage.ElectronSafeStorage["Service"]);
 }
 
 function makeLayer(

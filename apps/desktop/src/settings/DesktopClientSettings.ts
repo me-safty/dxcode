@@ -2,7 +2,6 @@ import { ClientSettingsSchema, type ClientSettings } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -31,24 +30,24 @@ const decodeClientSettingsJson = (raw: string): Effect.Effect<ClientSettings, Sc
   );
 const encodeClientSettingsJson = Schema.encodeEffect(ClientSettingsJson);
 
-export class DesktopClientSettingsWriteError extends Data.TaggedError(
+export class DesktopClientSettingsWriteError extends Schema.TaggedErrorClass<DesktopClientSettingsWriteError>()(
   "DesktopClientSettingsWriteError",
-)<{
-  readonly cause: PlatformError.PlatformError | Schema.SchemaError;
-}> {
-  override get message() {
-    return `Failed to write desktop client settings: ${this.cause.message}`;
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    const detail = this.cause instanceof Error ? this.cause.message : String(this.cause);
+    return `Failed to write desktop client settings: ${detail}`;
   }
-}
-
-export interface DesktopClientSettingsShape {
-  readonly get: Effect.Effect<Option.Option<ClientSettings>>;
-  readonly set: (settings: ClientSettings) => Effect.Effect<void, DesktopClientSettingsWriteError>;
 }
 
 export class DesktopClientSettings extends Context.Service<
   DesktopClientSettings,
-  DesktopClientSettingsShape
+  {
+    readonly get: Effect.Effect<Option.Option<ClientSettings>>;
+    readonly set: (
+      settings: ClientSettings,
+    ) => Effect.Effect<void, DesktopClientSettingsWriteError>;
+  }
 >()("@t3tools/desktop/settings/DesktopClientSettings") {}
 
 const readClientSettings = (
@@ -84,36 +83,35 @@ const writeClientSettings = Effect.fnUntraced(function* (input: {
   yield* input.fileSystem.rename(tempPath, input.settingsPath);
 });
 
-export const layer = Layer.effect(
-  DesktopClientSettings,
-  Effect.gen(function* () {
-    const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const crypto = yield* Crypto.Crypto;
+export const make = Effect.gen(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const crypto = yield* Crypto.Crypto;
 
-    return DesktopClientSettings.of({
-      get: readClientSettings(fileSystem, environment.clientSettingsPath).pipe(
-        Effect.withSpan("desktop.clientSettings.get"),
-      ),
-      set: (settings) =>
-        crypto.randomUUIDv4.pipe(
-          Effect.map((uuid) => uuid.replace(/-/g, "")),
-          Effect.flatMap((suffix) =>
-            writeClientSettings({
-              fileSystem,
-              path,
-              settingsPath: environment.clientSettingsPath,
-              settings,
-              suffix,
-            }),
-          ),
-          Effect.mapError((cause) => new DesktopClientSettingsWriteError({ cause })),
-          Effect.withSpan("desktop.clientSettings.set"),
+  return DesktopClientSettings.of({
+    get: readClientSettings(fileSystem, environment.clientSettingsPath).pipe(
+      Effect.withSpan("desktop.clientSettings.get"),
+    ),
+    set: (settings) =>
+      crypto.randomUUIDv4.pipe(
+        Effect.map((uuid) => uuid.replace(/-/g, "")),
+        Effect.flatMap((suffix) =>
+          writeClientSettings({
+            fileSystem,
+            path,
+            settingsPath: environment.clientSettingsPath,
+            settings,
+            suffix,
+          }),
         ),
-    });
-  }),
-);
+        Effect.mapError((cause) => new DesktopClientSettingsWriteError({ cause })),
+        Effect.withSpan("desktop.clientSettings.set"),
+      ),
+  });
+});
+
+export const layer = Layer.effect(DesktopClientSettings, make);
 
 export const layerTest = (initialSettings: Option.Option<ClientSettings> = Option.none()) =>
   Layer.effect(
