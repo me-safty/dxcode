@@ -126,10 +126,21 @@ const getDefaultArch = Effect.fn("getDefaultArch")(function* (platform: typeof B
   return yield* getDefaultBuildArch(platform, config);
 });
 
-class BuildScriptError extends Data.TaggedError("BuildScriptError")<{
+export class BuildScriptError extends Data.TaggedError("BuildScriptError")<{
   readonly message: string;
   readonly cause?: unknown;
-}> {}
+}> {
+  static fromMacPasskeySigningConfiguration(
+    cause: unknown,
+  ): MacPasskeySigningConfigurationError | BuildScriptError {
+    return isMacPasskeySigningConfigurationError(cause)
+      ? cause
+      : new BuildScriptError({
+          message: "Failed to resolve macOS passkey signing configuration.",
+          cause,
+        });
+  }
+}
 
 const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
   stream.pipe(
@@ -366,6 +377,17 @@ export class MissingMacPasskeyRpDomainError extends Schema.TaggedErrorClass<Miss
     return "At least one Clerk passkey RP domain is required.";
   }
 }
+
+export const MacPasskeySigningConfigurationError = Schema.Union([
+  InvalidMacPasskeyRpDomainError,
+  InvalidAppleTeamIdError,
+  MissingMacPasskeyProvisioningProfileError,
+  MissingMacPasskeyDomainConfigurationError,
+  InvalidMacPasskeyPublishableKeyError,
+  MissingMacPasskeyRpDomainError,
+]);
+export type MacPasskeySigningConfigurationError = typeof MacPasskeySigningConfigurationError.Type;
+export const isMacPasskeySigningConfigurationError = Schema.is(MacPasskeySigningConfigurationError);
 
 function normalizePasskeyRpDomain(value: string): string {
   const normalized = value.trim().toLowerCase();
@@ -1211,11 +1233,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     options.platform === "mac" && options.signed
       ? yield* Effect.try({
           try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
-          catch: (cause) =>
-            new BuildScriptError({
-              message: cause instanceof Error ? cause.message : String(cause),
-              cause,
-            }),
+          catch: BuildScriptError.fromMacPasskeySigningConfiguration,
         })
       : undefined;
   const macPasskeySigning = configuredMacPasskeySigning

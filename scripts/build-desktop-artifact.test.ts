@@ -6,12 +6,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import {
+  BuildScriptError,
   createStageWorkspaceConfig,
   createStagePnpmConfig,
   createBuildConfig,
   DESKTOP_ASAR_UNPACK,
   InvalidMacPasskeyRpDomainError,
   InvalidMacPasskeyPublishableKeyError,
+  isMacPasskeySigningConfigurationError,
   MissingMacPasskeyProvisioningProfileError,
   renderMacPasskeyEntitlements,
   resolveClerkPasskeyNativeArtifacts,
@@ -264,6 +266,30 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.instanceOf(invalidPublishableKeyError, InvalidMacPasskeyPublishableKeyError);
     assert.ok(invalidPublishableKeyError.cause);
     assert.equal(invalidPublishableKeyError.message, "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.");
+    assert.notProperty(invalidPublishableKeyError, "publishableKey");
+    assert.notInclude(invalidPublishableKeyError.message, "pk_test_%");
+  });
+
+  it("preserves known passkey signing configuration errors at the build boundary", () => {
+    const decodingCause = new Error("publishable-key-decode-failed");
+    const knownError = new InvalidMacPasskeyPublishableKeyError({ cause: decodingCause });
+    const error = BuildScriptError.fromMacPasskeySigningConfiguration(knownError);
+
+    assert.strictEqual(error, knownError);
+    assert.instanceOf(error, InvalidMacPasskeyPublishableKeyError);
+    assert.strictEqual(error.cause, decodingCause);
+    assert.isTrue(isMacPasskeySigningConfigurationError(error));
+  });
+
+  it("wraps unknown passkey signing configuration defects without copying cause text", () => {
+    const secret = "pk_test_do-not-retain";
+    const cause = new Error(secret);
+    const error = BuildScriptError.fromMacPasskeySigningConfiguration(cause);
+
+    assert.instanceOf(error, BuildScriptError);
+    assert.strictEqual(error.cause, cause);
+    assert.equal(error.message, "Failed to resolve macOS passkey signing configuration.");
+    assert.notInclude(error.message, secret);
   });
 
   it.effect("adds passkey entitlements and both renderer protocols to signed macOS builds", () =>
