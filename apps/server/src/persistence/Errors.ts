@@ -1,7 +1,19 @@
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
-const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
+function summarizeSchemaIssue(issue: SchemaIssue.Issue): string {
+  switch (issue._tag) {
+    case "Filter":
+    case "Encoding":
+    case "Pointer":
+      return `${issue._tag}(${summarizeSchemaIssue(issue.issue)})`;
+    case "Composite":
+    case "AnyOf":
+      return `${issue._tag}(${issue.issues.map(summarizeSchemaIssue).join(",")})`;
+    default:
+      return issue._tag;
+  }
+}
 
 // ===============================
 // Core Persistence Errors
@@ -33,7 +45,7 @@ export class PersistenceDecodeError extends Schema.TaggedErrorClass<PersistenceD
   static fromSchemaError(operation: string, cause: Schema.SchemaError): PersistenceDecodeError {
     return new PersistenceDecodeError({
       operation,
-      issue: formatSchemaIssue(cause.issue),
+      issue: summarizeSchemaIssue(cause.issue),
       cause,
     });
   }

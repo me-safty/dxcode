@@ -4,7 +4,13 @@ import * as Schema from "effect/Schema";
 
 import { PersistenceDecodeError, PersistenceSqlError } from "./Errors.ts";
 
-const decodeString = Schema.decodeUnknownEffect(Schema.String);
+const decodeRuntimePayload = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    runtimePayload: Schema.Struct({
+      attempt: Schema.Number,
+    }),
+  }),
+);
 
 it("keeps SQL operation context without a tautological detail", () => {
   const cause = new Error("database unavailable");
@@ -19,9 +25,16 @@ it("keeps SQL operation context without a tautological detail", () => {
   assert.equal(error.message, "SQL error in AuthSessionRepository.list:query");
 });
 
-it.effect("maps schema errors with their formatted issue and exact cause", () =>
+it.effect("maps schema errors without copying rejected payloads into diagnostics", () =>
   Effect.gen(function* () {
-    const cause = yield* Effect.flip(decodeString(42));
+    const rejectedPayload = "runtime-payload-secret-sentinel";
+    const cause = yield* Effect.flip(
+      decodeRuntimePayload({
+        runtimePayload: {
+          attempt: rejectedPayload,
+        },
+      }),
+    );
     const error = PersistenceDecodeError.fromSchemaError(
       "ProviderSessionRuntimeRepository.list:decodeRows",
       cause,
@@ -29,6 +42,8 @@ it.effect("maps schema errors with their formatted issue and exact cause", () =>
 
     assert.equal(error.operation, "ProviderSessionRuntimeRepository.list:decodeRows");
     assert.equal(error.cause, cause);
-    assert.include(error.issue, "Expected string");
+    assert.notInclude(error.issue, rejectedPayload);
+    assert.notInclude(error.message, rejectedPayload);
+    assert.include(error.issue, "InvalidType");
   }),
 );
