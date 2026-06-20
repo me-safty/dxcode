@@ -12,6 +12,7 @@ import {
   CloudDpopProofError,
   CloudDpopStorageError,
   createDpopProof,
+  DpopStoredPublicKeyMismatchError,
   generateDpopProofKeyPair,
   isCloudDpopError,
   loadOrCreateDpopProofKeyPair,
@@ -106,6 +107,26 @@ describe("mobile DPoP", () => {
       expect(error.cause).toMatchObject({ _tag: "SchemaError" });
       expect(error.message).not.toContain(String(error.cause));
       expect(isCloudDpopError(error)).toBe(true);
+    }).pipe(Effect.provide(cryptoLayer)),
+  );
+
+  it.effect("preserves a structured cause when stored key material does not match", () =>
+    Effect.gen(function* () {
+      secureStore.clear();
+      const generated = yield* generateDpopProofKeyPair();
+      secureStore.set(
+        "t3code.cloud.dpop-proof-key",
+        JSON.stringify({ ...generated.privateJwk, x: generated.privateJwk.y }),
+      );
+
+      const error = yield* loadOrCreateDpopProofKeyPair().pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(CloudDpopStorageError);
+      expect(error).toMatchObject({
+        operation: "restore",
+        storageKey: "t3code.cloud.dpop-proof-key",
+      });
+      expect(error.cause).toBeInstanceOf(DpopStoredPublicKeyMismatchError);
     }).pipe(Effect.provide(cryptoLayer)),
   );
 

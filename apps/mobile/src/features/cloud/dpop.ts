@@ -63,6 +63,31 @@ export class CloudDpopProofError extends Schema.TaggedErrorClass<CloudDpopProofE
   }
 }
 
+export class DpopPublicKeyFormatError extends Schema.TaggedErrorClass<DpopPublicKeyFormatError>()(
+  "DpopPublicKeyFormatError",
+  {
+    byteLength: Schema.Number,
+    firstByte: Schema.optional(Schema.Number),
+  },
+) {
+  override get message(): string {
+    const prefix =
+      this.firstByte === undefined
+        ? "no prefix byte"
+        : `prefix 0x${this.firstByte.toString(16).padStart(2, "0")}`;
+    return `Expected a 65-byte uncompressed P-256 public key beginning with 0x04; received ${this.byteLength} bytes with ${prefix}.`;
+  }
+}
+
+export class DpopStoredPublicKeyMismatchError extends Schema.TaggedErrorClass<DpopStoredPublicKeyMismatchError>()(
+  "DpopStoredPublicKeyMismatchError",
+  {},
+) {
+  override get message(): string {
+    return "Stored DPoP private and public key material do not match.";
+  }
+}
+
 export const CloudDpopError = Schema.Union([
   CloudDpopStorageError,
   CloudDpopKeyError,
@@ -145,7 +170,10 @@ function base64UrlToBytes(value: string): Uint8Array {
 
 function publicJwkFromUncompressedPublicKey(publicKey: Uint8Array): DpopPublicJwk {
   if (publicKey.length !== 65 || publicKey[0] !== 0x04) {
-    throw new Error("Generated DPoP public key is not an uncompressed P-256 point.");
+    throw new DpopPublicKeyFormatError({
+      byteLength: publicKey.length,
+      ...(publicKey[0] === undefined ? {} : { firstByte: publicKey[0] }),
+    });
   }
   return {
     kty: "EC",
@@ -223,7 +251,7 @@ export function loadOrCreateDpopProofKeyPair(): Effect.Effect<
             p256.getPublicKey(privateKey, false),
           );
           if (publicJwk.x !== storedPrivateJwk.x || publicJwk.y !== storedPrivateJwk.y) {
-            throw new Error("Stored DPoP key does not match its public key.");
+            throw new DpopStoredPublicKeyMismatchError();
           }
           return { privateJwk: storedPrivateJwk, publicJwk };
         },
