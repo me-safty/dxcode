@@ -183,6 +183,39 @@ releaseDate: '2026-03-07T10:36:07.540Z'
       assert.equal(error.lineNumber, 1);
       assert.equal(error.reason, "unsupported line");
       assert.equal(error.offendingLine, "not yaml");
+      assert.equal(
+        error.message,
+        "Invalid macOS update manifest at latest-mac.yml:1: unsupported line. Input: not yaml",
+      );
+    }
+  });
+
+  it("identifies both sources when duplicate primary file entries conflict", () => {
+    const manifest = {
+      version: "1.0.0",
+      releaseDate: "2026-06-20T00:00:00.000Z",
+      extras: {},
+    };
+    const error = captureUpdateManifestError(() =>
+      mergePlatformUpdateManifests(
+        "win",
+        {
+          ...manifest,
+          files: [
+            { url: "app.exe", sha512: "first", size: 1 },
+            { url: "app.exe", sha512: "second", size: 2 },
+          ],
+        },
+        { ...manifest, files: [] },
+      ),
+    );
+
+    assert.equal(error._tag, "UpdateManifestFileConflictError");
+    if (error._tag === "UpdateManifestFileConflictError") {
+      assert.equal(error.existingManifest, "primary");
+      assert.equal(error.existingSha512, "first");
+      assert.equal(error.conflictingManifest, "primary");
+      assert.equal(error.conflictingSha512, "second");
     }
   });
 

@@ -36,7 +36,8 @@ export class UpdateManifestParseError extends Schema.TaggedErrorClass<UpdateMani
   override get message(): string {
     const location =
       this.lineNumber === undefined ? this.sourcePath : `${this.sourcePath}:${this.lineNumber}`;
-    return `Invalid ${this.platformLabel} update manifest at ${location}: ${this.reason}.`;
+    const input = this.offendingLine === undefined ? "" : ` Input: ${this.offendingLine}`;
+    return `Invalid ${this.platformLabel} update manifest at ${location}: ${this.reason}.${input}`;
   }
 }
 
@@ -72,10 +73,12 @@ export class UpdateManifestFileConflictError extends Schema.TaggedErrorClass<Upd
   {
     platformLabel: Schema.String,
     url: Schema.String,
-    primarySha512: Schema.String,
-    primarySize: Schema.Number,
-    secondarySha512: Schema.String,
-    secondarySize: Schema.Number,
+    existingManifest: Schema.Literals(["primary", "secondary"]),
+    existingSha512: Schema.String,
+    existingSize: Schema.Number,
+    conflictingManifest: Schema.Literals(["primary", "secondary"]),
+    conflictingSha512: Schema.String,
+    conflictingSize: Schema.Number,
   },
 ) {
   override get message(): string {
@@ -360,27 +363,37 @@ export function mergeUpdateManifests(
     });
   }
 
-  const filesByUrl = new Map<string, UpdateManifestFile>();
-  for (const file of [...primary.files, ...secondary.files]) {
-    const existing = filesByUrl.get(file.url);
-    if (existing && (existing.sha512 !== file.sha512 || existing.size !== file.size)) {
-      throw new UpdateManifestFileConflictError({
-        platformLabel,
-        url: file.url,
-        primarySha512: existing.sha512,
-        primarySize: existing.size,
-        secondarySha512: file.sha512,
-        secondarySize: file.size,
-      });
+  const filesByUrl = new Map<
+    string,
+    { readonly manifest: "primary" | "secondary"; readonly file: UpdateManifestFile }
+  >();
+  for (const [manifest, files] of [
+    ["primary", primary.files],
+    ["secondary", secondary.files],
+  ] as const) {
+    for (const file of files) {
+      const existing = filesByUrl.get(file.url);
+      if (existing && (existing.file.sha512 !== file.sha512 || existing.file.size !== file.size)) {
+        throw new UpdateManifestFileConflictError({
+          platformLabel,
+          url: file.url,
+          existingManifest: existing.manifest,
+          existingSha512: existing.file.sha512,
+          existingSize: existing.file.size,
+          conflictingManifest: manifest,
+          conflictingSha512: file.sha512,
+          conflictingSize: file.size,
+        });
+      }
+      filesByUrl.set(file.url, { manifest, file });
     }
-    filesByUrl.set(file.url, file);
   }
 
   return {
     version: primary.version,
     releaseDate:
       primary.releaseDate >= secondary.releaseDate ? primary.releaseDate : secondary.releaseDate,
-    files: [...filesByUrl.values()],
+    files: [...filesByUrl.values()].map(({ file }) => file),
     extras: mergeExtras(primary.extras, secondary.extras, platformLabel),
   };
 }
