@@ -4443,6 +4443,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const outsideFile = path.join(outsideDir, "outside.txt");
       yield* fs.writeFileString(outsideFile, "outside\n");
       yield* fs.symlink(outsideFile, path.join(workspaceDir, "linked-outside.txt"));
+      const resolvedOutsideFile = yield* fs.realPath(outsideFile);
 
       yield* buildAppUnderTest();
 
@@ -4485,7 +4486,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(results.read._tag === "Failure");
       assert.equal(
         results.read.failure.message,
-        "Failed to read workspace file: Workspace file path resolves outside the project root.",
+        `Failed to read workspace file: Workspace file 'linked-outside.txt' resolves outside workspace root '${workspaceDir}': ${resolvedOutsideFile}`,
       );
       assertTrue(results.browse._tag === "Failure");
       assert.equal(

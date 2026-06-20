@@ -170,6 +170,21 @@ function workspaceBrowseCompatibilityDetail(
   }
 }
 
+function workspaceFileReadCompatibilityDetail(
+  error: WorkspaceFileSystem.WorkspaceFileSystemError,
+): string {
+  switch (error._tag) {
+    case "WorkspaceFileSystemOperationError":
+      return legacyPlatformFailureDescription(error.cause);
+    case "WorkspaceFilePathEscapeError":
+    case "WorkspacePathNotFileError":
+    case "WorkspaceBinaryFileError":
+      return error.message;
+    default:
+      return unexpectedCompatibilityError(error);
+  }
+}
+
 function projectSetupScriptCompatibilityDetail(
   error: ProjectSetupScriptRunner.ProjectSetupScriptRunnerError,
 ): string {
@@ -1288,7 +1303,7 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
               Effect.mapError((cause) => {
                 const message = isWorkspacePathOutsideRootError(cause)
                   ? "Workspace file path must stay within the project root."
-                  : `Failed to read workspace file: ${legacyPlatformFailureDescription(cause.cause)}`;
+                  : `Failed to read workspace file: ${workspaceFileReadCompatibilityDetail(cause)}`;
                 return new ProjectReadFileError({ message, cause });
               }),
             ),
