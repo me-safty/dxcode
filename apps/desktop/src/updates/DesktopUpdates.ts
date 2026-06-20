@@ -84,6 +84,30 @@ export class DesktopUpdateChannelPersistenceError extends Schema.TaggedErrorClas
   }
 }
 
+export class DesktopUpdatePollerError extends Schema.TaggedErrorClass<DesktopUpdatePollerError>()(
+  "DesktopUpdatePollerError",
+  {
+    poller: Schema.Literals(["startup", "poll"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Desktop update ${this.poller} poller failed.`;
+  }
+}
+
+export class DesktopUpdateEventHandlingError extends Schema.TaggedErrorClass<DesktopUpdateEventHandlingError>()(
+  "DesktopUpdateEventHandlingError",
+  {
+    event: Schema.Literals(["update-available", "download-progress", "update-downloaded"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to handle desktop update ${this.event} event.`;
+  }
+}
+
 export type DesktopUpdateConfigureError = never;
 
 export const DesktopUpdateSetChannelError = Schema.Union([
@@ -405,17 +429,25 @@ export const make = Effect.gen(function* () {
   const startUpdatePollers: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
     yield* Effect.sleep(AUTO_UPDATE_STARTUP_DELAY).pipe(
       Effect.andThen(checkForUpdates("startup")),
-      Effect.catchCause((cause) =>
-        logUpdaterError("startup update check failed", { cause: Cause.pretty(cause) }),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.void;
+        }
+        const error = new DesktopUpdatePollerError({ poller: "startup", cause });
+        return logUpdaterError(error.message, { error });
+      }),
       Effect.forkScoped,
     );
     yield* Effect.sleep(AUTO_UPDATE_POLL_INTERVAL).pipe(
       Effect.andThen(checkForUpdates("poll")),
       Effect.forever,
-      Effect.catchCause((cause) =>
-        logUpdaterError("poll update check failed", { cause: Cause.pretty(cause) }),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.void;
+        }
+        const error = new DesktopUpdatePollerError({ poller: "poll", cause });
+        return logUpdaterError(error.message, { error });
+      }),
       Effect.forkScoped,
     );
   }).pipe(Effect.withSpan("desktop.updates.startPollers"));
@@ -446,11 +478,13 @@ export const make = Effect.gen(function* () {
           yield* logUpdaterInfo("update available", { version: info.version });
         }),
       ),
-      Effect.catchCause((cause) =>
-        logUpdaterWarning("ignored malformed update-available event", {
-          cause: Cause.pretty(cause),
-        }),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.void;
+        }
+        const error = new DesktopUpdateEventHandlingError({ event: "update-available", cause });
+        return logUpdaterWarning(error.message, { error });
+      }),
     );
   });
 
@@ -510,11 +544,13 @@ export const make = Effect.gen(function* () {
           }
         }),
       ),
-      Effect.catchCause((cause) =>
-        logUpdaterWarning("ignored malformed download-progress event", {
-          cause: Cause.pretty(cause),
-        }),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.void;
+        }
+        const error = new DesktopUpdateEventHandlingError({ event: "download-progress", cause });
+        return logUpdaterWarning(error.message, { error });
+      }),
     );
   });
 
@@ -529,11 +565,13 @@ export const make = Effect.gen(function* () {
           yield* logUpdaterInfo("update downloaded", { version: info.version });
         }),
       ),
-      Effect.catchCause((cause) =>
-        logUpdaterWarning("ignored malformed update-downloaded event", {
-          cause: Cause.pretty(cause),
-        }),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.void;
+        }
+        const error = new DesktopUpdateEventHandlingError({ event: "update-downloaded", cause });
+        return logUpdaterWarning(error.message, { error });
+      }),
     );
   });
 
