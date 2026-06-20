@@ -1186,16 +1186,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const legacyHistoryPath = (threadId: string) =>
     path.join(logsDir, `${legacySafeThreadId(threadId)}.log`);
 
-  const toTerminalHistoryError =
-    (operation: "read" | "truncate" | "migrate", threadId: string, terminalId: string) =>
-    (cause: unknown) =>
-      new TerminalHistoryError({
-        operation,
-        threadId,
-        terminalId,
-        cause,
-      });
-
   const readManagerState = SynchronizedRef.get(managerStateRef);
 
   const modifyManagerState = <A>(
@@ -1401,16 +1391,29 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     if (
       yield* fileSystem
         .exists(nextPath)
-        .pipe(Effect.mapError(toTerminalHistoryError("read", threadId, terminalId)))
+        .pipe(
+          Effect.mapError(
+            (cause) => new TerminalHistoryError({ operation: "read", threadId, terminalId, cause }),
+          ),
+        )
     ) {
       const raw = yield* fileSystem
         .readFileString(nextPath)
-        .pipe(Effect.mapError(toTerminalHistoryError("read", threadId, terminalId)));
+        .pipe(
+          Effect.mapError(
+            (cause) => new TerminalHistoryError({ operation: "read", threadId, terminalId, cause }),
+          ),
+        );
       const capped = capHistory(raw, historyLineLimit);
       if (capped !== raw) {
         yield* fileSystem
           .writeFileString(nextPath, capped)
-          .pipe(Effect.mapError(toTerminalHistoryError("truncate", threadId, terminalId)));
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new TerminalHistoryError({ operation: "truncate", threadId, terminalId, cause }),
+            ),
+          );
       }
       return capped;
     }
@@ -1423,18 +1426,33 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     if (
       !(yield* fileSystem
         .exists(legacyPath)
-        .pipe(Effect.mapError(toTerminalHistoryError("migrate", threadId, terminalId))))
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new TerminalHistoryError({ operation: "migrate", threadId, terminalId, cause }),
+          ),
+        ))
     ) {
       return "";
     }
 
     const raw = yield* fileSystem
       .readFileString(legacyPath)
-      .pipe(Effect.mapError(toTerminalHistoryError("migrate", threadId, terminalId)));
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new TerminalHistoryError({ operation: "migrate", threadId, terminalId, cause }),
+        ),
+      );
     const capped = capHistory(raw, historyLineLimit);
     yield* fileSystem
       .writeFileString(nextPath, capped)
-      .pipe(Effect.mapError(toTerminalHistoryError("migrate", threadId, terminalId)));
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new TerminalHistoryError({ operation: "migrate", threadId, terminalId, cause }),
+        ),
+      );
     yield* fileSystem.remove(legacyPath, { force: true }).pipe(
       Effect.catch((cleanupError) =>
         Effect.logWarning("failed to remove legacy terminal history", {
