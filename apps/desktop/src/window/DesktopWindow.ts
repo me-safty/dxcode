@@ -4,11 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
-import type {
-  BrowserWindow,
-  BrowserWindowConstructorOptions,
-  MenuItemConstructorOptions,
-} from "electron";
+import type * as Electron from "electron";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -28,7 +24,7 @@ const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
 
 type WindowTitleBarOptions = Pick<
-  BrowserWindowConstructorOptions,
+  Electron.BrowserWindowConstructorOptions,
   "titleBarOverlay" | "titleBarStyle" | "trafficLightPosition"
 >;
 
@@ -49,9 +45,9 @@ export type DesktopWindowError =
 export class DesktopWindow extends Context.Service<
   DesktopWindow,
   {
-    readonly createMain: Effect.Effect<BrowserWindow, DesktopWindowError>;
-    readonly ensureMain: Effect.Effect<BrowserWindow, DesktopWindowError>;
-    readonly revealOrCreateMain: Effect.Effect<BrowserWindow, DesktopWindowError>;
+    readonly createMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
+    readonly ensureMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
+    readonly revealOrCreateMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
     readonly activate: Effect.Effect<void, DesktopWindowError>;
     readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
     readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
@@ -112,7 +108,7 @@ function getWindowTitleBarOptions(
 }
 
 function syncWindowAppearance(
-  window: BrowserWindow,
+  window: Electron.BrowserWindow,
   shouldUseDarkColors: boolean,
   platform: NodeJS.Platform,
 ): Effect.Effect<void> {
@@ -159,7 +155,7 @@ export const make = Effect.gen(function* () {
   const runPromise = Effect.runPromiseWith(context);
 
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (): Effect.fn.Return<
-    BrowserWindow,
+    Electron.BrowserWindow,
     DesktopWindowError
   > {
     yield* previewManager.getBrowserSession();
@@ -210,7 +206,7 @@ export const make = Effect.gen(function* () {
     window.webContents.on("context-menu", (event, params) => {
       event.preventDefault();
 
-      const menuTemplate: MenuItemConstructorOptions[] = [];
+      const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
 
       if (params.misspelledWord) {
         for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {

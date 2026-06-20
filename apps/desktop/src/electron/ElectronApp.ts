@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
-import { app, type AboutPanelOptionsOptions, type App, type RelaunchOptions } from "electron";
+import * as Electron from "electron";
 
 export interface ElectronAppMetadata {
   readonly appVersion: string;
@@ -21,10 +21,15 @@ export class ElectronApp extends Context.Service<
     readonly whenReady: Effect.Effect<void>;
     readonly quit: Effect.Effect<void>;
     readonly exit: (code: number) => Effect.Effect<void>;
-    readonly relaunch: (options: RelaunchOptions) => Effect.Effect<void>;
-    readonly setPath: (name: Parameters<App["setPath"]>[0], path: string) => Effect.Effect<void>;
+    readonly relaunch: (options: Electron.RelaunchOptions) => Effect.Effect<void>;
+    readonly setPath: (
+      name: Parameters<Electron.App["setPath"]>[0],
+      path: string,
+    ) => Effect.Effect<void>;
     readonly setName: (name: string) => Effect.Effect<void>;
-    readonly setAboutPanelOptions: (options: AboutPanelOptionsOptions) => Effect.Effect<void>;
+    readonly setAboutPanelOptions: (
+      options: Electron.AboutPanelOptionsOptions,
+    ) => Effect.Effect<void>;
     readonly setAppUserModelId: (id: string) => Effect.Effect<void>;
     readonly requestSingleInstanceLock: Effect.Effect<boolean>;
     readonly isDefaultProtocolClient: (protocol: string) => Effect.Effect<boolean>;
@@ -49,78 +54,79 @@ const addScopedAppListener = <Args extends ReadonlyArray<unknown>>(
 ): Effect.Effect<void, never, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.sync(() => {
-      app.on(eventName as any, listener as any);
+      Electron.app.on(eventName as any, listener as any);
     }),
     () =>
       Effect.sync(() => {
-        app.removeListener(eventName as any, listener as any);
+        Electron.app.removeListener(eventName as any, listener as any);
       }),
   ).pipe(Effect.asVoid);
 
 export const make = ElectronApp.of({
   metadata: Effect.sync(() => ({
-    appVersion: app.getVersion(),
-    appPath: app.getAppPath(),
-    isPackaged: app.isPackaged,
+    appVersion: Electron.app.getVersion(),
+    appPath: Electron.app.getAppPath(),
+    isPackaged: Electron.app.isPackaged,
     resourcesPath: process.resourcesPath,
-    runningUnderArm64Translation: app.runningUnderARM64Translation === true,
+    runningUnderArm64Translation: Electron.app.runningUnderARM64Translation === true,
   })),
-  name: Effect.sync(() => app.name),
-  whenReady: Effect.promise(() => app.whenReady()).pipe(Effect.asVoid),
+  name: Effect.sync(() => Electron.app.name),
+  whenReady: Effect.promise(() => Electron.app.whenReady()).pipe(Effect.asVoid),
   quit: Effect.sync(() => {
-    app.quit();
+    Electron.app.quit();
   }),
   exit: (code) =>
     Effect.sync(() => {
-      app.exit(code);
+      Electron.app.exit(code);
     }),
   relaunch: (options) =>
     Effect.sync(() => {
-      app.relaunch(options);
+      Electron.app.relaunch(options);
     }),
   setPath: (name, path) =>
     Effect.sync(() => {
-      app.setPath(name, path);
+      Electron.app.setPath(name, path);
     }),
   setName: (name) =>
     Effect.sync(() => {
-      app.setName(name);
+      Electron.app.setName(name);
     }),
   setAboutPanelOptions: (options) =>
     Effect.sync(() => {
-      app.setAboutPanelOptions(options);
+      Electron.app.setAboutPanelOptions(options);
     }),
   setAppUserModelId: (id) =>
     Effect.sync(() => {
-      app.setAppUserModelId(id);
+      Electron.app.setAppUserModelId(id);
     }),
-  requestSingleInstanceLock: Effect.sync(() => app.requestSingleInstanceLock()),
-  isDefaultProtocolClient: (protocol) => Effect.sync(() => app.isDefaultProtocolClient(protocol)),
+  requestSingleInstanceLock: Effect.sync(() => Electron.app.requestSingleInstanceLock()),
+  isDefaultProtocolClient: (protocol) =>
+    Effect.sync(() => Electron.app.isDefaultProtocolClient(protocol)),
   setAsDefaultProtocolClient: (protocol, path, args) =>
     Effect.sync(() => {
       if (path === undefined) {
-        return app.setAsDefaultProtocolClient(protocol);
+        return Electron.app.setAsDefaultProtocolClient(protocol);
       }
-      return app.setAsDefaultProtocolClient(protocol, path, [...(args ?? [])]);
+      return Electron.app.setAsDefaultProtocolClient(protocol, path, [...(args ?? [])]);
     }),
   setDesktopName: (desktopName) =>
     Effect.sync(() => {
-      const linuxApp = app as App & {
+      const linuxApp = Electron.app as Electron.App & {
         setDesktopName?: (desktopName: string) => void;
       };
       linuxApp.setDesktopName?.(desktopName);
     }),
   setDockIcon: (iconPath) =>
     Effect.sync(() => {
-      app.dock?.setIcon(iconPath);
+      Electron.app.dock?.setIcon(iconPath);
     }),
   appendCommandLineSwitch: (switchName, value) =>
     Effect.sync(() => {
       if (value === undefined) {
-        app.commandLine.appendSwitch(switchName);
+        Electron.app.commandLine.appendSwitch(switchName);
         return;
       }
-      app.commandLine.appendSwitch(switchName, value);
+      Electron.app.commandLine.appendSwitch(switchName, value);
     }),
   on: addScopedAppListener,
 });

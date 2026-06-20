@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { BrowserWindow, MenuItem, MenuItemConstructorOptions, PopupOptions } from "electron";
+import type * as Electron from "electron";
 import { beforeEach, vi } from "vite-plus/test";
 
 const { buildFromTemplateMock, createFromNamedImageMock, setApplicationMenuMock } = vi.hoisted(
@@ -35,7 +35,7 @@ describe("ElectronMenu", () => {
     Effect.gen(function* () {
       const electronMenu = yield* ElectronMenu.ElectronMenu;
       const selectedItemId = yield* electronMenu.showContextMenu({
-        window: {} as BrowserWindow,
+        window: {} as Electron.BrowserWindow,
         items: [],
         position: Option.none(),
       });
@@ -47,21 +47,23 @@ describe("ElectronMenu", () => {
 
   it.effect("resolves with the clicked leaf item id", () =>
     Effect.gen(function* () {
-      buildFromTemplateMock.mockImplementation((template: MenuItemConstructorOptions[]) => ({
-        popup: () => {
-          const firstItem = template[0];
-          assert.isDefined(firstItem);
-          const click = firstItem.click;
-          if (!click) {
-            throw new Error("Expected menu item to have a click handler.");
-          }
-          click({} as MenuItem, {} as BrowserWindow, {} as KeyboardEvent);
-        },
-      }));
+      buildFromTemplateMock.mockImplementation(
+        (template: Electron.MenuItemConstructorOptions[]) => ({
+          popup: () => {
+            const firstItem = template[0];
+            assert.isDefined(firstItem);
+            const click = firstItem.click;
+            if (!click) {
+              throw new Error("Expected menu item to have a click handler.");
+            }
+            click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+          },
+        }),
+      );
 
       const electronMenu = yield* ElectronMenu.ElectronMenu;
       const selectedItemId = yield* electronMenu.showContextMenu({
-        window: {} as BrowserWindow,
+        window: {} as Electron.BrowserWindow,
         items: [{ id: "copy", label: "Copy" }],
         position: Option.none(),
       });
@@ -73,14 +75,14 @@ describe("ElectronMenu", () => {
   it.effect("resolves with none when the menu closes without a click", () =>
     Effect.gen(function* () {
       buildFromTemplateMock.mockImplementation(() => ({
-        popup: (options: PopupOptions) => {
+        popup: (options: Electron.PopupOptions) => {
           options.callback?.();
         },
       }));
 
       const electronMenu = yield* ElectronMenu.ElectronMenu;
       const selectedItemId = yield* electronMenu.showContextMenu({
-        window: {} as BrowserWindow,
+        window: {} as Electron.BrowserWindow,
         items: [{ id: "copy", label: "Copy" }],
         position: Option.some({ x: 10.8, y: 20.2 }),
       });
@@ -101,7 +103,7 @@ describe("ElectronMenu", () => {
 
       const electronMenu = yield* ElectronMenu.ElectronMenu;
       const popup = electronMenu.popupTemplate({
-        window: {} as BrowserWindow,
+        window: {} as Electron.BrowserWindow,
         template: [{ label: "Copy" }],
       });
 

@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
-import { nativeTheme } from "electron";
+import * as Electron from "electron";
 
 export class ElectronTheme extends Context.Service<
   ElectronTheme,
@@ -16,21 +16,21 @@ export class ElectronTheme extends Context.Service<
 >()("@t3tools/desktop/electron/ElectronTheme") {}
 
 export const make = ElectronTheme.of({
-  shouldUseDarkColors: Effect.sync(() => nativeTheme.shouldUseDarkColors),
+  shouldUseDarkColors: Effect.sync(() => Electron.nativeTheme.shouldUseDarkColors),
   setSource: (theme) =>
     Effect.suspend(() => {
-      nativeTheme.themeSource = theme;
+      Electron.nativeTheme.themeSource = theme;
       return Effect.void;
     }),
   onUpdated: (listener) =>
     Effect.acquireRelease(
       Effect.suspend(() => {
-        nativeTheme.on("updated", listener);
+        Electron.nativeTheme.on("updated", listener);
         return Effect.void;
       }),
       () =>
         Effect.suspend(() => {
-          nativeTheme.removeListener("updated", listener);
+          Electron.nativeTheme.removeListener("updated", listener);
           return Effect.void;
         }),
     ),

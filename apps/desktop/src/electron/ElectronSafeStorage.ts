@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import { safeStorage } from "electron";
+import * as Electron from "electron";
 
 const electronSafeStorageErrorFields = {
   cause: Schema.Defect(),
@@ -65,17 +65,17 @@ export class ElectronSafeStorage extends Context.Service<
 
 export const make = ElectronSafeStorage.of({
   isEncryptionAvailable: Effect.try({
-    try: () => safeStorage.isEncryptionAvailable(),
+    try: () => Electron.safeStorage.isEncryptionAvailable(),
     catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
   }),
   encryptString: (value) =>
     Effect.try({
-      try: () => safeStorage.encryptString(value),
+      try: () => Electron.safeStorage.encryptString(value),
       catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
     }),
   decryptString: (value) =>
     Effect.try({
-      try: () => safeStorage.decryptString(Buffer.from(value)),
+      try: () => Electron.safeStorage.decryptString(Buffer.from(value)),
       catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
     }),
 });

@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import type { BrowserWindow, MenuItem, MenuItemConstructorOptions } from "electron";
+import type * as Electron from "electron";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -79,7 +79,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 
 const makeElectronMenuLayer = (
-  applicationMenuTemplate: Deferred.Deferred<readonly MenuItemConstructorOptions[]>,
+  applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
 ) =>
   Layer.succeed(ElectronMenu.ElectronMenu, {
     setApplicationMenu: (template) =>
@@ -92,7 +92,8 @@ describe("DesktopApplicationMenu", () => {
   it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
-      const applicationMenuTemplate = yield* Deferred.make<readonly MenuItemConstructorOptions[]>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
 
       yield* Effect.gen(function* () {
         const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
@@ -127,7 +128,7 @@ describe("DesktopApplicationMenu", () => {
         throw new Error("Expected Settings menu item to have a click handler.");
       }
 
-      settingsClick({} as MenuItem, {} as BrowserWindow, {} as KeyboardEvent);
+      settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
     }),
   );

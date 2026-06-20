@@ -5,14 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import {
-  Menu,
-  nativeImage,
-  type BrowserWindow,
-  type MenuItemConstructorOptions,
-  type NativeImage,
-  type PopupOptions,
-} from "electron";
+import * as Electron from "electron";
 
 export interface ElectronMenuPosition {
   readonly x: number;
@@ -20,21 +13,21 @@ export interface ElectronMenuPosition {
 }
 
 export interface ElectronMenuContextInput {
-  readonly window: BrowserWindow;
+  readonly window: Electron.BrowserWindow;
   readonly items: readonly ContextMenuItem[];
   readonly position: Option.Option<ElectronMenuPosition>;
 }
 
 export interface ElectronMenuTemplateInput {
-  readonly window: BrowserWindow;
-  readonly template: readonly MenuItemConstructorOptions[];
+  readonly window: Electron.BrowserWindow;
+  readonly template: readonly Electron.MenuItemConstructorOptions[];
 }
 
 export class ElectronMenu extends Context.Service<
   ElectronMenu,
   {
     readonly setApplicationMenu: (
-      template: readonly MenuItemConstructorOptions[],
+      template: readonly Electron.MenuItemConstructorOptions[],
     ) => Effect.Effect<void>;
     readonly showContextMenu: (
       input: ElectronMenuContextInput,
@@ -88,9 +81,9 @@ const normalizePosition = (
 
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcessPlatform;
-  let destructiveMenuIconCache: Option.Option<NativeImage> | undefined;
+  let destructiveMenuIconCache: Option.Option<Electron.NativeImage> | undefined;
 
-  const getDestructiveMenuIcon = (): Option.Option<NativeImage> => {
+  const getDestructiveMenuIcon = (): Option.Option<Electron.NativeImage> => {
     if (platform !== "darwin") {
       return Option.none();
     }
@@ -99,7 +92,7 @@ export const make = Effect.gen(function* () {
     }
 
     try {
-      const icon = nativeImage.createFromNamedImage("trash").resize({
+      const icon = Electron.nativeImage.createFromNamedImage("trash").resize({
         width: 12,
         height: 12,
       });
@@ -115,8 +108,8 @@ export const make = Effect.gen(function* () {
   const buildTemplate = (
     entries: readonly ContextMenuItem[],
     complete: (selectedItemId: Option.Option<string>) => void,
-  ): MenuItemConstructorOptions[] => {
-    const template: MenuItemConstructorOptions[] = [];
+  ): Electron.MenuItemConstructorOptions[] => {
+    const template: Electron.MenuItemConstructorOptions[] = [];
     let hasInsertedDestructiveSeparator = false;
 
     for (const item of entries) {
@@ -125,7 +118,7 @@ export const make = Effect.gen(function* () {
         hasInsertedDestructiveSeparator = true;
       }
 
-      const itemOption: MenuItemConstructorOptions = {
+      const itemOption: Electron.MenuItemConstructorOptions = {
         label: item.label,
         enabled: !item.disabled,
       };
@@ -150,14 +143,14 @@ export const make = Effect.gen(function* () {
   return ElectronMenu.of({
     setApplicationMenu: (template) =>
       Effect.sync(() => {
-        Menu.setApplicationMenu(Menu.buildFromTemplate([...template]));
+        Electron.Menu.setApplicationMenu(Electron.Menu.buildFromTemplate([...template]));
       }),
     popupTemplate: (input) =>
       Effect.sync(() => {
         if (input.template.length === 0) {
           return;
         }
-        Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
+        Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
       }),
     showContextMenu: (input) =>
       Effect.callback<Option.Option<string>>((resume) => {
@@ -176,14 +169,14 @@ export const make = Effect.gen(function* () {
           resume(Effect.succeed(selectedItemId));
         };
 
-        const menu = Menu.buildFromTemplate(buildTemplate(normalizedItems, complete));
+        const menu = Electron.Menu.buildFromTemplate(buildTemplate(normalizedItems, complete));
         const popupPosition = normalizePosition(input.position);
         const popupOptions = Option.match(popupPosition, {
-          onNone: (): PopupOptions => ({
+          onNone: (): Electron.PopupOptions => ({
             window: input.window,
             callback: () => complete(Option.none()),
           }),
-          onSome: (position): PopupOptions => ({
+          onSome: (position): Electron.PopupOptions => ({
             window: input.window,
             x: position.x,
             y: position.y,

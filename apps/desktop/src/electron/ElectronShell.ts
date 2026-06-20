@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import { clipboard, shell } from "electron";
+import * as Electron from "electron";
 
 const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -34,7 +34,7 @@ export const make = ElectronShell.of({
       onNone: () => Effect.succeed(false),
       onSome: (externalUrl) =>
         Effect.promise(() =>
-          shell.openExternal(externalUrl).then(
+          Electron.shell.openExternal(externalUrl).then(
             () => true,
             () => false,
           ),
@@ -42,7 +42,7 @@ export const make = ElectronShell.of({
     }),
   copyText: (text) =>
     Effect.sync(() => {
-      clipboard.writeText(text);
+      Electron.clipboard.writeText(text);
     }),
 });
 

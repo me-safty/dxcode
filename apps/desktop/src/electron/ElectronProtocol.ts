@@ -5,7 +5,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
-import { net, protocol } from "electron";
+import * as Electron from "electron";
 
 export const DESKTOP_HOST = "app";
 export const DESKTOP_PRODUCTION_SCHEME = "t3code";
@@ -110,7 +110,7 @@ async function proxyRequest(
     init.body = request.body;
     (init as RequestInit & { duplex: "half" }).duplex = "half";
   }
-  const response = await net.fetch(targetUrl.toString(), init);
+  const response = await Electron.net.fetch(targetUrl.toString(), init);
   return withContentSecurityPolicy(response, contentSecurityPolicy);
 }
 
@@ -126,7 +126,7 @@ export const make = Effect.gen(function* () {
       yield* Effect.acquireRelease(
         Effect.try({
           try: () => {
-            protocol.handle(input.scheme, (request) =>
+            Electron.protocol.handle(input.scheme, (request) =>
               proxyRequest(request, input.targetOrigin, contentSecurityPolicy),
             );
           },
@@ -134,7 +134,7 @@ export const make = Effect.gen(function* () {
         }).pipe(Effect.andThen(Ref.set(registered, true))),
         () =>
           Effect.sync(() => {
-            protocol.unhandle(input.scheme);
+            Electron.protocol.unhandle(input.scheme);
           }).pipe(Effect.andThen(Ref.set(registered, false))),
       );
     },
