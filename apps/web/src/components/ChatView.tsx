@@ -36,7 +36,7 @@ import {
   createModelSelection,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
-import { stripManagedRuntimeEnvKeys } from "@t3tools/shared/launchEnv";
+import { stripManagedRuntimeEnvKeys } from "@t3tools/shared/projectLaunchEnv";
 import { projectScriptCwd } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";

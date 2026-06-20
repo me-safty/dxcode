@@ -46,7 +46,10 @@ import {
   withMetrics,
 } from "../../observability/Metrics.ts";
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import type {
+  ProviderAdapterShape,
+  ProviderSessionEnvironment,
+} from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
@@ -103,6 +106,23 @@ const decodeInputOrValidationError = <S extends Schema.Top>(input: {
     ),
   );
 };
+
+function readInternalProviderSessionEnv(input: unknown): ProviderSessionEnvironment | undefined {
+  if (typeof input !== "object" || input === null || !("env" in input)) {
+    return undefined;
+  }
+  const env = (input as { readonly env?: unknown }).env;
+  if (env === undefined) return undefined;
+  if (typeof env !== "object" || env === null || Array.isArray(env)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(env).filter(
+    (entry): entry is [string, string | undefined] =>
+      typeof entry[1] === "string" || entry[1] === undefined,
+  );
+  return Object.freeze(Object.fromEntries(entries));
+}
 
 function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "stopped" | "error" {
   switch (session.status) {
@@ -521,11 +541,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const startSession: ProviderServiceMethod<"startSession"> = Effect.fn("startSession")(
     function* (threadId, rawInput) {
-      const parsed = yield* decodeInputOrValidationError({
+      const parsedBase = yield* decodeInputOrValidationError({
         operation: "ProviderService.startSession",
         schema: ProviderSessionStartInput,
         payload: rawInput,
       });
+      const internalEnv = readInternalProviderSessionEnv(rawInput);
+      const parsed = {
+        ...parsedBase,
+        ...(internalEnv !== undefined ? { env: internalEnv } : {}),
+      };
 
       const resolvedInstanceId = yield* requireBindingInstanceId(
         "ProviderService.startSession",

@@ -49,8 +49,11 @@ import * as Semaphore from "effect/Semaphore";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
-import { LaunchEnv, type LaunchEnvShape } from "../launchEnv/Services/LaunchEnv.ts";
-import { isManagedRuntimeEnvKey } from "../launchEnv/launchEnvUtils.ts";
+import {
+  ProjectLaunchEnv,
+  type ProjectLaunchEnvShape,
+} from "../projectLaunchEnv/Services/ProjectLaunchEnv.ts";
+import { isManagedRuntimeEnvKey } from "../projectLaunchEnv/projectLaunchEnvUtils.ts";
 import {
   increment,
   terminalRestartsTotal,
@@ -1092,20 +1095,20 @@ interface TerminalManagerOptions {
     readonly threadId: string;
     readonly terminalId: string;
   }) => Effect.Effect<void>;
-  launchEnv: LaunchEnvShape;
+  projectLaunchEnv: ProjectLaunchEnvShape;
 }
 
 export const make = Effect.fn("TerminalManager.make")(function* () {
   const { terminalLogsDir } = yield* ServerConfig.ServerConfig;
   const ptyAdapter = yield* PtyAdapter.PtyAdapter;
   const portDiscovery = yield* PortScanner.PortDiscovery;
-  const launchEnv = yield* LaunchEnv;
+  const projectLaunchEnv = yield* ProjectLaunchEnv;
   return yield* makeWithOptions({
     logsDir: terminalLogsDir,
     ptyAdapter,
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
-    launchEnv,
+    projectLaunchEnv,
   });
 });
 
@@ -1116,9 +1119,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const path = yield* Path.Path;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
-  const launchEnv = options.launchEnv;
+  const projectLaunchEnv = options.projectLaunchEnv;
 
-  const toLaunchEnvInput = (
+  const toProjectLaunchEnvInput = (
     input: Pick<
       TerminalOpenInput | TerminalRestartInput | TerminalAttachInput,
       "threadId" | "terminalId" | "projectId" | "worktreePath" | "env"
@@ -1131,10 +1134,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     ...(input.env !== undefined ? { extraEnv: input.env } : {}),
   });
 
-  const applyLaunchEnv = <T extends TerminalOpenInput | TerminalRestartInput>(input: T) =>
-    launchEnv.resolveForThread(toLaunchEnvInput(input)).pipe(
+  const applyProjectLaunchEnv = <T extends TerminalOpenInput | TerminalRestartInput>(input: T) =>
+    projectLaunchEnv.resolveForThread(toProjectLaunchEnvInput(input)).pipe(
       Effect.catchTags({
-        LaunchEnvProjectLookupError: (error) =>
+        ProjectLaunchEnvProjectLookupError: (error) =>
           Effect.fail(
             new TerminalCwdError({
               cwd: error.projectId,
@@ -1142,7 +1145,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               cause: error.cause,
             }),
           ),
-        LaunchEnvThreadLookupError: (error) =>
+        ProjectLaunchEnvThreadLookupError: (error) =>
           Effect.fail(
             new TerminalSessionLookupError({
               threadId: error.threadId,
@@ -1157,15 +1160,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       })),
     );
 
-  const resolveLaunchInput = <T extends TerminalOpenInput | TerminalRestartInput>(input: T) =>
-    applyLaunchEnv(input).pipe(
-      Effect.catchTag("TerminalSessionLookupError", () => Effect.succeed(input)),
-    );
-
-  const applyLaunchEnvForAttach = (input: TerminalAttachInput) =>
-    launchEnv.resolveForThread(toLaunchEnvInput(input)).pipe(
+  const applyProjectLaunchEnvForAttach = (input: TerminalAttachInput) =>
+    projectLaunchEnv.resolveForThread(toProjectLaunchEnvInput(input)).pipe(
       Effect.catchTags({
-        LaunchEnvProjectLookupError: (error) =>
+        ProjectLaunchEnvProjectLookupError: (error) =>
           Effect.fail(
             new TerminalCwdError({
               cwd: error.projectId,
@@ -1173,7 +1171,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               cause: error.cause,
             }),
           ),
-        LaunchEnvThreadLookupError: (error) =>
+        ProjectLaunchEnvThreadLookupError: (error) =>
           Effect.fail(
             new TerminalSessionLookupError({
               threadId: error.threadId,
@@ -1190,11 +1188,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             env: resolved.env,
           }) satisfies TerminalAttachRuntimeInput,
       ),
-    );
-
-  const resolveAttachLaunchInput = (input: TerminalAttachInput) =>
-    applyLaunchEnvForAttach(input).pipe(
-      Effect.catchTag("TerminalSessionLookupError", () => Effect.succeed(input)),
     );
 
   const logsDir = options.logsDir;
@@ -2274,7 +2267,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     withThreadLock(
       input.threadId,
       Effect.gen(function* () {
-        const resolvedInput = yield* resolveLaunchInput(input);
+        const resolvedInput = yield* applyProjectLaunchEnv(input);
         return yield* openLocked(resolvedInput);
       }),
     );
@@ -2294,7 +2287,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             });
           }
 
-          const resolvedInput = yield* resolveAttachLaunchInput(input);
+          const resolvedInput = yield* applyProjectLaunchEnvForAttach(input);
           return yield* openLocked({
             ...resolvedInput,
             terminalId,
@@ -2307,7 +2300,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const targetRows = input.rows ?? session.rows;
 
         if (!session.process && input.cwd && input.restartIfNotRunning === true) {
-          const resolvedInput = yield* resolveAttachLaunchInput(input);
+          const resolvedInput = yield* applyProjectLaunchEnvForAttach(input);
           return yield* openLocked({
             ...resolvedInput,
             terminalId,
@@ -2558,7 +2551,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     withThreadLock(
       input.threadId,
       Effect.gen(function* () {
-        const resolvedInput = yield* resolveLaunchInput(input);
+        const resolvedInput = yield* applyProjectLaunchEnv(input);
         yield* increment(terminalRestartsTotal, { scope: "thread" });
         const terminalId = resolvedInput.terminalId;
         yield* assertValidCwd(resolvedInput.cwd);

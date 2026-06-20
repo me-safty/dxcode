@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { isManagedRuntimeEnvKey, stripManagedRuntimeEnvKeys } from "./launchEnv.ts";
+import { isManagedRuntimeEnvKey, stripManagedRuntimeEnvKeys } from "./projectLaunchEnv.ts";
 
-describe("launchEnv", () => {
+describe("projectLaunchEnv", () => {
   it("identifies managed runtime env keys", () => {
     expect(isManagedRuntimeEnvKey("T3CODE_PORT")).toBe(true);
     expect(isManagedRuntimeEnvKey("t3code_home")).toBe(true);
