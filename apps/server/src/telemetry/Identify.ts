@@ -26,7 +26,6 @@ export type TelemetryIdentitySource = typeof TelemetryIdentitySource.Type;
 export class TelemetryIdentityReadError extends Schema.TaggedErrorClass<TelemetryIdentityReadError>()(
   "TelemetryIdentityReadError",
   {
-    operation: Schema.Literal("read"),
     source: TelemetryIdentitySource,
     filePath: Schema.String,
     cause: Schema.Defect(),
@@ -40,7 +39,6 @@ export class TelemetryIdentityReadError extends Schema.TaggedErrorClass<Telemetr
 export class TelemetryIdentityDecodeError extends Schema.TaggedErrorClass<TelemetryIdentityDecodeError>()(
   "TelemetryIdentityDecodeError",
   {
-    operation: Schema.Literal("decode"),
     source: Schema.Literals(["codex", "claude"]),
     filePath: Schema.String,
     cause: Schema.Defect(),
@@ -54,7 +52,6 @@ export class TelemetryIdentityDecodeError extends Schema.TaggedErrorClass<Teleme
 export class TelemetryAnonymousIdGenerationError extends Schema.TaggedErrorClass<TelemetryAnonymousIdGenerationError>()(
   "TelemetryAnonymousIdGenerationError",
   {
-    operation: Schema.Literal("generate"),
     source: Schema.Literal("anonymous"),
     filePath: Schema.String,
     cause: Schema.Defect(),
@@ -68,7 +65,6 @@ export class TelemetryAnonymousIdGenerationError extends Schema.TaggedErrorClass
 export class TelemetryAnonymousIdPersistenceError extends Schema.TaggedErrorClass<TelemetryAnonymousIdPersistenceError>()(
   "TelemetryAnonymousIdPersistenceError",
   {
-    operation: Schema.Literal("write"),
     source: Schema.Literal("anonymous"),
     filePath: Schema.String,
     cause: Schema.Defect(),
@@ -82,7 +78,6 @@ export class TelemetryAnonymousIdPersistenceError extends Schema.TaggedErrorClas
 export class TelemetryIdentityHashError extends Schema.TaggedErrorClass<TelemetryIdentityHashError>()(
   "TelemetryIdentityHashError",
   {
-    operation: Schema.Literal("hash"),
     source: TelemetryIdentitySource,
     algorithm: Schema.Literal("SHA-256"),
     cause: Schema.Defect(),
@@ -110,7 +105,7 @@ function isNotFoundError(error: PlatformError.PlatformError): boolean {
 const logTelemetryIdentityError = (error: TelemetryIdentityError) =>
   Effect.logWarning(error.message).pipe(
     Effect.annotateLogs({
-      operation: error.operation,
+      errorTag: error._tag,
       source: error.source,
       ...("filePath" in error ? { filePath: error.filePath } : {}),
       cause: error,
@@ -130,7 +125,6 @@ const readIdentityFile = (
           ? Effect.succeed(Option.none<string>())
           : Effect.fail(
               new TelemetryIdentityReadError({
-                operation: "read",
                 source,
                 filePath,
                 cause,
@@ -146,7 +140,6 @@ const hash = (source: TelemetryIdentitySource, value: string) =>
     Effect.mapError(
       (cause) =>
         new TelemetryIdentityHashError({
-          operation: "hash",
           source,
           algorithm: "SHA-256",
           cause,
@@ -169,7 +162,6 @@ const getCodexAccountId = Effect.fn("TelemetryIdentity.getCodexAccountId")(funct
     Effect.mapError(
       (cause) =>
         new TelemetryIdentityDecodeError({
-          operation: "decode",
           source: "codex",
           filePath: authJsonPath,
           cause,
@@ -195,7 +187,6 @@ const getClaudeUserId = Effect.fn("TelemetryIdentity.getClaudeUserId")(function*
     Effect.mapError(
       (cause) =>
         new TelemetryIdentityDecodeError({
-          operation: "decode",
           source: "claude",
           filePath: claudeJsonPath,
           cause,
@@ -220,7 +211,6 @@ const upsertAnonymousId = Effect.gen(function* () {
     Effect.mapError(
       (cause) =>
         new TelemetryAnonymousIdGenerationError({
-          operation: "generate",
           source: "anonymous",
           filePath: anonymousIdPath,
           cause,
@@ -231,7 +221,6 @@ const upsertAnonymousId = Effect.gen(function* () {
     Effect.mapError(
       (cause) =>
         new TelemetryAnonymousIdPersistenceError({
-          operation: "write",
           source: "anonymous",
           filePath: anonymousIdPath,
           cause,

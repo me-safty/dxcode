@@ -35,9 +35,8 @@ const makeCaptureLogger = (logs: CapturedLog[]) =>
 const findIdentityLog = (
   logs: ReadonlyArray<CapturedLog>,
   source: Identify.TelemetryIdentitySource,
-  operation: string,
-) =>
-  logs.find((log) => log.annotations.source === source && log.annotations.operation === operation);
+  errorTag: string,
+) => logs.find((log) => log.annotations.source === source && log.annotations.errorTag === errorTag);
 
 it.layer(NodeServices.layer)("telemetry identity", (it) => {
   it.effect("uses the persisted anonymous id when provider identities are absent", () =>
@@ -82,7 +81,7 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
       const identifier = yield* Identify.getTelemetryIdentifierForHome(homeDirectory);
 
       assert.equal(identifier, sha256(anonymousId));
-      const decodeLog = findIdentityLog(logs, "codex", "decode");
+      const decodeLog = findIdentityLog(logs, "codex", "TelemetryIdentityDecodeError");
       assert.isDefined(decodeLog);
       assert.equal(
         decodeLog?.message,
@@ -125,7 +124,7 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
       assert.isNull(identifier);
       assert.deepEqual(yield* fileSystem.readDirectory(config.anonymousIdPath), []);
 
-      const readLog = findIdentityLog(logs, "anonymous", "read");
+      const readLog = findIdentityLog(logs, "anonymous", "TelemetryIdentityReadError");
       assert.isDefined(readLog);
       const error = readLog?.annotations.cause;
       assert.instanceOf(error, Identify.TelemetryIdentityReadError);
@@ -136,7 +135,9 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
           assert.notEqual(error.cause.reason._tag, "NotFound");
         }
       }
-      assert.isUndefined(findIdentityLog(logs, "anonymous", "write"));
+      assert.isUndefined(
+        findIdentityLog(logs, "anonymous", "TelemetryAnonymousIdPersistenceError"),
+      );
     }).pipe(
       Effect.provide(
         Layer.merge(
