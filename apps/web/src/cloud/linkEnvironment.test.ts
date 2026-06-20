@@ -576,13 +576,13 @@ describe("web cloud link environment client", () => {
             relayUrlInputLength: relayUrl.length,
             relayUrlProtocol: "https:",
             relayUrlHostname: "relay.example.test",
+            causeTag: "ManagedRelayRequestFailedError",
           });
           expect(logFields).not.toHaveProperty("relayUrl");
-          const logText = [
-            ...(capturedLogs[0]?.filter((value): value is string => typeof value === "string") ??
-              []),
-            String(logFields?.cause),
-          ].join(" ");
+          expect(logFields).not.toHaveProperty("cause");
+          const logText = capturedLogs[0]
+            ?.filter((value): value is string => typeof value === "string")
+            .join(" ");
           for (const secret of [
             "relay-user",
             "relay-password",

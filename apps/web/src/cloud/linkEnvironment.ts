@@ -605,7 +605,7 @@ export function unlinkPrimaryEnvironmentFromCloud(input: {
               ...(error.relayUrlHostname === undefined
                 ? {}
                 : { relayUrlHostname: error.relayUrlHostname }),
-              cause: error,
+              causeTag: cause._tag,
             });
           }),
         );
