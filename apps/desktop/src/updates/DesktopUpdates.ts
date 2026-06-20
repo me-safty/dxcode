@@ -108,6 +108,18 @@ export class DesktopUpdateEventHandlingError extends Schema.TaggedErrorClass<Des
   }
 }
 
+export class DesktopUpdaterReportedError extends Schema.TaggedErrorClass<DesktopUpdaterReportedError>()(
+  "DesktopUpdaterReportedError",
+  {
+    operation: Schema.Literals(["check", "download", "install", "background"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Desktop updater ${this.operation} operation reported an error.`;
+  }
+}
+
 export type DesktopUpdateConfigureError = never;
 
 export const DesktopUpdateSetChannelError = Schema.Union([
@@ -497,14 +509,20 @@ export const make = Effect.gen(function* () {
   }).pipe(Effect.withSpan("desktop.updates.handleUpdateNotAvailable"));
 
   const handleUpdaterError = Effect.fn("desktop.updates.handleUpdaterError")(function* (
-    error: unknown,
+    cause: unknown,
   ) {
-    const message = error instanceof Error ? error.message : String(error);
+    const activeAction = yield* activeUpdateAction;
+    const error = new DesktopUpdaterReportedError({
+      operation: Option.getOrElse(activeAction, () => "background" as const),
+      cause,
+    });
     if (yield* Ref.get(updateInstallInFlightRef)) {
       yield* Ref.set(updateInstallInFlightRef, false);
       yield* Ref.set(desktopState.quitting, false);
-      yield* updateState((current) => reduceDesktopUpdateStateOnInstallFailure(current, message));
-      yield* logUpdaterError("updater error", { message });
+      yield* updateState((current) =>
+        reduceDesktopUpdateStateOnInstallFailure(current, error.message),
+      );
+      yield* logUpdaterError(error.message, { error });
       return;
     }
 
@@ -514,7 +532,7 @@ export const make = Effect.gen(function* () {
       yield* updateState((current) => ({
         ...current,
         status: "error",
-        message,
+        message: error.message,
         checkedAt,
         downloadPercent: null,
         errorContext,
@@ -522,7 +540,7 @@ export const make = Effect.gen(function* () {
       }));
     }
 
-    yield* logUpdaterError("updater error", { message });
+    yield* logUpdaterError(error.message, { error });
   });
 
   const handleDownloadProgress = Effect.fn("desktop.updates.handleDownloadProgress")(function* (

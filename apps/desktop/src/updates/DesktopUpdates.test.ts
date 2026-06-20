@@ -200,6 +200,10 @@ describe("DesktopUpdates", () => {
       event: "download-progress",
       cause,
     });
+    const reportedError = new DesktopUpdates.DesktopUpdaterReportedError({
+      operation: "download",
+      cause,
+    });
 
     assert.strictEqual(pollerError.cause, cause);
     assert.equal(pollerError.poller, "startup");
@@ -207,6 +211,9 @@ describe("DesktopUpdates", () => {
     assert.strictEqual(eventError.cause, cause);
     assert.equal(eventError.event, "download-progress");
     assert.equal(eventError.message, "Failed to handle desktop update download-progress event.");
+    assert.strictEqual(reportedError.cause, cause);
+    assert.equal(reportedError.operation, "download");
+    assert.equal(reportedError.message, "Desktop updater download operation reported an error.");
   });
 
   it.effect("configures the updater and runs startup checks on the test clock", () => {
@@ -252,6 +259,28 @@ describe("DesktopUpdates", () => {
         assert.equal(state.availableVersion, "1.2.4");
         assert.isNotNull(state.checkedAt);
         assert.equal(harness.sentStates.at(-1)?.status, "available");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("keeps raw updater event failures out of update state", () => {
+    const harness = makeHarness();
+    const cause = new Error(
+      "request failed for https://user:secret@example.com/update?token=secret",
+    );
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("error", cause);
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "error");
+        assert.equal(state.message, "Desktop updater background operation reported an error.");
+        assert.notInclude(state.message ?? "", "secret");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
