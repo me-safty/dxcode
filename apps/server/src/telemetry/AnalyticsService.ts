@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -42,6 +43,20 @@ const TelemetryEnvConfig = Config.all({
   ),
   wslDistroName: Config.string("WSL_DISTRO_NAME").pipe(Config.option),
 });
+
+export class AnalyticsBatchDeliveryError extends Schema.TaggedErrorClass<AnalyticsBatchDeliveryError>()(
+  "AnalyticsBatchDeliveryError",
+  {
+    endpoint: Schema.String,
+    eventCount: Schema.Int.check(Schema.isGreaterThan(0)),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    const eventLabel = this.eventCount === 1 ? "event" : "events";
+    return `Failed to deliver ${this.eventCount} analytics ${eventLabel} to PostHog at '${this.endpoint}'.`;
+  }
+}
 
 export class AnalyticsService extends Context.Service<
   AnalyticsService,
@@ -75,6 +90,7 @@ export const make = Effect.gen(function* () {
   const clientType = serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
   const hostPlatform = yield* HostProcessPlatform;
   const hostArchitecture = yield* HostProcessArchitecture;
+  const batchEndpoint = `${telemetryConfig.posthogHost}/batch/`;
 
   const enqueueBufferedEvent = (event: string, properties?: Readonly<Record<string, unknown>>) =>
     Effect.flatMap(DateTime.now, (now) =>
@@ -126,10 +142,18 @@ export const make = Effect.gen(function* () {
       })),
     };
 
-    yield* HttpClientRequest.post(`${telemetryConfig.posthogHost}/batch/`).pipe(
+    yield* HttpClientRequest.post(batchEndpoint).pipe(
       HttpClientRequest.bodyJson(payload),
       Effect.flatMap(httpClient.execute),
       Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.mapError(
+        (cause) =>
+          new AnalyticsBatchDeliveryError({
+            endpoint: batchEndpoint,
+            eventCount: events.length,
+            cause,
+          }),
+      ),
     );
   });
 
@@ -149,14 +173,26 @@ export const make = Effect.gen(function* () {
       }
 
       yield* sendBatch(batch).pipe(
-        Effect.catch((error) =>
-          Ref.update(bufferRef, (current) => [...batch, ...current]).pipe(
-            Effect.flatMap(() => Effect.fail(error)),
-          ),
-        ),
+        Effect.catchTags({
+          AnalyticsBatchDeliveryError: (error) =>
+            Ref.update(bufferRef, (current) => [...batch, ...current]).pipe(
+              Effect.flatMap(() => Effect.fail(error)),
+            ),
+        }),
       );
     }
-  }).pipe(Effect.catch((cause) => Effect.logError("Failed to flush telemetry", { cause })));
+  }).pipe(
+    Effect.catchTags({
+      AnalyticsBatchDeliveryError: (error) =>
+        Effect.logError(error.message).pipe(
+          Effect.annotateLogs({
+            endpoint: error.endpoint,
+            eventCount: error.eventCount,
+            cause: error,
+          }),
+        ),
+    }),
+  );
 
   const record: AnalyticsService["Service"]["record"] = Effect.fn("AnalyticsService.record")(
     function* (event, properties) {
