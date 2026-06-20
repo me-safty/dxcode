@@ -2116,7 +2116,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const actualBytes = Buffer.byteLength(serialized, "utf8");
       if (actualBytes > MAX_EVALUATION_BYTES) {
         return yield* new PreviewAutomationResultTooLargeError({
-          operation: "evaluate",
           tabId,
           actualBytes,
           maximumBytes: MAX_EVALUATION_BYTES,
@@ -2191,7 +2190,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       yield* Effect.sleep(100);
     }
     return yield* new PreviewAutomationTimeoutError({
-      operation: "waitFor",
       tabId,
       timeoutMs,
     });
@@ -2458,7 +2456,6 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedErrorCla
 export class PreviewAutomationResultTooLargeError extends Schema.TaggedErrorClass<PreviewAutomationResultTooLargeError>()(
   "PreviewAutomationResultTooLargeError",
   {
-    operation: Schema.String,
     tabId: Schema.String,
     actualBytes: Schema.Number,
     maximumBytes: Schema.Number,
@@ -2469,20 +2466,19 @@ export class PreviewAutomationResultTooLargeError extends Schema.TaggedErrorClas
   }
 
   override get message(): string {
-    return `Preview automation ${this.operation} result was ${this.actualBytes} bytes; maximum is ${this.maximumBytes} bytes`;
+    return `Preview evaluation result in tab ${this.tabId} was ${this.actualBytes} bytes; maximum is ${this.maximumBytes} bytes`;
   }
 }
 
 export class PreviewAutomationTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationTimeoutError>()(
   "PreviewAutomationTimeoutError",
   {
-    operation: Schema.String,
     tabId: Schema.String,
     timeoutMs: Schema.Number,
   },
 ) {
   override get message(): string {
-    return `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms in tab ${this.tabId}`;
+    return `Preview condition did not match within ${this.timeoutMs}ms in tab ${this.tabId}`;
   }
 }
 
