@@ -7,6 +7,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 
@@ -21,12 +22,16 @@ import {
   EMPTY_VCS_ACTION_STATE,
   getVcsActionTargetKey,
   normalizeVcsActionProgressEvent,
+  VcsActionMissingTerminalEventError,
+  VcsActionRemoteFailureError,
+  VcsActionUnavailableError,
 } from "./vcsAction.ts";
 
 const actionId = "action-123";
 const action = "commit_push" as const;
 const cwd = "/repo";
 const environmentId = EnvironmentId.make("environment-1");
+const isVcsActionUnavailableError = Schema.is(VcsActionUnavailableError);
 const result: GitRunStackedActionResult = {
   action,
   branch: {
@@ -254,6 +259,7 @@ describe("vcsActionState", () => {
         target,
         transportActionId,
         actionId,
+        action,
         onProgress: (event) =>
           Effect.sync(() => {
             observed.push(event);
@@ -263,6 +269,84 @@ describe("vcsActionState", () => {
       expect(actual).toEqual(result);
       expect(observed.map((event) => event.actionId)).toEqual([actionId, actionId]);
       expect(observed.map((event) => event.kind)).toEqual(["phase_started", "action_finished"]);
+    }),
+  );
+
+  it.effect("retains remote failure context in a distinct error", () =>
+    Effect.gen(function* () {
+      const target = { environmentId, cwd };
+      const transportActionId = createVcsActionTransportId(target, actionId);
+      const error = yield* consumeVcsActionProgress(
+        Stream.fromIterable<GitActionProgressEvent>([
+          {
+            actionId: transportActionId,
+            action,
+            cwd,
+            kind: "action_failed",
+            phase: "push",
+            message: "The remote rejected the push.",
+          },
+        ]),
+        {
+          target,
+          transportActionId,
+          actionId,
+          action,
+          onProgress: () => Effect.void,
+        },
+      ).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(VcsActionRemoteFailureError);
+      expect(error).toMatchObject({
+        actionId,
+        transportActionId,
+        action,
+        environmentId,
+        cwd,
+        phase: "push",
+        detail: "The remote rejected the push.",
+      });
+      expect(error.message).toBe(
+        "Source control action 'commit_push' failed during push: The remote rejected the push.",
+      );
+    }),
+  );
+
+  it.effect("reports a missing terminal event as a protocol failure", () =>
+    Effect.gen(function* () {
+      const target = { environmentId, cwd };
+      const transportActionId = createVcsActionTransportId(target, actionId);
+      const error = yield* consumeVcsActionProgress(
+        Stream.fromIterable<GitActionProgressEvent>([
+          {
+            actionId: transportActionId,
+            action,
+            cwd,
+            kind: "phase_started",
+            phase: "commit",
+            label: "Committing...",
+          },
+        ]),
+        {
+          target,
+          transportActionId,
+          actionId,
+          action,
+          onProgress: () => Effect.void,
+        },
+      ).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(VcsActionMissingTerminalEventError);
+      expect(error).toMatchObject({
+        actionId,
+        transportActionId,
+        action,
+        environmentId,
+        cwd,
+      });
+      expect(error.message).toBe(
+        "Source control action 'commit_push' ended without a terminal result.",
+      );
     }),
   );
 
@@ -282,6 +366,38 @@ describe("vcsActionState", () => {
     expect(manager.runStackedAction(target)).toBe(manager.runStackedAction({ ...target }));
     expect(manager.runStackedAction(target)).not.toBe(manager.runStackedAction(otherTarget));
     expect(registry.get(manager.stateAtom(target))).toEqual(EMPTY_VCS_ACTION_STATE);
+
+    registry.dispose();
+  });
+
+  it("retains the incomplete target and operation when tracking is unavailable", async () => {
+    const runtime = Atom.runtime(Layer.empty) as unknown as Atom.AtomRuntime<
+      EnvironmentRegistry,
+      never
+    >;
+    const manager = createVcsActionManager(runtime);
+    const registry = AtomRegistry.make();
+    const result = await manager.track(
+      registry,
+      { environmentId, cwd: null },
+      { operation: "pull", label: "Pulling latest changes" },
+      async () => AsyncResult.success(undefined),
+    );
+
+    expect(AsyncResult.isFailure(result)).toBe(true);
+    if (AsyncResult.isFailure(result)) {
+      const error = Cause.squash(result.cause);
+      expect(error).toBeInstanceOf(VcsActionUnavailableError);
+      if (!isVcsActionUnavailableError(error)) {
+        throw error;
+      }
+      expect(error).toMatchObject({
+        operation: "pull",
+        environmentId,
+        cwd: null,
+      });
+      expect(error.message).toBe("Source control operation 'pull' is unavailable.");
+    }
 
     registry.dispose();
   });
