@@ -3,6 +3,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { make as makeJsonSchemaGenerator } from "@effect/openapi-generator/JsonSchemaGenerator";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -62,16 +63,32 @@ interface JsonSchemaFile {
   readonly repositoryPath: string;
 }
 
+const urlDiagnosticsSchema = {
+  urlInputLength: Schema.Number,
+  urlProtocol: Schema.optionalKey(Schema.String),
+  urlHostname: Schema.optionalKey(Schema.String),
+};
+
+function urlDiagnosticFields(url: string) {
+  const diagnostics = getUrlDiagnostics(url);
+  return {
+    urlInputLength: diagnostics.inputLength,
+    ...(diagnostics.protocol === undefined ? {} : { urlProtocol: diagnostics.protocol }),
+    ...(diagnostics.hostname === undefined ? {} : { urlHostname: diagnostics.hostname }),
+  };
+}
+
 export class GeneratorFetchError extends Schema.TaggedErrorClass<GeneratorFetchError>()(
   "GeneratorFetchError",
   {
-    url: Schema.String,
+    ...urlDiagnosticsSchema,
     stage: Schema.Literals(["request", "read-response"]),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to fetch ${this.url}.`;
+    const source = this.urlHostname === undefined ? "the configured source" : this.urlHostname;
+    return `Failed to fetch a Codex generator input from ${source} during ${this.stage}.`;
   }
 }
 
@@ -79,12 +96,12 @@ export class GeneratorDirectoryDecodeError extends Schema.TaggedErrorClass<Gener
   "GeneratorDirectoryDecodeError",
   {
     directoryPath: Schema.String,
-    url: Schema.String,
+    ...urlDiagnosticsSchema,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to decode the GitHub directory listing for ${this.directoryPath} from ${this.url}.`;
+    return `Failed to decode the GitHub directory listing for ${this.directoryPath}.`;
   }
 }
 
@@ -92,12 +109,12 @@ export class GeneratorSchemaDocumentDecodeError extends Schema.TaggedErrorClass<
   "GeneratorSchemaDocumentDecodeError",
   {
     repositoryPath: Schema.String,
-    url: Schema.String,
+    ...urlDiagnosticsSchema,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to decode the Codex schema document ${this.repositoryPath} from ${this.url}.`;
+    return `Failed to decode the Codex schema document ${this.repositoryPath}.`;
   }
 }
 
@@ -106,13 +123,13 @@ export class GeneratorFormatProcessError extends Schema.TaggedErrorClass<Generat
   {
     operation: Schema.Literals(["spawn", "wait-for-exit"]),
     command: Schema.String,
-    args: Schema.Array(Schema.String),
+    argumentCount: Schema.Number,
     generatedDir: Schema.String,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Generator formatting command ${JSON.stringify([this.command, ...this.args])} failed during ${this.operation} for ${this.generatedDir}.`;
+    return `Generator formatting command ${this.command} failed during ${this.operation} for ${this.generatedDir}.`;
   }
 }
 
@@ -120,13 +137,13 @@ export class GeneratorFormatExitError extends Schema.TaggedErrorClass<GeneratorF
   "GeneratorFormatExitError",
   {
     command: Schema.String,
-    args: Schema.Array(Schema.String),
+    argumentCount: Schema.Number,
     generatedDir: Schema.String,
     exitCode: Schema.Number,
   },
 ) {
   override get message(): string {
-    return `Generator formatting command ${JSON.stringify([this.command, ...this.args])} exited with code ${this.exitCode} for ${this.generatedDir}.`;
+    return `Generator formatting command ${this.command} exited with code ${this.exitCode} for ${this.generatedDir}.`;
   }
 }
 
@@ -270,10 +287,24 @@ export const fetchText = Effect.fn("fetchText")(function* (url: string) {
     HttpClientRequest.setHeader("user-agent", USER_AGENT),
     HttpClient.execute,
     Effect.flatMap(HttpClientResponse.filterStatusOk),
-    Effect.mapError((cause) => new GeneratorFetchError({ url, stage: "request", cause })),
+    Effect.mapError(
+      (cause) =>
+        new GeneratorFetchError({
+          ...urlDiagnosticFields(url),
+          stage: "request",
+          cause,
+        }),
+    ),
   );
   return yield* response.text.pipe(
-    Effect.mapError((cause) => new GeneratorFetchError({ url, stage: "read-response", cause })),
+    Effect.mapError(
+      (cause) =>
+        new GeneratorFetchError({
+          ...urlDiagnosticFields(url),
+          stage: "read-response",
+          cause,
+        }),
+    ),
   );
 });
 
@@ -283,7 +314,14 @@ export const fetchDirectoryEntries = Effect.fn("fetchDirectoryEntries")(function
   const url = `${GITHUB_API_BASE}/${directoryPath}?ref=${UPSTREAM_REF}`;
   const raw = yield* fetchText(url);
   return yield* decodeGithubContentEntries(raw).pipe(
-    Effect.mapError((cause) => new GeneratorDirectoryDecodeError({ directoryPath, url, cause })),
+    Effect.mapError(
+      (cause) =>
+        new GeneratorDirectoryDecodeError({
+          directoryPath,
+          ...urlDiagnosticFields(url),
+          cause,
+        }),
+    ),
   );
 });
 
@@ -297,7 +335,7 @@ export const decodeSchemaDocument = Effect.fn("decodeSchemaDocument")(function* 
       (cause) =>
         new GeneratorSchemaDocumentDecodeError({
           repositoryPath: input.repositoryPath,
-          url: input.url,
+          ...urlDiagnosticFields(input.url),
           cause,
         }),
     ),
@@ -316,7 +354,7 @@ export const formatGeneratedFiles = Effect.fn("formatGeneratedFiles")(function* 
         new GeneratorFormatProcessError({
           operation: "spawn",
           command,
-          args,
+          argumentCount: args.length,
           generatedDir,
           cause,
         }),
@@ -328,7 +366,7 @@ export const formatGeneratedFiles = Effect.fn("formatGeneratedFiles")(function* 
         new GeneratorFormatProcessError({
           operation: "wait-for-exit",
           command,
-          args,
+          argumentCount: args.length,
           generatedDir,
           cause,
         }),
@@ -338,7 +376,7 @@ export const formatGeneratedFiles = Effect.fn("formatGeneratedFiles")(function* 
   if (exitCode !== 0) {
     return yield* new GeneratorFormatExitError({
       command,
-      args,
+      argumentCount: args.length,
       generatedDir,
       exitCode,
     });

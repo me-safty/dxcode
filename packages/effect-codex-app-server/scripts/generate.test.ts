@@ -34,9 +34,10 @@ function processHandle(exitCode: number) {
 }
 
 describe("Codex schema generator errors", () => {
-  it.effect("retains the requested URL and HTTP cause when fetching fails", () =>
+  it.effect("retains safe URL diagnostics and the HTTP cause when fetching fails", () =>
     Effect.gen(function* () {
-      const url = "https://example.test/schema.json";
+      const url =
+        "https://generator-user:generator-password@example.test/private/schema.json?token=generator-secret#fragment";
       const error = yield* Generator.fetchText(url).pipe(
         Effect.provideService(
           HttpClient.HttpClient,
@@ -46,10 +47,18 @@ describe("Codex schema generator errors", () => {
       );
 
       assert(isGeneratorFetchError(error));
-      expect(error.url).toBe(url);
+      expect(error).toMatchObject({
+        urlInputLength: url.length,
+        urlProtocol: "https:",
+        urlHostname: "example.test",
+      });
+      expect(error).not.toHaveProperty("url");
       expect(error.stage).toBe("request");
       expect(error.cause).toBeDefined();
-      expect(error.message).toBe(`Failed to fetch ${url}.`);
+      const { cause: _, ...directDiagnostics } = error;
+      expect(JSON.stringify(directDiagnostics)).not.toMatch(
+        /generator-user|generator-password|private|token|generator-secret|fragment/,
+      );
     }),
   );
 
@@ -65,7 +74,12 @@ describe("Codex schema generator errors", () => {
 
       assert(isGeneratorDirectoryDecodeError(error));
       expect(error.directoryPath).toBe("schema/json/v2");
-      expect(error.url).toContain("/schema/json/v2?ref=");
+      expect(error).toMatchObject({
+        urlProtocol: "https:",
+        urlHostname: "api.github.com",
+      });
+      expect(error.urlInputLength).toBeGreaterThan(0);
+      expect(error).not.toHaveProperty("url");
       expect(error.cause).toBeDefined();
       expect(error.message).toContain("schema/json/v2");
     }),
@@ -83,7 +97,12 @@ describe("Codex schema generator errors", () => {
 
       assert(isGeneratorSchemaDocumentDecodeError(error));
       expect(error.repositoryPath).toBe(repositoryPath);
-      expect(error.url).toBe(url);
+      expect(error).toMatchObject({
+        urlInputLength: url.length,
+        urlProtocol: "https:",
+        urlHostname: "raw.example.test",
+      });
+      expect(error).not.toHaveProperty("url");
       expect(error.cause).toBeDefined();
       expect(error.message).toContain(repositoryPath);
     }),
@@ -104,12 +123,13 @@ describe("Codex schema generator errors", () => {
 
       assert(isGeneratorFormatExitError(error));
       expect(error.command).toBe("vp");
-      expect(error.args).toEqual(["fmt", generatedDir, "--write"]);
+      expect(error.argumentCount).toBe(3);
+      expect(error).not.toHaveProperty("args");
       expect(error.generatedDir).toBe(generatedDir);
       expect(error.exitCode).toBe(17);
       expect(error.message).toContain("17");
       expect(spawned?.command).toBe("vp");
-      expect(spawned?.args).toEqual(error.args);
+      expect(spawned?.args).toEqual(["fmt", generatedDir, "--write"]);
     }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
   });
 });
