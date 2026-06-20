@@ -92,7 +92,6 @@ export const decodeNotificationPayload = <A, I>(
     Effect.mapError(
       (error) =>
         new CodexError.CodexAppServerProtocolParseError({
-          detail: "Invalid notification payload",
           method,
           operation: "decode-notification-payload",
           cause: error,

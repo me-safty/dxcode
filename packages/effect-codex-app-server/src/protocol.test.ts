@@ -212,14 +212,18 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
       const bigintError = yield* transport.notify("x/test", 1n).pipe(Effect.flip);
       assert.instanceOf(bigintError, CodexError.CodexAppServerProtocolParseError);
       assert.equal(bigintError.operation, "encode-wire-message");
-      assert.equal(bigintError.detail, "Failed to encode Codex App Server message");
+      assert.exists(bigintError.cause);
+      assert.equal(
+        bigintError.message,
+        "Codex App Server protocol operation 'encode-wire-message' failed.",
+      );
 
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       const circularError = yield* transport.notify("x/test", circular).pipe(Effect.flip);
       assert.instanceOf(circularError, CodexError.CodexAppServerProtocolParseError);
       assert.equal(circularError.operation, "encode-wire-message");
-      assert.equal(circularError.detail, "Failed to encode Codex App Server message");
+      assert.exists(circularError.cause);
     }),
   );
 

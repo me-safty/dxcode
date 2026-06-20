@@ -18,7 +18,10 @@ export const CodexAppServerProtocolParseOperation = Schema.Literals([
   "decode-wire-message",
   "route-wire-message",
   "decode-notification-payload",
+  "decode-request-payload",
+  "decode-response-payload",
 ]);
+export type CodexAppServerProtocolParseOperation = typeof CodexAppServerProtocolParseOperation.Type;
 
 export const CodexAppServerTransportOperation = Schema.Literals([
   "read-input-stream",
@@ -71,16 +74,15 @@ export class CodexAppServerProcessExitedError extends Schema.TaggedErrorClass<Co
 export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<CodexAppServerProtocolParseError>()(
   "CodexAppServerProtocolParseError",
   {
-    detail: Schema.String,
+    operation: CodexAppServerProtocolParseOperation,
     method: Schema.optionalKey(Schema.String),
-    operation: Schema.optionalKey(CodexAppServerProtocolParseOperation),
+    detail: Schema.optionalKey(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
-    const operation = this.operation === undefined ? "" : ` during '${this.operation}'`;
     const method = this.method === undefined ? "" : ` for method '${this.method}'`;
-    return `Failed to parse Codex App Server protocol message${operation}${method}: ${this.detail}`;
+    return `Codex App Server protocol operation '${this.operation}' failed${method}.`;
   }
 }
 

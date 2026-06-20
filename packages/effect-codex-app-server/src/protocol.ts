@@ -97,7 +97,6 @@ const encodeWireMessage = (
     Effect.mapError(
       (cause) =>
         new CodexError.CodexAppServerProtocolParseError({
-          detail: "Failed to encode Codex App Server message",
           operation: "encode-wire-message",
           cause,
         }),
@@ -111,7 +110,6 @@ const decodeWireMessage = (
     Effect.mapError(
       (cause) =>
         new CodexError.CodexAppServerProtocolParseError({
-          detail: "Failed to decode Codex App Server wire message",
           operation: "decode-wire-message",
           cause,
         }),
@@ -330,6 +328,8 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             direction: "incoming",
             stage: "decode_failed",
             payload: {
+              operation: error.operation,
+              ...(error.method === undefined ? {} : { method: error.method }),
               detail: error.detail,
               cause: error.cause,
             },

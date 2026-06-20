@@ -390,7 +390,15 @@ export function buildTurnStartParams(input: {
     ...(input.effort ? { effort: input.effort } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),
   }).pipe(
-    Effect.mapError((error) => toProtocolParseError("Invalid turn/start request payload", error)),
+    Effect.mapError(
+      (cause) =>
+        new CodexErrors.CodexAppServerProtocolParseError({
+          operation: "decode-request-payload",
+          method: "turn/start",
+          detail: formatSchemaIssue(cause.issue),
+          cause,
+        }),
+    ),
   );
 }
 
@@ -656,16 +664,6 @@ function toCodexUserInputAnswers(
       ),
     { concurrency: 1 },
   ).pipe(Effect.map((entries) => Object.fromEntries(entries)));
-}
-
-function toProtocolParseError(
-  detail: string,
-  cause: Schema.SchemaError,
-): CodexErrors.CodexAppServerProtocolParseError {
-  return new CodexErrors.CodexAppServerProtocolParseError({
-    detail: `${detail}: ${formatSchemaIssue(cause.issue)}`,
-    cause,
-  });
 }
 
 function currentProviderThreadId(session: ProviderSession): string | undefined {
@@ -1295,8 +1293,14 @@ export const makeCodexSessionRuntime = (
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
-            Effect.mapError((error) =>
-              toProtocolParseError("Invalid turn/start response payload", error),
+            Effect.mapError(
+              (error) =>
+                new CodexErrors.CodexAppServerProtocolParseError({
+                  operation: "decode-response-payload",
+                  method: "turn/start",
+                  detail: formatSchemaIssue(error.issue),
+                  cause: error,
+                }),
             ),
           );
           const turnId = TurnId.make(response.turn.id);
