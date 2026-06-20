@@ -1,7 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 
-import { ConnectionsSettings } from "../components/settings/ConnectionsSettings";
+const ConnectionsSettings = lazy(() =>
+  import("../components/settings/ConnectionsSettings").then((module) => ({
+    default: module.ConnectionsSettings,
+  })),
+);
+
+function ConnectionsSettingsRoute() {
+  return (
+    <Suspense fallback={null}>
+      <ConnectionsSettings />
+    </Suspense>
+  );
+}
 
 export const Route = createFileRoute("/settings/connections")({
-  component: ConnectionsSettings,
+  component: ConnectionsSettingsRoute,
 });

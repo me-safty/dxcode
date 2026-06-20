@@ -257,4 +257,30 @@ describe("environmentBootstrap", () => {
       message: "The window-origin primary environment target uses unsupported protocol file:.",
     });
   });
+
+  it("uses the desktop custom scheme proxy for desktop-managed descriptor requests", async () => {
+    writePrimaryEnvironmentDescriptor(BASE_ENVIRONMENT);
+    vi.stubGlobal("window", {
+      location: new URL("t3code-dev://app/"),
+      history: {
+        replaceState: vi.fn(),
+      },
+      desktopBridge: {
+        getLocalEnvironmentBootstrap: () => ({
+          label: "Local environment",
+          httpBaseUrl: "http://127.0.0.1:3773",
+          wsBaseUrl: "ws://127.0.0.1:3773",
+          bootstrapToken: "desktop-bootstrap-token",
+        }),
+      },
+    });
+
+    expect(resolvePrimaryEnvironmentHttpUrl("/.well-known/t3/environment")).toBe(
+      "t3code-dev://app/.well-known/t3/environment",
+    );
+    expect(getPrimaryKnownEnvironment()?.target).toEqual({
+      httpBaseUrl: "t3code-dev://app/",
+      wsBaseUrl: "ws://127.0.0.1:3773/",
+    });
+  });
 });

@@ -1,5 +1,4 @@
 import { WorkerPoolContextProvider, useWorkerPool } from "@pierre/diffs/react";
-import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import * as Schema from "effect/Schema";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useTheme } from "../hooks/useTheme";
@@ -13,6 +12,12 @@ export class DiffWorkerError extends Schema.TaggedErrorClass<DiffWorkerError>()(
   override get message(): string {
     return `Diff worker operation ${this.operation} failed for theme ${this.themeName}.`;
   }
+}
+
+function createDiffsWorker() {
+  return new Worker(new URL("@pierre/diffs/worker/worker-portable.js", import.meta.url), {
+    type: "module",
+  });
 }
 
 function DiffWorkerThemeSync({ themeName }: { themeName: DiffThemeName }) {
@@ -59,7 +64,7 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode }) {
       poolOptions={{
         workerFactory: () => {
           try {
-            return new DiffsWorker();
+            return createDiffsWorker();
           } catch (cause) {
             throw new DiffWorkerError({
               operation: "create-worker",

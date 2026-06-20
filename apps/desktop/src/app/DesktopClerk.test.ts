@@ -53,6 +53,26 @@ describe("DesktopClerk", () => {
     assert.equal(DesktopClerk.resolveDesktopClerkFrontendApiHostname("invalid"), undefined);
   });
 
+  it.effect("skips acquiring the SDK bridge when Clerk is disabled", () => {
+    const environment = DesktopEnvironment.DesktopEnvironment.of({
+      stateDir: "/tmp/t3-state",
+      isDevelopment: true,
+    } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
+
+    return Effect.gen(function* () {
+      yield* Effect.scoped(
+        Layer.build(
+          DesktopClerk.makeDesktopClerkLayer(false).pipe(
+            Layer.provide(Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment)),
+          ),
+        ),
+      );
+
+      assert.deepEqual(storageMock.mock.calls, []);
+      assert.deepEqual(createClerkBridgeMock.mock.calls, []);
+    });
+  });
+
   it.effect("acquires and releases the SDK bridge with the layer", () => {
     const cleanup = vi.fn();
     storageMock.mockReturnValue(storageAdapter);

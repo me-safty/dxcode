@@ -228,6 +228,23 @@ describe("resolveInitialServerAuthGateState", () => {
     );
   });
 
+  it("uses the desktop custom scheme proxy for desktop-managed auth requests", async () => {
+    const testWindow = installTestBrowser("t3code-dev://app/");
+    testWindow.desktopBridge = {
+      getLocalEnvironmentBootstrap: () => ({
+        label: "Local environment",
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+      }),
+    } as DesktopBridge;
+
+    const { resolvePrimaryEnvironmentHttpUrl } = await import("./environments/primary");
+
+    expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
+      "t3code-dev://app/api/auth/session",
+    );
+  });
+
   it("returns a requires-auth state instead of throwing when no bootstrap credential exists", async () => {
     await installAuthApi({ session: () => unauthenticatedSession(LOOPBACK_AUTH) });
     const { resolveInitialServerAuthGateState } = await import("./environments/primary");

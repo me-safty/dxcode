@@ -86,7 +86,6 @@ overrides:
   # upstream Vitest peer and create a second Vite/Vitest toolchain.
   "@effect/vitest>vitest": "-"
   "@expo/metro-config": 56.0.13
-  "@pierre/diffs>@shikijs/transformers": ^4.2.0
   "@types/node": "catalog:"
   effect: "catalog:"
   vite: "catalog:"

@@ -102,6 +102,10 @@ function parseTargetUrl(input: {
   }
 }
 
+function currentWindowBaseUrl(): string {
+  return window.location.origin === "null" ? window.location.href : window.location.origin;
+}
+
 function normalizeBaseUrl(
   rawValue: string,
   source: PrimaryEnvironmentTargetSource,
@@ -109,7 +113,7 @@ function normalizeBaseUrl(
 ): string {
   return parseTargetUrl({
     rawValue,
-    baseUrl: window.location.origin,
+    baseUrl: currentWindowBaseUrl(),
     source,
     urlKind,
   }).toString();
@@ -143,11 +147,17 @@ export function isLoopbackHostname(hostname: string): boolean {
 
 function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): string {
   const httpBaseUrl = primaryTarget.target.httpBaseUrl;
-  const configuredDevServerUrl = import.meta.env.VITE_DEV_SERVER_URL?.trim();
-  if (!configuredDevServerUrl) {
-    return httpBaseUrl;
-  }
 
+function effectiveUrlOrigin(url: URL): string {
+  return url.origin === "null" ? `${url.protocol}//${url.host}` : url.origin;
+}
+
+function originBaseUrl(origin: string): string {
+  return origin.endsWith("/") ? origin : `${origin}/`;
+}
+
+function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): string {
+  const httpBaseUrl = primaryTarget.target.httpBaseUrl;
   const currentUrl = parseTargetUrl({
     rawValue: window.location.href,
     source: "window-origin",
@@ -158,27 +168,38 @@ function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): str
     source: primaryTarget.source,
     urlKind: "http-base-url",
   });
+  const currentOrigin = effectiveUrlOrigin(currentUrl);
+  const isCurrentOriginDesktopDevApp =
+    currentUrl.protocol === "t3code-dev:" && currentUrl.host === "app";
+
+  if (currentOrigin === targetUrl.origin || !isLoopbackHostname(targetUrl.hostname)) {
+    return httpBaseUrl;
+  }
+
+  if (isCurrentOriginDesktopDevApp) {
+    return originBaseUrl(currentOrigin);
+  }
+
+  const configuredDevServerUrl = import.meta.env.VITE_DEV_SERVER_URL?.trim();
+  if (!configuredDevServerUrl) {
+    return httpBaseUrl;
+  }
+
   const devServerUrl = parseTargetUrl({
     rawValue: configuredDevServerUrl,
-    baseUrl: currentUrl.origin,
+    baseUrl: originBaseUrl(currentOrigin),
     source: "configured",
     urlKind: "development-server-url",
   });
 
   const isCurrentOriginDevServer =
     (currentUrl.protocol === "http:" || currentUrl.protocol === "https:") &&
-    currentUrl.origin === devServerUrl.origin;
-
-  if (
-    !isCurrentOriginDevServer ||
-    currentUrl.origin === targetUrl.origin ||
-    !isLoopbackHostname(currentUrl.hostname) ||
-    !isLoopbackHostname(targetUrl.hostname)
-  ) {
+    currentOrigin === devServerUrl.origin;
+  if (!isCurrentOriginDevServer || !isLoopbackHostname(currentUrl.hostname)) {
     return httpBaseUrl;
   }
 
-  return currentUrl.origin;
+  return originBaseUrl(currentOrigin);
 }
 
 function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
@@ -253,11 +274,21 @@ function resolveDesktopPrimaryTarget(): PrimaryEnvironmentTarget | null {
   return {
     source: "desktop-managed",
     target: {
-      httpBaseUrl: normalizeBaseUrl(
-        desktopBootstrap.httpBaseUrl,
-        "desktop-managed",
-        "http-base-url",
-      ),
+      httpBaseUrl: resolveHttpRequestBaseUrl({
+        source: "desktop-managed",
+        target: {
+          httpBaseUrl: normalizeBaseUrl(
+            desktopBootstrap.httpBaseUrl,
+            "desktop-managed",
+            "http-base-url",
+          ),
+          wsBaseUrl: normalizeBaseUrl(
+            desktopBootstrap.wsBaseUrl,
+            "desktop-managed",
+            "websocket-base-url",
+          ),
+        },
+      }),
       wsBaseUrl: normalizeBaseUrl(
         desktopBootstrap.wsBaseUrl,
         "desktop-managed",

@@ -53,6 +53,12 @@ import * as DesktopWindow from "./window/DesktopWindow.ts";
 import * as DesktopWslBackend from "./wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "./wsl/DesktopWslEnvironment.ts";
 
+const isDesktopDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+
+if (!DesktopClerk.desktopClerkBridgeEnabled) {
+  ElectronProtocol.registerDesktopSchemePrivileges(isDesktopDevelopment);
+}
+
 const desktopEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
     const metadata = yield* Effect.service(ElectronApp.ElectronApp).pipe(
@@ -107,7 +113,7 @@ const electronLayer = Layer.mergeAll(
   ElectronApp.layer,
   ElectronDialog.layer,
   ElectronMenu.layer,
-  ElectronProtocol.layer,
+  ElectronProtocol.layer.pipe(Layer.provide(NodeHttpClient.layerUndici)),
   ElectronSafeStorage.layer,
   ElectronShell.layer,
   ElectronTheme.layer,

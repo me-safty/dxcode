@@ -57,7 +57,6 @@ overrides:
   '@effect/vitest': 4.0.0-beta.78
   '@effect/vitest>vitest': '-'
   '@expo/metro-config': 56.0.13
-  '@pierre/diffs>@shikijs/transformers': ^4.2.0
   '@types/node': 24.12.4
   effect: 4.0.0-beta.78
   vite: npm:@voidzero-dev/vite-plus-core@0.2.1

@@ -71,6 +71,8 @@ export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHos
     : __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__,
 );
 
+export const desktopClerkBridgeEnabled = Boolean(desktopClerkFrontendApiHostname);
+
 export function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   return createClerkBridge({
     storage: storage({ path: stateDir }),
@@ -82,54 +84,60 @@ export function createDesktopClerkBridge(stateDir: string, isDevelopment: boolea
   });
 }
 
-export const make = Effect.gen(function* () {
-  const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  yield* Effect.acquireRelease(
-    Effect.try({
-      try: () => createDesktopClerkBridge(environment.stateDir, environment.isDevelopment),
-      catch: (cause) =>
-        new DesktopClerkBridgeInitializationError({
-          stateDir: environment.stateDir,
-          isDevelopment: environment.isDevelopment,
-          cause,
+export function makeDesktopClerkLayer(enabled = desktopClerkBridgeEnabled) {
+  const make = Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    if (enabled) {
+      yield* Effect.acquireRelease(
+        Effect.try({
+          try: () => createDesktopClerkBridge(environment.stateDir, environment.isDevelopment),
+          catch: (cause) =>
+            new DesktopClerkBridgeInitializationError({
+              stateDir: environment.stateDir,
+              isDevelopment: environment.isDevelopment,
+              cause,
+            }),
         }),
-    }),
-    (bridge) =>
-      Effect.try({
-        try: () => bridge.cleanup(),
-        catch: (cause) =>
-          new DesktopClerkBridgeCleanupError({
-            stateDir: environment.stateDir,
-            isDevelopment: environment.isDevelopment,
-            cause,
-          }),
-      }).pipe(Effect.orDie),
-  );
+        (bridge) =>
+          Effect.try({
+            try: () => bridge.cleanup(),
+            catch: (cause) =>
+              new DesktopClerkBridgeCleanupError({
+                stateDir: environment.stateDir,
+                isDevelopment: environment.isDevelopment,
+                cause,
+              }),
+          }).pipe(Effect.orDie),
+      );
+    }
 
-  return DesktopClerk.of({
-    configure: Effect.gen(function* () {
-      const electronApp = yield* ElectronApp.ElectronApp;
-      const electronWindow = yield* ElectronWindow.ElectronWindow;
-      const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
-      const runPromise = Effect.runPromiseWith(context);
+    return DesktopClerk.of({
+      configure: Effect.gen(function* () {
+        const electronApp = yield* ElectronApp.ElectronApp;
+        const electronWindow = yield* ElectronWindow.ElectronWindow;
+        const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
+        const runPromise = Effect.runPromiseWith(context);
 
-      if (!(yield* electronApp.requestSingleInstanceLock)) {
-        yield* electronApp.quit;
-        return yield* Effect.interrupt;
-      }
+        if (!(yield* electronApp.requestSingleInstanceLock)) {
+          yield* electronApp.quit;
+          return yield* Effect.interrupt;
+        }
 
-      yield* electronApp.on("second-instance", () => {
-        void runPromise(
-          Effect.gen(function* () {
-            const mainWindow = yield* electronWindow.currentMainOrFirst;
-            if (Option.isSome(mainWindow)) {
-              yield* electronWindow.reveal(mainWindow.value);
-            }
-          }),
-        );
-      });
-    }).pipe(Effect.withSpan("desktop.clerk.configure")),
+        yield* electronApp.on("second-instance", () => {
+          void runPromise(
+            Effect.gen(function* () {
+              const mainWindow = yield* electronWindow.currentMainOrFirst;
+              if (Option.isSome(mainWindow)) {
+                yield* electronWindow.reveal(mainWindow.value);
+              }
+            }),
+          );
+        });
+      }).pipe(Effect.withSpan("desktop.clerk.configure")),
+    });
   });
-});
 
-export const layer = Layer.effect(DesktopClerk, make);
+  return Layer.effect(DesktopClerk, make);
+}
+
+export const layer = makeDesktopClerkLayer();
