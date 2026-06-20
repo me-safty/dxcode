@@ -1,4 +1,13 @@
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
+  ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Thread } from "../types";
@@ -12,9 +21,47 @@ import {
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
+  replaceUnifiedServerSettings,
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
+
+describe("replaceUnifiedServerSettings", () => {
+  it("uses the selected environment's provider settings while preserving client settings", () => {
+    const primarySettings = {
+      ...DEFAULT_UNIFIED_SETTINGS,
+      favorites: [
+        {
+          provider: ProviderInstanceId.make("codex_remote"),
+          model: "gpt-5.4",
+        },
+      ],
+      providers: {
+        ...DEFAULT_SERVER_SETTINGS.providers,
+        codex: {
+          ...DEFAULT_SERVER_SETTINGS.providers.codex,
+          enabled: false,
+        },
+      },
+      providerInstances: {},
+    };
+    const remoteSettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [ProviderInstanceId.make("codex_remote")]: {
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+        },
+      },
+    };
+
+    const settings = replaceUnifiedServerSettings(primarySettings, remoteSettings);
+
+    expect(settings.providers.codex.enabled).toBe(true);
+    expect(settings.providerInstances).toEqual(remoteSettings.providerInstances);
+    expect(settings.favorites).toEqual(primarySettings.favorites);
+  });
+});
 
 const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");

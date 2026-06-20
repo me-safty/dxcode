@@ -217,6 +217,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  replaceUnifiedServerSettings,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -1586,7 +1587,15 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProvider: selectedProviderByThreadId,
     threadProvider,
   });
-  const serverConfig = activeEnvironment?.serverConfig ?? primaryEnvironment?.serverConfig ?? null;
+  // Once a thread selects an environment, never substitute the primary
+  // environment's config while the selected environment is still loading.
+  const serverConfig = activeThread
+    ? (activeEnvironment?.serverConfig ?? null)
+    : (primaryEnvironment?.serverConfig ?? null);
+  const composerSettings = useMemo(
+    () => (serverConfig ? replaceUnifiedServerSettings(settings, serverConfig.settings) : settings),
+    [serverConfig, settings],
+  );
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
   const versionMismatchDismissKey =
     versionMismatch && activeThread
@@ -4811,7 +4820,7 @@ function ChatViewContent(props: ChatViewProps) {
                     activeThreadModelSelection={activeThread?.modelSelection}
                     activeThreadActivities={activeThread?.activities}
                     resolvedTheme={resolvedTheme}
-                    settings={settings}
+                    settings={composerSettings}
                     keybindings={keybindings}
                     terminalOpen={Boolean(terminalUiState.terminalOpen)}
                     gitCwd={gitCwd}
