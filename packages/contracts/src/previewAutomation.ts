@@ -474,8 +474,18 @@ const PreviewAutomationRequestErrorFields = {
 
 const PreviewAutomationRemoteDiagnosticFields = {
   remoteTag: TrimmedNonEmptyString,
-  remoteMessage: Schema.String,
-  remoteDetail: Schema.optional(Schema.Unknown),
+  remoteMessageLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  remoteDetailKind: Schema.optional(
+    Schema.Literals(["null", "array", "object", "string", "number", "boolean"]),
+  ),
+};
+
+const PreviewAutomationOptionalRemoteDiagnosticFields = {
+  remoteTag: Schema.optional(TrimmedNonEmptyString),
+  remoteMessageLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  remoteDetailKind: Schema.optional(
+    Schema.Literals(["null", "array", "object", "string", "number", "boolean"]),
+  ),
 };
 
 export class PreviewAutomationNoFocusedOwnerError extends Schema.TaggedErrorClass<PreviewAutomationNoFocusedOwnerError>()(
@@ -486,14 +496,12 @@ export class PreviewAutomationNoFocusedOwnerError extends Schema.TaggedErrorClas
     requestId: Schema.optional(TrimmedNonEmptyString),
     tabId: Schema.optional(PreviewTabId),
     timeoutMs: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
-    remoteTag: Schema.optional(TrimmedNonEmptyString),
-    remoteMessage: Schema.optional(Schema.String),
-    remoteDetail: Schema.optional(Schema.Unknown),
+    ...PreviewAutomationOptionalRemoteDiagnosticFields,
   },
 ) {
   override get message(): string {
     const summary = `No focused preview automation owner is available for ${this.operation} in thread ${this.threadId}.`;
-    return this.remoteMessage ? `${summary} ${this.remoteMessage}` : summary;
+    return summary;
   }
 }
 
@@ -505,7 +513,7 @@ export class PreviewAutomationUnsupportedClientError extends Schema.TaggedErrorC
   },
 ) {
   override get message(): string {
-    return `Preview automation client ${this.clientId} does not support ${this.operation}. ${this.remoteMessage}`;
+    return `Preview automation client ${this.clientId} does not support ${this.operation}.`;
   }
 }
 
@@ -520,7 +528,7 @@ export class PreviewAutomationTabNotFoundError extends Schema.TaggedErrorClass<P
     const summary = this.tabId
       ? `Preview tab ${this.tabId} was not found for ${this.operation}.`
       : `No active preview tab was found for ${this.operation}.`;
-    return `${summary} ${this.remoteMessage}`;
+    return summary;
   }
 }
 
@@ -528,13 +536,12 @@ export class PreviewAutomationTimeoutError extends Schema.TaggedErrorClass<Previ
   "PreviewAutomationTimeoutError",
   {
     ...PreviewAutomationRequestErrorFields,
-    remoteMessage: Schema.optional(Schema.String),
-    remoteDetail: Schema.optional(Schema.Unknown),
+    ...PreviewAutomationOptionalRemoteDiagnosticFields,
   },
 ) {
   override get message(): string {
     const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms.`;
-    return this.remoteMessage ? `${summary} ${this.remoteMessage}` : summary;
+    return summary;
   }
 }
 
@@ -546,7 +553,7 @@ export class PreviewAutomationControlInterruptedError extends Schema.TaggedError
   },
 ) {
   override get message(): string {
-    return `Preview automation ${this.operation} was interrupted on client ${this.clientId}. ${this.remoteMessage}`;
+    return `Preview automation ${this.operation} was interrupted on client ${this.clientId}.`;
   }
 }
 
@@ -558,7 +565,7 @@ export class PreviewAutomationExecutionError extends Schema.TaggedErrorClass<Pre
   },
 ) {
   override get message(): string {
-    return `Preview automation ${this.operation} failed on client ${this.clientId}. ${this.remoteMessage}`;
+    return `Preview automation ${this.operation} failed on client ${this.clientId}.`;
   }
 }
 
@@ -567,14 +574,15 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedErrorCla
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
-    selector: Schema.optional(Schema.String),
+    selectorKind: Schema.optional(Schema.Literals(["locator", "selector"])),
+    selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   },
 ) {
   override get message(): string {
-    const summary = this.selector
-      ? `Invalid preview automation selector for ${this.operation}: ${this.selector}`
-      : `Preview automation ${this.operation} received an invalid selector.`;
-    return `${summary} ${this.remoteMessage}`;
+    if (this.selectorKind !== undefined && this.selectorLength !== undefined) {
+      return `Preview automation ${this.operation} received an invalid ${this.selectorKind} (${this.selectorLength} characters).`;
+    }
+    return `Preview automation ${this.operation} received an invalid selector.`;
   }
 }
 
@@ -591,7 +599,7 @@ export class PreviewAutomationResultTooLargeError extends Schema.TaggedErrorClas
       this.maximumBytes === undefined
         ? `Preview automation ${this.operation} produced a result that is too large.`
         : `Preview automation ${this.operation} produced a result larger than ${this.maximumBytes} bytes.`;
-    return `${summary} ${this.remoteMessage}`;
+    return summary;
   }
 }
 
@@ -633,7 +641,7 @@ export class PreviewAutomationRemoteUnavailableError extends Schema.TaggedErrorC
   },
 ) {
   override get message(): string {
-    return `Preview automation ${this.operation} is unavailable on client ${this.clientId}. ${this.remoteMessage}`;
+    return `Preview automation ${this.operation} is unavailable on client ${this.clientId}.`;
   }
 }
 

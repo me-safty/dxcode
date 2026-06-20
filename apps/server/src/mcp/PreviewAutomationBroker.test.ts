@@ -61,8 +61,11 @@ it.effect("atomically registers a connected owner and correlates its response", 
   ),
 );
 
-it.effect("preserves request context and remote selector diagnostics", () =>
-  Effect.scoped(
+it.effect("preserves bounded request and remote selector diagnostics", () => {
+  const locator = "role=button[name='request-secret']";
+  const remoteMessage = "Unexpected token near remote-secret.";
+
+  return Effect.scoped(
     Effect.gen(function* () {
       const broker = yield* PreviewAutomationBroker.make;
       const requests = yield* broker.connect(makeOwner({ tabId: "tab-1" }));
@@ -72,8 +75,8 @@ it.effect("preserves request context and remote selector diagnostics", () =>
           ok: false,
           error: {
             _tag: "PreviewAutomationInvalidSelectorError",
-            message: "Unexpected token near the locator.",
-            detail: { selector: "role=button[" },
+            message: remoteMessage,
+            detail: { selector: "role=button[name='remote-secret']" },
           },
         }),
       ).pipe(Effect.forkScoped);
@@ -83,7 +86,7 @@ it.effect("preserves request context and remote selector diagnostics", () =>
         .invoke<void>({
           scope,
           operation: "click",
-          input: { locator: "role=button[" },
+          input: { locator },
           timeoutMs: 1_234,
         })
         .pipe(Effect.flip);
@@ -99,17 +102,22 @@ it.effect("preserves request context and remote selector diagnostics", () =>
         requestId: "preview-0",
         tabId: "tab-1",
         timeoutMs: 1_234,
-        selector: "role=button[",
+        selectorKind: "locator",
+        selectorLength: locator.length,
         remoteTag: "PreviewAutomationInvalidSelectorError",
-        remoteMessage: "Unexpected token near the locator.",
-        remoteDetail: { selector: "role=button[" },
+        remoteMessageLength: remoteMessage.length,
+        remoteDetailKind: "object",
       });
       expect(error.message).toBe(
-        "Invalid preview automation selector for click: role=button[ Unexpected token near the locator.",
+        `Preview automation click received an invalid locator (${locator.length} characters).`,
       );
+      expect(error.message).not.toContain("secret");
+      expect("selector" in error).toBe(false);
+      expect("remoteMessage" in error).toBe(false);
+      expect("remoteDetail" in error).toBe(false);
     }),
-  ),
-);
+  );
+});
 
 it.effect("distinguishes malformed remote failures", () =>
   Effect.scoped(

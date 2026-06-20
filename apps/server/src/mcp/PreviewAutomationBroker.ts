@@ -79,7 +79,8 @@ interface PreviewAutomationRequestErrorContext {
   readonly requestId: string;
   readonly tabId?: PreviewTabId;
   readonly timeoutMs: number;
-  readonly selector?: string;
+  readonly selectorKind?: "locator" | "selector";
+  readonly selectorLength?: number;
 }
 
 interface BrokerState {
@@ -89,63 +90,75 @@ interface BrokerState {
   readonly requestSequence: number;
 }
 
-const selectorFromInput = (input: unknown): string | undefined => {
-  if (typeof input !== "object" || input === null) return undefined;
-  if ("locator" in input && typeof input.locator === "string") return input.locator;
-  if ("selector" in input && typeof input.selector === "string") return input.selector;
-  return undefined;
+const selectorDiagnosticsFromInput = (
+  input: unknown,
+): Pick<PreviewAutomationRequestErrorContext, "selectorKind" | "selectorLength"> => {
+  if (typeof input !== "object" || input === null) return {};
+  if ("locator" in input && typeof input.locator === "string") {
+    return { selectorKind: "locator", selectorLength: input.locator.length };
+  }
+  if ("selector" in input && typeof input.selector === "string") {
+    return { selectorKind: "selector", selectorLength: input.selector.length };
+  }
+  return {};
 };
+
+type RemoteDetailKind = "null" | "array" | "object" | "string" | "number" | "boolean";
+
+function remoteDetailKind(detail: unknown): RemoteDetailKind {
+  if (detail === null) return "null";
+  if (Array.isArray(detail)) return "array";
+  switch (typeof detail) {
+    case "string":
+      return "string";
+    case "number":
+      return "number";
+    case "boolean":
+      return "boolean";
+    default:
+      return "object";
+  }
+}
 
 const classifyResponseError = (
   context: PreviewAutomationRequestErrorContext,
   error: NonNullable<PreviewAutomationResponse["error"]>,
 ): PreviewAutomationError => {
-  const { selector, ...requestContext } = context;
   const remoteDiagnostics = {
     remoteTag: error._tag,
-    remoteMessage: error.message,
-    ...(error.detail === undefined ? {} : { remoteDetail: error.detail }),
+    remoteMessageLength: error.message.length,
+    ...(error.detail === undefined ? {} : { remoteDetailKind: remoteDetailKind(error.detail) }),
   };
   switch (error._tag) {
     case "PreviewAutomationNoFocusedOwnerError":
       return new PreviewAutomationNoFocusedOwnerError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
       });
     case "PreviewAutomationUnsupportedClientError":
       return new PreviewAutomationUnsupportedClientError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
       });
     case "PreviewAutomationTabNotFoundError":
       return new PreviewAutomationTabNotFoundError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
       });
     case "PreviewAutomationTimeoutError":
       return new PreviewAutomationTimeoutError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
       });
     case "PreviewAutomationControlInterruptedError":
       return new PreviewAutomationControlInterruptedError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
       });
     case "PreviewAutomationInvalidSelectorError": {
-      const detail =
-        typeof error.detail === "object" && error.detail !== null ? error.detail : undefined;
-      const responseSelector =
-        detail &&
-        "selector" in detail &&
-        typeof detail.selector === "string" &&
-        detail.selector.length > 0
-          ? detail.selector
-          : selector;
       return new PreviewAutomationInvalidSelectorError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
-        ...(responseSelector === undefined ? {} : { selector: responseSelector }),
       });
     }
     case "PreviewAutomationResultTooLargeError": {
@@ -160,19 +173,19 @@ const classifyResponseError = (
           ? detail.maximumBytes
           : undefined;
       return new PreviewAutomationResultTooLargeError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
         ...(maximumBytes === undefined ? {} : { maximumBytes }),
       });
     }
     case "PreviewAutomationUnavailableError":
       return new PreviewAutomationRemoteUnavailableError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
       });
     default:
       return new PreviewAutomationExecutionError({
-        ...requestContext,
+        ...context,
         ...remoteDiagnostics,
       });
   }
@@ -339,7 +352,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     const [requestId, requestContext] = yield* SynchronizedRef.modify(state, (next) => {
       const requestId = `preview-${next.requestSequence}`;
       const tabId = input.tabId ?? owner.tabId ?? undefined;
-      const selector = selectorFromInput(input.input);
+      const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
       const context: PreviewAutomationRequestErrorContext = {
         operation: input.operation,
         environmentId: input.scope.environmentId,
@@ -350,7 +363,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         requestId,
         ...(tabId === undefined ? {} : { tabId }),
         timeoutMs,
-        ...(selector === undefined ? {} : { selector }),
+        ...selectorDiagnostics,
       };
       const pending = new Map(next.pending);
       pending.set(requestId, { queue: connection.queue, deferred, context });
