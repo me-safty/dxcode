@@ -5,13 +5,13 @@ import type {
   RelayManagedEndpoint,
 } from "@t3tools/contracts/relay";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 
-import { RelayDb } from "../db.ts";
+import * as RelayDb from "../db.ts";
 import { relayEnvironmentLinks } from "../persistence/schema.ts";
 
 export interface RelayLinkedEnvironmentRecord extends RelayClientEnvironmentRecord {
@@ -24,81 +24,98 @@ export interface AgentAwarenessDeliveryUserRecord {
   readonly liveActivitiesEnabled: boolean;
 }
 
-export class EnvironmentLinkUpsertPersistenceError extends Data.TaggedError(
+export class EnvironmentLinkUpsertPersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkUpsertPersistenceError>()(
   "EnvironmentLinkUpsertPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export class EnvironmentLinkUserListPersistenceError extends Data.TaggedError(
-  "EnvironmentLinkUserListPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export class EnvironmentPublicKeyListPersistenceError extends Data.TaggedError(
-  "EnvironmentPublicKeyListPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export class EnvironmentLinkListPersistenceError extends Data.TaggedError(
-  "EnvironmentLinkListPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export class EnvironmentLinkLookupPersistenceError extends Data.TaggedError(
-  "EnvironmentLinkLookupPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export class EnvironmentLinkRevokePersistenceError extends Data.TaggedError(
-  "EnvironmentLinkRevokePersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export interface EnvironmentLinksShape {
-  readonly upsert: (input: {
-    readonly userId: string;
-    readonly request: RelayEnvironmentLinkRequest;
-    readonly proof: RelayEnvironmentLinkProofPayload;
-    readonly endpoint: RelayManagedEndpoint;
-  }) => Effect.Effect<void, EnvironmentLinkUpsertPersistenceError>;
-  readonly listUsersForEnvironment: (input: {
-    readonly environmentId: string;
-  }) => Effect.Effect<ReadonlyArray<string>, EnvironmentLinkUserListPersistenceError>;
-  readonly listDeliveryUsersForEnvironment: (input: {
-    readonly environmentId: string;
-    readonly environmentPublicKey: string;
-  }) => Effect.Effect<
-    ReadonlyArray<AgentAwarenessDeliveryUserRecord>,
-    EnvironmentLinkUserListPersistenceError
-  >;
-  readonly listPublicKeysForEnvironment: (input: {
-    readonly environmentId: string;
-  }) => Effect.Effect<ReadonlyArray<string>, EnvironmentPublicKeyListPersistenceError>;
-  readonly listForUser: (input: {
-    readonly userId: string;
-  }) => Effect.Effect<
-    ReadonlyArray<RelayClientEnvironmentRecord>,
-    EnvironmentLinkListPersistenceError
-  >;
-  readonly getForUser: (input: {
-    readonly userId: string;
-    readonly environmentId: string;
-  }) => Effect.Effect<RelayLinkedEnvironmentRecord | null, EnvironmentLinkLookupPersistenceError>;
-  readonly revokeForUser: (input: {
-    readonly userId: string;
-    readonly environmentId: string;
-  }) => Effect.Effect<boolean, EnvironmentLinkRevokePersistenceError>;
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to persist environment link";
+  }
 }
 
-export class EnvironmentLinks extends Context.Service<EnvironmentLinks, EnvironmentLinksShape>()(
-  "t3code-relay/environments/EnvironmentLinks",
-) {}
+export class EnvironmentLinkUserListPersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkUserListPersistenceError>()(
+  "EnvironmentLinkUserListPersistenceError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to list users linked to environment";
+  }
+}
+
+export class EnvironmentPublicKeyListPersistenceError extends Schema.TaggedErrorClass<EnvironmentPublicKeyListPersistenceError>()(
+  "EnvironmentPublicKeyListPersistenceError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to list environment public keys";
+  }
+}
+
+export class EnvironmentLinkListPersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkListPersistenceError>()(
+  "EnvironmentLinkListPersistenceError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to list environment links";
+  }
+}
+
+export class EnvironmentLinkLookupPersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkLookupPersistenceError>()(
+  "EnvironmentLinkLookupPersistenceError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to look up environment link";
+  }
+}
+
+export class EnvironmentLinkRevokePersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkRevokePersistenceError>()(
+  "EnvironmentLinkRevokePersistenceError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to revoke environment link";
+  }
+}
+
+export class EnvironmentLinks extends Context.Service<
+  EnvironmentLinks,
+  {
+    readonly upsert: (input: {
+      readonly userId: string;
+      readonly request: RelayEnvironmentLinkRequest;
+      readonly proof: RelayEnvironmentLinkProofPayload;
+      readonly endpoint: RelayManagedEndpoint;
+    }) => Effect.Effect<void, EnvironmentLinkUpsertPersistenceError>;
+    readonly listUsersForEnvironment: (input: {
+      readonly environmentId: string;
+    }) => Effect.Effect<ReadonlyArray<string>, EnvironmentLinkUserListPersistenceError>;
+    readonly listDeliveryUsersForEnvironment: (input: {
+      readonly environmentId: string;
+      readonly environmentPublicKey: string;
+    }) => Effect.Effect<
+      ReadonlyArray<AgentAwarenessDeliveryUserRecord>,
+      EnvironmentLinkUserListPersistenceError
+    >;
+    readonly listPublicKeysForEnvironment: (input: {
+      readonly environmentId: string;
+    }) => Effect.Effect<ReadonlyArray<string>, EnvironmentPublicKeyListPersistenceError>;
+    readonly listForUser: (input: {
+      readonly userId: string;
+    }) => Effect.Effect<
+      ReadonlyArray<RelayClientEnvironmentRecord>,
+      EnvironmentLinkListPersistenceError
+    >;
+    readonly getForUser: (input: {
+      readonly userId: string;
+      readonly environmentId: string;
+    }) => Effect.Effect<RelayLinkedEnvironmentRecord | null, EnvironmentLinkLookupPersistenceError>;
+    readonly revokeForUser: (input: {
+      readonly userId: string;
+      readonly environmentId: string;
+    }) => Effect.Effect<boolean, EnvironmentLinkRevokePersistenceError>;
+  }
+>()("t3code-relay/environments/EnvironmentLinks") {}
 
 function agentAwarenessDeliveryUserCondition(environmentId: string) {
   return and(
@@ -122,7 +139,7 @@ function agentAwarenessDeliveryUserKeyCondition(input: {
 }
 
 const make = Effect.gen(function* () {
-  const db = yield* RelayDb;
+  const db = yield* RelayDb.RelayDb;
 
   return EnvironmentLinks.of({
     upsert: Effect.fn("relay.environment_links.upsert")(

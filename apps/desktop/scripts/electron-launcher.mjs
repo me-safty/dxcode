@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import * as NodeOS from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
@@ -30,17 +31,11 @@ export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
-const LAUNCHER_VERSION = 10;
+const LAUNCHER_VERSION = 12;
 const defaultIconPath = join(desktopDir, "resources", "icon.icns");
 const developmentMacIconPngPath = join(repoRoot, "assets", "dev", "blueprint-macos-1024.png");
-
-function resolveDevelopmentProtocolCallbackPort() {
-  const configuredPort = Number.parseInt(process.env.T3CODE_PORT ?? "", 10);
-  if (Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65535) {
-    return configuredPort + 1;
-  }
-  return 13774;
-}
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
+const hostPlatform = NodeOS.platform();
 
 function setPlistString(plistPath, key, value) {
   const replaceResult = spawnSync("plutil", ["-replace", key, "-string", value, plistPath], {
@@ -97,7 +92,6 @@ function shellSingleQuote(value) {
 
 function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
   const mainEntryPath = join(desktopDir, "dist-electron", "main.cjs");
-  const protocolCallbackUrl = `http://127.0.0.1:${resolveDevelopmentProtocolCallbackPort()}/auth/callback`;
   const envEntries = [
     ["VITE_DEV_SERVER_URL", process.env.VITE_DEV_SERVER_URL],
     ["T3CODE_PORT", process.env.T3CODE_PORT],
@@ -106,23 +100,12 @@ function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
     ["T3CODE_OTLP_TRACES_URL", process.env.T3CODE_OTLP_TRACES_URL],
     ["T3CODE_OTLP_EXPORT_INTERVAL_MS", process.env.T3CODE_OTLP_EXPORT_INTERVAL_MS],
     ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
-    ["T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED", "1"],
-    ["T3CODE_DESKTOP_PROTOCOL_CALLBACK_URL", protocolCallbackUrl],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   writeFileSync(
     targetBinaryPath,
     [
       "#!/bin/sh",
       ...envEntries.map(([name, value]) => `export ${name}=${shellSingleQuote(value)}`),
-      'for arg in "$@"; do',
-      '  case "$arg" in',
-      "    t3code-dev://auth/callback*)",
-      '      if [ -n "$T3CODE_DESKTOP_PROTOCOL_CALLBACK_URL" ]; then',
-      '        /usr/bin/curl -fsS --max-time 2 -X POST --data-binary "$arg" "$T3CODE_DESKTOP_PROTOCOL_CALLBACK_URL" >/dev/null 2>&1 && exit 0',
-      "      fi",
-      "      ;;",
-      "  esac",
-      "done",
       `exec ${shellSingleQuote(electronBinaryPath)} --t3code-dev-root=${shellSingleQuote(desktopDir)} ${shellSingleQuote(mainEntryPath)} "$@"`,
       "",
     ].join("\n"),
@@ -295,7 +278,11 @@ function buildMacLauncher(electronBinaryPath) {
   }
 
   rmSync(targetAppBundlePath, { recursive: true, force: true });
-  cpSync(sourceAppBundlePath, targetAppBundlePath, { recursive: true });
+  // verbatimSymlinks keeps the framework's relative symlinks intact
+  // (e.g. Resources -> Versions/Current/Resources). Without it cpSync
+  // rewrites them to absolute paths into node_modules, which escape the
+  // bundle and crash sandboxed helper processes (icudtl.dat not found).
+  cpSync(sourceAppBundlePath, targetAppBundlePath, { recursive: true, verbatimSymlinks: true });
   patchMainBundleInfoPlist(targetAppBundlePath, iconPath);
   patchHelperBundleInfoPlists(targetAppBundlePath);
   if (isDevelopment) {
@@ -307,21 +294,54 @@ function buildMacLauncher(electronBinaryPath) {
   return targetBinaryPath;
 }
 
+function isLinuxSetuidSandboxConfigured(electronBinaryPath) {
+  if (hostPlatform !== "linux") {
+    return true;
+  }
+
+  const sandboxPath = join(dirname(electronBinaryPath), "chrome-sandbox");
+  try {
+    const sandboxStat = statSync(sandboxPath);
+    return sandboxStat.uid === 0 && (sandboxStat.mode & 0o4777) === 0o4755;
+  } catch {
+    return false;
+  }
+}
+
+function resolveLinuxSandboxArgs(electronBinaryPath) {
+  if (isLinuxSetuidSandboxConfigured(electronBinaryPath)) {
+    return [];
+  }
+
+  console.warn(
+    "[desktop-launcher] Electron chrome-sandbox is not root-owned with mode 4755; launching local Electron with --no-sandbox.",
+  );
+  return ["--no-sandbox"];
+}
+
 export function resolveElectronPath() {
   ensureElectronRuntime();
 
   const require = createRequire(import.meta.url);
   const electronBinaryPath = require("electron");
 
-  if (process.platform !== "darwin") {
+  if (hostPlatform !== "darwin") {
     return electronBinaryPath;
   }
 
   return buildMacLauncher(electronBinaryPath);
 }
 
+export function resolveElectronLaunchCommand(args = []) {
+  const electronPath = resolveElectronPath();
+  return {
+    electronPath,
+    args: [...resolveLinuxSandboxArgs(electronPath), ...args],
+  };
+}
+
 export function resolveDevProtocolClient() {
-  if (process.platform !== "darwin" || !isDevelopment) {
+  if (hostPlatform !== "darwin" || !isDevelopment) {
     return null;
   }
 

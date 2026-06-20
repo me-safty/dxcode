@@ -2,21 +2,14 @@ import * as NodeCrypto from "node:crypto";
 
 import type { RelayAgentActivityAggregateState } from "@t3tools/contracts/relay";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import {
-  Headers,
-  HttpClient,
-  HttpClientRequest,
-  type HttpBody,
-  type HttpClientError,
-} from "effect/unstable/http";
-import type { ApnsCredentials } from "../Config.ts";
+import { Headers, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import * as RelayConfiguration from "../Config.ts";
 import type { ApnsNotificationPayload } from "./apnsDeliveryJobs.ts";
 
 const LIVE_ACTIVITY_NAME = "AgentActivity";
@@ -45,18 +38,39 @@ export interface ApnsDeliveryResult {
   readonly apnsId: string | null;
 }
 
-export class ApnsSigningError extends Data.TaggedError("ApnsSigningError")<{
-  readonly phase: "encoding" | "signing";
-  readonly cause: unknown;
-}> {}
+export class ApnsSigningError extends Schema.TaggedErrorClass<ApnsSigningError>()(
+  "ApnsSigningError",
+  {
+    phase: Schema.Literals(["encoding", "signing"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed during APNs JWT ${this.phase}`;
+  }
+}
 
-export class ApnsHttpRequestError extends Data.TaggedError("ApnsHttpRequestError")<{
-  readonly cause: HttpClientError.HttpClientError | HttpBody.HttpBodyError;
-}> {}
+export class ApnsHttpRequestError extends Schema.TaggedErrorClass<ApnsHttpRequestError>()(
+  "ApnsHttpRequestError",
+  {
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "APNs HTTP request failed";
+  }
+}
 
-export class ApnsInvalidResponseError extends Data.TaggedError("ApnsInvalidResponseError")<{
-  readonly cause: unknown;
-}> {}
+export class ApnsInvalidResponseError extends Schema.TaggedErrorClass<ApnsInvalidResponseError>()(
+  "ApnsInvalidResponseError",
+  {
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "APNs returned an invalid response";
+  }
+}
 
 export type ApnsError = ApnsSigningError | ApnsHttpRequestError | ApnsInvalidResponseError;
 
@@ -85,9 +99,9 @@ const encodeApnsJwtPayloadJson = Schema.encodeEffect(
 );
 
 const makeApnsJwt = Effect.fn("relay.apns.make_jwt")(function* (input: {
-  readonly teamId: ApnsCredentials["teamId"];
-  readonly keyId: ApnsCredentials["keyId"];
-  readonly privateKey: ApnsCredentials["privateKey"];
+  readonly teamId: RelayConfiguration.ApnsCredentials["teamId"];
+  readonly keyId: RelayConfiguration.ApnsCredentials["keyId"];
+  readonly privateKey: RelayConfiguration.ApnsCredentials["privateKey"];
   readonly issuedAtUnixSeconds: number;
 }) {
   const headerJson = yield* encodeApnsJwtHeaderJson({ alg: "ES256", kid: input.keyId }).pipe(
@@ -221,12 +235,12 @@ export interface ApnsClientShape {
   readonly makeLiveActivityRequest: typeof makeLiveActivityRequest;
   readonly makePushNotificationRequest: typeof makePushNotificationRequest;
   readonly sendLiveActivityRequest: (input: {
-    readonly credentials: ApnsCredentials;
+    readonly credentials: RelayConfiguration.ApnsCredentials;
     readonly request: ApnsLiveActivityRequest;
     readonly issuedAtUnixSeconds: number;
   }) => Effect.Effect<ApnsDeliveryResult, ApnsError>;
   readonly sendPushNotificationRequest: (input: {
-    readonly credentials: ApnsCredentials;
+    readonly credentials: RelayConfiguration.ApnsCredentials;
     readonly request: ApnsPushNotificationRequest;
     readonly issuedAtUnixSeconds: number;
   }) => Effect.Effect<ApnsDeliveryResult, ApnsError>;

@@ -5,7 +5,6 @@ import type {
 } from "@t3tools/contracts/relay";
 import { RelayAgentActivityAggregateState as RelayAgentActivityAggregateStateSchema } from "@t3tools/contracts/relay";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { cast } from "effect/Function";
@@ -13,26 +12,35 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { and, eq, sql } from "drizzle-orm";
 
-import { RelayDb } from "../db.ts";
+import * as RelayDb from "../db.ts";
 import { relayLiveActivities, relayMobileDevices } from "../persistence/schema.ts";
 
-export class LiveActivityRegistrationPersistenceError extends Data.TaggedError(
+export class LiveActivityRegistrationPersistenceError extends Schema.TaggedErrorClass<LiveActivityRegistrationPersistenceError>()(
   "LiveActivityRegistrationPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to persist Live Activity registration";
+  }
+}
 
-export class LiveActivityTargetListPersistenceError extends Data.TaggedError(
+export class LiveActivityTargetListPersistenceError extends Schema.TaggedErrorClass<LiveActivityTargetListPersistenceError>()(
   "LiveActivityTargetListPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to list Live Activity delivery targets";
+  }
+}
 
-export class LiveActivityDeliveryMarkPersistenceError extends Data.TaggedError(
+export class LiveActivityDeliveryMarkPersistenceError extends Schema.TaggedErrorClass<LiveActivityDeliveryMarkPersistenceError>()(
   "LiveActivityDeliveryMarkPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to persist Live Activity delivery state";
+  }
+}
 
 export interface DeviceRow {
   readonly user_id: string;
@@ -100,7 +108,7 @@ const encodeRelayAgentActivityAggregateStateJson = Schema.encodeEffect(
 );
 
 const make = Effect.gen(function* () {
-  const db = yield* RelayDb;
+  const db = yield* RelayDb.RelayDb;
 
   return LiveActivities.of({
     register: Effect.fn("relay.live_activities.register")(

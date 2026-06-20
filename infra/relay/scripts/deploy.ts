@@ -8,10 +8,12 @@ import { provideFreshArtifactStore } from "alchemy/Artifacts";
 import { AuthProviders } from "alchemy/Auth/AuthProvider";
 import { CredentialsStoreLive } from "alchemy/Auth/Credentials";
 import { ProfileLive } from "alchemy/Auth/Profile";
+import * as Cloudflare from "alchemy/Cloudflare";
 import { Cli } from "alchemy/Cli/Cli";
 import { LoggingCli } from "alchemy/Cli/LoggingCli";
 import * as Plan from "alchemy/Plan";
 import * as Stage from "alchemy/Stage";
+import * as State from "alchemy/State/State";
 import { TelemetryLive } from "alchemy/Telemetry/Layer";
 import { PlatformServices } from "alchemy/Util/PlatformServices";
 import * as Config from "effect/Config";
@@ -23,6 +25,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Redacted from "effect/Redacted";
 import { Command, Flag, Prompt } from "effect/unstable/cli";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
@@ -40,17 +43,63 @@ export interface RelayDeployOptions {
   readonly yes: boolean;
   readonly adopt: boolean;
   readonly githubOutput: boolean;
+  readonly githubEnvFile: Option.Option<string>;
+  readonly readState: boolean;
+}
+
+export interface RelayPublicConfig {
+  readonly relayUrl: string;
+  readonly mobileTracingUrl: string;
+  readonly mobileTracingDataset: string;
+  readonly mobileTracingToken: string;
+  readonly clientTracingUrl: string;
+  readonly clientTracingDataset: string;
+  readonly clientTracingToken: string;
+}
+
+const publicConfigEnvEntries = (config: RelayPublicConfig) =>
+  ({
+    T3CODE_RELAY_URL: config.relayUrl,
+    T3CODE_MOBILE_OTLP_TRACES_URL: config.mobileTracingUrl,
+    T3CODE_MOBILE_OTLP_TRACES_DATASET: config.mobileTracingDataset,
+    T3CODE_MOBILE_OTLP_TRACES_TOKEN: config.mobileTracingToken,
+    T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl,
+    T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset,
+    T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: config.clientTracingToken,
+  }) as const;
+
+export function reconcileRootEnvPublicConfig(contents: string, config: RelayPublicConfig): string {
+  let next = contents;
+  for (const [name, value] of Object.entries(publicConfigEnvEntries(config))) {
+    const entry = `${name}=${value}`;
+    const pattern = new RegExp(`^${name}=.*$`, "mu");
+    if (pattern.test(next)) {
+      next = next.replace(pattern, entry);
+      continue;
+    }
+    if (!next) {
+      next = `${entry}\n`;
+      continue;
+    }
+    next = `${next}${next.endsWith("\n") ? "" : "\n"}${entry}\n`;
+  }
+  return next;
 }
 
 export function reconcileRootEnvRelayUrl(contents: string, relayUrl: string): string {
-  const entry = `T3CODE_RELAY_URL=${relayUrl}`;
-  if (/^T3CODE_RELAY_URL=.*$/mu.test(contents)) {
-    return contents.replace(/^T3CODE_RELAY_URL=.*$/mu, entry);
-  }
-  if (!contents) {
-    return `${entry}\n`;
-  }
-  return `${contents}${contents.endsWith("\n") ? "" : "\n"}${entry}\n`;
+  return reconcileRootEnvPublicConfig(contents, {
+    relayUrl,
+    mobileTracingUrl: "",
+    mobileTracingDataset: "",
+    mobileTracingToken: "",
+    clientTracingUrl: "",
+    clientTracingDataset: "",
+    clientTracingToken: "",
+  })
+    .split("\n")
+    .filter((line) => !line.startsWith("T3CODE_MOBILE_OTLP_TRACES_"))
+    .filter((line) => !line.startsWith("T3CODE_RELAY_CLIENT_OTLP_TRACES_"))
+    .join("\n");
 }
 
 export function hasDeployChanges(plan: Plan.Plan): boolean {
@@ -63,18 +112,26 @@ export function hasDeployChanges(plan: Plan.Plan): boolean {
   );
 }
 
-export type RelayDeployResult = "applied" | "noop" | "dry-run" | "cancelled";
+export type RelayDeployResult = "applied" | "noop" | "dry-run" | "cancelled" | "state";
 
 export interface RelayDeployOutcome {
   readonly result: RelayDeployResult;
   readonly changed: boolean;
-  readonly relayUrl: Option.Option<string>;
+  readonly publicConfig: Option.Option<RelayPublicConfig>;
 }
 
 export function serializeGithubOutput(entries: Readonly<Record<string, string | boolean>>): string {
   return Object.entries(entries)
     .map(([key, value]) => `${key}=${value}\n`)
     .join("");
+}
+
+export function serializeRelayClientTracingEnvironment(config: RelayPublicConfig): string {
+  return serializeGithubOutput({
+    T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl,
+    T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset,
+    T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: config.clientTracingToken,
+  });
 }
 
 const relayRoot = Effect.service(Path.Path).pipe(
@@ -106,15 +163,17 @@ const relayDeployStage = Config.nonEmptyString("stage").pipe(
   ),
 );
 
-const reconcileRootEnv = Effect.fn("relay.deploy.reconcileRootEnv")(function* (relayUrl: string) {
+const reconcileRootEnv = Effect.fn("relay.deploy.reconcileRootEnv")(function* (
+  config: RelayPublicConfig,
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const root = yield* repoRoot;
   const rootEnvPath = path.join(root, ".env");
   const contents = (yield* fs.exists(rootEnvPath)) ? yield* fs.readFileString(rootEnvPath) : "";
 
-  yield* fs.writeFileString(rootEnvPath, reconcileRootEnvRelayUrl(contents, relayUrl));
-  yield* Console.log(`Updated ${rootEnvPath} with T3CODE_RELAY_URL=${relayUrl}`);
+  yield* fs.writeFileString(rootEnvPath, reconcileRootEnvPublicConfig(contents, config));
+  yield* Console.log(`Updated ${rootEnvPath} with relay public client configuration`);
 });
 
 const writeGithubOutput = Effect.fn("relay.deploy.writeGithubOutput")(function* (
@@ -127,13 +186,35 @@ const writeGithubOutput = Effect.fn("relay.deploy.writeGithubOutput")(function* 
     serializeGithubOutput({
       changed: outcome.changed,
       result: outcome.result,
-      ...(Option.isSome(outcome.relayUrl) ? { relay_url: outcome.relayUrl.value } : {}),
+      ...(Option.isSome(outcome.publicConfig)
+        ? {
+            relay_url: outcome.publicConfig.value.relayUrl,
+          }
+        : {}),
     }),
     { flag: "a" },
   );
 });
 
-const deployServices = Layer.mergeAll(
+const writeGithubEnvFile = Effect.fn("relay.deploy.writeGithubEnvFile")(function* (
+  outcome: RelayDeployOutcome,
+  outputPath: string,
+) {
+  if (Option.isNone(outcome.publicConfig)) {
+    return yield* new RelayDeployError({
+      message: "Relay public client config is unavailable for the GitHub environment file",
+    });
+  }
+  const fs = yield* FileSystem.FileSystem;
+  yield* Console.log(`::add-mask::${outcome.publicConfig.value.clientTracingToken}`);
+  yield* fs.writeFileString(
+    outputPath,
+    serializeRelayClientTracingEnvironment(outcome.publicConfig.value),
+  );
+});
+
+const deployBaseServices = Layer.mergeAll(
+  Layer.succeed(AuthProviders, {}),
   Layer.provideMerge(AlchemyContextLive, PlatformServices),
   Layer.provide(ProfileLive, PlatformServices),
   Layer.provide(CredentialsStoreLive, PlatformServices),
@@ -141,6 +222,64 @@ const deployServices = Layer.mergeAll(
   TelemetryLive,
   LoggingCli,
 );
+const deployServices = deployBaseServices;
+
+export function publicConfigFromOutput(output: unknown): RelayPublicConfig | null {
+  if (typeof output !== "object" || output === null) {
+    return null;
+  }
+  const value = output as Record<string, unknown>;
+  const text = (name: string) => (typeof value[name] === "string" ? value[name] : undefined);
+  const secret = (name: string): string | undefined => {
+    const candidate = value[name];
+    if (!Redacted.isRedacted(candidate)) {
+      return text(name);
+    }
+    const redacted = Redacted.value(candidate);
+    return typeof redacted === "string" ? redacted : undefined;
+  };
+  const relayUrl = text("url");
+  const mobileTracingUrl = text("mobileTracingUrl");
+  const mobileTracingDataset = text("mobileTracingDataset");
+  const mobileTracingToken = secret("mobileTracingToken");
+  const clientTracingUrl = text("clientTracingUrl");
+  const clientTracingDataset = text("clientTracingDataset");
+  const clientTracingToken = secret("clientTracingToken");
+  return relayUrl &&
+    mobileTracingUrl &&
+    mobileTracingDataset &&
+    mobileTracingToken &&
+    clientTracingUrl &&
+    clientTracingDataset &&
+    clientTracingToken
+    ? {
+        relayUrl,
+        mobileTracingUrl,
+        mobileTracingDataset,
+        mobileTracingToken,
+        clientTracingUrl,
+        clientTracingDataset,
+        clientTracingToken,
+      }
+    : null;
+}
+
+const readRelayPublicConfig = Effect.fn("relay.deploy.readState")(function* (stage: string) {
+  const state = yield* State.State;
+  const service = yield* state;
+  const output = yield* service.getOutput({ stack: "T3CodeRelay", stage });
+  const publicConfig = publicConfigFromOutput(output);
+  if (publicConfig === null) {
+    return yield* new RelayDeployError({
+      message: `Alchemy relay state for stage ${stage} did not include complete public client config`,
+    });
+  }
+  return {
+    result: "state",
+    changed: false,
+    publicConfig: Option.some(publicConfig),
+  } satisfies RelayDeployOutcome;
+});
 
 const runRelayDeploy = Effect.fn("relay.deploy.run")(
   function* (
@@ -149,7 +288,6 @@ const runRelayDeploy = Effect.fn("relay.deploy.run")(
     _stage: string,
   ) {
     const stack = yield* RelayStack;
-
     const cli = yield* Cli;
     const plan = yield* Plan.make(stack, { force: options.force }).pipe(
       Effect.provide(stack.services),
@@ -160,7 +298,7 @@ const runRelayDeploy = Effect.fn("relay.deploy.run")(
       return {
         result: "dry-run",
         changed,
-        relayUrl: Option.none<string>(),
+        publicConfig: Option.none<RelayPublicConfig>(),
       } satisfies RelayDeployOutcome;
     }
     if (!options.yes && changed) {
@@ -175,20 +313,36 @@ const runRelayDeploy = Effect.fn("relay.deploy.run")(
         return {
           result: "cancelled",
           changed,
-          relayUrl: Option.none<string>(),
+          publicConfig: Option.none<RelayPublicConfig>(),
         } satisfies RelayDeployOutcome;
       }
     }
     const output = yield* Apply.apply(plan).pipe(Effect.provide(stack.services));
-    if (output.url === undefined) {
+    if (
+      output.url === undefined ||
+      output.mobileTracingUrl === undefined ||
+      output.mobileTracingDataset === undefined ||
+      output.mobileTracingToken === undefined ||
+      output.clientTracingUrl === undefined ||
+      output.clientTracingDataset === undefined ||
+      output.clientTracingToken === undefined
+    ) {
       return yield* new RelayDeployError({
-        message: "Alchemy relay deploy output did not include a URL",
+        message: "Alchemy relay deploy output did not include complete public client config",
       });
     }
     return {
       result: changed ? "applied" : "noop",
       changed,
-      relayUrl: Option.some(output.url),
+      publicConfig: Option.some({
+        relayUrl: output.url,
+        mobileTracingUrl: output.mobileTracingUrl,
+        mobileTracingDataset: output.mobileTracingDataset,
+        mobileTracingToken: Redacted.value(output.mobileTracingToken),
+        clientTracingUrl: output.clientTracingUrl,
+        clientTracingDataset: output.clientTracingDataset,
+        clientTracingToken: Redacted.value(output.clientTracingToken),
+      }),
     } satisfies RelayDeployOutcome;
   },
   (effect, options, configProvider, stage) =>
@@ -215,12 +369,17 @@ export const deploy = Effect.fn("relay.deploy")(function* (options: RelayDeployO
     Effect.provide(ConfigProvider.layer(configProvider)),
   );
   const stage = Option.getOrElse(options.stage, () => configuredStage);
-  const outcome = yield* runRelayDeploy(options, configProvider, stage);
-  if (Option.isSome(outcome.relayUrl)) {
-    yield* reconcileRootEnv(outcome.relayUrl.value);
+  const outcome = options.readState
+    ? yield* readRelayPublicConfig(stage).pipe(Effect.provide(Cloudflare.state()))
+    : yield* runRelayDeploy(options, configProvider, stage);
+  if (Option.isSome(outcome.publicConfig)) {
+    yield* reconcileRootEnv(outcome.publicConfig.value);
   }
   if (options.githubOutput) {
     yield* writeGithubOutput(outcome);
+  }
+  if (Option.isSome(options.githubEnvFile)) {
+    yield* writeGithubEnvFile(outcome, options.githubEnvFile.value);
   }
 });
 
@@ -255,6 +414,16 @@ export const relayDeployCommand = Command.make(
     ),
     githubOutput: Flag.boolean("github-output").pipe(
       Flag.withDescription("Append relay deployment metadata to GITHUB_OUTPUT."),
+      Flag.withDefault(false),
+    ),
+    githubEnvFile: Flag.string("github-env-file").pipe(
+      Flag.withDescription(
+        "Write relay client tracing variables to a file suitable for GITHUB_ENV.",
+      ),
+      Flag.optional,
+    ),
+    readState: Flag.boolean("read-state").pipe(
+      Flag.withDescription("Read the deployed stack output without planning or applying changes."),
       Flag.withDefault(false),
     ),
   },

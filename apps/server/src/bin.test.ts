@@ -20,8 +20,8 @@ import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/unstable/cli";
 
 import { cli, makeCli } from "./bin.ts";
-import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config.ts";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerConfig from "./config.ts";
+import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
@@ -38,11 +38,11 @@ import { environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 class ProjectCliHttpApi extends HttpApi.make("environment").add(EnvironmentOrchestrationHttpApi) {}
 
-const cloudCli = makeCli({ cloudEnabled: true });
-const noCloudCli = makeCli({ cloudEnabled: false });
+const connectCli = makeCli({ cloudEnabled: true });
+const noConnectCli = makeCli({ cloudEnabled: false });
 const runCli = (args: ReadonlyArray<string>, command = cli) =>
   Command.runWith(command, { version: "0.0.0" })(args);
-const runCloudCli = (args: ReadonlyArray<string>) => runCli(args, cloudCli);
+const runConnectCli = (args: ReadonlyArray<string>) => runCli(args, connectCli);
 const runCliWithRuntime = (args: ReadonlyArray<string>) =>
   runCli(args).pipe(Effect.provide(CliRuntimeLayer));
 
@@ -57,7 +57,7 @@ const captureStdout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 const makeCliTestServerConfig = (baseDir: string) =>
   Effect.gen(function* () {
-    const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
+    const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
     return {
       logLevel: "Info",
       traceMinLevel: "Info",
@@ -84,26 +84,23 @@ const makeCliTestServerConfig = (baseDir: string) =>
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
-    } satisfies ServerConfigShape;
+    } satisfies ServerConfig.ServerConfig["Service"];
   });
 
-const makeProjectPersistenceLayer = (config: ServerConfigShape) =>
+const makeProjectPersistenceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
   Layer.mergeAll(
     OrchestrationLayerLive.pipe(
       Layer.provideMerge(RepositoryIdentityResolverLive),
       Layer.provideMerge(SqlitePersistenceLayerLive),
     ),
     WorkspacePathsLive,
-  ).pipe(
-    Layer.provideMerge(NodeServices.layer),
-    Layer.provide(Layer.succeed(ServerConfig, config)),
-  );
+  ).pipe(Layer.provideMerge(NodeServices.layer), Layer.provide(ServerConfig.layer(config)));
 
 const readPersistedSnapshot = (baseDir: string) =>
   Effect.gen(function* () {
     const config = yield* makeCliTestServerConfig(baseDir);
     return yield* Effect.gen(function* () {
-      const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+      const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       return yield* projectionSnapshotQuery.getSnapshot();
     }).pipe(Effect.provide(makeProjectPersistenceLayer(config)));
   });
@@ -133,7 +130,7 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
         }),
       ),
       Layer.provideMerge(NodeServices.layer),
-      Layer.provide(Layer.succeed(ServerConfig, config)),
+      Layer.provide(ServerConfig.layer(config)),
     );
 
     return yield* Effect.scoped(
@@ -179,9 +176,9 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
-  it.effect("rejects cloud commands when public cloud configuration is missing", () =>
+  it.effect("rejects connect commands when public configuration is missing", () =>
     Effect.gen(function* () {
-      const error = yield* runCli(["cloud", "status"], noCloudCli).pipe(Effect.flip);
+      const error = yield* runCli(["connect", "status"], noConnectCli).pipe(Effect.flip);
 
       if (!CliError.isCliError(error)) {
         assert.fail(`Expected CliError, got ${String(error)}`);
@@ -189,20 +186,20 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       if (error._tag !== "ShowHelp") {
         assert.fail(`Expected ShowHelp, got ${error._tag}`);
       }
-      assert.deepEqual(error.commandPath, ["t3", "cloud"]);
-      assert.include(error.errors[0]?.message ?? "", "missing T3 Cloud public configuration");
+      assert.deepEqual(error.commandPath, ["t3", "connect"]);
+      assert.include(error.errors[0]?.message ?? "", "missing T3 Connect public configuration");
 
       const output = (yield* TestConsole.errorLines).join("\n");
       assert.include(output, "ERROR");
-      assert.include(output, "missing T3 Cloud public configuration");
+      assert.include(output, "missing T3 Connect public configuration");
     }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer))),
   );
 
-  it.effect("reports fresh headless cloud state without requiring local configuration", () =>
+  it.effect("reports fresh headless connect state without requiring local configuration", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-status-test-"));
       const { output } = yield* captureStdout(
-        runCloudCli(["cloud", "status", "--base-dir", baseDir, "--json"]),
+        runConnectCli(["connect", "status", "--base-dir", baseDir, "--json"]),
       );
       // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is decoded as a presentation DTO.
       const status = JSON.parse(output) as {
@@ -221,24 +218,24 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
-  it.effect("reports actionable human-readable headless cloud state", () =>
+  it.effect("reports actionable human-readable headless connect state", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-status-human-test-"));
       const { output } = yield* captureStdout(
-        runCloudCli(["cloud", "status", "--base-dir", baseDir]),
+        runConnectCli(["connect", "status", "--base-dir", baseDir]),
       );
 
-      assert.include(output, "T3 Cloud\n  Exposure: disabled");
+      assert.include(output, "T3 Connect\n  Exposure: disabled");
       assert.include(output, "  Authorization: missing");
       assert.include(output, "  Environment link: not provisioned");
-      assert.include(output, "Next: Run `t3 cloud link` to authorize and enable cloud exposure.");
+      assert.include(output, "Next: Run `t3 connect link` to authorize and enable T3 Connect.");
     }),
   );
 
-  it.effect("logs in to headless cloud without enabling exposure", () =>
+  it.effect("logs in to headless connect without enabling access", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-login-test-"));
-      const { secretsDir } = yield* deriveServerPaths(baseDir, undefined);
+      const { secretsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
       mkdirSync(secretsDir, { recursive: true });
       writeFileSync(
         join(secretsDir, "cloud-cli-oauth-token.bin"),
@@ -250,9 +247,11 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         }),
       );
 
-      const login = yield* captureStdout(runCloudCli(["cloud", "login", "--base-dir", baseDir]));
+      const login = yield* captureStdout(
+        runConnectCli(["connect", "login", "--base-dir", baseDir]),
+      );
       const status = yield* captureStdout(
-        runCloudCli(["cloud", "status", "--base-dir", baseDir, "--json"]),
+        runConnectCli(["connect", "status", "--base-dir", baseDir, "--json"]),
       );
       // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is decoded as a presentation DTO.
       const decoded = JSON.parse(status.output) as {
@@ -260,36 +259,36 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         readonly authenticated: boolean;
       };
 
-      assert.equal(login.output, "Signed in to T3 Cloud.");
+      assert.equal(login.output, "Signed in to T3 Connect.");
       assert.isFalse(decoded.desired);
       assert.isTrue(decoded.authenticated);
     }),
   );
 
-  it.effect("disables headless cloud exposure without a running server", () =>
+  it.effect("disables headless connect without a running server", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-unlink-test-"));
       const { output } = yield* captureStdout(
-        runCloudCli(["cloud", "unlink", "--base-dir", baseDir]),
+        runConnectCli(["connect", "unlink", "--base-dir", baseDir]),
       );
 
-      assert.equal(output, "T3 Cloud exposure is disabled locally.");
+      assert.equal(output, "T3 Connect is disabled locally.");
     }),
   );
 
-  it.effect("logs out of headless cloud and removes the stored CLI authorization", () =>
+  it.effect("logs out of headless connect and removes the stored CLI authorization", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-logout-test-"));
-      const { secretsDir } = yield* deriveServerPaths(baseDir, undefined);
+      const { secretsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
       const tokenPath = join(secretsDir, "cloud-cli-oauth-token.bin");
       mkdirSync(secretsDir, { recursive: true });
       writeFileSync(tokenPath, "invalid persisted token");
 
       const { output } = yield* captureStdout(
-        runCloudCli(["cloud", "logout", "--base-dir", baseDir]),
+        runConnectCli(["connect", "logout", "--base-dir", baseDir]),
       );
 
-      assert.equal(output, "Signed out of T3 Cloud locally.");
+      assert.equal(output, "Signed out of T3 Connect locally.");
       assert.isFalse(existsSync(tokenPath));
     }),
   );
@@ -459,7 +458,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
             "--base-dir",
             baseDir,
           ]);
-          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
           const readModel = yield* projectionSnapshotQuery.getSnapshot();
           const addedProject = readModel.projects.find(
             (project) => project.workspaceRoot === workspaceRoot && project.deletedAt === null,

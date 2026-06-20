@@ -3,12 +3,12 @@ import * as Cloudflare from "alchemy/Cloudflare";
 import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 
 import type {
   RelayManagedEndpoint,
@@ -23,30 +23,46 @@ import {
   managedEndpointHostname,
   managedEndpointTunnelName,
 } from "../deploymentConfig.ts";
-import { ManagedEndpointAllocations } from "./ManagedEndpointAllocations.ts";
+import * as ManagedEndpointAllocations from "./ManagedEndpointAllocations.ts";
 
-export class ManagedEndpointProvisioningNotConfigured extends Data.TaggedError(
+export class ManagedEndpointProvisioningNotConfigured extends Schema.TaggedErrorClass<ManagedEndpointProvisioningNotConfigured>()(
   "ManagedEndpointProvisioningNotConfigured",
-)<{}> {}
+  {},
+) {
+  override get message(): string {
+    return "Managed endpoint provisioning is not configured";
+  }
+}
 
-export class ManagedEndpointProvisioningFailed extends Data.TaggedError(
+export class ManagedEndpointProvisioningFailed extends Schema.TaggedErrorClass<ManagedEndpointProvisioningFailed>()(
   "ManagedEndpointProvisioningFailed",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Managed endpoint provisioning failed";
+  }
+}
 
-export class ManagedEndpointDeprovisioningFailed extends Data.TaggedError(
+export class ManagedEndpointDeprovisioningFailed extends Schema.TaggedErrorClass<ManagedEndpointDeprovisioningFailed>()(
   "ManagedEndpointDeprovisioningFailed",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Managed endpoint deprovisioning failed";
+  }
+}
 
-export class ManagedEndpointOriginNotAllowed extends Data.TaggedError(
+export class ManagedEndpointOriginNotAllowed extends Schema.TaggedErrorClass<ManagedEndpointOriginNotAllowed>()(
   "ManagedEndpointOriginNotAllowed",
-)<{
-  readonly host: string;
-  readonly port: number;
-}> {}
+  {
+    host: Schema.String,
+    port: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Managed endpoint origin '${this.host}:${this.port}' is not allowed`;
+  }
+}
 
 export type ManagedEndpointProviderError =
   | ManagedEndpointProvisioningNotConfigured
@@ -58,21 +74,19 @@ export interface ManagedEndpointProvisioningResult {
   readonly runtime: RelayManagedEndpointRuntimeConfig;
 }
 
-export interface ManagedEndpointProviderShape {
-  readonly provision: (input: {
-    readonly userId: string;
-    readonly environmentId: string;
-    readonly origin: RelayManagedEndpointOrigin;
-  }) => Effect.Effect<ManagedEndpointProvisioningResult, ManagedEndpointProviderError>;
-  readonly deprovision: (input: {
-    readonly userId: string;
-    readonly environmentId: string;
-  }) => Effect.Effect<void, ManagedEndpointDeprovisioningFailed>;
-}
-
 export class ManagedEndpointProvider extends Context.Service<
   ManagedEndpointProvider,
-  ManagedEndpointProviderShape
+  {
+    readonly provision: (input: {
+      readonly userId: string;
+      readonly environmentId: string;
+      readonly origin: RelayManagedEndpointOrigin;
+    }) => Effect.Effect<ManagedEndpointProvisioningResult, ManagedEndpointProviderError>;
+    readonly deprovision: (input: {
+      readonly userId: string;
+      readonly environmentId: string;
+    }) => Effect.Effect<void, ManagedEndpointDeprovisioningFailed>;
+  }
 >()("t3code-relay/environments/ManagedEndpointProvider") {}
 
 interface ManagedEndpointTunnel {
@@ -80,41 +94,50 @@ interface ManagedEndpointTunnel {
   readonly name?: string | null;
 }
 
-export class ManagedEndpointTunnelClientError extends Data.TaggedError(
+export class ManagedEndpointTunnelClientError extends Schema.TaggedErrorClass<ManagedEndpointTunnelClientError>()(
   "ManagedEndpointTunnelClientError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export interface ManagedEndpointTunnelClientShape {
-  readonly list: (request: {
-    readonly name: string;
-    readonly isDeleted: false;
-  }) => Effect.Effect<
-    { readonly result: ReadonlyArray<ManagedEndpointTunnel> },
-    ManagedEndpointTunnelClientError
-  >;
-  readonly create: (request: {
-    readonly name: string;
-    readonly configSrc: "cloudflare";
-  }) => Effect.Effect<ManagedEndpointTunnel, ManagedEndpointTunnelClientError>;
-  readonly putConfiguration: (
-    tunnelId: string,
-    config: {
-      readonly ingress: Array<{
-        readonly hostname?: string;
-        readonly service: string;
-      }>;
-    },
-  ) => Effect.Effect<unknown, ManagedEndpointTunnelClientError>;
-  readonly getToken: (tunnelId: string) => Effect.Effect<string, ManagedEndpointTunnelClientError>;
-  readonly delete: (tunnelId: string) => Effect.Effect<unknown, ManagedEndpointTunnelClientError>;
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Managed endpoint tunnel provider request failed";
+  }
 }
 
 export class ManagedEndpointTunnelClient extends Context.Service<
   ManagedEndpointTunnelClient,
-  ManagedEndpointTunnelClientShape
+  {
+    readonly list: (request: {
+      readonly name: string;
+      readonly isDeleted: false;
+    }) => Effect.Effect<
+      { readonly result: ReadonlyArray<ManagedEndpointTunnel> },
+      ManagedEndpointTunnelClientError
+    >;
+    readonly create: (request: {
+      readonly name: string;
+      readonly configSrc: "cloudflare";
+    }) => Effect.Effect<ManagedEndpointTunnel, ManagedEndpointTunnelClientError>;
+    readonly putConfiguration: (
+      tunnelId: string,
+      config: {
+        readonly ingress: Array<{
+          readonly hostname?: string;
+          readonly service: string;
+        }>;
+      },
+    ) => Effect.Effect<unknown, ManagedEndpointTunnelClientError>;
+    readonly getToken: (
+      tunnelId: string,
+    ) => Effect.Effect<string, ManagedEndpointTunnelClientError>;
+    readonly delete: (tunnelId: string) => Effect.Effect<unknown, ManagedEndpointTunnelClientError>;
+  }
 >()("t3code-relay/environments/ManagedEndpointProvider/ManagedEndpointTunnelClient") {}
+
+export const makeTunnelClient = (client: ManagedEndpointTunnelClient["Service"]) =>
+  ManagedEndpointTunnelClient.of(client);
+
+export const layerTunnelClient = (client: ManagedEndpointTunnelClient["Service"]) =>
+  Layer.succeed(ManagedEndpointTunnelClient, makeTunnelClient(client));
 
 interface ManagedEndpointCnameRecordInput {
   readonly type: "CNAME";
@@ -124,35 +147,42 @@ interface ManagedEndpointCnameRecordInput {
   readonly proxied: true;
 }
 
-export class ManagedEndpointDnsClientError extends Data.TaggedError(
+export class ManagedEndpointDnsClientError extends Schema.TaggedErrorClass<ManagedEndpointDnsClientError>()(
   "ManagedEndpointDnsClientError",
-)<{
-  readonly cause: unknown;
-}> {}
-
-export interface ManagedEndpointDnsClientShape {
-  readonly listRecords: (
-    hostname: string,
-  ) => Effect.Effect<ReadonlyArray<{ readonly id: string }>, ManagedEndpointDnsClientError>;
-  readonly createRecord: (
-    request: ManagedEndpointCnameRecordInput,
-  ) => Effect.Effect<{ readonly id: string }, ManagedEndpointDnsClientError>;
-  readonly updateRecord: (
-    dnsRecordId: string,
-    request: ManagedEndpointCnameRecordInput,
-  ) => Effect.Effect<unknown, ManagedEndpointDnsClientError>;
-  readonly deleteRecord: (
-    dnsRecordId: string,
-  ) => Effect.Effect<unknown, ManagedEndpointDnsClientError>;
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Managed endpoint DNS provider request failed";
+  }
 }
 
 export class ManagedEndpointDnsClient extends Context.Service<
   ManagedEndpointDnsClient,
-  ManagedEndpointDnsClientShape
+  {
+    readonly listRecords: (
+      hostname: string,
+    ) => Effect.Effect<ReadonlyArray<{ readonly id: string }>, ManagedEndpointDnsClientError>;
+    readonly createRecord: (
+      request: ManagedEndpointCnameRecordInput,
+    ) => Effect.Effect<{ readonly id: string }, ManagedEndpointDnsClientError>;
+    readonly updateRecord: (
+      dnsRecordId: string,
+      request: ManagedEndpointCnameRecordInput,
+    ) => Effect.Effect<unknown, ManagedEndpointDnsClientError>;
+    readonly deleteRecord: (
+      dnsRecordId: string,
+    ) => Effect.Effect<unknown, ManagedEndpointDnsClientError>;
+  }
 >()("t3code-relay/environments/ManagedEndpointProvider/ManagedEndpointDnsClient") {}
 
+export const makeDnsClient = (client: ManagedEndpointDnsClient["Service"]) =>
+  ManagedEndpointDnsClient.of(client);
+
+export const layerDnsClient = (client: ManagedEndpointDnsClient["Service"]) =>
+  Layer.succeed(ManagedEndpointDnsClient, makeDnsClient(client));
+
 const requireCloudflareSettings = Effect.fnUntraced(function* (
-  settings: RelayConfiguration.RelayConfigurationShape,
+  settings: RelayConfiguration.RelayConfiguration["Service"],
 ) {
   if (!settings.managedEndpointBaseDomain || !settings.managedEndpointNamespace) {
     return yield* new ManagedEndpointProvisioningNotConfigured();
@@ -212,7 +242,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const tunnels = yield* ManagedEndpointTunnelClient;
   const dns = yield* ManagedEndpointDnsClient;
-  const allocations = yield* ManagedEndpointAllocations;
+  const allocations = yield* ManagedEndpointAllocations.ManagedEndpointAllocations;
 
   const updateExistingDnsRecords = Effect.fnUntraced(function* (
     records: ReadonlyArray<{ readonly id: string }>,
@@ -430,8 +460,7 @@ export const layerCloudflareBindings = (
   layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.succeed(
-          ManagedEndpointTunnelClient,
+        layerTunnelClient(
           ManagedEndpointTunnelClient.of({
             list: (request) =>
               tunnelClient.list(request).pipe(
@@ -460,8 +489,7 @@ export const layerCloudflareBindings = (
               ),
           }),
         ),
-        Layer.succeed(
-          ManagedEndpointDnsClient,
+        layerDnsClient(
           ManagedEndpointDnsClient.of({
             listRecords: (hostname) =>
               dnsClient.listDnsRecords({ search: hostname }).pipe(

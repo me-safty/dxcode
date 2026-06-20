@@ -1,7 +1,6 @@
 import type { RelayAgentActivityState } from "@t3tools/contracts/relay";
 import { RelayAgentActivityState as RelayAgentActivityStateSchema } from "@t3tools/contracts/relay";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { cast } from "effect/Function";
@@ -10,26 +9,35 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
-import { RelayDb } from "../db.ts";
+import * as RelayDb from "../db.ts";
 import { relayAgentActivityRows, relayEnvironmentLinks } from "../persistence/schema.ts";
 
-export class AgentActivityRowUpsertPersistenceError extends Data.TaggedError(
+export class AgentActivityRowUpsertPersistenceError extends Schema.TaggedErrorClass<AgentActivityRowUpsertPersistenceError>()(
   "AgentActivityRowUpsertPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to persist agent activity state";
+  }
+}
 
-export class AgentActivityRowDeletePersistenceError extends Data.TaggedError(
+export class AgentActivityRowDeletePersistenceError extends Schema.TaggedErrorClass<AgentActivityRowDeletePersistenceError>()(
   "AgentActivityRowDeletePersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to delete agent activity state";
+  }
+}
 
-export class AgentActivityRowListPersistenceError extends Data.TaggedError(
+export class AgentActivityRowListPersistenceError extends Schema.TaggedErrorClass<AgentActivityRowListPersistenceError>()(
   "AgentActivityRowListPersistenceError",
-)<{
-  readonly cause: unknown;
-}> {}
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to list agent activity state";
+  }
+}
 
 export interface AgentActivityRowsShape {
   readonly upsert: (input: {
@@ -62,7 +70,7 @@ const decodeRelayAgentActivityStateJson = Schema.decodeUnknownOption(
 );
 
 const make = Effect.gen(function* () {
-  const db = yield* RelayDb;
+  const db = yield* RelayDb.RelayDb;
 
   return AgentActivityRows.of({
     upsert: Effect.fn("relay.agent_activity_rows.upsert")(

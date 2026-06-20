@@ -29,6 +29,7 @@ import {
   RelayLinkProofRequest,
   RelayManagedEndpointOrigin,
 } from "@t3tools/contracts/relay";
+import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import {
   normalizeRelayIssuer,
   RELAY_HEALTH_REQUEST_TYP,
@@ -76,6 +77,7 @@ import { relayUrlConfig } from "./publicConfig.ts";
 import * as CliState from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.ts";
+import { traceRelayRequest } from "./traceRelayRequest.ts";
 
 const CLOUD_MINT_NONCE_PREFIX = "cloud-mint-nonce-";
 const CLOUD_MINT_JTI_PREFIX = "cloud-mint-jti-";
@@ -218,10 +220,10 @@ function validateLinkedCloudUser(input: {
         }),
     ),
     Effect.flatMap((existing) => {
-      if (!existing) {
+      if (Option.isNone(existing)) {
         return Effect.void;
       }
-      const existingCloudUserId = bytesToString(existing);
+      const existingCloudUserId = bytesToString(existing.value);
       return existingCloudUserId === input.cloudUserId
         ? Effect.void
         : Effect.fail(
@@ -246,8 +248,8 @@ function readInstalledCloudUserId(
         }),
     ),
     Effect.flatMap((bytes) =>
-      bytes
-        ? Effect.succeed(bytesToString(bytes))
+      Option.isSome(bytes)
+        ? Effect.succeed(bytesToString(bytes.value))
         : Effect.fail(
             new EnvironmentAuth.ServerAuthInternalError({
               message: "Cloud linked user is not installed for this environment.",
@@ -509,9 +511,10 @@ const relayClientRequest = <A>(
     Effect.mapError(
       (cause) =>
         new EnvironmentHttpInternalServerError({
-          message: `T3 Cloud relay request failed: ${String(cause)}`,
+          message: `T3 Connect relay request failed: ${String(cause)}`,
         }),
     ),
+    withRelayClientTracing,
   );
 
 const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesiredLinkWith")(
@@ -535,7 +538,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
           onNone: () =>
             Effect.fail(
               new EnvironmentHttpUnauthorizedError({
-                message: "Run `t3 cloud link` to authorize this environment.",
+                message: "Run `t3 connect link` to authorize this environment.",
               }),
             ),
           onSome: Effect.succeed,
@@ -595,7 +598,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
     CloudCliTokenManagerError: (error) =>
       failEnvironmentCloudInternalError(error.message)(error.cause),
     SecretStoreError: failEnvironmentCloudInternalError(
-      "Could not persist desired T3 Cloud link state.",
+      "Could not persist desired T3 Connect link state.",
     ),
   }),
 );
@@ -619,12 +622,12 @@ const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function
     { concurrency: 4 },
   );
   return {
-    linked: cloudUserId !== null,
-    cloudUserId: cloudUserId ? bytesToString(cloudUserId) : null,
-    relayUrl: relayUrl ? bytesToString(relayUrl) : null,
-    relayIssuer: relayIssuer ? bytesToString(relayIssuer) : null,
-    publishAgentActivity: publishAgentActivity
-      ? bytesToString(publishAgentActivity) === "true"
+    linked: Option.isSome(cloudUserId),
+    cloudUserId: Option.isSome(cloudUserId) ? bytesToString(cloudUserId.value) : null,
+    relayUrl: Option.isSome(relayUrl) ? bytesToString(relayUrl.value) : null,
+    relayIssuer: Option.isSome(relayIssuer) ? bytesToString(relayIssuer.value) : null,
+    publishAgentActivity: Option.isSome(publishAgentActivity)
+      ? bytesToString(publishAgentActivity.value) === "true"
       : false,
   } satisfies EnvironmentCloudLinkStateResult;
 });
@@ -687,8 +690,8 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
   function* (dependencies: CloudHttpDependencies, request: RelayCloudEnvironmentHealthRequest) {
     const cloudMintPublicKey = yield* dependencies.secrets.get(CLOUD_MINT_PUBLIC_KEY).pipe(
       Effect.flatMap((bytes) =>
-        bytes
-          ? Effect.succeed(bytesToString(bytes))
+        Option.isSome(bytes)
+          ? Effect.succeed(bytesToString(bytes.value))
           : Effect.fail(
               new EnvironmentAuth.ServerAuthInternalError({
                 message: "Cloud mint public key is not installed for this environment.",
@@ -698,12 +701,12 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
     );
     const relayIssuer = yield* dependencies.secrets.get(RELAY_ISSUER_SECRET).pipe(
       Effect.flatMap((bytes) =>
-        bytes
-          ? Effect.succeed(bytesToString(bytes))
+        Option.isSome(bytes)
+          ? Effect.succeed(bytesToString(bytes.value))
           : dependencies.secrets.get(RELAY_URL_SECRET).pipe(
               Effect.flatMap((fallbackBytes) =>
-                fallbackBytes
-                  ? Effect.succeed(bytesToString(fallbackBytes))
+                Option.isSome(fallbackBytes)
+                  ? Effect.succeed(bytesToString(fallbackBytes.value))
                   : Effect.fail(
                       new EnvironmentAuth.ServerAuthInternalError({
                         message: "Cloud relay issuer is not installed for this environment.",
@@ -804,8 +807,8 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
   function* (dependencies: CloudHttpDependencies, request: RelayCloudMintCredentialRequest) {
     const cloudMintPublicKey = yield* dependencies.secrets.get(CLOUD_MINT_PUBLIC_KEY).pipe(
       Effect.flatMap((bytes) =>
-        bytes
-          ? Effect.succeed(bytesToString(bytes))
+        Option.isSome(bytes)
+          ? Effect.succeed(bytesToString(bytes.value))
           : Effect.fail(
               new EnvironmentAuth.ServerAuthInternalError({
                 message: "Cloud mint public key is not installed for this environment.",
@@ -815,12 +818,12 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
     );
     const relayIssuer = yield* dependencies.secrets.get(RELAY_ISSUER_SECRET).pipe(
       Effect.flatMap((bytes) =>
-        bytes
-          ? Effect.succeed(bytesToString(bytes))
+        Option.isSome(bytes)
+          ? Effect.succeed(bytesToString(bytes.value))
           : dependencies.secrets.get(RELAY_URL_SECRET).pipe(
               Effect.flatMap((fallbackBytes) =>
-                fallbackBytes
-                  ? Effect.succeed(bytesToString(fallbackBytes))
+                Option.isSome(fallbackBytes)
+                  ? Effect.succeed(bytesToString(fallbackBytes.value))
                   : Effect.fail(
                       new EnvironmentAuth.ServerAuthInternalError({
                         message: "Cloud relay issuer is not installed for this environment.",
@@ -874,7 +877,7 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
       scopes: AuthStandardClientScopes,
       subject: "cloud-connect",
       ttl: Duration.minutes(2),
-      label: "T3 Cloud connect",
+      label: "T3 Connect connect",
       proofKeyThumbprint: proof.clientProofKeyThumbprint,
     });
     const responsePayload = {
@@ -924,9 +927,9 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
   }),
 );
 
-export const cloudHttpApiLayer = HttpApiBuilder.group(
+export const connectHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
-  "cloud",
+  "connect",
   Effect.fnUntraced(function* (handlers) {
     const dependencies = yield* cloudHttpDependencies;
     return handlers
@@ -938,7 +941,7 @@ export const cloudHttpApiLayer = HttpApiBuilder.group(
       .handle("health", ({ payload }) => cloudEnvironmentHealthHandler(dependencies, payload))
       .handle("mintCredential", ({ payload }) => cloudMintCredentialHandler(dependencies, payload))
       .handle("t3MintCredential", ({ payload }) =>
-        cloudMintCredentialHandler(dependencies, payload),
+        traceRelayRequest(cloudMintCredentialHandler(dependencies, payload)),
       );
   }),
 );
