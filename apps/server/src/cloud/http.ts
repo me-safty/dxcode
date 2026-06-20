@@ -68,7 +68,7 @@ import {
   RELAY_URL_SECRET,
 } from "./config.ts";
 import { relayUrlConfig } from "./publicConfig.ts";
-import * as CliState from "./CliState.ts";
+import { setCliDesiredCloudLink } from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.ts";
 import { traceRelayRequest } from "./traceRelayRequest.ts";
@@ -583,7 +583,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       },
       schema: RelayEnvironmentLinkResponse,
     });
-    yield* CliState.setCliDesiredCloudLink(true);
+    yield* setCliDesiredCloudLink(true);
     return yield* applyCloudRelayConfig(dependencies, {
       relayUrl,
       relayIssuer: link.relayIssuer,
@@ -662,7 +662,7 @@ const cloudUnlinkHandler = Effect.fn("environment.cloud.unlink")(
       ],
       { concurrency: 7 },
     );
-    yield* CliState.setCliDesiredCloudLink(false);
+    yield* setCliDesiredCloudLink(false);
     return { ok: true, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
   },
   Effect.catchIf(

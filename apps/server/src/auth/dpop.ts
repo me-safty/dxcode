@@ -5,7 +5,12 @@ import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
-import * as EnvironmentAuth from "./EnvironmentAuth.ts";
+import {
+  ServerAuthDpopReplayKeyCalculationError,
+  ServerAuthDpopReplayStateRecordError,
+  ServerAuthInvalidCredentialError,
+  type ServerAuthInternalError,
+} from "./EnvironmentAuth.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 
 function firstHeaderValue(value: string | undefined): string | undefined {
@@ -26,13 +31,13 @@ export function requestAbsoluteUrl(request: HttpServerRequest.HttpServerRequest)
 
 export const mapDpopReplayStoreError = (
   error: ServerSecretStore.SecretStoreError,
-): EnvironmentAuth.ServerAuthInvalidCredentialError | EnvironmentAuth.ServerAuthInternalError =>
+): ServerAuthInvalidCredentialError | ServerAuthInternalError =>
   ServerSecretStore.isSecretAlreadyExistsError(error)
-    ? new EnvironmentAuth.ServerAuthInvalidCredentialError({
+    ? new ServerAuthInvalidCredentialError({
         reason: "invalid_credential",
         cause: "DPoP proof replayed.",
       })
-    : new EnvironmentAuth.ServerAuthDpopReplayStateRecordError({
+    : new ServerAuthDpopReplayStateRecordError({
         operation: "record_dpop_replay_state",
         cause: error,
       });
@@ -54,7 +59,7 @@ export const verifyRequestDpopProof = (input: {
       ...(input.expectedAccessToken ? { expectedAccessToken: input.expectedAccessToken } : {}),
     });
     if (!result.ok) {
-      return yield* new EnvironmentAuth.ServerAuthInvalidCredentialError({
+      return yield* new ServerAuthInvalidCredentialError({
         reason: "invalid_credential",
         cause: result.reason,
       });
@@ -67,7 +72,7 @@ export const verifyRequestDpopProof = (input: {
       Effect.map(Encoding.encodeBase64Url),
       Effect.mapError(
         (cause) =>
-          new EnvironmentAuth.ServerAuthDpopReplayKeyCalculationError({
+          new ServerAuthDpopReplayKeyCalculationError({
             operation: "calculate_dpop_replay_key",
             cause,
           }),
