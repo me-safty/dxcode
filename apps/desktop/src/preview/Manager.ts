@@ -148,6 +148,29 @@ interface CdpEvaluationResult {
   };
 }
 
+export const PreviewAutomationSelectorKind = Schema.Literals([
+  "focused-element",
+  "selector",
+  "locator",
+]);
+export type PreviewAutomationSelectorKind = typeof PreviewAutomationSelectorKind.Type;
+
+export const PreviewAutomationEvaluationDetailKind = Schema.Literals([
+  "exception-description",
+  "exception-text",
+  "unknown",
+]);
+export type PreviewAutomationEvaluationDetailKind =
+  typeof PreviewAutomationEvaluationDetailKind.Type;
+
+const previewAutomationTargetLabel = (
+  selectorKind: PreviewAutomationSelectorKind,
+  selectorLength?: number,
+) =>
+  selectorKind === "focused-element"
+    ? "the focused element"
+    : `${selectorKind} (${selectorLength ?? 0} characters)`;
+
 interface PreviewOperationContext {
   readonly operation: string;
   readonly tabId?: string;
@@ -884,17 +907,24 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     }).pipe(
       Effect.flatMap((rawResponse) => {
         const response = rawResponse as CdpEvaluationResult;
-        return response.exceptionDetails
-          ? Effect.fail(
-              new PreviewAutomationEvaluationError({
-                tabId,
-                detail:
-                  response.exceptionDetails.exception?.description ??
-                  response.exceptionDetails.text ??
-                  "JavaScript evaluation failed.",
-              }),
-            )
-          : Effect.succeed(response.result?.value as A);
+        if (!response.exceptionDetails) {
+          return Effect.succeed(response.result?.value as A);
+        }
+        const description = response.exceptionDetails.exception?.description;
+        const text = response.exceptionDetails.text;
+        return Effect.fail(
+          new PreviewAutomationEvaluationError({
+            tabId,
+            detailKind:
+              description !== undefined
+                ? "exception-description"
+                : text !== undefined
+                  ? "exception-text"
+                  : "unknown",
+            detailLength: description?.length ?? text?.length ?? 0,
+            cause: response.exceptionDetails,
+          }),
+        );
       }),
     );
 
@@ -902,6 +932,22 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     readonly selector?: string | undefined;
     readonly locator?: string | undefined;
   }): string | null => input.locator ?? (input.selector ? `css=${input.selector}` : null);
+
+  const automationSelectorDiagnostics = (input: {
+    readonly selector?: string | undefined;
+    readonly locator?: string | undefined;
+  }): {
+    readonly selectorKind: PreviewAutomationSelectorKind;
+    readonly selectorLength?: number;
+  } => {
+    if (input.locator !== undefined) {
+      return { selectorKind: "locator", selectorLength: input.locator.length };
+    }
+    if (input.selector !== undefined) {
+      return { selectorKind: "selector", selectorLength: input.selector.length };
+    }
+    return { selectorKind: "focused-element" };
+  };
 
   const ensurePlaywrightInjected = Effect.fn("PreviewManager.ensurePlaywrightInjected")(function* (
     tabId: string,
@@ -1831,15 +1877,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewAutomationInvalidSelectorError({
         operation: "click",
         tabId,
-        selector: locator,
-        reason: point.message,
+        ...automationSelectorDiagnostics(input),
+        reasonLength: point.message.length,
+        cause: point,
       });
     }
     if ("notFound" in point) {
       return yield* new PreviewAutomationTargetNotFoundError({
         operation: "click",
         tabId,
-        locator,
+        ...automationSelectorDiagnostics(input),
       });
     }
     return point;
@@ -1962,15 +2009,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewAutomationInvalidSelectorError({
         operation: "type",
         tabId,
-        selector: locator ?? "",
-        reason: result.message,
+        ...automationSelectorDiagnostics(input),
+        reasonLength: result.message.length,
+        cause: result,
       });
     }
     if ("notFound" in result) {
       return yield* new PreviewAutomationTargetNotFoundError({
         operation: "type",
         tabId,
-        locator,
+        ...automationSelectorDiagnostics(input),
       });
     }
   });
@@ -2081,15 +2129,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewAutomationInvalidSelectorError({
         operation: "scroll",
         tabId,
-        selector: locator ?? "",
-        reason: result.message,
+        ...automationSelectorDiagnostics(input),
+        reasonLength: result.message.length,
+        cause: result,
       });
     }
     if ("notFound" in result) {
       return yield* new PreviewAutomationTargetNotFoundError({
         operation: "scroll",
         tabId,
-        locator,
+        ...automationSelectorDiagnostics(input),
       });
     }
   });
@@ -2187,8 +2236,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return yield* new PreviewAutomationInvalidSelectorError({
           operation: "waitFor",
           tabId,
-          selector: locator ?? "",
-          reason: result.message,
+          ...automationSelectorDiagnostics(input),
+          reasonLength: result.message.length,
+          cause: result,
         });
       }
       if (result.matched) return;
@@ -2410,10 +2460,15 @@ export class PreviewAutomationDebuggerAttachedError extends Schema.TaggedErrorCl
 
 export class PreviewAutomationEvaluationError extends Schema.TaggedErrorClass<PreviewAutomationEvaluationError>()(
   "PreviewAutomationEvaluationError",
-  { tabId: Schema.String, detail: Schema.String },
+  {
+    tabId: Schema.String,
+    detailKind: PreviewAutomationEvaluationDetailKind,
+    detailLength: Schema.Number,
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    return `Preview JavaScript evaluation failed in tab ${this.tabId}: ${this.detail}`;
+    return `Preview JavaScript evaluation failed in tab ${this.tabId}`;
   }
 }
 
@@ -2422,11 +2477,12 @@ export class PreviewAutomationTargetNotFoundError extends Schema.TaggedErrorClas
   {
     operation: Schema.String,
     tabId: Schema.String,
-    locator: Schema.NullOr(Schema.String),
+    selectorKind: PreviewAutomationSelectorKind,
+    selectorLength: Schema.optionalKey(Schema.Number),
   },
 ) {
   override get message(): string {
-    const target = this.locator === null ? "the focused element" : `locator ${this.locator}`;
+    const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
     return `Preview automation ${this.operation} could not find ${target} in tab ${this.tabId}`;
   }
 }
@@ -2451,16 +2507,25 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedErrorCla
   {
     operation: Schema.String,
     tabId: Schema.String,
-    selector: Schema.String,
-    reason: Schema.String,
+    selectorKind: PreviewAutomationSelectorKind,
+    selectorLength: Schema.optionalKey(Schema.Number),
+    reasonLength: Schema.Number,
+    cause: Schema.Defect(),
   },
 ) {
-  get detail(): { readonly selector: string } {
-    return { selector: this.selector };
+  get detail(): {
+    readonly selectorKind: PreviewAutomationSelectorKind;
+    readonly selectorLength?: number;
+  } {
+    return {
+      selectorKind: this.selectorKind,
+      ...(this.selectorLength === undefined ? {} : { selectorLength: this.selectorLength }),
+    };
   }
 
   override get message(): string {
-    return `Preview automation ${this.operation} rejected selector ${JSON.stringify(this.selector)} in tab ${this.tabId}: ${this.reason}`;
+    const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
+    return `Preview automation ${this.operation} rejected ${target} in tab ${this.tabId}`;
   }
 }
 
