@@ -1,8 +1,13 @@
+import * as Cause from "effect/Cause";
 import { AtomRegistry } from "effect/unstable/reactivity";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { createWorkspaceFileImageAtomFamily } from "./workspace-file-image-cache";
+import {
+  createWorkspaceFileImageAtomFamily,
+  WorkspaceImagePrefetchFailedError,
+  WorkspaceImagePrefetchUnavailableError,
+} from "./workspace-file-image-cache";
 
 describe("workspaceFileImageAtom", () => {
   it("reuses a prefetched image across route remounts", async () => {
@@ -48,15 +53,44 @@ describe("workspaceFileImageAtom", () => {
     registry.dispose();
   });
 
-  it("exposes prefetch failures", async () => {
+  it("reports an unavailable image when prefetch completes without caching it", async () => {
+    const uri = "https://example.test/missing.png";
     const imageAtom = createWorkspaceFileImageAtomFamily({ prefetch: async () => false });
     const registry = AtomRegistry.make();
-    const atom = imageAtom("https://example.test/missing.png");
+    const atom = imageAtom(uri);
     const unmount = registry.mount(atom);
 
     await vi.waitFor(() => {
       expect(AsyncResult.isFailure(registry.get(atom))).toBe(true);
     });
+    const result = registry.get(atom);
+    if (AsyncResult.isFailure(result)) {
+      expect(Cause.squash(result.cause)).toEqual(
+        new WorkspaceImagePrefetchUnavailableError({ uri }),
+      );
+    }
+
+    unmount();
+    registry.dispose();
+  });
+
+  it("preserves rejected prefetch causes with the image URI", async () => {
+    const uri = "https://example.test/rejected.png";
+    const cause = new Error("native image loader failed");
+    const imageAtom = createWorkspaceFileImageAtomFamily({ prefetch: () => Promise.reject(cause) });
+    const registry = AtomRegistry.make();
+    const atom = imageAtom(uri);
+    const unmount = registry.mount(atom);
+
+    await vi.waitFor(() => {
+      expect(AsyncResult.isFailure(registry.get(atom))).toBe(true);
+    });
+    const result = registry.get(atom);
+    if (AsyncResult.isFailure(result)) {
+      const error = Cause.squash(result.cause);
+      expect(error).toEqual(new WorkspaceImagePrefetchFailedError({ uri, cause }));
+      expect((error as WorkspaceImagePrefetchFailedError).cause).toBe(cause);
+    }
 
     unmount();
     registry.dispose();
