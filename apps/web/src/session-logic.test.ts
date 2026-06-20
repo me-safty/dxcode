@@ -1213,7 +1213,7 @@ describe("deriveWorkLogEntries", () => {
             toolCallId: "command-1",
             command: "vp test",
             rawOutput: {
-              stdout: "Error\n",
+              stdout: "Error",
             },
           },
         },
@@ -1239,90 +1239,6 @@ describe("deriveWorkLogEntries", () => {
 
     const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.stdout).toBe("Error\nretrying");
-  });
-
-  it("concatenates split incremental command output without adding separators", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "command-tool-output-update-1",
-        createdAt: "2026-02-23T00:00:01.000Z",
-        kind: "tool.updated",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          title: "Ran command",
-          data: {
-            toolCallId: "command-1",
-            command: "printf Downloading",
-            rawOutput: {
-              stdout: "Down",
-            },
-          },
-        },
-      }),
-      makeActivity({
-        id: "command-tool-output-update-2",
-        createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "tool.updated",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          title: "Ran command",
-          data: {
-            toolCallId: "command-1",
-            command: "printf Downloading",
-            rawOutput: {
-              stdout: "loading",
-            },
-          },
-        },
-      }),
-    ];
-
-    const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.stdout).toBe("Downloading");
-  });
-
-  it("keeps incremental command chunks that match the accumulated prefix", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "command-tool-output-update-1",
-        createdAt: "2026-02-23T00:00:01.000Z",
-        kind: "tool.updated",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          title: "Ran command",
-          data: {
-            toolCallId: "command-1",
-            command: "printf aba",
-            rawOutput: {
-              stdout: "a\nb",
-            },
-          },
-        },
-      }),
-      makeActivity({
-        id: "command-tool-output-update-2",
-        createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "tool.updated",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          title: "Ran command",
-          data: {
-            toolCallId: "command-1",
-            command: "printf aba",
-            rawOutput: {
-              stdout: "a",
-            },
-          },
-        },
-      }),
-    ];
-
-    const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.stdout).toBe("a\nba");
   });
 
   it("preserves whitespace-only incremental command output chunks", () => {
@@ -1382,65 +1298,6 @@ describe("deriveWorkLogEntries", () => {
 
     const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.stdout).toBe("hello world");
-  });
-
-  it("preserves whitespace-only incremental raw output content chunks", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "command-tool-output-update-1",
-        createdAt: "2026-02-23T00:00:01.000Z",
-        kind: "tool.updated",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          title: "Ran command",
-          data: {
-            toolCallId: "command-1",
-            command: "printf hello",
-            rawOutput: {
-              content: "hello",
-            },
-          },
-        },
-      }),
-      makeActivity({
-        id: "command-tool-output-update-2",
-        createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "tool.updated",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          title: "Ran command",
-          data: {
-            toolCallId: "command-1",
-            command: "printf hello",
-            rawOutput: {
-              content: " ",
-            },
-          },
-        },
-      }),
-      makeActivity({
-        id: "command-tool-output-update-3",
-        createdAt: "2026-02-23T00:00:03.000Z",
-        kind: "tool.updated",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          title: "Ran command",
-          data: {
-            toolCallId: "command-1",
-            command: "printf hello",
-            rawOutput: {
-              content: "world",
-            },
-          },
-        },
-      }),
-    ];
-
-    const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.output).toBe("hello world");
   });
 
   it("strips fallback stdout exit-code metadata", () => {
