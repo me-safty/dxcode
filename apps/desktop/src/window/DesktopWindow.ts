@@ -226,7 +226,9 @@ export const make = Effect.gen(function* () {
           {
             label: "Copy Link",
             click: () => {
-              void runPromise(electronShell.copyText(params.linkURL));
+              void runPromise(
+                electronShell.copyText(params.linkURL).pipe(Effect.ignore({ log: true })),
+              );
             },
           },
           { type: "separator" },
