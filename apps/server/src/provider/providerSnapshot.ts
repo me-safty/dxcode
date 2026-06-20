@@ -9,7 +9,7 @@ import type {
   ServerProviderState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { normalizeModelSlug } from "@t3tools/shared/model";
@@ -27,11 +27,21 @@ export interface CommandResult {
   readonly code: number;
 }
 
-export class ProviderCommandExecutionError extends Data.TaggedError(
-  "ProviderCommandExecutionError",
-)<{
-  readonly message: string;
-}> {}
+export class ProviderCommandNotFoundError extends Schema.TaggedErrorClass<ProviderCommandNotFoundError>()(
+  "ProviderCommandNotFoundError",
+  {
+    binaryPath: Schema.String,
+    exitCode: Schema.Number,
+    stdout: Schema.String,
+    stderr: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Provider command ${this.binaryPath} was not found (exit code ${this.exitCode}).`;
+  }
+}
+
+const isProviderCommandNotFoundError = Schema.is(ProviderCommandNotFoundError);
 
 export interface ProviderProbeResult {
   readonly installed: boolean;
@@ -57,6 +67,7 @@ export function nonEmptyTrimmed(value: string | undefined): string | undefined {
 }
 
 export function isCommandMissingCause(error: { readonly message: string }): boolean {
+  if (isProviderCommandNotFoundError(error)) return true;
   const lower = error.message.toLowerCase();
   return lower.includes("enoent") || lower.includes("notfound");
 }
@@ -76,7 +87,12 @@ export const spawnAndCollect = (binaryPath: string, command: ChildProcess.Comman
 
     const result: CommandResult = { stdout, stderr, code: exitCode };
     if (yield* isWindowsCommandNotFound(exitCode, stderr)) {
-      return yield* new ProviderCommandExecutionError({ message: `spawn ${binaryPath} ENOENT` });
+      return yield* new ProviderCommandNotFoundError({
+        binaryPath,
+        exitCode,
+        stdout,
+        stderr,
+      });
     }
     return result;
   }).pipe(Effect.scoped);
