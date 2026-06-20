@@ -11,12 +11,13 @@ const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:"]);
 export class ElectronShellOpenExternalError extends Schema.TaggedErrorClass<ElectronShellOpenExternalError>()(
   "ElectronShellOpenExternalError",
   {
-    externalUrl: Schema.String,
+    requestTarget: Schema.String,
+    urlLength: Schema.Number,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to open external URL ${this.externalUrl}.`;
+    return `Failed to open external URL ${this.requestTarget}.`;
   }
 }
 
@@ -52,6 +53,11 @@ export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string> {
   }
 }
 
+function externalRequestTarget(externalUrl: string): string {
+  const url = new URL(externalUrl);
+  return `${url.protocol}//${url.host}${url.pathname}`;
+}
+
 export class ElectronShell extends Context.Service<
   ElectronShell,
   {
@@ -69,7 +75,12 @@ export const make = ElectronShell.of({
       onSome: (externalUrl) =>
         Effect.tryPromise({
           try: () => Electron.shell.openExternal(externalUrl),
-          catch: (cause) => new ElectronShellOpenExternalError({ externalUrl, cause }),
+          catch: (cause) =>
+            new ElectronShellOpenExternalError({
+              requestTarget: externalRequestTarget(externalUrl),
+              urlLength: externalUrl.length,
+              cause,
+            }),
         }).pipe(Effect.as(true)),
     }),
   copyText: (text) =>
