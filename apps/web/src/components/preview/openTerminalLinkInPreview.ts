@@ -1,4 +1,5 @@
 import type { LocalApi, ScopedThreadRef } from "@t3tools/contracts";
+import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { isPreviewableUrl } from "@t3tools/shared/preview";
 import * as Schema from "effect/Schema";
 
@@ -85,6 +86,9 @@ export async function openTerminalLinkInPreview<E>(
       input: { threadId: input.threadRef.threadId, url: input.url },
     });
     if (result._tag === "Failure") {
+      if (isAtomCommandInterrupted(result)) {
+        return;
+      }
       console.error(
         new TerminalLinkPreviewOpenError({
           ...errorContext,

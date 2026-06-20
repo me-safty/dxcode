@@ -106,4 +106,25 @@ describe("openTerminalLinkInPreview", () => {
     });
     expect(error.message).not.toContain("preview unavailable");
   });
+
+  it("does not report or fall back when opening the preview is interrupted", async () => {
+    const fallbackToBrowser = vi.fn();
+    const reportError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await openTerminalLinkInPreview({
+      url: "http://localhost:5173/",
+      position: { x: 12, y: 34 },
+      threadRef,
+      openPreview: async () => AsyncResult.failure(Cause.interrupt()),
+      localApi: {
+        contextMenu: {
+          show: vi.fn(async () => "open-in-preview"),
+        },
+      } as unknown as LocalApi,
+      fallbackToBrowser,
+    });
+
+    expect(reportError).not.toHaveBeenCalled();
+    expect(fallbackToBrowser).not.toHaveBeenCalled();
+  });
 });
