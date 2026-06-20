@@ -85,9 +85,8 @@ describe("LocalApi", () => {
     await expect(promise).rejects.toMatchObject({
       _tag: "LocalExternalUrlOpenError",
       url: "https://example.com/pull/42",
-      transport: "desktop-bridge",
       cause,
-      message: "Unable to open external URL https://example.com/pull/42 through desktop-bridge.",
+      message: "Unable to open external URL https://example.com/pull/42 through the desktop bridge.",
     });
   });
 

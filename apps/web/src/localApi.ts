@@ -36,23 +36,20 @@ export class LocalExternalUrlOpenError extends Schema.TaggedErrorClass<LocalExte
   "LocalExternalUrlOpenError",
   {
     url: Schema.String,
-    transport: Schema.Literal("desktop-bridge"),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Unable to open external URL ${this.url} through ${this.transport}.`;
+    return `Unable to open external URL ${this.url} through the desktop bridge.`;
   }
 }
 
 export class LocalApiUnavailableError extends Schema.TaggedErrorClass<LocalApiUnavailableError>()(
   "LocalApiUnavailableError",
-  {
-    runtime: Schema.Literal("server"),
-  },
+  {},
 ) {
   override get message(): string {
-    return `Local API is unavailable in the ${this.runtime} runtime.`;
+    return "Local API is unavailable in the server runtime.";
   }
 }
 
@@ -81,14 +78,12 @@ function createBrowserLocalApi(): LocalApi {
           } catch (cause) {
             throw new LocalExternalUrlOpenError({
               url,
-              transport: "desktop-bridge",
               cause,
             });
           }
           if (!opened) {
             throw new LocalExternalUrlOpenError({
               url,
-              transport: "desktop-bridge",
             });
           }
           return;
@@ -173,7 +168,7 @@ export function readLocalApi(): LocalApi | undefined {
 export function ensureLocalApi(): LocalApi {
   const api = readLocalApi();
   if (!api) {
-    throw new LocalApiUnavailableError({ runtime: "server" });
+    throw new LocalApiUnavailableError();
   }
   return api;
 }
