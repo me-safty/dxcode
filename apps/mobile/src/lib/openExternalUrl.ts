@@ -38,7 +38,14 @@ export async function tryOpenExternalUrl(url: string, target: ExternalUrlTarget)
     await Linking.openURL(url);
     return true;
   } catch (cause) {
-    console.error(new ExternalUrlOpenError({ target, ...externalUrlMetadata(url), cause }));
+    const error = new ExternalUrlOpenError({ target, ...externalUrlMetadata(url), cause });
+    console.error(error.message, {
+      _tag: error._tag,
+      target: error.target,
+      scheme: error.scheme,
+      host: error.host,
+      stack: error.stack,
+    });
     return false;
   }
 }

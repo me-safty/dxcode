@@ -26,8 +26,8 @@ describe("tryOpenExternalUrl", () => {
     ).resolves.toBe(true);
   });
 
-  it("logs stable URL context with the exact opening failure", async () => {
-    const cause = new Error("browser unavailable");
+  it("logs stable URL context without exposing the opening failure", async () => {
+    const cause = new Error("browser-unavailable-secret-sentinel");
     openURL.mockRejectedValue(cause);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -35,17 +35,24 @@ describe("tryOpenExternalUrl", () => {
       tryOpenExternalUrl("https://github.com/pingdotgg/t3code/pull/1?token=secret", "pull-request"),
     ).resolves.toBe(false);
 
-    expect(consoleError).toHaveBeenCalledWith(
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const [message, attributes] = consoleError.mock.calls[0] ?? [];
+    expect(message).toBe("Failed to open pull-request URL with the https scheme.");
+    expect(attributes).toEqual(
       expect.objectContaining({
         _tag: "ExternalUrlOpenError",
         target: "pull-request",
         scheme: "https",
         host: "github.com",
-        cause,
+        stack: expect.stringContaining("ExternalUrlOpenError"),
       }),
     );
-    const loggedError = consoleError.mock.calls[0]?.[0];
-    expect(loggedError).not.toHaveProperty("url");
-    expect(JSON.stringify(loggedError)).not.toContain("token=secret");
+    expect(attributes).not.toHaveProperty("url");
+    expect(attributes).not.toHaveProperty("cause");
+    const diagnosticText = [message, ...Object.values(attributes as Record<string, unknown>)]
+      .map(String)
+      .join("\n");
+    expect(diagnosticText).not.toContain("token=secret");
+    expect(diagnosticText).not.toContain("browser-unavailable-secret-sentinel");
   });
 });
