@@ -907,14 +907,30 @@ function mergeTextOutput(
   if (next.startsWith(previous)) {
     return next;
   }
-  if (previous.startsWith(next) && shouldKeepLongerOutputSnapshot(next, nextEntry)) {
+  if (previous.startsWith(next) && shouldKeepLongerOutputSnapshot(previous, next, nextEntry)) {
     return previous;
   }
   return `${previous}${next}`;
 }
 
-function shouldKeepLongerOutputSnapshot(next: string, nextEntry: DerivedWorkLogEntry): boolean {
-  return nextEntry.activityKind === "tool.completed" || next.endsWith("\n");
+function shouldKeepLongerOutputSnapshot(
+  previous: string,
+  next: string,
+  nextEntry: DerivedWorkLogEntry,
+): boolean {
+  return (
+    nextEntry.activityKind === "tool.completed" ||
+    next.endsWith("\n") ||
+    isLikelyShorterOutputSnapshot(previous, next)
+  );
+}
+
+function isLikelyShorterOutputSnapshot(previous: string, next: string): boolean {
+  if (next.length <= 1) {
+    return false;
+  }
+  const following = previous.slice(next.length, next.length + 1);
+  return following === " " || following === "\t" || following === "\n" || following === "\r";
 }
 
 function mergeChangedFiles(
