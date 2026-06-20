@@ -21,7 +21,7 @@ import { PreviewChromeRow } from "./PreviewChromeRow";
 import { formatPreviewUrl } from "./previewUrlPresentation";
 import { PreviewEmptyState } from "./PreviewEmptyState";
 import { PreviewMoreMenu } from "./PreviewMoreMenu";
-import { reportPreviewActionFailure } from "./reportPreviewActionFailure";
+import { previewUrlFailureContext, reportPreviewActionFailure } from "./reportPreviewActionFailure";
 import { PreviewUnreachable } from "./PreviewUnreachable";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
@@ -117,14 +117,24 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
           });
           if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
             reportPreviewActionFailure(
-              { operation, threadKey, ...(tabId ? { tabId } : {}), url: targetUrl },
+              {
+                operation,
+                threadKey,
+                ...(tabId ? { tabId } : {}),
+                ...previewUrlFailureContext(targetUrl),
+              },
               result.cause,
             );
           }
         }
       } catch (cause) {
         reportPreviewActionFailure(
-          { operation, threadKey, ...(tabId ? { tabId } : {}), url: targetUrl },
+          {
+            operation,
+            threadKey,
+            ...(tabId ? { tabId } : {}),
+            ...previewUrlFailureContext(targetUrl),
+          },
           cause,
         );
         // Server-side `failed` event renders the unreachable view.
@@ -179,7 +189,12 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
     if (!localApi || !url) return;
     void localApi.shell.openExternal(url).catch((cause) => {
       reportPreviewActionFailure(
-        { operation: "open-external", threadKey, ...(tabId ? { tabId } : {}), url },
+        {
+          operation: "open-external",
+          threadKey,
+          ...(tabId ? { tabId } : {}),
+          ...previewUrlFailureContext(url),
+        },
         cause,
       );
     });
