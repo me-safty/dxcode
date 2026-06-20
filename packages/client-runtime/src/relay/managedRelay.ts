@@ -52,12 +52,12 @@ export interface ManagedRelayDpopProofInput {
 export class ManagedRelayDpopKeyLoadError extends Schema.TaggedErrorClass<ManagedRelayDpopKeyLoadError>()(
   "ManagedRelayDpopKeyLoadError",
   {
-    operation: Schema.Literal("load-or-create"),
+    keyStore: Schema.Literals(["expo-secure-store", "indexed-db"]),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Could not ${this.operation.replaceAll("-", " ")} the relay DPoP proof key.`;
+    return `Could not load or create the relay DPoP proof key from ${this.keyStore}.`;
   }
 }
 

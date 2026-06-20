@@ -20,7 +20,7 @@ const relayDpopSignerLayer = Layer.effect(
         Effect.mapError(
           (error) =>
             new ManagedRelay.ManagedRelayDpopKeyLoadError({
-              operation: "load-or-create",
+              keyStore: "expo-secure-store",
               cause: error,
             }),
         ),

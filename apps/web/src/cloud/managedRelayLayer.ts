@@ -42,7 +42,7 @@ export const relayDpopSignerLayer = Layer.effect(
         Effect.mapError(
           (error) =>
             new ManagedRelay.ManagedRelayDpopKeyLoadError({
-              operation: "load-or-create",
+              keyStore: "indexed-db",
               cause: error,
             }),
         ),
