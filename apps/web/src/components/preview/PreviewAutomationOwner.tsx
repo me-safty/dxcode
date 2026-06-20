@@ -121,6 +121,10 @@ export class PreviewAutomationRecordingNotActiveError extends Schema.TaggedError
     tabId: PreviewTabId,
   },
 ) {
+  get responseTag() {
+    return "PreviewAutomationExecutionError";
+  }
+
   override get message(): string {
     return `Preview automation request ${this.requestId} found no active recording for tab ${this.tabId} on environment ${this.environmentId} thread ${this.threadId}.`;
   }
