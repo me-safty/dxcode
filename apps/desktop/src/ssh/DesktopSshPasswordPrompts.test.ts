@@ -6,7 +6,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
-import type * as Electron from "electron";
+import type { BrowserWindow } from "electron";
 
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
@@ -71,9 +71,9 @@ function makeElectronWindowLayer(window: ReturnType<typeof makeTestWindow>["wind
     ElectronWindow.ElectronWindow,
     ElectronWindow.ElectronWindow.of({
       create: () => Effect.die("unexpected BrowserWindow creation"),
-      main: Effect.succeed(Option.some(window as Electron.BrowserWindow)),
-      currentMainOrFirst: Effect.succeed(Option.some(window as Electron.BrowserWindow)),
-      focusedMainOrFirst: Effect.succeed(Option.some(window as Electron.BrowserWindow)),
+      main: Effect.succeed(Option.some(window as BrowserWindow)),
+      currentMainOrFirst: Effect.succeed(Option.some(window as BrowserWindow)),
+      focusedMainOrFirst: Effect.succeed(Option.some(window as BrowserWindow)),
       setMain: () => Effect.void,
       clearMain: () => Effect.void,
       reveal: () => Effect.void,

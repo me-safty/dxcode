@@ -4,19 +4,23 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
-import type * as Electron from "electron";
+import type {
+  BrowserWindow,
+  BrowserWindowConstructorOptions,
+  MenuItemConstructorOptions,
+} from "electron";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
-import * as PreviewManager from "../preview/Manager.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
+import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
-import * as IpcChannels from "../ipc/channels.ts";
+import { MENU_ACTION_CHANNEL } from "../ipc/channels.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
@@ -24,7 +28,7 @@ const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
 
 type WindowTitleBarOptions = Pick<
-  Electron.BrowserWindowConstructorOptions,
+  BrowserWindowConstructorOptions,
   "titleBarOverlay" | "titleBarStyle" | "trafficLightPosition"
 >;
 
@@ -45,9 +49,9 @@ export type DesktopWindowError =
 export class DesktopWindow extends Context.Service<
   DesktopWindow,
   {
-    readonly createMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
-    readonly ensureMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
-    readonly revealOrCreateMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
+    readonly createMain: Effect.Effect<BrowserWindow, DesktopWindowError>;
+    readonly ensureMain: Effect.Effect<BrowserWindow, DesktopWindowError>;
+    readonly revealOrCreateMain: Effect.Effect<BrowserWindow, DesktopWindowError>;
     readonly activate: Effect.Effect<void, DesktopWindowError>;
     readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
     readonly handleBackendReady: Effect.Effect<void, DesktopWindowError>;
@@ -108,7 +112,7 @@ function getWindowTitleBarOptions(
 }
 
 function syncWindowAppearance(
-  window: Electron.BrowserWindow,
+  window: BrowserWindow,
   shouldUseDarkColors: boolean,
   platform: NodeJS.Platform,
 ): Effect.Effect<void> {
@@ -155,11 +159,11 @@ export const make = Effect.gen(function* () {
   const runPromise = Effect.runPromiseWith(context);
 
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (): Effect.fn.Return<
-    Electron.BrowserWindow,
+    BrowserWindow,
     DesktopWindowError
   > {
     yield* previewManager.getBrowserSession();
-    const applicationUrl = getDesktopUrl(environment.isDevelopment);
+    const applicationUrl = ElectronProtocol.getDesktopUrl(environment.isDevelopment);
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
@@ -206,7 +210,7 @@ export const make = Effect.gen(function* () {
     window.webContents.on("context-menu", (event, params) => {
       event.preventDefault();
 
-      const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
+      const menuTemplate: MenuItemConstructorOptions[] = [];
 
       if (params.misspelledWord) {
         for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
@@ -380,7 +384,7 @@ export const make = Effect.gen(function* () {
 
       const send = () => {
         if (targetWindow.isDestroyed()) return;
-        targetWindow.webContents.send(IpcChannels.MENU_ACTION_CHANNEL, action);
+        targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
         void runPromise(electronWindow.reveal(targetWindow));
       };
 

@@ -1,45 +1,45 @@
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 
-import * as Electron from "electron";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { app, BrowserWindow, type BrowserWindowConstructorOptions } from "electron";
 
-export class ElectronWindowCreateError extends Data.TaggedError("ElectronWindowCreateError")<{
-  readonly cause: unknown;
-}> {
-  override get message() {
-    return "Failed to create Electron BrowserWindow.";
+export class ElectronWindowCreateError extends Schema.TaggedErrorClass<ElectronWindowCreateError>()(
+  "ElectronWindowCreateError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return `Failed to create Electron BrowserWindow (${String(this.cause)}).`;
   }
 }
 
-export interface ElectronWindowShape {
-  readonly create: (
-    options: Electron.BrowserWindowConstructorOptions,
-  ) => Effect.Effect<Electron.BrowserWindow, ElectronWindowCreateError>;
-  readonly main: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
-  readonly currentMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
-  readonly focusedMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
-  readonly setMain: (window: Electron.BrowserWindow) => Effect.Effect<void>;
-  readonly clearMain: (window: Option.Option<Electron.BrowserWindow>) => Effect.Effect<void>;
-  readonly reveal: (window: Electron.BrowserWindow) => Effect.Effect<void>;
-  readonly sendAll: (channel: string, ...args: readonly unknown[]) => Effect.Effect<void>;
-  readonly destroyAll: Effect.Effect<void>;
-  readonly syncAllAppearance: <E, R>(
-    sync: (window: Electron.BrowserWindow) => Effect.Effect<void, E, R>,
-  ) => Effect.Effect<void, E, R>;
-}
+export class ElectronWindow extends Context.Service<
+  ElectronWindow,
+  {
+    readonly create: (
+      options: BrowserWindowConstructorOptions,
+    ) => Effect.Effect<BrowserWindow, ElectronWindowCreateError>;
+    readonly main: Effect.Effect<Option.Option<BrowserWindow>>;
+    readonly currentMainOrFirst: Effect.Effect<Option.Option<BrowserWindow>>;
+    readonly focusedMainOrFirst: Effect.Effect<Option.Option<BrowserWindow>>;
+    readonly setMain: (window: BrowserWindow) => Effect.Effect<void>;
+    readonly clearMain: (window: Option.Option<BrowserWindow>) => Effect.Effect<void>;
+    readonly reveal: (window: BrowserWindow) => Effect.Effect<void>;
+    readonly sendAll: (channel: string, ...args: readonly unknown[]) => Effect.Effect<void>;
+    readonly destroyAll: Effect.Effect<void>;
+    readonly syncAllAppearance: <E, R>(
+      sync: (window: BrowserWindow) => Effect.Effect<void, E, R>,
+    ) => Effect.Effect<void, E, R>;
+  }
+>()("@t3tools/desktop/electron/ElectronWindow") {}
 
-export class ElectronWindow extends Context.Service<ElectronWindow, ElectronWindowShape>()(
-  "@t3tools/desktop/electron/ElectronWindow",
-) {}
-
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const platform = yield* HostProcessPlatform;
-  const mainWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+  const mainWindowRef = yield* Ref.make<Option.Option<BrowserWindow>>(Option.none());
 
   const liveMain = Ref.get(mainWindowRef).pipe(
     Effect.map(Option.filter((value) => !value.isDestroyed())),
@@ -51,13 +51,13 @@ const make = Effect.gen(function* () {
       return main;
     }
 
-    return Option.fromNullishOr(Electron.BrowserWindow.getAllWindows()[0] ?? null).pipe(
+    return Option.fromNullishOr(BrowserWindow.getAllWindows()[0] ?? null).pipe(
       Option.filter((window) => !window.isDestroyed()),
     );
   });
 
   const focusedMainOrFirst = Effect.sync(() =>
-    Option.fromNullishOr(Electron.BrowserWindow.getFocusedWindow() ?? null).pipe(
+    Option.fromNullishOr(BrowserWindow.getFocusedWindow() ?? null).pipe(
       Option.filter((window) => !window.isDestroyed()),
     ),
   ).pipe(
@@ -69,7 +69,7 @@ const make = Effect.gen(function* () {
   return ElectronWindow.of({
     create: (options) =>
       Effect.try({
-        try: () => new Electron.BrowserWindow(options),
+        try: () => new BrowserWindow(options),
         catch: (cause) => new ElectronWindowCreateError({ cause }),
       }),
     main: liveMain,
@@ -101,14 +101,14 @@ const make = Effect.gen(function* () {
         }
 
         if (platform === "darwin") {
-          Electron.app.focus({ steal: true });
+          app.focus({ steal: true });
         }
 
         window.focus();
       }),
     sendAll: (channel, ...args) =>
       Effect.sync(() => {
-        for (const window of Electron.BrowserWindow.getAllWindows()) {
+        for (const window of BrowserWindow.getAllWindows()) {
           if (window.isDestroyed()) {
             continue;
           }
@@ -116,14 +116,14 @@ const make = Effect.gen(function* () {
         }
       }),
     destroyAll: Effect.sync(() => {
-      for (const window of Electron.BrowserWindow.getAllWindows()) {
+      for (const window of BrowserWindow.getAllWindows()) {
         window.destroy();
       }
     }),
     syncAllAppearance: Effect.fn("desktop.electron.window.syncAllAppearance")(function* <E, R>(
-      sync: (window: Electron.BrowserWindow) => Effect.Effect<void, E, R>,
+      sync: (window: BrowserWindow) => Effect.Effect<void, E, R>,
     ) {
-      const windows = Electron.BrowserWindow.getAllWindows();
+      const windows = BrowserWindow.getAllWindows();
       for (const window of windows) {
         if (window.isDestroyed()) {
           continue;

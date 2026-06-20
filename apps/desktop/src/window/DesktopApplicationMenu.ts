@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import type * as Electron from "electron";
+import type { MenuItemConstructorOptions } from "electron";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
@@ -125,7 +125,7 @@ export const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
-    const template: Electron.MenuItemConstructorOptions[] = [];
+    const template: MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
       template.push({

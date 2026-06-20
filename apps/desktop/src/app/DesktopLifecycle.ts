@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 
-import type * as Electron from "electron";
+import type { Event } from "electron";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
@@ -69,7 +69,7 @@ const requestDesktopShutdownAndWait = Effect.fn("desktop.lifecycle.requestShutdo
 );
 
 function handleBeforeQuit(
-  event: Electron.Event,
+  event: Event,
   runEffect: <A, E>(effect: Effect.Effect<A, E, DesktopLifecycleRuntimeServices>) => Promise<A>,
   allowQuit: () => boolean,
   markQuitAllowed: () => void,
@@ -164,7 +164,7 @@ const make = DesktopLifecycle.of({
         desktopWindow.syncAppearance.pipe(Effect.withSpan("desktop.lifecycle.themeUpdated")),
       );
     });
-    yield* electronApp.on("before-quit", (event: Electron.Event) => {
+    yield* electronApp.on("before-quit", (event: Event) => {
       handleBeforeQuit(
         event,
         runEffect,

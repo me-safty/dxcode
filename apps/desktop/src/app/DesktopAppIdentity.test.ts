@@ -5,7 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import type * as Electron from "electron";
+import type { AboutPanelOptionsOptions } from "electron";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
@@ -30,7 +30,7 @@ type TestEnvironmentInput = Partial<DesktopEnvironment.MakeDesktopEnvironmentInp
 };
 
 interface ElectronAppCalls {
-  readonly setAboutPanelOptions: Array<Electron.AboutPanelOptionsOptions>;
+  readonly setAboutPanelOptions: Array<AboutPanelOptionsOptions>;
   readonly setDockIcon: string[];
   readonly setName: string[];
 }

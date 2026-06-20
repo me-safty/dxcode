@@ -3,38 +3,41 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import * as Electron from "electron";
+import {
+  dialog,
+  type BrowserWindow,
+  type MessageBoxOptions,
+  type MessageBoxReturnValue,
+  type OpenDialogOptions,
+} from "electron";
 
 const CONFIRM_BUTTON_INDEX = 1;
 
 export interface ElectronDialogPickFolderInput {
-  readonly owner: Option.Option<Electron.BrowserWindow>;
+  readonly owner: Option.Option<BrowserWindow>;
   readonly defaultPath: Option.Option<string>;
 }
 
 export interface ElectronDialogConfirmInput {
-  readonly owner: Option.Option<Electron.BrowserWindow>;
+  readonly owner: Option.Option<BrowserWindow>;
   readonly message: string;
 }
 
-export interface ElectronDialogShape {
-  readonly pickFolder: (
-    input: ElectronDialogPickFolderInput,
-  ) => Effect.Effect<Option.Option<string>>;
-  readonly confirm: (input: ElectronDialogConfirmInput) => Effect.Effect<boolean>;
-  readonly showMessageBox: (
-    options: Electron.MessageBoxOptions,
-  ) => Effect.Effect<Electron.MessageBoxReturnValue>;
-  readonly showErrorBox: (title: string, content: string) => Effect.Effect<void>;
-}
+export class ElectronDialog extends Context.Service<
+  ElectronDialog,
+  {
+    readonly pickFolder: (
+      input: ElectronDialogPickFolderInput,
+    ) => Effect.Effect<Option.Option<string>>;
+    readonly confirm: (input: ElectronDialogConfirmInput) => Effect.Effect<boolean>;
+    readonly showMessageBox: (options: MessageBoxOptions) => Effect.Effect<MessageBoxReturnValue>;
+    readonly showErrorBox: (title: string, content: string) => Effect.Effect<void>;
+  }
+>()("@t3tools/desktop/electron/ElectronDialog") {}
 
-export class ElectronDialog extends Context.Service<ElectronDialog, ElectronDialogShape>()(
-  "@t3tools/desktop/electron/ElectronDialog",
-) {}
-
-const make = ElectronDialog.of({
+export const make = ElectronDialog.of({
   pickFolder: Effect.fn("desktop.electron.dialog.pickFolder")(function* (input) {
-    const openDialogOptions: Electron.OpenDialogOptions = Option.match(input.defaultPath, {
+    const openDialogOptions: OpenDialogOptions = Option.match(input.defaultPath, {
       onNone: () => ({
         properties: ["openDirectory", "createDirectory"],
       }),
@@ -44,9 +47,8 @@ const make = ElectronDialog.of({
       }),
     });
     const result = yield* Option.match(input.owner, {
-      onNone: () => Effect.promise(() => Electron.dialog.showOpenDialog(openDialogOptions)),
-      onSome: (owner) =>
-        Effect.promise(() => Electron.dialog.showOpenDialog(owner, openDialogOptions)),
+      onNone: () => Effect.promise(() => dialog.showOpenDialog(openDialogOptions)),
+      onSome: (owner) => Effect.promise(() => dialog.showOpenDialog(owner, openDialogOptions)),
     });
 
     if (result.canceled) {
@@ -69,15 +71,15 @@ const make = ElectronDialog.of({
       message: normalizedMessage,
     };
     const result = yield* Option.match(input.owner, {
-      onNone: () => Effect.promise(() => Electron.dialog.showMessageBox(options)),
-      onSome: (owner) => Effect.promise(() => Electron.dialog.showMessageBox(owner, options)),
+      onNone: () => Effect.promise(() => dialog.showMessageBox(options)),
+      onSome: (owner) => Effect.promise(() => dialog.showMessageBox(owner, options)),
     });
     return result.response === CONFIRM_BUTTON_INDEX;
   }),
-  showMessageBox: (options) => Effect.promise(() => Electron.dialog.showMessageBox(options)),
+  showMessageBox: (options) => Effect.promise(() => dialog.showMessageBox(options)),
   showErrorBox: (title, content) =>
     Effect.sync(() => {
-      Electron.dialog.showErrorBox(title, content);
+      dialog.showErrorBox(title, content);
     }),
 });
 

@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import type * as Electron from "electron";
+import type { BrowserWindow, MenuItem, MenuItemConstructorOptions } from "electron";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -46,14 +46,14 @@ const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
   setDockIcon: () => Effect.void,
   appendCommandLineSwitch: () => Effect.void,
   on: () => Effect.void,
-} satisfies ElectronApp.ElectronAppShape);
+} satisfies ElectronApp.ElectronApp["Service"]);
 
 const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, {
   pickFolder: () => Effect.succeed(Option.none()),
   confirm: () => Effect.succeed(false),
   showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
   showErrorBox: () => Effect.void,
-} satisfies ElectronDialog.ElectronDialogShape);
+} satisfies ElectronDialog.ElectronDialog["Service"]);
 
 const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   getState: Effect.die("unexpected getState"),
@@ -79,21 +79,20 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 
 const makeElectronMenuLayer = (
-  applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
+  applicationMenuTemplate: Deferred.Deferred<readonly MenuItemConstructorOptions[]>,
 ) =>
   Layer.succeed(ElectronMenu.ElectronMenu, {
     setApplicationMenu: (template) =>
       Deferred.succeed(applicationMenuTemplate, template).pipe(Effect.asVoid),
     popupTemplate: () => Effect.void,
     showContextMenu: () => Effect.succeed(Option.none()),
-  } satisfies ElectronMenu.ElectronMenuShape);
+  } satisfies ElectronMenu.ElectronMenu["Service"]);
 
 describe("DesktopApplicationMenu", () => {
   it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
-      const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+      const applicationMenuTemplate = yield* Deferred.make<readonly MenuItemConstructorOptions[]>();
 
       yield* Effect.gen(function* () {
         const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
@@ -128,7 +127,7 @@ describe("DesktopApplicationMenu", () => {
         throw new Error("Expected Settings menu item to have a click handler.");
       }
 
-      settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+      settingsClick({} as MenuItem, {} as BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
     }),
   );

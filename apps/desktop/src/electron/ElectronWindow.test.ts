@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import type * as Electron from "electron";
+import type { BrowserWindow } from "electron";
 import { beforeEach, vi } from "vite-plus/test";
 
 const { appFocusMock, getAllWindowsMock } = vi.hoisted(() => ({
@@ -22,7 +22,7 @@ import * as ElectronWindow from "./ElectronWindow.ts";
 function makeBrowserWindow(input: { readonly destroyed: boolean }) {
   return {
     isDestroyed: vi.fn(() => input.destroyed),
-  } as unknown as Electron.BrowserWindow;
+  } as unknown as BrowserWindow;
 }
 
 describe("ElectronWindow", () => {
@@ -37,7 +37,7 @@ describe("ElectronWindow", () => {
       const destroyedWindow = makeBrowserWindow({ destroyed: true });
       getAllWindowsMock.mockReturnValue([destroyedWindow, liveWindow]);
 
-      const syncedWindows: Electron.BrowserWindow[] = [];
+      const syncedWindows: BrowserWindow[] = [];
       const electronWindow = yield* ElectronWindow.ElectronWindow;
       yield* electronWindow.syncAllAppearance((window) =>
         Effect.sync(() => {

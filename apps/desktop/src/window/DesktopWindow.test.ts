@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
-import type * as Electron from "electron";
+import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from "electron";
 import { vi } from "vite-plus/test";
 
 vi.mock("electron", async (importOriginal) => ({
@@ -76,7 +76,7 @@ function makeFakeBrowserWindow() {
   };
 
   return {
-    window: window as unknown as Electron.BrowserWindow,
+    window: window as unknown as BrowserWindow,
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
     setAutoHideCursor: window.setAutoHideCursor,
@@ -133,10 +133,10 @@ const desktopEnvironmentLayer = DesktopEnvironment.layer(environmentInput).pipe(
 );
 
 function makeTestLayer(input: {
-  readonly window: Electron.BrowserWindow;
+  readonly window: BrowserWindow;
   readonly createCount: Ref.Ref<number>;
-  readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
-  readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
+  readonly mainWindow: Ref.Ref<Option.Option<BrowserWindow>>;
+  readonly createdWindowOptions?: BrowserWindowConstructorOptions[];
   readonly openedExternalUrls?: unknown[];
 }) {
   const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
@@ -177,7 +177,7 @@ function makeTestLayer(input: {
         electronThemeLayer,
         electronWindowLayer,
         Layer.mock(PreviewManager.PreviewManager)({
-          getBrowserSession: () => Effect.succeed({} as Electron.Session),
+          getBrowserSession: () => Effect.succeed({} as Session),
           setMainWindow: () => Effect.void,
           isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
           getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
@@ -213,8 +213,8 @@ describe("DesktopWindow", () => {
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
       const createCount = yield* Ref.make(0);
-      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
-      const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+      const mainWindow = yield* Ref.make<Option.Option<BrowserWindow>>(Option.none());
+      const createdWindowOptions: BrowserWindowConstructorOptions[] = [];
       const layer = makeTestLayer({
         window: fakeWindow.window,
         createCount,
@@ -241,7 +241,7 @@ describe("DesktopWindow", () => {
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
       const createCount = yield* Ref.make(0);
-      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindow = yield* Ref.make<Option.Option<BrowserWindow>>(Option.none());
       const openedExternalUrls: unknown[] = [];
       const layer = makeTestLayer({
         window: fakeWindow.window,
