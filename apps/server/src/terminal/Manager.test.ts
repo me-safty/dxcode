@@ -27,9 +27,12 @@ import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 import { expect } from "vite-plus/test";
 
-import { projectLaunchEnvTestStub } from "../projectLaunchEnv/Layers/ProjectLaunchEnvTest.ts";
-import type { ProjectLaunchEnvShape } from "../projectLaunchEnv/Services/ProjectLaunchEnv.ts";
+import type {
+  ProjectLaunchEnvShape,
+  ResolvedProjectLaunchEnvForThread,
+} from "../projectLaunchEnv/Services/ProjectLaunchEnv.ts";
 import { ProjectLaunchEnvThreadLookupError } from "../projectLaunchEnv/Services/ProjectLaunchEnvErrors.ts";
+import { mergeResolvedProjectLaunchEnv } from "../projectLaunchEnv/projectLaunchEnvUtils.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as TerminalManager from "./Manager.ts";
 import * as PtyAdapter from "./PtyAdapter.ts";
@@ -211,6 +214,37 @@ interface CreateManagerOptions {
   ptyAdapter?: FakePtyAdapter;
   projectLaunchEnv?: ProjectLaunchEnvShape;
 }
+
+const projectLaunchEnvTestStub = (fixtures: {
+  readonly t3Home: string;
+  readonly projectId: ProjectId;
+}): ProjectLaunchEnvShape => ({
+  resolve: (input) =>
+    Effect.succeed(
+      mergeResolvedProjectLaunchEnv({
+        t3Home: fixtures.t3Home,
+        ...(input.extraEnv !== undefined ? { extraEnv: input.extraEnv } : {}),
+        context: {
+          projectRoot: input.projectRoot,
+          projectId: String(input.projectId),
+          threadId: input.threadId,
+          ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+        },
+      }),
+    ),
+  resolveForThread: (resolveInput) =>
+    Effect.succeed({
+      projectId: fixtures.projectId,
+      ...(resolveInput.worktreePath !== undefined
+        ? { worktreePath: resolveInput.worktreePath }
+        : {}),
+      env: Object.fromEntries(
+        Object.entries(resolveInput.extraEnv ?? {}).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
+    } satisfies ResolvedProjectLaunchEnvForThread),
+});
 
 interface ManagerFixture {
   readonly baseDir: string;
@@ -1230,6 +1264,7 @@ it.layer(
         env: {
           PORT: "5173",
           T3CODE_PORT: "3773",
+          T3_MCP_BEARER_TOKEN: "client-token",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
           TEST_TERMINAL_KEEP: "keep-me",
         },
@@ -1241,6 +1276,7 @@ it.layer(
 
       expect(spawnInput.env.PORT).toBeUndefined();
       expect(spawnInput.env.T3CODE_PORT).toBeUndefined();
+      expect(spawnInput.env.T3_MCP_BEARER_TOKEN).toBeUndefined();
       expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
       // Arbitrary host env vars must pass through — terminals inherit the
       // user's environment apart from the explicit blocklist.

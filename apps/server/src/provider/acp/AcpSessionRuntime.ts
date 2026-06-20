@@ -293,20 +293,15 @@ export const make = (
         ),
       );
 
-    const spawnEnv =
-      options.spawn.env !== undefined
-        ? mergeProviderSessionEnvironment(process.env, options.spawn.env)
-        : undefined;
-    const spawnCommand = yield* resolveSpawnCommand(
-      options.spawn.command,
-      options.spawn.args,
-      spawnEnv ? { env: spawnEnv } : {},
-    );
+    const spawnEnv = mergeProviderSessionEnvironment(process.env, options.spawn.env);
+    const spawnCommand = yield* resolveSpawnCommand(options.spawn.command, options.spawn.args, {
+      env: spawnEnv,
+    });
     const child = yield* spawner
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          ...(spawnEnv !== undefined ? { env: spawnEnv } : {}),
+          env: spawnEnv,
           shell: spawnCommand.shell,
         }),
       )

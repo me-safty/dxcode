@@ -25,6 +25,8 @@ describe("projectLaunchEnvUtils", () => {
         extraEnv: {
           T3CODE_PROJECT_ROOT: "/custom-root",
           T3CODE_PORT: "3773",
+          T3_MCP_BEARER_TOKEN: "client-token",
+          T3_CUSTOM: "client-custom",
           CUSTOM_FLAG: "1",
         },
         t3Home: "/data/.t3",

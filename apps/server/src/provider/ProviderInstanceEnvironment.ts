@@ -23,8 +23,8 @@ export function mergeProviderInstanceEnvironment(
 }
 
 export function mergeProviderSessionEnvironment(
-  baseEnv: EnvRecord | undefined,
-  sessionEnv: EnvRecord | undefined,
+  baseEnv?: EnvRecord | null,
+  sessionEnv?: EnvRecord | null,
 ): Record<string, string> {
   const next = stripManagedRuntimeEnvKeys(baseEnv ?? process.env);
   if (!sessionEnv) return next;

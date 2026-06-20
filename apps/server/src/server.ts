@@ -167,17 +167,13 @@ const ProjectLaunchEnvLayerLive = ProjectLaunchEnvLive.pipe(
 );
 
 const ReactorLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(
-    Layer.empty.pipe(
-      Layer.provideMerge(OrchestrationReactorLive),
-      Layer.provideMerge(ProviderRuntimeIngestionLive),
-      Layer.provideMerge(ProviderCommandReactorLive),
-      Layer.provideMerge(CheckpointReactorLive),
-      Layer.provideMerge(ThreadDeletionReactorLive),
-      Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
-      Layer.provideMerge(RuntimeReceiptBusLive),
-    ),
-  ),
+  Layer.provideMerge(OrchestrationReactorLive),
+  Layer.provideMerge(ProviderRuntimeIngestionLive),
+  Layer.provideMerge(ProviderCommandReactorLive),
+  Layer.provideMerge(CheckpointReactorLive),
+  Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+  Layer.provideMerge(RuntimeReceiptBusLive),
   Layer.provide(ProjectLaunchEnvLayerLive),
 );
 
