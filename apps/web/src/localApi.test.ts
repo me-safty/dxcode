@@ -62,15 +62,33 @@ afterEach(() => {
 
 describe("LocalApi", () => {
   it("keeps backend operations unavailable in the browser facade", async () => {
-    const { createLocalApi } = await import("./localApi");
+    const { createLocalApi, LocalBackendUnavailableError } = await import("./localApi");
     const api = createLocalApi();
 
-    await expect(api.server.getConfig()).rejects.toThrow(
-      "Local backend API is unavailable before a backend is paired.",
+    await expect(api.server.getConfig()).rejects.toEqual(
+      new LocalBackendUnavailableError({ operation: "get-config" }),
     );
-    await expect(api.shell.openInEditor("/tmp", "cursor")).rejects.toThrow(
-      "Local backend API is unavailable before a backend is paired.",
+    await expect(api.shell.openInEditor("/tmp", "cursor")).rejects.toEqual(
+      new LocalBackendUnavailableError({ operation: "open-in-editor" }),
     );
+  });
+
+  it("preserves desktop bridge failures when opening external URLs", async () => {
+    const cause = new Error("shell rejected request");
+    testWindow().desktopBridge = {
+      openExternal: vi.fn().mockRejectedValue(cause),
+    } as unknown as DesktopBridge;
+
+    const { createLocalApi } = await import("./localApi");
+    const promise = createLocalApi().shell.openExternal("https://example.com/pull/42");
+
+    await expect(promise).rejects.toMatchObject({
+      _tag: "LocalExternalUrlOpenError",
+      url: "https://example.com/pull/42",
+      transport: "desktop-bridge",
+      cause,
+      message: "Unable to open external URL https://example.com/pull/42 through desktop-bridge.",
+    });
   });
 
   it("uses the browser context-menu fallback without a desktop bridge", async () => {

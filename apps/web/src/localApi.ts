@@ -1,4 +1,5 @@
 import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
 import { showContextMenuFallback } from "./contextMenuFallback";
@@ -6,8 +7,53 @@ import { readBrowserClientSettings, writeBrowserClientSettings } from "./clientP
 
 let cachedApi: LocalApi | undefined;
 
-function unavailableLocalBackendError(): Error {
-  return new Error("Local backend API is unavailable before a backend is paired.");
+export class LocalBackendUnavailableError extends Schema.TaggedErrorClass<LocalBackendUnavailableError>()(
+  "LocalBackendUnavailableError",
+  {
+    operation: Schema.Literals([
+      "open-in-editor",
+      "get-config",
+      "refresh-providers",
+      "update-provider",
+      "upsert-keybinding",
+      "remove-keybinding",
+      "get-settings",
+      "update-settings",
+      "discover-source-control",
+      "get-trace-diagnostics",
+      "get-process-diagnostics",
+      "get-process-resource-history",
+      "signal-process",
+    ]),
+  },
+) {
+  override get message(): string {
+    return `Local backend operation ${this.operation} is unavailable before a backend is paired.`;
+  }
+}
+
+export class LocalExternalUrlOpenError extends Schema.TaggedErrorClass<LocalExternalUrlOpenError>()(
+  "LocalExternalUrlOpenError",
+  {
+    url: Schema.String,
+    transport: Schema.Literal("desktop-bridge"),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Unable to open external URL ${this.url} through ${this.transport}.`;
+  }
+}
+
+export class LocalApiUnavailableError extends Schema.TaggedErrorClass<LocalApiUnavailableError>()(
+  "LocalApiUnavailableError",
+  {
+    runtime: Schema.Literal("server"),
+  },
+) {
+  override get message(): string {
+    return `Local API is unavailable in the ${this.runtime} runtime.`;
+  }
 }
 
 function createBrowserLocalApi(): LocalApi {
@@ -25,12 +71,25 @@ function createBrowserLocalApi(): LocalApi {
       },
     },
     shell: {
-      openInEditor: () => Promise.reject(unavailableLocalBackendError()),
+      openInEditor: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "open-in-editor" })),
       openExternal: async (url) => {
         if (window.desktopBridge) {
-          const opened = await window.desktopBridge.openExternal(url);
+          let opened: boolean;
+          try {
+            opened = await window.desktopBridge.openExternal(url);
+          } catch (cause) {
+            throw new LocalExternalUrlOpenError({
+              url,
+              transport: "desktop-bridge",
+              cause,
+            });
+          }
           if (!opened) {
-            throw new Error("Unable to open link.");
+            throw new LocalExternalUrlOpenError({
+              url,
+              transport: "desktop-bridge",
+            });
           }
           return;
         }
@@ -64,18 +123,32 @@ function createBrowserLocalApi(): LocalApi {
       },
     },
     server: {
-      getConfig: () => Promise.reject(unavailableLocalBackendError()),
-      refreshProviders: () => Promise.reject(unavailableLocalBackendError()),
-      updateProvider: () => Promise.reject(unavailableLocalBackendError()),
-      upsertKeybinding: () => Promise.reject(unavailableLocalBackendError()),
-      removeKeybinding: () => Promise.reject(unavailableLocalBackendError()),
-      getSettings: () => Promise.reject(unavailableLocalBackendError()),
-      updateSettings: () => Promise.reject(unavailableLocalBackendError()),
-      discoverSourceControl: () => Promise.reject(unavailableLocalBackendError()),
-      getTraceDiagnostics: () => Promise.reject(unavailableLocalBackendError()),
-      getProcessDiagnostics: () => Promise.reject(unavailableLocalBackendError()),
-      getProcessResourceHistory: () => Promise.reject(unavailableLocalBackendError()),
-      signalProcess: () => Promise.reject(unavailableLocalBackendError()),
+      getConfig: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "get-config" })),
+      refreshProviders: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "refresh-providers" })),
+      updateProvider: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "update-provider" })),
+      upsertKeybinding: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "upsert-keybinding" })),
+      removeKeybinding: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "remove-keybinding" })),
+      getSettings: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "get-settings" })),
+      updateSettings: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "update-settings" })),
+      discoverSourceControl: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "discover-source-control" })),
+      getTraceDiagnostics: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "get-trace-diagnostics" })),
+      getProcessDiagnostics: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "get-process-diagnostics" })),
+      getProcessResourceHistory: () =>
+        Promise.reject(
+          new LocalBackendUnavailableError({ operation: "get-process-resource-history" }),
+        ),
+      signalProcess: () =>
+        Promise.reject(new LocalBackendUnavailableError({ operation: "signal-process" })),
     },
   };
 }
@@ -100,7 +173,7 @@ export function readLocalApi(): LocalApi | undefined {
 export function ensureLocalApi(): LocalApi {
   const api = readLocalApi();
   if (!api) {
-    throw new Error("Local API not found");
+    throw new LocalApiUnavailableError({ runtime: "server" });
   }
   return api;
 }
