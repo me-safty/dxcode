@@ -14,6 +14,9 @@ export interface CodexAppServerRequestDiagnostics {
 }
 
 export const CodexAppServerProtocolParseOperation = Schema.Literals([
+  "encode-wire-message",
+  "decode-wire-message",
+  "route-wire-message",
   "decode-notification-payload",
 ]);
 

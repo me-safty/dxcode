@@ -98,6 +98,7 @@ const encodeWireMessage = (
       (cause) =>
         new CodexError.CodexAppServerProtocolParseError({
           detail: "Failed to encode Codex App Server message",
+          operation: "encode-wire-message",
           cause,
         }),
     ),
@@ -111,6 +112,7 @@ const decodeWireMessage = (
       (cause) =>
         new CodexError.CodexAppServerProtocolParseError({
           detail: "Failed to decode Codex App Server wire message",
+          operation: "decode-wire-message",
           cause,
         }),
     ),
@@ -298,6 +300,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       return Effect.fail(
         new CodexError.CodexAppServerProtocolParseError({
           detail: "Received protocol message in an unknown shape",
+          operation: "route-wire-message",
         }),
       );
     };
