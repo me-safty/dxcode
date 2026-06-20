@@ -1,14 +1,74 @@
 import * as Schema from "effect/Schema";
+import type * as SchemaIssue from "effect/SchemaIssue";
 
 import * as AcpSchema from "./_generated/schema.gen.ts";
 
-export const AcpRequestOperation = Schema.Literal("handle-extension-request");
+export const AcpRequestOperation = Schema.Literals([
+  "decode-extension-request-payload",
+  "handle-extension-request",
+]);
 export type AcpRequestOperation = typeof AcpRequestOperation.Type;
+
+export const AcpSchemaIssueKind = Schema.Literals([
+  "Filter",
+  "Encoding",
+  "Pointer",
+  "Composite",
+  "AnyOf",
+  "InvalidType",
+  "InvalidValue",
+  "MissingKey",
+  "UnexpectedKey",
+  "Forbidden",
+  "OneOf",
+]);
+export type AcpSchemaIssueKind = typeof AcpSchemaIssueKind.Type;
+
+export interface AcpSchemaIssueDiagnostics {
+  readonly issueCount: number;
+  readonly issueKinds: ReadonlyArray<AcpSchemaIssueKind>;
+  readonly maximumPathDepth: number;
+}
+
+const schemaIssueDiagnostics = (root: SchemaIssue.Issue): AcpSchemaIssueDiagnostics => {
+  let issueCount = 0;
+  let maximumPathDepth = 0;
+  const issueKinds = new Set<AcpSchemaIssueKind>();
+
+  const visit = (issue: SchemaIssue.Issue, pathDepth: number): void => {
+    issueCount += 1;
+    issueKinds.add(issue._tag);
+    maximumPathDepth = Math.max(maximumPathDepth, pathDepth);
+    switch (issue._tag) {
+      case "Filter":
+      case "Encoding":
+        visit(issue.issue, pathDepth);
+        break;
+      case "Pointer":
+        visit(issue.issue, pathDepth + issue.path.length);
+        break;
+      case "Composite":
+      case "AnyOf":
+        for (const child of issue.issues) visit(child, pathDepth);
+        break;
+    }
+  };
+
+  visit(root, 0);
+  return {
+    issueCount,
+    issueKinds: [...issueKinds],
+    maximumPathDepth,
+  };
+};
 
 export interface AcpRequestDiagnostics {
   readonly method?: string;
   readonly operation?: AcpRequestOperation;
   readonly cause?: unknown;
+  readonly issueCount?: number;
+  readonly issueKinds?: ReadonlyArray<AcpSchemaIssueKind>;
+  readonly maximumPathDepth?: number;
 }
 
 export class AcpSpawnError extends Schema.TaggedErrorClass<AcpSpawnError>()("AcpSpawnError", {
@@ -49,12 +109,28 @@ export class AcpProtocolParseError extends Schema.TaggedErrorClass<AcpProtocolPa
     operation: AcpProtocolParseOperation,
     method: Schema.optionalKey(Schema.String),
     detail: Schema.optionalKey(Schema.String),
+    issueCount: Schema.optionalKey(Schema.Number),
+    issueKinds: Schema.optionalKey(Schema.Array(AcpSchemaIssueKind)),
+    maximumPathDepth: Schema.optionalKey(Schema.Number),
     cause: Schema.Defect(),
   },
 ) {
   override get message() {
     const method = this.method === undefined ? "" : ` for method '${this.method}'`;
     return `ACP protocol operation '${this.operation}' failed${method}.`;
+  }
+
+  static fromSchemaError(
+    operation: AcpProtocolParseOperation,
+    method: string,
+    cause: Schema.SchemaError,
+  ) {
+    return new AcpProtocolParseError({
+      operation,
+      method,
+      ...schemaIssueDiagnostics(cause.issue),
+      cause,
+    });
   }
 }
 
@@ -92,6 +168,9 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
   data: Schema.optional(Schema.Unknown),
   method: Schema.optionalKey(Schema.String),
   operation: Schema.optionalKey(AcpRequestOperation),
+  issueCount: Schema.optionalKey(Schema.Number),
+  issueKinds: Schema.optionalKey(Schema.Array(AcpSchemaIssueKind)),
+  maximumPathDepth: Schema.optionalKey(Schema.Number),
   cause: Schema.optionalKey(Schema.Defect()),
 }) {
   override get message() {
@@ -149,6 +228,19 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
       code: -32602,
       errorMessage: message,
       ...(data !== undefined ? { data } : {}),
+    });
+  }
+
+  static invalidExtensionPayload(method: string, cause: Schema.SchemaError) {
+    const diagnostics = schemaIssueDiagnostics(cause.issue);
+    return new AcpRequestError({
+      code: -32602,
+      errorMessage: `Invalid payload for ACP extension method '${method}'.`,
+      data: diagnostics,
+      method,
+      operation: "decode-extension-request-payload",
+      ...diagnostics,
+      cause,
     });
   }
 

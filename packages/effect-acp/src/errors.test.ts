@@ -1,10 +1,16 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as RpcClientError from "effect/unstable/rpc/RpcClientError";
 
 import * as AcpSchema from "./_generated/schema.gen.ts";
 import { callRpc, runHandler } from "./_internal/shared.ts";
 import * as AcpError from "./errors.ts";
+
+const decodeNestedNumberPayload = Schema.decodeUnknownEffect(
+  Schema.Struct({ profile: Schema.Struct({ token: Schema.Number }) }),
+);
+const encodeUnknownJson = Schema.encodeSync(Schema.UnknownFromJsonString);
 
 describe("effect-acp errors", () => {
   it.effect("retains RPC method and cause without deriving the message from the cause", () => {
@@ -95,4 +101,44 @@ describe("effect-acp errors", () => {
       expect(error.message).not.toContain(cause.message);
     });
   });
+
+  it.effect("keeps invalid extension payload values only in the exact schema cause", () =>
+    Effect.gen(function* () {
+      const secret = "acp-schema-payload-secret";
+      const cause = yield* decodeNestedNumberPayload({ profile: { token: secret } }).pipe(
+        Effect.flip,
+      );
+      const error = AcpError.AcpRequestError.invalidExtensionPayload("x/private", cause);
+      const { cause: directCause, ...directDiagnostics } = error;
+
+      expect(directCause).toBe(cause);
+      expect(error).toMatchObject({
+        method: "x/private",
+        operation: "decode-extension-request-payload",
+        maximumPathDepth: 2,
+      });
+      expect(error.issueCount).toBeGreaterThan(0);
+      expect(error.issueKinds).toContain("Pointer");
+      expect(error.message).toBe("Invalid payload for ACP extension method 'x/private'.");
+      expect(error.message).not.toContain(secret);
+      expect(encodeUnknownJson(directDiagnostics)).not.toContain(secret);
+      expect(encodeUnknownJson(error.toProtocolError())).not.toContain(secret);
+
+      const protocolError = AcpError.AcpProtocolParseError.fromSchemaError(
+        "decode-notification-payload",
+        "x/private",
+        cause,
+      );
+      const { cause: protocolCause, ...protocolDiagnostics } = protocolError;
+      expect(protocolCause).toBe(cause);
+      expect(protocolError).toMatchObject({
+        method: "x/private",
+        operation: "decode-notification-payload",
+        maximumPathDepth: 2,
+      });
+      expect(protocolError.message).not.toContain(secret);
+      expect(encodeUnknownJson(protocolDiagnostics)).not.toContain(secret);
+      expect("detail" in protocolError).toBe(false);
+    }),
+  );
 });

@@ -1,13 +1,10 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as SchemaIssue from "effect/SchemaIssue";
 import { RpcClientError } from "effect/unstable/rpc";
 
 import * as AcpSchema from "../_generated/schema.gen.ts";
 import * as AcpError from "../errors.ts";
 const isError = Schema.is(AcpSchema.Error);
-
-const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
 export const callRpc = <A>(
   method: string,
@@ -51,12 +48,7 @@ export function decodeExtRequestRegistration<A, I>(
 ) {
   return (params: unknown): Effect.Effect<unknown, AcpError.AcpError> =>
     Schema.decodeUnknownEffect(payload)(params).pipe(
-      Effect.mapError((error) =>
-        AcpError.AcpRequestError.invalidParams(
-          `Invalid ${method} payload: ${formatSchemaIssue(error.issue)}`,
-          { issue: error.issue },
-        ),
-      ),
+      Effect.mapError((error) => AcpError.AcpRequestError.invalidExtensionPayload(method, error)),
       Effect.flatMap((decoded) => handler(decoded)),
     );
 }
@@ -68,14 +60,12 @@ export function decodeExtNotificationRegistration<A, I>(
 ) {
   return (params: unknown): Effect.Effect<void, AcpError.AcpError> =>
     Schema.decodeUnknownEffect(payload)(params).pipe(
-      Effect.mapError(
-        (error) =>
-          new AcpError.AcpProtocolParseError({
-            operation: "decode-notification-payload",
-            method,
-            detail: formatSchemaIssue(error.issue),
-            cause: error,
-          }),
+      Effect.mapError((error) =>
+        AcpError.AcpProtocolParseError.fromSchemaError(
+          "decode-notification-payload",
+          method,
+          error,
+        ),
       ),
       Effect.flatMap((decoded) => handler(decoded)),
     );
