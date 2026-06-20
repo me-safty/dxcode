@@ -4,7 +4,7 @@ import type {
   DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
-import { SshPasswordPrompt, type SshPasswordRequest } from "@t3tools/ssh/auth";
+import * as SshAuth from "@t3tools/ssh/auth";
 import { discoverSshHosts } from "@t3tools/ssh/config";
 import {
   SshCommandError,
@@ -15,7 +15,7 @@ import {
   SshPasswordPromptError,
   SshReadinessError,
 } from "@t3tools/ssh/errors";
-import { SshEnvironmentManager, type RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
+import * as SshTunnel from "@t3tools/ssh/tunnel";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -66,7 +66,7 @@ export class DesktopSshEnvironment extends Context.Service<
 
 export interface DesktopSshEnvironmentLayerOptions {
   readonly resolveCliPackageSpec?: () => string;
-  readonly resolveCliRunner?: Effect.Effect<RemoteT3RunnerOptions>;
+  readonly resolveCliRunner?: Effect.Effect<SshTunnel.RemoteT3RunnerOptions>;
 }
 
 function discoverDesktopSshHostsEffect(input?: { readonly homeDir?: string }) {
@@ -84,9 +84,9 @@ export function isDesktopSshPasswordPromptCancellation(
 
 const makePasswordPrompt = (
   prompts: DesktopSshPasswordPrompts.DesktopSshPasswordPrompts["Service"],
-): SshPasswordPrompt["Service"] => ({
+): SshAuth.SshPasswordPrompt["Service"] => ({
   isAvailable: true,
-  request: (request: SshPasswordRequest) =>
+  request: (request: SshAuth.SshPasswordRequest) =>
     prompts.request(request).pipe(
       Effect.mapError(
         (cause) =>
@@ -99,10 +99,10 @@ const makePasswordPrompt = (
 });
 
 export const make = Effect.gen(function* () {
-  const manager = yield* SshEnvironmentManager;
+  const manager = yield* SshTunnel.SshEnvironmentManager;
   const prompts = yield* DesktopSshPasswordPrompts.DesktopSshPasswordPrompts;
   const runtimeContext = yield* Effect.context<DesktopSshEnvironmentRuntimeServices>();
-  const passwordPrompt = SshPasswordPrompt.of(makePasswordPrompt(prompts));
+  const passwordPrompt = SshAuth.SshPasswordPrompt.of(makePasswordPrompt(prompts));
 
   return DesktopSshEnvironment.of({
     discoverHosts: (input) =>
@@ -114,7 +114,7 @@ export const make = Effect.gen(function* () {
       manager
         .ensureEnvironment(target, ensureOptions)
         .pipe(
-          Effect.provideService(SshPasswordPrompt, passwordPrompt),
+          Effect.provideService(SshAuth.SshPasswordPrompt, passwordPrompt),
           Effect.provide(runtimeContext),
           Effect.withSpan("desktop.ssh.ensureEnvironment"),
         ),
@@ -122,7 +122,7 @@ export const make = Effect.gen(function* () {
       manager
         .disconnectEnvironment(target)
         .pipe(
-          Effect.provideService(SshPasswordPrompt, passwordPrompt),
+          Effect.provideService(SshAuth.SshPasswordPrompt, passwordPrompt),
           Effect.provide(runtimeContext),
           Effect.withSpan("desktop.ssh.disconnectEnvironment"),
         ),
@@ -132,7 +132,7 @@ export const make = Effect.gen(function* () {
 export const layer = (options: DesktopSshEnvironmentLayerOptions = {}) =>
   Layer.effect(DesktopSshEnvironment, make).pipe(
     Layer.provide(
-      SshEnvironmentManager.layer({
+      SshTunnel.SshEnvironmentManager.layer({
         ...(options.resolveCliPackageSpec === undefined
           ? {}
           : { resolveCliPackageSpec: options.resolveCliPackageSpec }),

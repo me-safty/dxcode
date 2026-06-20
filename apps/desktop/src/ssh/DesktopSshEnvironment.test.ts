@@ -104,7 +104,6 @@ describe("sshEnvironment", () => {
             Layer.succeed(DesktopSshPasswordPrompts.DesktopSshPasswordPrompts, {
               request: () => Effect.die("unexpected password prompt request"),
               resolve: () => Effect.die("unexpected password prompt resolution"),
-              cancelPending: () => Effect.void,
             }),
           ),
           Layer.provideMerge(NodeServices.layer),

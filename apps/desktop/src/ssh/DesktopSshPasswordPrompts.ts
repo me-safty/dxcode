@@ -12,26 +12,25 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
-import * as IpcChannels from "../ipc/channels.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { SSH_PASSWORD_PROMPT_CHANNEL } from "../ipc/channels.ts";
 
 const DEFAULT_SSH_PASSWORD_PROMPT_TIMEOUT_MS = 3 * 60 * 1000;
 
 type DesktopSshPasswordPromptResolutionInput =
   typeof DesktopSshPasswordPromptResolutionInputSchema.Type;
 
-const windowUnavailableMessage = (destination: string): string =>
-  `T3 Code window is not available for SSH authentication to ${destination}.`;
+const WINDOW_UNAVAILABLE_MESSAGE = "T3 Code window is not available for SSH authentication.";
 
-export class DesktopSshPromptUnavailableError extends Schema.TaggedErrorClass<DesktopSshPromptUnavailableError>()(
-  "DesktopSshPromptUnavailableError",
+export class DesktopSshPromptRequestIdGenerationError extends Schema.TaggedErrorClass<DesktopSshPromptRequestIdGenerationError>()(
+  "DesktopSshPromptRequestIdGenerationError",
   {
     destination: Schema.String,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Secure randomness is unavailable for SSH authentication to ${this.destination}.`;
+    return "Secure randomness is unavailable.";
   }
 }
 
@@ -42,14 +41,14 @@ export class DesktopSshPromptWindowUnavailableError extends Schema.TaggedErrorCl
   },
 ) {
   override get message(): string {
-    return windowUnavailableMessage(this.destination);
+    return WINDOW_UNAVAILABLE_MESSAGE;
   }
 }
 
 const isDesktopSshPromptWindowUnavailableError = Schema.is(DesktopSshPromptWindowUnavailableError);
 
-export class DesktopSshPromptSendError extends Schema.TaggedErrorClass<DesktopSshPromptSendError>()(
-  "DesktopSshPromptSendError",
+export class DesktopSshPromptPresentationError extends Schema.TaggedErrorClass<DesktopSshPromptPresentationError>()(
+  "DesktopSshPromptPresentationError",
   {
     requestId: Schema.String,
     destination: Schema.String,
@@ -57,7 +56,7 @@ export class DesktopSshPromptSendError extends Schema.TaggedErrorClass<DesktopSs
   },
 ) {
   override get message(): string {
-    return `Failed to send SSH password prompt ${this.requestId} for ${this.destination}.`;
+    return WINDOW_UNAVAILABLE_MESSAGE;
   }
 }
 
@@ -78,11 +77,34 @@ export class DesktopSshPromptCancelledError extends Schema.TaggedErrorClass<Desk
   {
     requestId: Schema.String,
     destination: Schema.String,
-    reason: Schema.String,
   },
 ) {
   override get message(): string {
-    return this.reason;
+    return `SSH authentication cancelled for ${this.destination}.`;
+  }
+}
+
+export class DesktopSshPromptWindowClosedError extends Schema.TaggedErrorClass<DesktopSshPromptWindowClosedError>()(
+  "DesktopSshPromptWindowClosedError",
+  {
+    requestId: Schema.String,
+    destination: Schema.String,
+  },
+) {
+  override get message(): string {
+    return "SSH authentication was cancelled because the app window closed.";
+  }
+}
+
+export class DesktopSshPromptServiceStoppedError extends Schema.TaggedErrorClass<DesktopSshPromptServiceStoppedError>()(
+  "DesktopSshPromptServiceStoppedError",
+  {
+    requestId: Schema.String,
+    destination: Schema.String,
+  },
+) {
+  override get message(): string {
+    return "SSH password prompt service stopped.";
   }
 }
 
@@ -93,7 +115,7 @@ export class DesktopSshPromptInvalidRequestIdError extends Schema.TaggedErrorCla
   },
 ) {
   override get message(): string {
-    return `Invalid SSH password prompt id: ${this.requestId}.`;
+    return "Invalid SSH password prompt id.";
   }
 }
 
@@ -104,16 +126,18 @@ export class DesktopSshPromptExpiredError extends Schema.TaggedErrorClass<Deskto
   },
 ) {
   override get message(): string {
-    return `SSH password prompt ${this.requestId} expired. Try connecting again.`;
+    return "SSH password prompt expired. Try connecting again.";
   }
 }
 
 export type DesktopSshPasswordPromptRequestError =
-  | DesktopSshPromptUnavailableError
+  | DesktopSshPromptRequestIdGenerationError
   | DesktopSshPromptWindowUnavailableError
-  | DesktopSshPromptSendError
+  | DesktopSshPromptPresentationError
   | DesktopSshPromptTimedOutError
-  | DesktopSshPromptCancelledError;
+  | DesktopSshPromptCancelledError
+  | DesktopSshPromptWindowClosedError
+  | DesktopSshPromptServiceStoppedError;
 
 export type DesktopSshPasswordPromptResolveError =
   | DesktopSshPromptInvalidRequestIdError
@@ -125,6 +149,8 @@ export type DesktopSshPasswordPromptError =
 
 export const DesktopSshPasswordPromptCancellation = Schema.Union([
   DesktopSshPromptCancelledError,
+  DesktopSshPromptWindowClosedError,
+  DesktopSshPromptServiceStoppedError,
   DesktopSshPromptTimedOutError,
 ]);
 export type DesktopSshPasswordPromptCancellation = typeof DesktopSshPasswordPromptCancellation.Type;
@@ -142,7 +168,6 @@ export class DesktopSshPasswordPrompts extends Context.Service<
     readonly resolve: (
       input: DesktopSshPasswordPromptResolutionInput,
     ) => Effect.Effect<void, DesktopSshPasswordPromptResolveError>;
-    readonly cancelPending: (reason: string) => Effect.Effect<void>;
   }
 >()("@t3tools/desktop/ssh/DesktopSshPasswordPrompts") {}
 
@@ -185,7 +210,7 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
   const passwordPromptTimeoutMs =
     options.passwordPromptTimeoutMs ?? DEFAULT_SSH_PASSWORD_PROMPT_TIMEOUT_MS;
 
-  const cancelPending: DesktopSshPasswordPrompts["Service"]["cancelPending"] = (reason) =>
+  const cancelPending = () =>
     Ref.getAndSet(pendingRef, new Map()).pipe(
       Effect.flatMap((pending) =>
         Effect.forEach(
@@ -193,10 +218,9 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
           (entry) =>
             failPending(
               entry,
-              new DesktopSshPromptCancelledError({
+              new DesktopSshPromptServiceStoppedError({
                 requestId: entry.requestId,
                 destination: entry.destination,
-                reason,
               }),
             ),
           { discard: true },
@@ -205,9 +229,7 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
       Effect.asVoid,
     );
 
-  yield* Effect.addFinalizer(() =>
-    cancelPending("SSH password prompt service stopped.").pipe(Effect.ignore),
-  );
+  yield* Effect.addFinalizer(() => cancelPending().pipe(Effect.ignore));
 
   const resolve: DesktopSshPasswordPrompts["Service"]["resolve"] = Effect.fn(
     "desktop.sshPasswordPrompts.resolve",
@@ -229,7 +251,6 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
         new DesktopSshPromptCancelledError({
           requestId,
           destination: entry.destination,
-          reason: `SSH authentication cancelled for ${entry.destination}.`,
         }),
       );
       return;
@@ -251,7 +272,7 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
     const requestId = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
-          new DesktopSshPromptUnavailableError({
+          new DesktopSshPromptRequestIdGenerationError({
             destination: input.destination,
             cause,
           }),
@@ -288,10 +309,9 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
               onSome: (pending) =>
                 failPending(
                   pending,
-                  new DesktopSshPromptCancelledError({
+                  new DesktopSshPromptWindowClosedError({
                     requestId,
                     destination: input.destination,
-                    reason: "SSH authentication was cancelled because the app window closed.",
                   }),
                 ),
             }),
@@ -328,7 +348,7 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
           });
         }
         window.value.once("closed", cancelOnWindowClosed);
-        window.value.webContents.send(IpcChannels.SSH_PASSWORD_PROMPT_CHANNEL, promptRequest);
+        window.value.webContents.send(SSH_PASSWORD_PROMPT_CHANNEL, promptRequest);
         if (window.value.isDestroyed()) {
           throw new DesktopSshPromptWindowUnavailableError({
             destination: input.destination,
@@ -347,7 +367,7 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
       catch: (cause) =>
         isDesktopSshPromptWindowUnavailableError(cause)
           ? cause
-          : new DesktopSshPromptSendError({
+          : new DesktopSshPromptPresentationError({
               requestId,
               destination: input.destination,
               cause,
@@ -358,7 +378,6 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
   return DesktopSshPasswordPrompts.of({
     request,
     resolve,
-    cancelPending,
   });
 });
 
