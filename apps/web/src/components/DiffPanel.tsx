@@ -271,7 +271,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const selectedScopeLabel =
     selectedTurnId === null
       ? selectedGitScope === "unstaged"
-        ? "Unstaged"
+        ? "Working tree"
         : "Branch changes"
       : selectedTurn?.turnId === latestTurn?.turnId
         ? "Latest turn"
@@ -287,7 +287,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const reviewSectionTitle = selectedTurn
     ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
     : selectedGitScope === "unstaged"
-      ? "Unstaged"
+      ? "Working tree"
       : "Branch changes";
   const selectedCheckpointRange = useMemo(
     () =>
@@ -501,7 +501,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-60">
             <DropdownMenuItem onClick={() => selectGitScope("unstaged")}>
-              <span>Unstaged</span>
+              <span>Working tree</span>
               {selectedTurnId === null && selectedGitScope === "unstaged" && (
                 <CheckIcon className="ml-auto" />
               )}
@@ -764,7 +764,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                     selectedTurn
                       ? "Loading checkpoint diff..."
                       : selectedGitScope === "unstaged"
-                        ? "Loading unstaged diff..."
+                        ? "Loading working tree diff..."
                         : "Loading branch diff..."
                   }
                 />
