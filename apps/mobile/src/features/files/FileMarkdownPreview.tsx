@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   Markdown,
   type CustomRenderers,
@@ -144,12 +144,19 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
 
 export function FileMarkdownPreview(props: { readonly markdown: string }) {
   const styles = useMarkdownPreviewStyles();
+  const onLinkPress = useCallback((href: string) => {
+    void tryOpenExternalUrl(href, "markdown-link");
+  }, []);
 
   return (
     <ScrollView className="flex-1 bg-card" contentContainerStyle={{ padding: 18 }}>
       <View className="mx-auto w-full max-w-[760px]">
         {hasNativeSelectableMarkdownText() ? (
-          <SelectableMarkdownText markdown={props.markdown} textStyle={styles.nativeTextStyle} />
+          <SelectableMarkdownText
+            markdown={props.markdown}
+            onLinkPress={onLinkPress}
+            textStyle={styles.nativeTextStyle}
+          />
         ) : (
           <Markdown
             options={{ gfm: true }}
