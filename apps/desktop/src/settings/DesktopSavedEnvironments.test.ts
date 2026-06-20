@@ -56,6 +56,7 @@ function makeSafeStorageLayer(input: {
         ? Effect.succeed(input.available)
         : Effect.fail(
             new ElectronSafeStorage.ElectronSafeStorageAvailabilityError({
+              operation: "check encryption availability",
               cause: input.availabilityError,
             }),
           ),
@@ -64,6 +65,7 @@ function makeSafeStorageLayer(input: {
         ? Effect.succeed(textEncoder.encode(`enc:${value}`))
         : Effect.fail(
             new ElectronSafeStorage.ElectronSafeStorageEncryptError({
+              operation: "encrypt a string",
               cause: input.encryptError,
             }),
           ),
@@ -71,6 +73,7 @@ function makeSafeStorageLayer(input: {
       if (input.decryptError !== undefined) {
         return Effect.fail(
           new ElectronSafeStorage.ElectronSafeStorageDecryptError({
+            operation: "decrypt a string",
             cause: input.decryptError,
           }),
         );
@@ -80,6 +83,7 @@ function makeSafeStorageLayer(input: {
       if (!decoded.startsWith("enc:")) {
         return Effect.fail(
           new ElectronSafeStorage.ElectronSafeStorageDecryptError({
+            operation: "decrypt a string",
             cause: new Error("invalid secret"),
           }),
         );

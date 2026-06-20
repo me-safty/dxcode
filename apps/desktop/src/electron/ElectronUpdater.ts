@@ -12,28 +12,37 @@ export type ElectronUpdaterFeedUrl = Parameters<AutoUpdater["setFeedURL"]>[0];
 
 export class ElectronUpdaterCheckForUpdatesError extends Schema.TaggedErrorClass<ElectronUpdaterCheckForUpdatesError>()(
   "ElectronUpdaterCheckForUpdatesError",
-  { cause: Schema.Defect() },
+  {
+    operation: Schema.Literal("check for updates"),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    return `Electron updater failed to check for updates (${String(this.cause)}).`;
+    return `Electron updater failed to ${this.operation}.`;
   }
 }
 
 export class ElectronUpdaterDownloadUpdateError extends Schema.TaggedErrorClass<ElectronUpdaterDownloadUpdateError>()(
   "ElectronUpdaterDownloadUpdateError",
-  { cause: Schema.Defect() },
+  {
+    operation: Schema.Literal("download the update"),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    return `Electron updater failed to download the update (${String(this.cause)}).`;
+    return `Electron updater failed to ${this.operation}.`;
   }
 }
 
 export class ElectronUpdaterQuitAndInstallError extends Schema.TaggedErrorClass<ElectronUpdaterQuitAndInstallError>()(
   "ElectronUpdaterQuitAndInstallError",
-  { cause: Schema.Defect() },
+  {
+    operation: Schema.Literal("quit and install the update"),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    return `Electron updater failed to quit and install the update (${String(this.cause)}).`;
+    return `Electron updater failed to ${this.operation}.`;
   }
 }
 
@@ -105,16 +114,22 @@ export const make = ElectronUpdater.of({
     }),
   checkForUpdates: Effect.tryPromise({
     try: () => autoUpdater.checkForUpdates(),
-    catch: (cause) => new ElectronUpdaterCheckForUpdatesError({ cause }),
+    catch: (cause) =>
+      new ElectronUpdaterCheckForUpdatesError({ operation: "check for updates", cause }),
   }).pipe(Effect.asVoid),
   downloadUpdate: Effect.tryPromise({
     try: () => autoUpdater.downloadUpdate(),
-    catch: (cause) => new ElectronUpdaterDownloadUpdateError({ cause }),
+    catch: (cause) =>
+      new ElectronUpdaterDownloadUpdateError({ operation: "download the update", cause }),
   }).pipe(Effect.asVoid),
   quitAndInstall: ({ isSilent, isForceRunAfter }) =>
     Effect.try({
       try: () => autoUpdater.quitAndInstall(isSilent, isForceRunAfter),
-      catch: (cause) => new ElectronUpdaterQuitAndInstallError({ cause }),
+      catch: (cause) =>
+        new ElectronUpdaterQuitAndInstallError({
+          operation: "quit and install the update",
+          cause,
+        }),
     }),
   on: (eventName, listener) => {
     const eventTarget = autoUpdater as unknown as {

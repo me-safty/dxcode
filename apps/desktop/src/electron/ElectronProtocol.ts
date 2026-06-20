@@ -31,7 +31,7 @@ export class ElectronProtocolRegistrationError extends Schema.TaggedErrorClass<E
   },
 ) {
   override get message(): string {
-    return `Failed to register ${this.scheme}: protocol (${String(this.cause)}).`;
+    return `Failed to register ${this.scheme}: protocol.`;
   }
 }
 

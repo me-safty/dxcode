@@ -33,6 +33,7 @@ function makeSafeStorageLayer(available: boolean, failDecrypt: Ref.Ref<boolean> 
           (failDecrypt !== null && (yield* Ref.get(failDecrypt)))
         ) {
           return yield* new ElectronSafeStorage.ElectronSafeStorageDecryptError({
+            operation: "decrypt a string",
             cause: new Error("invalid encrypted catalog"),
           });
         }

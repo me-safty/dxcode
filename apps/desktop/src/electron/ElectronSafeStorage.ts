@@ -7,28 +7,37 @@ import { safeStorage } from "electron";
 
 export class ElectronSafeStorageAvailabilityError extends Schema.TaggedErrorClass<ElectronSafeStorageAvailabilityError>()(
   "ElectronSafeStorageAvailabilityError",
-  { cause: Schema.Defect() },
+  {
+    operation: Schema.Literal("check encryption availability"),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    return `Electron safe storage failed to check encryption availability (${String(this.cause)}).`;
+    return `Electron safe storage failed to ${this.operation}.`;
   }
 }
 
 export class ElectronSafeStorageEncryptError extends Schema.TaggedErrorClass<ElectronSafeStorageEncryptError>()(
   "ElectronSafeStorageEncryptError",
-  { cause: Schema.Defect() },
+  {
+    operation: Schema.Literal("encrypt a string"),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    return `Electron safe storage failed to encrypt a string (${String(this.cause)}).`;
+    return `Electron safe storage failed to ${this.operation}.`;
   }
 }
 
 export class ElectronSafeStorageDecryptError extends Schema.TaggedErrorClass<ElectronSafeStorageDecryptError>()(
   "ElectronSafeStorageDecryptError",
-  { cause: Schema.Defect() },
+  {
+    operation: Schema.Literal("decrypt a string"),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    return `Electron safe storage failed to decrypt a string (${String(this.cause)}).`;
+    return `Electron safe storage failed to ${this.operation}.`;
   }
 }
 
@@ -48,17 +57,23 @@ export class ElectronSafeStorage extends Context.Service<
 export const make = ElectronSafeStorage.of({
   isEncryptionAvailable: Effect.try({
     try: () => safeStorage.isEncryptionAvailable(),
-    catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
+    catch: (cause) =>
+      new ElectronSafeStorageAvailabilityError({
+        operation: "check encryption availability",
+        cause,
+      }),
   }),
   encryptString: (value) =>
     Effect.try({
       try: () => safeStorage.encryptString(value),
-      catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
+      catch: (cause) =>
+        new ElectronSafeStorageEncryptError({ operation: "encrypt a string", cause }),
     }),
   decryptString: (value) =>
     Effect.try({
       try: () => safeStorage.decryptString(Buffer.from(value)),
-      catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
+      catch: (cause) =>
+        new ElectronSafeStorageDecryptError({ operation: "decrypt a string", cause }),
     }),
 });
 

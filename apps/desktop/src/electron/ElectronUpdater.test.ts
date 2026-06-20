@@ -72,7 +72,9 @@ describe("ElectronUpdater", () => {
       if (exit._tag === "Failure") {
         const error = Cause.squash(exit.cause);
         assert.instanceOf(error, ElectronUpdater.ElectronUpdaterCheckForUpdatesError);
+        assert.equal(error.operation, "check for updates");
         assert.equal(error.cause, cause);
+        assert.equal(error.message, "Electron updater failed to check for updates.");
       }
     }).pipe(Effect.provide(ElectronUpdater.layer)),
   );
