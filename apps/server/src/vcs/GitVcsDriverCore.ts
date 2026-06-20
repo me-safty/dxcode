@@ -2038,7 +2038,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         Effect.catchTags({
           GitCommandError: (error) =>
             Effect.logWarning(
-              `GitVcsDriver.listRefs: remote refName lookup failed for ${input.cwd}: ${error.message}. Falling back to an empty remote refName list.`,
+              "Git remote ref lookup failed; falling back to an empty remote ref list.",
+              {
+                operation: error.operation,
+                command: error.command,
+                cwd: error.cwd,
+                detail: error.detail,
+                cause: error,
+              },
             ).pipe(
               Effect.as({
                 exitCode: ChildProcessSpawner.ExitCode(1),
@@ -2063,7 +2070,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         Effect.catchTags({
           GitCommandError: (error) =>
             Effect.logWarning(
-              `GitVcsDriver.listRefs: remote name lookup failed for ${input.cwd}: ${error.message}. Falling back to an empty remote name list.`,
+              "Git remote name lookup failed; falling back to an empty remote name list.",
+              {
+                operation: error.operation,
+                command: error.command,
+                cwd: error.cwd,
+                detail: error.detail,
+                cause: error,
+              },
             ).pipe(
               Effect.as({
                 exitCode: ChildProcessSpawner.ExitCode(1),
