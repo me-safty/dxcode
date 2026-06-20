@@ -394,6 +394,20 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
         }),
       ),
     );
+    const preferSubmittedPassword = (error: DesktopSshPasswordPromptRequestError) =>
+      Deferred.poll(deferred).pipe(
+        Effect.flatMap(
+          Option.match({
+            onSome: (completion) => completion,
+            onNone: () =>
+              Ref.get(pendingRef).pipe(
+                Effect.flatMap((entries) =>
+                  entries.has(requestId) ? Effect.fail(error) : Deferred.await(deferred),
+                ),
+              ),
+          }),
+        ),
+      );
 
     return yield* Effect.gen(function* () {
       const unavailableBeforePresentation = yield* runPresentationOperation(
@@ -410,38 +424,42 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
       yield* runPresentationOperation("register-window-close-listener", () =>
         window.value.once("closed", cancelOnWindowClosed),
       );
-      yield* runPresentationOperation("send-prompt-request", () =>
-        window.value.webContents.send(SSH_PASSWORD_PROMPT_CHANNEL, promptRequest),
-      );
-      const unavailableAfterSend = yield* runPresentationOperation("check-window-after-send", () =>
-        window.value.isDestroyed(),
-      );
-      if (unavailableAfterSend) {
-        return yield* new DesktopSshPromptWindowUnavailableError({
-          destination: input.destination,
-          requestId,
-          stage: "after-send",
-        });
-      }
-      const minimized = yield* runPresentationOperation("check-window-minimized", () =>
-        window.value.isMinimized(),
-      );
-      if (minimized) {
-        yield* runPresentationOperation("restore-window", () => window.value.restore());
-      }
-      const unavailableAfterRestore = yield* runPresentationOperation(
-        "check-window-after-restore",
-        () => window.value.isDestroyed(),
-      );
-      if (unavailableAfterRestore) {
-        return yield* new DesktopSshPromptWindowUnavailableError({
-          destination: input.destination,
-          requestId,
-          stage: "after-restore",
-        });
-      }
-      yield* runPresentationOperation("focus-window", () => window.value.focus());
-      return yield* waitForPassword;
+      return yield* Effect.gen(function* () {
+        yield* runPresentationOperation("send-prompt-request", () =>
+          window.value.webContents.send(SSH_PASSWORD_PROMPT_CHANNEL, promptRequest),
+        );
+        yield* Effect.yieldNow;
+        const unavailableAfterSend = yield* runPresentationOperation(
+          "check-window-after-send",
+          () => window.value.isDestroyed(),
+        );
+        if (unavailableAfterSend) {
+          return yield* new DesktopSshPromptWindowUnavailableError({
+            destination: input.destination,
+            requestId,
+            stage: "after-send",
+          });
+        }
+        const minimized = yield* runPresentationOperation("check-window-minimized", () =>
+          window.value.isMinimized(),
+        );
+        if (minimized) {
+          yield* runPresentationOperation("restore-window", () => window.value.restore());
+        }
+        const unavailableAfterRestore = yield* runPresentationOperation(
+          "check-window-after-restore",
+          () => window.value.isDestroyed(),
+        );
+        if (unavailableAfterRestore) {
+          return yield* new DesktopSshPromptWindowUnavailableError({
+            destination: input.destination,
+            requestId,
+            stage: "after-restore",
+          });
+        }
+        yield* runPresentationOperation("focus-window", () => window.value.focus());
+        return yield* waitForPassword;
+      }).pipe(Effect.catch(preferSubmittedPassword));
     }).pipe(Effect.ensuring(cleanup));
   });
 

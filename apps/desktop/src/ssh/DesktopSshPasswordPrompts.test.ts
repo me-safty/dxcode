@@ -18,7 +18,11 @@ interface SentMessage {
 }
 
 function makeTestWindow(
-  options: { readonly isDestroyedError?: unknown; readonly sendError?: unknown } = {},
+  options: {
+    readonly isDestroyedError?: unknown;
+    readonly isMinimizedError?: unknown;
+    readonly sendError?: unknown;
+  } = {},
 ) {
   const listeners = new Map<string, Set<() => void>>();
   const sentMessages: SentMessage[] = [];
@@ -34,7 +38,12 @@ function makeTestWindow(
       }
       return destroyed;
     },
-    isMinimized: () => minimized,
+    isMinimized: () => {
+      if (options.isMinimizedError !== undefined) {
+        throw options.isMinimizedError;
+      }
+      return minimized;
+    },
     restore: () => {
       restored = true;
       minimized = false;
@@ -52,7 +61,8 @@ function makeTestWindow(
     },
     webContents: {
       send: (channel: string, ...args: readonly unknown[]) => {
-        sentMessages.push({ channel, args });
+        const message = { channel, args };
+        sentMessages.push(message);
         if (options.sendError !== undefined) {
           throw options.sendError;
         }
@@ -119,6 +129,7 @@ describe("DesktopSshPasswordPrompts", () => {
         .pipe(Effect.forkScoped);
 
       yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
       assert.equal(testWindow.sentMessages.length, 1);
       const sent = testWindow.sentMessages[0];
       assert.ok(sent);
@@ -183,6 +194,35 @@ describe("DesktopSshPasswordPrompts", () => {
         .resolve({ requestId, password: "secret" })
         .pipe(Effect.flip);
       assert.instanceOf(resolveError, DesktopSshPasswordPrompts.DesktopSshPromptExpiredError);
+    }).pipe(Effect.provide(makeLayer(testWindow.window)), Effect.scoped);
+  });
+
+  it.effect("keeps a submitted password when a later presentation step fails", () => {
+    const testWindow = makeTestWindow({
+      isMinimizedError: new Error("failed to read minimized state"),
+    });
+
+    return Effect.gen(function* () {
+      const prompts = yield* DesktopSshPasswordPrompts.DesktopSshPasswordPrompts;
+      const requestFiber = yield* prompts
+        .request({
+          destination: "devbox",
+          username: "julius",
+          prompt: "Enter the SSH password.",
+          attempt: 1,
+        })
+        .pipe(Effect.forkScoped);
+
+      yield* Effect.yieldNow;
+      const sent = testWindow.sentMessages[0];
+      assert.ok(sent);
+      const request = sent.args[0] as { readonly requestId: string };
+      yield* prompts.resolve({ requestId: request.requestId, password: "secret" });
+      const password = yield* Fiber.join(requestFiber);
+
+      assert.equal(password, "secret");
+      assert.equal(testWindow.isFocused(), false);
+      assert.equal(testWindow.closedListenerCount(), 0);
     }).pipe(Effect.provide(makeLayer(testWindow.window)), Effect.scoped);
   });
 
