@@ -15,6 +15,7 @@ describe("project RPC errors", () => {
       query: "needle",
       limit: 20,
       failure: "search_index_search_failed",
+      normalizedCwd: "/workspace",
       detail: "index unavailable",
       cause,
     });
@@ -30,6 +31,7 @@ describe("project RPC errors", () => {
 
     expect(searchError.message).toBe("Failed to search workspace entries in '/workspace'.");
     expect(searchError.message).not.toContain(cause.message);
+    expect(searchError.normalizedCwd).toBe("/workspace");
     expect(searchError.cause).toBe(cause);
     expect(readError.message).toBe("Failed to read workspace file 'src/index.ts' in '/workspace'.");
     expect(readError.message).not.toContain(cause.message);

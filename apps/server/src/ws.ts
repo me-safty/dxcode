@@ -155,11 +155,23 @@ function projectEntriesFailureContext(error: WorkspaceEntries.WorkspaceEntriesEr
         normalizedCwd: error.normalizedWorkspaceRoot,
       };
     case "WorkspaceSearchIndexCreateFailed":
-      return { failure: "search_index_create_failed", detail: error.reason };
+      return {
+        failure: "search_index_create_failed",
+        normalizedCwd: error.cwd,
+        detail: error.reason,
+      };
     case "WorkspaceSearchIndexScanTimedOut":
-      return { failure: "search_index_scan_timed_out", timeout: error.timeout };
+      return {
+        failure: "search_index_scan_timed_out",
+        normalizedCwd: error.cwd,
+        timeout: error.timeout,
+      };
     case "WorkspaceSearchIndexSearchFailed":
-      return { failure: "search_index_search_failed", detail: error.reason };
+      return {
+        failure: "search_index_search_failed",
+        normalizedCwd: error.cwd,
+        detail: error.reason,
+      };
     default:
       return unexpectedCompatibilityError(error);
   }
