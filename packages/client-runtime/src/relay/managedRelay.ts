@@ -53,6 +53,8 @@ export class ManagedRelayDpopKeyLoadError extends Schema.TaggedErrorClass<Manage
   "ManagedRelayDpopKeyLoadError",
   {
     keyStore: Schema.Literals(["expo-secure-store", "indexed-db"]),
+    method: Schema.optional(Schema.String),
+    url: Schema.optional(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
@@ -64,7 +66,6 @@ export class ManagedRelayDpopKeyLoadError extends Schema.TaggedErrorClass<Manage
 export class ManagedRelayDpopProofCreationError extends Schema.TaggedErrorClass<ManagedRelayDpopProofCreationError>()(
   "ManagedRelayDpopProofCreationError",
   {
-    stage: Schema.Literals(["load-key", "create-proof"]),
     method: Schema.String,
     url: Schema.String,
     cause: Schema.Defect(),
@@ -219,7 +220,7 @@ export class ManagedRelayDpopSigner extends Context.Service<
     readonly thumbprint: Effect.Effect<string, ManagedRelayDpopKeyLoadError>;
     readonly createProof: (
       input: ManagedRelayDpopProofInput,
-    ) => Effect.Effect<string, ManagedRelayDpopProofCreationError>;
+    ) => Effect.Effect<string, ManagedRelayDpopSignerError>;
   }
 >()("@t3tools/client-runtime/relay/managedRelay/ManagedRelayDpopSigner") {}
 
@@ -453,12 +454,13 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
         "relay.client_id": options.clientId,
         "relay.scopes": input.scopes.join(" "),
       });
-      const proof = yield* signer.createProof(dpopProofTargets.exchangeAccessToken()).pipe(
+      const proofTarget = dpopProofTargets.exchangeAccessToken();
+      const proof = yield* signer.createProof(proofTarget).pipe(
         Effect.mapError(
           (cause) =>
             new ManagedRelayTokenProofCreationError({
-              method: cause.method,
-              url: cause.url,
+              method: proofTarget.method,
+              url: proofTarget.url,
               cause,
             }),
         ),
@@ -588,8 +590,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
         Effect.mapError(
           (cause) =>
             new ManagedRelayRequestProofCreationError({
-              method: cause.method,
-              url: cause.url,
+              method: input.target.method,
+              url: input.target.url,
               cause,
             }),
         ),

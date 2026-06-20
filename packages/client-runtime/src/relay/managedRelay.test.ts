@@ -15,15 +15,15 @@ function managedRelayTestLayer(
   fetchFn: typeof globalThis.fetch,
   relayUrl = "https://relay.example.test",
   accessTokenStore?: ManagedRelay.ManagedRelayAccessTokenStore,
+  signer: ManagedRelay.ManagedRelayDpopSigner["Service"] = {
+    thumbprint: Effect.succeed("client-thumbprint"),
+    createProof: (input) => Effect.succeed(`proof:${input.url}`),
+  },
 ) {
   const httpClientLayer = remoteHttpClientLayer(fetchFn);
   const signerLayer = Layer.succeed(
     ManagedRelay.ManagedRelayDpopSigner,
-    ManagedRelay.ManagedRelayDpopSigner.of({
-      thumbprint: Effect.succeed("client-thumbprint"),
-      createProof: (input: ManagedRelay.ManagedRelayDpopProofInput) =>
-        Effect.succeed(`proof:${input.url}`),
-    }),
+    ManagedRelay.ManagedRelayDpopSigner.of(signer),
   );
   return ManagedRelay.layer({
     relayUrl,
@@ -129,6 +129,48 @@ describe("ManagedRelayClient", () => {
       });
       expect(requestCount).toBe(0);
     }).pipe(Effect.provide(managedRelayTestLayer(fetchFn, "http://relay.example.test")));
+  });
+
+  it.effect("preserves key-load failures when creating a token proof", () => {
+    const keyStoreCause = new Error("IndexedDB unavailable");
+    const fetchFn = (() => Promise.resolve(Response.json({}))) satisfies typeof globalThis.fetch;
+
+    return Effect.gen(function* () {
+      const relayClient = yield* ManagedRelay.ManagedRelayClient;
+      const error = yield* relayClient
+        .getEnvironmentStatus({
+          clerkToken: clerkToken("user-1", "session-1"),
+          scopes: [RelayEnvironmentStatusScope],
+          environmentId: EnvironmentId.make("env-1"),
+        })
+        .pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "ManagedRelayTokenProofCreationError",
+        cause: {
+          _tag: "ManagedRelayDpopKeyLoadError",
+          keyStore: "indexed-db",
+          method: "POST",
+          message: "Could not load relay DPoP proof key.",
+          cause: keyStoreCause,
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        managedRelayTestLayer(fetchFn, undefined, undefined, {
+          thumbprint: Effect.succeed("client-thumbprint"),
+          createProof: (input) =>
+            Effect.fail(
+              new ManagedRelay.ManagedRelayDpopKeyLoadError({
+                keyStore: "indexed-db",
+                method: input.method,
+                url: input.url,
+                cause: keyStoreCause,
+              }),
+            ),
+        }),
+      ),
+    );
   });
 
   it.effect("reuses usable DPoP tokens and refreshes cleared or expiring cache entries", () => {

@@ -52,8 +52,8 @@ export const relayDpopSignerLayer = Layer.effect(
         const proofKey = yield* loadOrCreateBrowserDpopKey.pipe(
           Effect.mapError(
             (error) =>
-              new ManagedRelay.ManagedRelayDpopProofCreationError({
-                stage: "load-key",
+              new ManagedRelay.ManagedRelayDpopKeyLoadError({
+                keyStore: "indexed-db",
                 method: input.method,
                 url: input.url,
                 cause: error,
@@ -66,7 +66,6 @@ export const relayDpopSignerLayer = Layer.effect(
           Effect.mapError(
             (error) =>
               new ManagedRelay.ManagedRelayDpopProofCreationError({
-                stage: "create-proof",
                 method: input.method,
                 url: input.url,
                 cause: error,
