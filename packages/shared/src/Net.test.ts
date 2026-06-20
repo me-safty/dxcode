@@ -2,8 +2,11 @@ import * as NodeNet from "node:net";
 
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import * as NetService from "./Net.ts";
+
+const isLoopbackPortListenError = Schema.is(NetService.LoopbackPortListenError);
 
 const closeServer = (server: NodeNet.Server) =>
   Effect.sync(() => {
@@ -19,19 +22,19 @@ const getPort = (server: NodeNet.Server): number => {
   return typeof address === "object" && address !== null ? address.port : 0;
 };
 
-const openServer = (host?: string): Effect.Effect<NodeNet.Server, NetService.NetError> =>
-  Effect.callback<NodeNet.Server, NetService.NetError>((resume) => {
+const openServer = (host?: string): Effect.Effect<NodeNet.Server, Error> =>
+  Effect.callback<NodeNet.Server, Error>((resume) => {
     const server = NodeNet.createServer();
     let settled = false;
 
-    const settle = (effect: Effect.Effect<NodeNet.Server, NetService.NetError>) => {
+    const settle = (effect: Effect.Effect<NodeNet.Server, Error>) => {
       if (settled) return;
       settled = true;
       resume(effect);
     };
 
     server.once("error", (cause) => {
-      settle(Effect.fail(new NetService.NetError({ host: host ?? "localhost", cause })));
+      settle(Effect.fail(cause));
     });
 
     if (host) {
@@ -45,17 +48,24 @@ const openServer = (host?: string): Effect.Effect<NodeNet.Server, NetService.Net
 
 it.layer(NetService.layer)("NetService", (it) => {
   describe("Net helpers", () => {
-    it("preserves the loopback reservation error message", () => {
-      const error = new NetService.NetError({ host: "127.0.0.1" });
-      assert.equal(error.message, "Failed to reserve loopback port");
-    });
-
     it.effect("reserveLoopbackPort returns a positive loopback port", () =>
       Effect.gen(function* () {
         const net = yield* NetService.NetService;
         const port = yield* net.reserveLoopbackPort();
 
         assert.ok(port > 0);
+      }),
+    );
+
+    it.effect("retains the host and listen cause when reservation fails", () =>
+      Effect.gen(function* () {
+        const net = yield* NetService.NetService;
+        const error = yield* net.reserveLoopbackPort("256.256.256.256").pipe(Effect.flip);
+
+        assert(isLoopbackPortListenError(error));
+        assert.equal(error.host, "256.256.256.256");
+        assert.match(error.message, /256\.256\.256\.256/u);
+        assert.equal((error.cause as NodeJS.ErrnoException).code, "ENOTFOUND");
       }),
     );
 

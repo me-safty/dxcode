@@ -6,14 +6,51 @@ import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
-export class NetError extends Schema.TaggedErrorClass<NetError>()("NetError", {
-  host: Schema.String,
-  cause: Schema.optional(Schema.Defect()),
-}) {
+export class LoopbackPortListenError extends Schema.TaggedErrorClass<LoopbackPortListenError>()(
+  "LoopbackPortListenError",
+  {
+    host: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
   override get message(): string {
-    return "Failed to reserve loopback port";
+    return `Failed to listen for an ephemeral loopback port on ${this.host}.`;
   }
 }
+
+export class LoopbackPortAddressUnavailableError extends Schema.TaggedErrorClass<LoopbackPortAddressUnavailableError>()(
+  "LoopbackPortAddressUnavailableError",
+  {
+    host: Schema.String,
+    address: Schema.NullOr(Schema.String),
+    family: Schema.NullOr(Schema.String),
+    port: Schema.NullOr(Schema.Number),
+  },
+) {
+  override get message(): string {
+    return `Failed to read a usable ephemeral loopback port for ${this.host} (address ${this.address ?? "unavailable"}, family ${this.family ?? "unavailable"}, port ${this.port ?? "unavailable"}).`;
+  }
+}
+
+export class LoopbackPortReleaseError extends Schema.TaggedErrorClass<LoopbackPortReleaseError>()(
+  "LoopbackPortReleaseError",
+  {
+    host: Schema.String,
+    port: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to release ephemeral loopback port ${this.port} on ${this.host}.`;
+  }
+}
+
+export const NetError = Schema.Union([
+  LoopbackPortListenError,
+  LoopbackPortAddressUnavailableError,
+  LoopbackPortReleaseError,
+]);
+export type NetError = typeof NetError.Type;
 
 const isErrnoExceptionWithCode = (
   cause: unknown,
@@ -163,20 +200,55 @@ export const make = () => {
       };
 
       probe.once("error", (cause) => {
-        settle(Effect.fail(new NetError({ host, cause })));
+        settle(Effect.fail(new LoopbackPortListenError({ host, cause })));
       });
 
-      probe.listen(0, host, () => {
-        const address = probe.address();
-        const port = typeof address === "object" && address !== null ? address.port : 0;
-        probe.close(() => {
-          if (port > 0) {
-            settle(Effect.succeed(port));
-            return;
-          }
-          settle(Effect.fail(new NetError({ host })));
+      try {
+        probe.listen(0, host, () => {
+          const address = probe.address();
+          const addressDetails =
+            typeof address === "object" && address !== null
+              ? {
+                  address: address.address,
+                  family: address.family,
+                  port: address.port,
+                }
+              : {
+                  address,
+                  family: null,
+                  port: null,
+                };
+
+          probe.close((cause) => {
+            if (cause) {
+              settle(
+                Effect.fail(
+                  new LoopbackPortReleaseError({
+                    host,
+                    port: addressDetails.port ?? 0,
+                    cause,
+                  }),
+                ),
+              );
+              return;
+            }
+            if (addressDetails.port !== null && addressDetails.port > 0) {
+              settle(Effect.succeed(addressDetails.port));
+              return;
+            }
+            settle(
+              Effect.fail(
+                new LoopbackPortAddressUnavailableError({
+                  host,
+                  ...addressDetails,
+                }),
+              ),
+            );
+          });
         });
-      });
+      } catch (cause) {
+        settle(Effect.fail(new LoopbackPortListenError({ host, cause })));
+      }
 
       return Effect.sync(() => {
         closeServer(probe);
