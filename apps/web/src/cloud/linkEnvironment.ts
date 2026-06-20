@@ -628,9 +628,6 @@ export function linkPrimaryEnvironmentToCloud(input: {
         environmentId: input.target.environmentId,
       });
     }
-    const relayClient = yield* ManagedRelay.ManagedRelayClient;
-    yield* ensureRelayClientAvailable(EnvironmentId.make(input.target.environmentId));
-
     const origin = yield* endpointOrigin({
       environmentId: input.target.environmentId,
       httpBaseUrl: input.target.httpBaseUrl,
@@ -639,6 +636,8 @@ export function linkPrimaryEnvironmentToCloud(input: {
       environmentId: input.target.environmentId,
       httpBaseUrl: input.target.httpBaseUrl,
     });
+    const relayClient = yield* ManagedRelay.ManagedRelayClient;
+    yield* ensureRelayClientAvailable(EnvironmentId.make(input.target.environmentId));
 
     const challenge = yield* relayClient
       .createEnvironmentLinkChallenge({

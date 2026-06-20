@@ -2,6 +2,7 @@ import {
   type DesktopBridge,
   EnvironmentId,
   type RelayClientInstallProgressEvent,
+  type RelayClientStatus,
   WS_METHODS,
 } from "@t3tools/contracts";
 import { RelayWebClientId } from "@t3tools/contracts/relay";
@@ -87,7 +88,7 @@ function relayLayer() {
 }
 
 function registryLayer(options?: {
-  readonly status?: { readonly status: "available"; readonly version: string };
+  readonly status?: RelayClientStatus;
   readonly installEvents?: ReadonlyArray<RelayClientInstallProgressEvent>;
 }) {
   return Layer.effect(
@@ -95,7 +96,14 @@ function registryLayer(options?: {
     Effect.gen(function* () {
       const client = {
         [WS_METHODS.cloudGetRelayClientStatus]: () =>
-          Effect.succeed(options?.status ?? { status: "available", version: "2026.6.0" }),
+          Effect.succeed(
+            options?.status ?? {
+              status: "available",
+              executablePath: "/managed/cloudflared",
+              source: "managed",
+              version: "2026.6.0",
+            },
+          ),
         [WS_METHODS.cloudInstallRelayClient]: () =>
           Stream.fromIterable(options?.installEvents ?? []),
       } as unknown as RpcSession["client"];
@@ -450,6 +458,37 @@ describe("web cloud link environment client", () => {
     }),
   );
 
+  it.effect("validates the environment endpoint before prompting to install a relay client", () =>
+    Effect.gen(function* () {
+      const invalidUrl =
+        "https://user:password@[invalid-host]/private/path?access_token=secret#fragment";
+
+      const error = yield* withServices(
+        linkPrimaryEnvironmentToCloud({
+          target: {
+            ...TARGET,
+            httpBaseUrl: invalidUrl,
+          },
+          clerkToken: "clerk-token",
+        }),
+        {
+          status: { status: "missing", version: "2026.6.0" },
+        },
+      ).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkOperationError",
+        action: "derive the environment endpoint origin",
+        environmentId: TARGET.environmentId,
+        httpBaseUrlInputLength: invalidUrl.length,
+      });
+      expect(error.cause).toBeInstanceOf(TypeError);
+      expect(error).not.toHaveProperty("httpBaseUrl");
+      expect(error.message).not.toMatch(/user|password|private|path|access_token|secret|fragment/);
+      expect(relayClientInstallDialog.requestConfirmation).not.toHaveBeenCalled();
+    }),
+  );
+
   it.effect("installs a missing relay client before linking", () =>
     Effect.gen(function* () {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ malformed: true })));
@@ -460,7 +499,12 @@ describe("web cloud link environment client", () => {
           clerkToken: "clerk-token",
         }),
         {
-          status: { status: "available", version: "2026.6.0" },
+          status: {
+            status: "available",
+            executablePath: "/managed/cloudflared",
+            source: "managed",
+            version: "2026.6.0",
+          },
           installEvents: [],
         },
       ).pipe(Effect.flip);
