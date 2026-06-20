@@ -9,6 +9,15 @@ function decodeTerminalLabelPart(value: string): string {
   }
 }
 
+function formatActionTerminalLabel(actionId: string): string {
+  const fallbackMatch = /^(.*):([1-9][0-9]*)$/.exec(actionId);
+  if (fallbackMatch) {
+    const scriptId = decodeTerminalLabelPart(fallbackMatch[1] ?? "").replace(/[-:]+/g, " ");
+    return `${scriptId} (${fallbackMatch[2]})`;
+  }
+  return decodeTerminalLabelPart(actionId).replace(/[-:]+/g, " ");
+}
+
 export function getTerminalLabel(terminalId: string): string {
   const numericSuffix = /^term(?:inal)?-(\d+)$/i.exec(terminalId)?.[1];
   if (numericSuffix) {
@@ -17,7 +26,7 @@ export function getTerminalLabel(terminalId: string): string {
 
   const actionId = /^action-(.+)$/i.exec(terminalId)?.[1]?.trim();
   if (actionId) {
-    return `Action: ${decodeTerminalLabelPart(actionId).replace(/[-:]+/g, " ")}`;
+    return `Action: ${formatActionTerminalLabel(actionId)}`;
   }
 
   return terminalId;
