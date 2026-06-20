@@ -6,13 +6,26 @@ import * as Path from "effect/Path";
 import { Command, CliError } from "effect/unstable/cli";
 
 import {
+  mergeUpdateManifestFiles,
   mergePlatformUpdateManifests,
   mergeUpdateManifestsCommand,
   parsePlatformUpdateManifest,
   serializePlatformUpdateManifest,
 } from "./merge-update-manifests.ts";
+import { isUpdateManifestError, type UpdateManifestError } from "./lib/update-manifest.ts";
 
 const runCli = Command.runWith(mergeUpdateManifestsCommand, { version: "0.0.0" });
+
+function captureUpdateManifestError(run: () => unknown): UpdateManifestError {
+  let caught: unknown;
+  try {
+    run();
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(isUpdateManifestError(caught));
+  return caught;
+}
 
 describe("merge-update-manifests", () => {
   it("merges arm64 and x64 macOS update manifests into one multi-arch manifest", () => {
@@ -148,10 +161,29 @@ releaseDate: '2026-03-07T10:36:07.540Z'
       "latest-win-x64.yml",
     );
 
-    assert.throws(
-      () => mergePlatformUpdateManifests("win", primary, secondary),
-      /different versions/,
+    const error = captureUpdateManifestError(() =>
+      mergePlatformUpdateManifests("win", primary, secondary),
     );
+    assert.equal(error._tag, "UpdateManifestVersionConflictError");
+    if (error._tag === "UpdateManifestVersionConflictError") {
+      assert.equal(error.platformLabel, "Windows");
+      assert.equal(error.primaryVersion, "0.0.4");
+      assert.equal(error.secondaryVersion, "0.0.5");
+    }
+  });
+
+  it("reports manifest parse location and the unsupported input", () => {
+    const error = captureUpdateManifestError(() =>
+      parsePlatformUpdateManifest("mac", "not yaml", "latest-mac.yml"),
+    );
+    assert.equal(error._tag, "UpdateManifestParseError");
+    if (error._tag === "UpdateManifestParseError") {
+      assert.equal(error.platformLabel, "macOS");
+      assert.equal(error.sourcePath, "latest-mac.yml");
+      assert.equal(error.lineNumber, 1);
+      assert.equal(error.reason, "unsupported line");
+      assert.equal(error.offendingLine, "not yaml");
+    }
   });
 
   it("preserves quoted scalars as strings", () => {
@@ -283,6 +315,35 @@ releaseDate: '2026-03-07T10:36:07.540Z'
       const merged = yield* fs.readFileString(outputPath);
       assert.ok(merged.includes("T3-Code-0.0.4-arm64.exe"));
       assert.ok(merged.includes("T3-Code-0.0.4-x64.exe"));
+    }),
+  );
+
+  it.effect("surfaces manifest validation as a typed failure", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "merge-update-manifests-invalid-",
+      });
+      const primaryPath = path.join(baseDir, "latest-mac.yml");
+      const secondaryPath = path.join(baseDir, "latest-mac-x64.yml");
+
+      yield* fs.writeFileString(primaryPath, "not yaml");
+      yield* fs.writeFileString(secondaryPath, arm64MacManifest);
+
+      const error = yield* mergeUpdateManifestFiles(
+        "mac",
+        primaryPath,
+        secondaryPath,
+        undefined,
+      ).pipe(Effect.flip);
+
+      assert.ok(isUpdateManifestError(error));
+      assert.equal(error._tag, "UpdateManifestParseError");
+      if (error._tag === "UpdateManifestParseError") {
+        assert.equal(error.sourcePath, primaryPath);
+        assert.equal(error.reason, "unsupported line");
+      }
     }),
   );
 

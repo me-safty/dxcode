@@ -1,10 +1,120 @@
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+
 export interface UpdateManifestFile {
   readonly url: string;
   readonly sha512: string;
   readonly size: number;
 }
 
-export type UpdateManifestScalar = string | number | boolean;
+export const UpdateManifestScalar = Schema.Union([Schema.String, Schema.Number, Schema.Boolean]);
+export type UpdateManifestScalar = typeof UpdateManifestScalar.Type;
+
+export const UpdateManifestParseReason = Schema.Literals([
+  "incomplete file entry",
+  "sha512 without a file entry",
+  "size without a file entry",
+  "unsupported line",
+  "version must be a string",
+  "releaseDate must be a string",
+  "missing version",
+  "missing releaseDate",
+  "missing files",
+]);
+export type UpdateManifestParseReason = typeof UpdateManifestParseReason.Type;
+
+export class UpdateManifestParseError extends Schema.TaggedErrorClass<UpdateManifestParseError>()(
+  "UpdateManifestParseError",
+  {
+    platformLabel: Schema.String,
+    sourcePath: Schema.String,
+    lineNumber: Schema.optionalKey(Schema.Number),
+    reason: UpdateManifestParseReason,
+    offendingLine: Schema.optionalKey(Schema.String),
+  },
+) {
+  override get message(): string {
+    const location =
+      this.lineNumber === undefined ? this.sourcePath : `${this.sourcePath}:${this.lineNumber}`;
+    return `Invalid ${this.platformLabel} update manifest at ${location}: ${this.reason}.`;
+  }
+}
+
+export class UpdateManifestVersionConflictError extends Schema.TaggedErrorClass<UpdateManifestVersionConflictError>()(
+  "UpdateManifestVersionConflictError",
+  {
+    platformLabel: Schema.String,
+    primaryVersion: Schema.String,
+    secondaryVersion: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Cannot merge ${this.platformLabel} update manifests with different versions (${this.primaryVersion} vs ${this.secondaryVersion}).`;
+  }
+}
+
+export class UpdateManifestExtraConflictError extends Schema.TaggedErrorClass<UpdateManifestExtraConflictError>()(
+  "UpdateManifestExtraConflictError",
+  {
+    platformLabel: Schema.String,
+    key: Schema.String,
+    primaryValue: UpdateManifestScalar,
+    secondaryValue: UpdateManifestScalar,
+  },
+) {
+  override get message(): string {
+    return `Cannot merge ${this.platformLabel} update manifests: conflicting '${this.key}' values ('${this.primaryValue}' vs '${this.secondaryValue}').`;
+  }
+}
+
+export class UpdateManifestFileConflictError extends Schema.TaggedErrorClass<UpdateManifestFileConflictError>()(
+  "UpdateManifestFileConflictError",
+  {
+    platformLabel: Schema.String,
+    url: Schema.String,
+    primarySha512: Schema.String,
+    primarySize: Schema.Number,
+    secondarySha512: Schema.String,
+    secondarySize: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Cannot merge ${this.platformLabel} update manifests: conflicting file entry for ${this.url}.`;
+  }
+}
+
+export class UpdateManifestSerializationError extends Schema.TaggedErrorClass<UpdateManifestSerializationError>()(
+  "UpdateManifestSerializationError",
+  {
+    platformLabel: Schema.String,
+    key: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Cannot serialize ${this.platformLabel} update manifest: missing value for '${this.key}'.`;
+  }
+}
+
+export const UpdateManifestError = Schema.Union([
+  UpdateManifestParseError,
+  UpdateManifestVersionConflictError,
+  UpdateManifestExtraConflictError,
+  UpdateManifestFileConflictError,
+  UpdateManifestSerializationError,
+]);
+export type UpdateManifestError = typeof UpdateManifestError.Type;
+export const isUpdateManifestError = Schema.is(UpdateManifestError);
+
+export const attemptUpdateManifest = <A>(
+  evaluate: () => A,
+): Effect.Effect<A, UpdateManifestError> =>
+  Effect.suspend(() => {
+    try {
+      return Effect.succeed(evaluate());
+    } catch (error) {
+      return isUpdateManifestError(error) ? Effect.fail(error) : Effect.die(error);
+    }
+  });
 
 export interface UpdateManifest {
   readonly version: string;
@@ -40,9 +150,12 @@ function parseFileRecord(
     typeof currentFile.sha512 !== "string" ||
     typeof currentFile.size !== "number"
   ) {
-    throw new Error(
-      `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: incomplete file entry.`,
-    );
+    throw new UpdateManifestParseError({
+      platformLabel,
+      sourcePath,
+      lineNumber,
+      reason: "incomplete file entry",
+    });
   }
   return {
     url: currentFile.url,
@@ -94,9 +207,12 @@ export function parseUpdateManifest(
     const fileShaMatch = line.match(/^    sha512:\s*(.+)$/);
     if (fileShaMatch?.[1]) {
       if (currentFile === null) {
-        throw new Error(
-          `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: sha512 without a file entry.`,
-        );
+        throw new UpdateManifestParseError({
+          platformLabel,
+          sourcePath,
+          lineNumber,
+          reason: "sha512 without a file entry",
+        });
       }
       currentFile.sha512 = stripSingleQuotes(fileShaMatch[1].trim());
       continue;
@@ -105,9 +221,12 @@ export function parseUpdateManifest(
     const fileSizeMatch = line.match(/^    size:\s*(\d+)$/);
     if (fileSizeMatch?.[1]) {
       if (currentFile === null) {
-        throw new Error(
-          `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: size without a file entry.`,
-        );
+        throw new UpdateManifestParseError({
+          platformLabel,
+          sourcePath,
+          lineNumber,
+          reason: "size without a file entry",
+        });
       }
       currentFile.size = Number(fileSizeMatch[1]);
       continue;
@@ -127,9 +246,13 @@ export function parseUpdateManifest(
 
     const topLevelMatch = line.match(/^([A-Za-z][A-Za-z0-9]*):\s*(.+)$/);
     if (!topLevelMatch?.[1] || topLevelMatch[2] === undefined) {
-      throw new Error(
-        `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: unsupported line '${line}'.`,
-      );
+      throw new UpdateManifestParseError({
+        platformLabel,
+        sourcePath,
+        lineNumber,
+        reason: "unsupported line",
+        offendingLine: line,
+      });
     }
 
     const [, key, rawValue] = topLevelMatch;
@@ -137,9 +260,12 @@ export function parseUpdateManifest(
 
     if (key === "version") {
       if (typeof value !== "string") {
-        throw new Error(
-          `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: version must be a string.`,
-        );
+        throw new UpdateManifestParseError({
+          platformLabel,
+          sourcePath,
+          lineNumber,
+          reason: "version must be a string",
+        });
       }
       version = value;
       continue;
@@ -147,9 +273,12 @@ export function parseUpdateManifest(
 
     if (key === "releaseDate") {
       if (typeof value !== "string") {
-        throw new Error(
-          `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: releaseDate must be a string.`,
-        );
+        throw new UpdateManifestParseError({
+          platformLabel,
+          sourcePath,
+          lineNumber,
+          reason: "releaseDate must be a string",
+        });
       }
       releaseDate = value;
       continue;
@@ -166,15 +295,25 @@ export function parseUpdateManifest(
   if (finalized) files.push(finalized);
 
   if (!version) {
-    throw new Error(`Invalid ${platformLabel} update manifest at ${sourcePath}: missing version.`);
+    throw new UpdateManifestParseError({
+      platformLabel,
+      sourcePath,
+      reason: "missing version",
+    });
   }
   if (!releaseDate) {
-    throw new Error(
-      `Invalid ${platformLabel} update manifest at ${sourcePath}: missing releaseDate.`,
-    );
+    throw new UpdateManifestParseError({
+      platformLabel,
+      sourcePath,
+      reason: "missing releaseDate",
+    });
   }
   if (files.length === 0) {
-    throw new Error(`Invalid ${platformLabel} update manifest at ${sourcePath}: missing files.`);
+    throw new UpdateManifestParseError({
+      platformLabel,
+      sourcePath,
+      reason: "missing files",
+    });
   }
 
   return {
@@ -195,9 +334,12 @@ function mergeExtras(
   for (const [key, value] of Object.entries(secondary)) {
     const existing = merged[key];
     if (existing !== undefined && existing !== value) {
-      throw new Error(
-        `Cannot merge ${platformLabel} update manifests: conflicting '${key}' values ('${existing}' vs '${value}').`,
-      );
+      throw new UpdateManifestExtraConflictError({
+        platformLabel,
+        key,
+        primaryValue: existing,
+        secondaryValue: value,
+      });
     }
     merged[key] = value;
   }
@@ -211,18 +353,25 @@ export function mergeUpdateManifests(
   platformLabel: string,
 ): UpdateManifest {
   if (primary.version !== secondary.version) {
-    throw new Error(
-      `Cannot merge ${platformLabel} update manifests with different versions (${primary.version} vs ${secondary.version}).`,
-    );
+    throw new UpdateManifestVersionConflictError({
+      platformLabel,
+      primaryVersion: primary.version,
+      secondaryVersion: secondary.version,
+    });
   }
 
   const filesByUrl = new Map<string, UpdateManifestFile>();
   for (const file of [...primary.files, ...secondary.files]) {
     const existing = filesByUrl.get(file.url);
     if (existing && (existing.sha512 !== file.sha512 || existing.size !== file.size)) {
-      throw new Error(
-        `Cannot merge ${platformLabel} update manifests: conflicting file entry for ${file.url}.`,
-      );
+      throw new UpdateManifestFileConflictError({
+        platformLabel,
+        url: file.url,
+        primarySha512: existing.sha512,
+        primarySize: existing.size,
+        secondarySha512: file.sha512,
+        secondarySize: file.size,
+      });
     }
     filesByUrl.set(file.url, file);
   }
@@ -264,9 +413,10 @@ export function serializeUpdateManifest(
   for (const key of Object.keys(manifest.extras).toSorted()) {
     const value = manifest.extras[key];
     if (value === undefined) {
-      throw new Error(
-        `Cannot serialize ${options.platformLabel} update manifest: missing value for '${key}'.`,
-      );
+      throw new UpdateManifestSerializationError({
+        platformLabel: options.platformLabel,
+        key,
+      });
     }
     lines.push(`${key}: ${serializeScalarValue(value)}`);
   }
