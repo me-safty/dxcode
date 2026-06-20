@@ -28,12 +28,13 @@ export class ComposerImageOperationError extends Schema.TaggedErrorClass<Compose
       "read-pasted-image",
       "remove-pasted-image",
     ]),
-    uri: Schema.NullOr(Schema.String),
+    uriLength: Schema.optional(Schema.Number),
+    uriProtocol: Schema.optional(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Composer image operation ${this.operation} failed${this.uri === null ? "" : ` for ${this.uri}`}.`;
+    return `Composer image operation ${this.operation} failed${this.uriLength === undefined ? "" : ` for a ${this.uriProtocol ?? "unknown-protocol"} URI (length ${this.uriLength})`}.`;
   }
 }
 
@@ -48,7 +49,6 @@ async function loadImagePicker() {
   } catch (cause) {
     throw new ComposerImageOperationError({
       operation: "load-image-picker",
-      uri: null,
       cause,
     });
   }
@@ -60,7 +60,6 @@ async function loadClipboard() {
   } catch (cause) {
     throw new ComposerImageOperationError({
       operation: "load-clipboard",
-      uri: null,
       cause,
     });
   }
@@ -92,7 +91,6 @@ export async function pickComposerImages(input: { readonly existingCount: number
   const permission = await imagePicker.requestMediaLibraryPermissionsAsync().catch((cause) => {
     throw new ComposerImageOperationError({
       operation: "request-media-library-permission",
-      uri: null,
       cause,
     });
   });
@@ -114,7 +112,6 @@ export async function pickComposerImages(input: { readonly existingCount: number
     .catch((cause) => {
       throw new ComposerImageOperationError({
         operation: "launch-image-library",
-        uri: null,
         cause,
       });
     });
@@ -187,7 +184,6 @@ export async function pasteComposerClipboard(input: { readonly existingCount: nu
   const hasImage = await clipboard.hasImageAsync().catch((cause) => {
     throw new ComposerImageOperationError({
       operation: "check-clipboard-image",
-      uri: null,
       cause,
     });
   });
@@ -202,7 +198,6 @@ export async function pasteComposerClipboard(input: { readonly existingCount: nu
     const image = await clipboard.getImageAsync({ format: "png" }).catch((cause) => {
       throw new ComposerImageOperationError({
         operation: "read-clipboard-image",
-        uri: null,
         cause,
       });
     });
@@ -244,7 +239,6 @@ export async function pasteComposerClipboard(input: { readonly existingCount: nu
   const hasText = await clipboard.hasStringAsync().catch((cause) => {
     throw new ComposerImageOperationError({
       operation: "check-clipboard-text",
-      uri: null,
       cause,
     });
   });
@@ -252,7 +246,6 @@ export async function pasteComposerClipboard(input: { readonly existingCount: nu
     const text = await clipboard.getStringAsync().catch((cause) => {
       throw new ComposerImageOperationError({
         operation: "read-clipboard-text",
-        uri: null,
         cause,
       });
     });
@@ -304,6 +297,19 @@ export function isOwnedPastedImageUri(uri: string): boolean {
   }
 }
 
+function describeComposerImageUri(uri: string) {
+  let uriProtocol: string | undefined;
+  try {
+    uriProtocol = new URL(uri).protocol || undefined;
+  } catch {
+    // Malformed URIs still retain a nonsecret input length for diagnostics.
+  }
+  return {
+    uriLength: uri.length,
+    ...(uriProtocol === undefined ? {} : { uriProtocol }),
+  };
+}
+
 export async function convertPastedImagesToAttachments(input: {
   readonly uris: ReadonlyArray<string>;
   readonly existingCount: number;
@@ -339,7 +345,7 @@ export async function convertPastedImagesToAttachments(input: {
         "[composer-images] failed to read pasted image",
         new ComposerImageOperationError({
           operation: "read-pasted-image",
-          uri,
+          ...describeComposerImageUri(uri),
           cause,
         }),
       );
@@ -355,7 +361,7 @@ export async function convertPastedImagesToAttachments(input: {
             "[composer-images] failed to remove temporary pasted image",
             new ComposerImageOperationError({
               operation: "remove-pasted-image",
-              uri,
+              ...describeComposerImageUri(uri),
               cause,
             }),
           );
