@@ -11,24 +11,22 @@ export type NotificationPermissionResult =
 export class NotificationPermissionReadError extends Schema.TaggedErrorClass<NotificationPermissionReadError>()(
   "NotificationPermissionReadError",
   {
-    platform: Schema.Literal("ios"),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to read notification permissions on ${this.platform}.`;
+    return "Failed to read notification permissions on iOS.";
   }
 }
 
 export class NotificationPermissionRequestError extends Schema.TaggedErrorClass<NotificationPermissionRequestError>()(
   "NotificationPermissionRequestError",
   {
-    platform: Schema.Literal("ios"),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to request notification permissions on ${this.platform}.`;
+    return "Failed to request notification permissions on iOS.";
   }
 }
 
@@ -42,7 +40,7 @@ export const requestAgentNotificationPermission: Effect.Effect<
 
   const existing = yield* Effect.tryPromise({
     try: () => Notifications.getPermissionsAsync(),
-    catch: (cause) => new NotificationPermissionReadError({ platform: "ios", cause }),
+    catch: (cause) => new NotificationPermissionReadError({ cause }),
   });
   if (existing.granted) {
     return { type: "granted" };
@@ -61,7 +59,7 @@ export const requestAgentNotificationPermission: Effect.Effect<
           allowSound: true,
         },
       }),
-    catch: (cause) => new NotificationPermissionRequestError({ platform: "ios", cause }),
+    catch: (cause) => new NotificationPermissionRequestError({ cause }),
   });
   return requested.granted
     ? { type: "granted" }
