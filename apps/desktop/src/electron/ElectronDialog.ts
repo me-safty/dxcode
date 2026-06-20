@@ -27,13 +27,13 @@ export class ElectronDialogConfirmError extends Schema.TaggedErrorClass<Electron
   "ElectronDialogConfirmError",
   {
     ownerWindowId: Schema.NullOr(Schema.Number),
-    promptMessage: Schema.String,
+    promptLength: Schema.Number,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
     const owner = this.ownerWindowId === null ? "the application" : `window ${this.ownerWindowId}`;
-    return `Failed to open an Electron confirmation dialog for ${owner}: ${this.promptMessage}`;
+    return `Failed to open an Electron confirmation dialog for ${owner} with a ${this.promptLength}-character prompt.`;
   }
 }
 
@@ -41,30 +41,29 @@ export class ElectronDialogShowMessageBoxError extends Schema.TaggedErrorClass<E
   "ElectronDialogShowMessageBoxError",
   {
     type: Schema.NullOr(Schema.Literals(["none", "info", "error", "question", "warning"])),
-    title: Schema.NullOr(Schema.String),
-    dialogMessage: Schema.String,
-    dialogDetail: Schema.NullOr(Schema.String),
-    buttons: Schema.Array(Schema.String),
+    titleLength: Schema.NullOr(Schema.Number),
+    messageLength: Schema.Number,
+    detailLength: Schema.NullOr(Schema.Number),
+    buttonCount: Schema.Number,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
     const type = this.type === null ? "untyped" : this.type;
-    const title = this.title === null ? "untitled" : this.title;
-    return `Failed to show the Electron ${type} message box titled ${title}.`;
+    return `Failed to show the Electron ${type} message box with ${this.buttonCount} buttons.`;
   }
 }
 
 export class ElectronDialogShowErrorBoxError extends Schema.TaggedErrorClass<ElectronDialogShowErrorBoxError>()(
   "ElectronDialogShowErrorBoxError",
   {
-    title: Schema.String,
-    content: Schema.String,
+    titleLength: Schema.Number,
+    contentLength: Schema.Number,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to show the Electron error box titled ${this.title}.`;
+    return `Failed to show the Electron error box with a ${this.titleLength}-character title and ${this.contentLength}-character content.`;
   }
 }
 
@@ -165,7 +164,7 @@ export const make = ElectronDialog.of({
       catch: (cause) =>
         new ElectronDialogConfirmError({
           ownerWindowId,
-          promptMessage: normalizedMessage,
+          promptLength: normalizedMessage.length,
           cause,
         }),
     });
@@ -177,17 +176,22 @@ export const make = ElectronDialog.of({
       catch: (cause) =>
         new ElectronDialogShowMessageBoxError({
           type: options.type ?? null,
-          title: options.title ?? null,
-          dialogMessage: options.message,
-          dialogDetail: options.detail ?? null,
-          buttons: options.buttons ?? [],
+          titleLength: options.title?.length ?? null,
+          messageLength: options.message.length,
+          detailLength: options.detail?.length ?? null,
+          buttonCount: options.buttons?.length ?? 0,
           cause,
         }),
     }),
   showErrorBox: (title, content) =>
     Effect.try({
       try: () => Electron.dialog.showErrorBox(title, content),
-      catch: (cause) => new ElectronDialogShowErrorBoxError({ title, content, cause }),
+      catch: (cause) =>
+        new ElectronDialogShowErrorBoxError({
+          titleLength: title.length,
+          contentLength: content.length,
+          cause,
+        }),
     }).pipe(Effect.orDie),
 });
 
