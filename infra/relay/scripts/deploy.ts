@@ -44,18 +44,38 @@ const relayDeployOutputFields = [
 export const RelayDeployOutputField = Schema.Literals(relayDeployOutputFields);
 export type RelayDeployOutputField = typeof RelayDeployOutputField.Type;
 
+export const RelayDeployResult = Schema.Literals([
+  "applied",
+  "noop",
+  "dry-run",
+  "cancelled",
+  "state",
+]);
+export type RelayDeployResult = typeof RelayDeployResult.Type;
+
 export class RelayDeployError extends Schema.TaggedErrorClass<RelayDeployError>()(
   "RelayDeployError",
   {
-    source: Schema.Literals(["deploy_outcome", "alchemy_state", "alchemy_apply"]),
+    source: Schema.Literals(["alchemy_state", "alchemy_apply"]),
     stage: Schema.String,
-    outputPath: Schema.optional(Schema.String),
     missingFields: Schema.Array(RelayDeployOutputField),
   },
 ) {
   override get message(): string {
-    const outputPath = this.outputPath ? ` at output path '${this.outputPath}'` : "";
-    return `Relay deploy output from '${this.source}' for stage '${this.stage}'${outputPath} is missing required public config fields: ${this.missingFields.join(", ")}`;
+    return `Relay deploy output from '${this.source}' for stage '${this.stage}' is missing required public config fields: ${this.missingFields.join(", ")}`;
+  }
+}
+
+export class RelayDeployPublicConfigUnavailableError extends Schema.TaggedErrorClass<RelayDeployPublicConfigUnavailableError>()(
+  "RelayDeployPublicConfigUnavailableError",
+  {
+    result: RelayDeployResult,
+    stage: Schema.String,
+    outputPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Relay deploy result '${this.result}' for stage '${this.stage}' did not produce public config required by GitHub environment output '${this.outputPath}'.`;
   }
 }
 
@@ -135,8 +155,6 @@ export function hasDeployChanges(plan: Plan.Plan): boolean {
     )
   );
 }
-
-export type RelayDeployResult = "applied" | "noop" | "dry-run" | "cancelled" | "state";
 
 export interface RelayDeployOutcome {
   readonly result: RelayDeployResult;
@@ -226,11 +244,10 @@ const writeGithubEnvFile = Effect.fn("relay.deploy.writeGithubEnvFile")(function
   stage: string,
 ) {
   if (Option.isNone(outcome.publicConfig)) {
-    return yield* new RelayDeployError({
-      source: "deploy_outcome",
+    return yield* new RelayDeployPublicConfigUnavailableError({
+      result: outcome.result,
       stage,
       outputPath,
-      missingFields: ["clientTracingUrl", "clientTracingDataset", "clientTracingToken"],
     });
   }
   const fs = yield* FileSystem.FileSystem;

@@ -11,6 +11,7 @@ import {
   reconcileRootEnvPublicConfig,
   reconcileRootEnvRelayUrl,
   RelayDeployError,
+  RelayDeployPublicConfigUnavailableError,
   serializeGithubOutput,
   serializeRelayClientTracingEnvironment,
 } from "./deploy.ts";
@@ -43,16 +44,15 @@ describe("RelayDeployError", () => {
     );
   });
 
-  it("includes the GitHub environment output path", () => {
-    const error = new RelayDeployError({
-      source: "deploy_outcome",
+  it("distinguishes deploy results that do not produce public config", () => {
+    const error = new RelayDeployPublicConfigUnavailableError({
+      result: "dry-run",
       stage: "production",
       outputPath: "/tmp/relay-client.env",
-      missingFields: ["clientTracingUrl", "clientTracingDataset", "clientTracingToken"],
     });
 
     expect(error.message).toBe(
-      "Relay deploy output from 'deploy_outcome' for stage 'production' at output path '/tmp/relay-client.env' is missing required public config fields: clientTracingUrl, clientTracingDataset, clientTracingToken",
+      "Relay deploy result 'dry-run' for stage 'production' did not produce public config required by GitHub environment output '/tmp/relay-client.env'.",
     );
   });
 });
