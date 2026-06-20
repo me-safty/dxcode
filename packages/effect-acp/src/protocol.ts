@@ -17,7 +17,6 @@ import * as AcpSchema from "./_generated/schema.gen.ts";
 import { CLIENT_METHODS } from "./_generated/meta.gen.ts";
 import * as AcpError from "./errors.ts";
 const isAcpError = Schema.is(AcpError.AcpError);
-const isAcpRequestError = Schema.is(AcpError.AcpRequestError);
 
 export interface AcpProtocolLogEvent {
   readonly direction: "incoming" | "outgoing";
@@ -243,7 +242,11 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     }
     return options.onExtRequest(message.tag, message.payload).pipe(
       Effect.matchEffect({
-        onFailure: (error) => respondWithError(message.id, normalizeToRequestError(error)),
+        onFailure: (error) =>
+          respondWithError(
+            message.id,
+            AcpError.AcpRequestError.fromHandlerError(error, message.tag),
+          ),
         onSuccess: (value) => respondWithSuccess(message.id, value),
       }),
     );
@@ -435,7 +438,18 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
         Stream.runForEach((message) => f(message)),
         Effect.forever,
       ),
-    send: (_clientId, request) => offerOutgoing(request).pipe(Effect.mapError(toRpcClientError)),
+    send: (_clientId, request) =>
+      offerOutgoing(request).pipe(
+        Effect.mapError(
+          (error) =>
+            new RpcClientError.RpcClientError({
+              reason: new RpcClientError.RpcClientDefect({
+                message: error.message,
+                cause: error,
+              }),
+            }),
+        ),
+      ),
     supportsAck: true,
     supportsTransferables: false,
   });
@@ -514,17 +528,4 @@ function isProtocolError(
     "message" in value &&
     typeof value.message === "string"
   );
-}
-
-function normalizeToRequestError(error: AcpError.AcpError): AcpError.AcpRequestError {
-  return isAcpRequestError(error) ? error : AcpError.AcpRequestError.internalError(error.message);
-}
-
-function toRpcClientError(error: AcpError.AcpError): RpcClientError.RpcClientError {
-  return new RpcClientError.RpcClientError({
-    reason: new RpcClientError.RpcClientDefect({
-      message: error.message,
-      cause: error,
-    }),
-  });
 }

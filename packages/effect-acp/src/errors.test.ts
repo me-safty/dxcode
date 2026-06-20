@@ -59,4 +59,21 @@ describe("effect-acp errors", () => {
     expect(error.message).toBe("ACP transport operation failed.");
     expect(error.cause).toBe(cause);
   });
+
+  it("preserves structured extension handler failures behind stable request errors", () => {
+    const cause = new AcpError.AcpTransportError({
+      operation: "read-input-stream",
+      cause: new Error("private transport diagnostics"),
+    });
+    const error = AcpError.AcpRequestError.fromHandlerError(cause, "x/test");
+
+    expect(error).toMatchObject({
+      code: -32603,
+      method: "x/test",
+      operation: "handle-extension-request",
+      cause,
+    });
+    expect(error.message).toBe("ACP extension request handler failed for method 'x/test'");
+    expect(error.message).not.toContain(cause.message);
+  });
 });

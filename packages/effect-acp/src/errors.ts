@@ -2,6 +2,15 @@ import * as Schema from "effect/Schema";
 
 import * as AcpSchema from "./_generated/schema.gen.ts";
 
+export const AcpRequestOperation = Schema.Literal("handle-extension-request");
+export type AcpRequestOperation = typeof AcpRequestOperation.Type;
+
+export interface AcpRequestDiagnostics {
+  readonly method?: string;
+  readonly operation?: AcpRequestOperation;
+  readonly cause?: unknown;
+}
+
 export class AcpSpawnError extends Schema.TaggedErrorClass<AcpSpawnError>()("AcpSpawnError", {
   command: Schema.optional(Schema.String),
   cause: Schema.Defect(),
@@ -71,6 +80,9 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
   code: AcpSchema.ErrorCode,
   errorMessage: Schema.String,
   data: Schema.optional(Schema.Unknown),
+  method: Schema.optionalKey(Schema.String),
+  operation: Schema.optionalKey(AcpRequestOperation),
+  cause: Schema.optionalKey(Schema.Defect()),
 }) {
   override get message() {
     return this.errorMessage;
@@ -82,6 +94,21 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
       errorMessage: error.message,
       ...(error.data !== undefined ? { data: error.data } : {}),
     });
+  }
+
+  static fromHandlerError(error: AcpError, method: string) {
+    if (error._tag === "AcpRequestError") {
+      return error;
+    }
+    return AcpRequestError.internalError(
+      `ACP extension request handler failed for method '${method}'`,
+      undefined,
+      {
+        method,
+        operation: "handle-extension-request",
+        cause: error,
+      },
+    );
   }
 
   static parseError(message = "Parse error", data?: unknown) {
@@ -115,11 +142,16 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
     });
   }
 
-  static internalError(message = "Internal error", data?: unknown) {
+  static internalError(
+    message = "Internal error",
+    data?: unknown,
+    diagnostics: AcpRequestDiagnostics = {},
+  ) {
     return new AcpRequestError({
       code: -32603,
       errorMessage: message,
       ...(data !== undefined ? { data } : {}),
+      ...diagnostics,
     });
   }
 
