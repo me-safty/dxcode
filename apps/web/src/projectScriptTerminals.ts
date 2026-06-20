@@ -34,6 +34,13 @@ function projectActionTerminalIdBase(scriptId: ProjectScript["id"]): string {
   return `${ACTION_TERMINAL_ID_PREFIX}${encodeURIComponent(scriptId)}`;
 }
 
+function isProjectActionTerminalFallbackId(terminalId: string, baseTerminalId: string): boolean {
+  const suffix = terminalId.startsWith(`${baseTerminalId}${ACTION_TERMINAL_FALLBACK_SEPARATOR}`)
+    ? terminalId.slice(baseTerminalId.length + ACTION_TERMINAL_FALLBACK_SEPARATOR.length)
+    : "";
+  return /^[1-9][0-9]*$/.test(suffix);
+}
+
 export function isProjectActionTerminalId(terminalId: string): boolean {
   return terminalId.startsWith(ACTION_TERMINAL_ID_PREFIX);
 }
@@ -54,10 +61,10 @@ export function resolveProjectActionTerminalId(input: {
     return baseTerminalId;
   }
 
-  const basePrefix = `${baseTerminalId}${ACTION_TERMINAL_FALLBACK_SEPARATOR}`;
   const idleActionTerminal = input.terminalIds.find(
     (terminalId) =>
-      (terminalId === baseTerminalId || terminalId.startsWith(basePrefix)) &&
+      (terminalId === baseTerminalId ||
+        isProjectActionTerminalFallbackId(terminalId, baseTerminalId)) &&
       !busyTerminalIds.has(terminalId),
   );
   if (idleActionTerminal) {

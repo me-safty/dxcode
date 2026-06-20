@@ -108,6 +108,23 @@ describe("project action terminal ids", () => {
       }),
     ).toBe("action-build%3A2:2");
   });
+
+  it("only reuses numeric action fallback suffixes", () => {
+    expect(
+      resolveProjectActionTerminalId({
+        scriptId: "build",
+        terminalIds: ["action-build", "action-build:dev", "action-build:2"],
+        runningTerminalIds: ["action-build"],
+      }),
+    ).toBe("action-build:2");
+    expect(
+      resolveProjectActionTerminalId({
+        scriptId: "build",
+        terminalIds: ["action-build", "action-build:dev"],
+        runningTerminalIds: ["action-build"],
+      }),
+    ).toBe("action-build:2");
+  });
 });
 
 describe("terminalOutputLooksReadyForInput", () => {
