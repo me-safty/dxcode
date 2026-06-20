@@ -4,11 +4,7 @@ import type {
   DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
-import {
-  SshPasswordPrompt,
-  type SshPasswordPromptShape,
-  type SshPasswordRequest,
-} from "@t3tools/ssh/auth";
+import { SshPasswordPrompt, type SshPasswordRequest } from "@t3tools/ssh/auth";
 import { discoverSshHosts } from "@t3tools/ssh/config";
 import {
   SshCommandError,
@@ -25,8 +21,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import { HttpClient } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import * as DesktopSshPasswordPrompts from "./DesktopSshPasswordPrompts.ts";
 
@@ -52,22 +48,20 @@ export type DesktopSshEnvironmentError =
   | DesktopSshEnvironmentDiscoverError
   | DesktopSshEnvironmentOperationError;
 
-export interface DesktopSshEnvironmentShape {
-  readonly discoverHosts: (input?: {
-    readonly homeDir?: string;
-  }) => Effect.Effect<readonly DesktopDiscoveredSshHost[], DesktopSshEnvironmentDiscoverError>;
-  readonly ensureEnvironment: (
-    target: DesktopSshEnvironmentTarget,
-    options?: { readonly issuePairingToken?: boolean },
-  ) => Effect.Effect<DesktopSshEnvironmentBootstrap, DesktopSshEnvironmentOperationError>;
-  readonly disconnectEnvironment: (
-    target: DesktopSshEnvironmentTarget,
-  ) => Effect.Effect<void, DesktopSshEnvironmentOperationError>;
-}
-
 export class DesktopSshEnvironment extends Context.Service<
   DesktopSshEnvironment,
-  DesktopSshEnvironmentShape
+  {
+    readonly discoverHosts: (input?: {
+      readonly homeDir?: string;
+    }) => Effect.Effect<readonly DesktopDiscoveredSshHost[], DesktopSshEnvironmentDiscoverError>;
+    readonly ensureEnvironment: (
+      target: DesktopSshEnvironmentTarget,
+      options?: { readonly issuePairingToken?: boolean },
+    ) => Effect.Effect<DesktopSshEnvironmentBootstrap, DesktopSshEnvironmentOperationError>;
+    readonly disconnectEnvironment: (
+      target: DesktopSshEnvironmentTarget,
+    ) => Effect.Effect<void, DesktopSshEnvironmentOperationError>;
+  }
 >()("@t3tools/desktop/ssh/DesktopSshEnvironment") {}
 
 export interface DesktopSshEnvironmentLayerOptions {
@@ -89,8 +83,8 @@ export function isDesktopSshPasswordPromptCancellation(
 }
 
 const makePasswordPrompt = (
-  prompts: DesktopSshPasswordPrompts.DesktopSshPasswordPromptsShape,
-): SshPasswordPromptShape => ({
+  prompts: DesktopSshPasswordPrompts.DesktopSshPasswordPrompts["Service"],
+): SshPasswordPrompt["Service"] => ({
   isAvailable: true,
   request: (request: SshPasswordRequest) =>
     prompts.request(request).pipe(
@@ -104,7 +98,7 @@ const makePasswordPrompt = (
     ),
 });
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const manager = yield* SshEnvironmentManager;
   const prompts = yield* DesktopSshPasswordPrompts.DesktopSshPasswordPrompts;
   const runtimeContext = yield* Effect.context<DesktopSshEnvironmentRuntimeServices>();
