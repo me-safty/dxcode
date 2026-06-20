@@ -86,11 +86,37 @@ describe("VcsProcess.run", () => {
         argumentCount: 4,
         exitCode: 2,
         detail: "Process exited with a non-zero status.",
+        failureKind: "command-failed",
         stderrLength: secretStderr.length,
         stderrTruncated: false,
       });
       expect(error.message).not.toContain(secretArgument);
       expect(error.message).not.toContain(secretStderr);
+    }).pipe(provideLive),
+  );
+
+  it.effect("classifies authentication failures without retaining stderr", () =>
+    Effect.gen(function* () {
+      const secretStderr = "authentication failed for token super-secret-token";
+      const error = yield* run({
+        operation: "test.authentication",
+        command: "node",
+        args: ["-e", "process.stderr.write(process.argv[1]); process.exit(1)", secretStderr],
+        cwd: process.cwd(),
+      }).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(VcsProcessExitError);
+      expect(error).toMatchObject({
+        operation: "test.authentication",
+        command: "node",
+        exitCode: 1,
+        detail: "Authentication failed.",
+        failureKind: "authentication",
+        stderrLength: secretStderr.length,
+        stderrTruncated: false,
+      });
+      expect(error.message).not.toContain(secretStderr);
+      expect(error.message).not.toContain("super-secret-token");
     }).pipe(provideLive),
   );
 

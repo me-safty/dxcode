@@ -87,6 +87,19 @@ export interface VcsProcessTimeoutFailure {
   readonly timeoutMs: number;
 }
 
+export const VcsProcessExitFailureKind = Schema.Literals([
+  "authentication",
+  "not-found",
+  "command-failed",
+]);
+export type VcsProcessExitFailureKind = typeof VcsProcessExitFailureKind.Type;
+
+export interface VcsProcessExitFailure {
+  readonly exitCode: number;
+  readonly stderr: string;
+  readonly stderrTruncated: boolean;
+}
+
 export class VcsProcessSpawnError extends Schema.TaggedErrorClass<VcsProcessSpawnError>()(
   "VcsProcessSpawnError",
   {
@@ -118,12 +131,39 @@ export class VcsProcessExitError extends Schema.TaggedErrorClass<VcsProcessExitE
     argumentCount: Schema.optional(NonNegativeInt),
     exitCode: Schema.Number,
     detail: Schema.String,
+    failureKind: Schema.optional(VcsProcessExitFailureKind),
     stderrLength: Schema.optional(NonNegativeInt),
     stderrTruncated: Schema.optional(Schema.Boolean),
   },
 ) {
   override get message(): string {
     return `VCS process failed in ${this.operation}: ${this.command} (${this.cwd}) exited with ${this.exitCode} - ${this.detail}`;
+  }
+
+  static fromProcessExit(
+    context: VcsProcessErrorContext,
+    error: VcsProcessExitFailure,
+    failureKind: VcsProcessExitFailureKind,
+  ) {
+    const detail =
+      failureKind === "authentication"
+        ? "Authentication failed."
+        : failureKind === "not-found"
+          ? context.command === "glab"
+            ? "Merge request not found."
+            : context.command === "gh" || context.command === "az"
+              ? "Pull request not found."
+              : "VCS resource not found."
+          : "Process exited with a non-zero status.";
+
+    return new VcsProcessExitError({
+      ...context,
+      exitCode: error.exitCode,
+      detail,
+      failureKind,
+      stderrLength: error.stderr.length,
+      stderrTruncated: error.stderrTruncated,
+    });
   }
 }
 
