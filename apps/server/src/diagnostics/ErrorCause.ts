@@ -56,19 +56,16 @@ export function sanitizeErrorCause(cause: unknown): SanitizedErrorCause {
     return output;
   }
 
-  if (cause instanceof Error) {
-    const output: MutableSanitizedErrorCause = {};
-    addTextField(output, "name", cause.name);
-    addTextField(output, "message", cause.message);
-    return output;
-  }
-
   if (typeof cause === "object" && cause !== null) {
     const record = cause as Record<PropertyKey, unknown>;
     const output: MutableSanitizedErrorCause = {};
     addTextField(output, "tag", stringField(record, "_tag"));
-    addTextField(output, "name", stringField(record, "name"));
-    addTextField(output, "message", stringField(record, "message"));
+    addTextField(output, "name", cause instanceof Error ? cause.name : stringField(record, "name"));
+    addTextField(
+      output,
+      "message",
+      cause instanceof Error ? cause.message : stringField(record, "message"),
+    );
     addTextField(output, "detail", stringField(record, "detail"));
     addTextField(output, "code", stringField(record, "code"));
 
