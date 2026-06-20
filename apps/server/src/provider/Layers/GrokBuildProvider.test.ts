@@ -80,7 +80,6 @@ Available models:
     ).toEqual({
       displayName: "Grok Build",
       showInteractionModeToggle: true,
-      requiresNewThreadForModelChange: true,
     });
   });
 });

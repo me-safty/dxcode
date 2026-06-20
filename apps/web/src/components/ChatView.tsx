@@ -3755,7 +3755,7 @@ export default function ChatView(props: ChatViewProps) {
         currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
         nextModelSelection: { instanceId, model },
       });
-      return reason ? `${reason.description} Start a new thread to use this model.` : null;
+      return reason ? `${reason.description} Start a new chat to use this model.` : null;
     },
     [activeThread, providerStatuses],
   );

@@ -34,6 +34,7 @@ export const XAiAskUserQuestionRequest = Schema.Union([
 
 type XAiAskUserQuestionRequestParams = typeof XAiAskUserQuestionParams.Type;
 type XAiAskUserQuestionRequest = typeof XAiAskUserQuestionRequest.Type;
+const EMPTY_OPTIONS_CONTINUE_FALLBACK = [{ label: "OK", description: "Continue" }] as const;
 
 function trimmed(value: string | undefined): string | undefined {
   const text = value?.trim();
@@ -60,7 +61,7 @@ export function extractXAiAskUserQuestions(
             label: option.label,
             description: option.description ?? option.label,
           }))
-        : [{ label: "OK", description: "Continue" }],
+        : EMPTY_OPTIONS_CONTINUE_FALLBACK,
   }));
 }
 

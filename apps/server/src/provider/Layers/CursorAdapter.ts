@@ -13,7 +13,6 @@ import {
   type ProviderInteractionMode,
   type ProviderRuntimeEvent,
   type ProviderSession,
-  type ProviderUserInputAnswers,
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeRequestId,
@@ -63,6 +62,12 @@ import {
   emitDedupedAcpPlanUpdate,
   mapAcpParsedSessionEvent,
 } from "../acp/AcpSessionEventSupport.ts";
+import {
+  answerPendingAcpUserInput,
+  bridgeAcpUserInputRequest,
+  type PendingAcpUserInput,
+  settlePendingAcpUserInputsAsCancelled,
+} from "../acp/AcpUserInputBridge.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
 import { applyCursorAcpModelSelection, makeCursorAcpRuntime } from "../acp/CursorAcpSupport.ts";
@@ -115,10 +120,6 @@ interface PendingApproval {
   readonly kind: string | "unknown";
 }
 
-interface PendingUserInput {
-  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
-}
-
 interface CursorSessionContext {
   readonly threadId: ThreadId;
   session: ProviderSession;
@@ -126,7 +127,7 @@ interface CursorSessionContext {
   readonly acp: AcpSessionRuntimeShape;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
-  readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
+  readonly pendingUserInputs: Map<ApprovalRequestId, PendingAcpUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
@@ -140,19 +141,6 @@ function settlePendingApprovalsAsCancelled(
   return Effect.forEach(
     pendingEntries,
     (pending) => Deferred.succeed(pending.decision, "cancel").pipe(Effect.ignore),
-    {
-      discard: true,
-    },
-  );
-}
-
-function settlePendingUserInputsAsEmptyAnswers(
-  pendingUserInputs: ReadonlyMap<ApprovalRequestId, PendingUserInput>,
-): Effect.Effect<void> {
-  const pendingEntries = Array.from(pendingUserInputs.values());
-  return Effect.forEach(
-    pendingEntries,
-    (pending) => Deferred.succeed(pending.answers, {}).pipe(Effect.ignore),
     {
       discard: true,
     },
@@ -326,7 +314,7 @@ export function makeCursorAdapter(
         if (ctx.stopped) return;
         ctx.stopped = true;
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
-        yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
+        yield* settlePendingAcpUserInputsAsCancelled(ctx.pendingUserInputs);
         if (ctx.notificationFiber) {
           yield* Fiber.interrupt(ctx.notificationFiber);
         }
@@ -369,7 +357,7 @@ export function makeCursorAdapter(
           }
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
-          const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
+          const pendingUserInputs = new Map<ApprovalRequestId, PendingAcpUserInput>();
           const sessionScope = yield* Scope.make("sequential");
           let sessionScopeTransferred = false;
           yield* Effect.addFinalizer(() =>
@@ -426,36 +414,22 @@ export function makeCursorAdapter(
                     params,
                     "acp.cursor.extension",
                   );
-                  const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
-                  const runtimeRequestId = RuntimeRequestId.make(requestId);
-                  const answers = yield* Deferred.make<ProviderUserInputAnswers>();
-                  pendingUserInputs.set(requestId, { answers });
-                  yield* offerRuntimeEvent({
-                    type: "user-input.requested",
-                    ...(yield* makeEventStamp()),
+                  return yield* bridgeAcpUserInputRequest({
                     provider: PROVIDER,
                     threadId: input.threadId,
-                    turnId: ctx?.activeTurnId,
-                    requestId: runtimeRequestId,
-                    payload: { questions: extractAskQuestions(params) },
-                    raw: {
-                      source: "acp.cursor.extension",
-                      method: "cursor/ask_question",
-                      payload: params,
-                    },
+                    turnId: () => ctx?.activeTurnId,
+                    method: "cursor/ask_question",
+                    source: "acp.cursor.extension",
+                    params,
+                    pendingUserInputs,
+                    nextRequestId: Effect.map(randomUUIDv4, ApprovalRequestId.make),
+                    makeEventStamp,
+                    offerRuntimeEvent,
+                    extractQuestions: extractAskQuestions,
+                    makeResponse: (_params, resolution) => ({
+                      answers: resolution._tag === "answered" ? resolution.answers : {},
+                    }),
                   });
-                  const resolved = yield* Deferred.await(answers);
-                  pendingUserInputs.delete(requestId);
-                  yield* offerRuntimeEvent({
-                    type: "user-input.resolved",
-                    ...(yield* makeEventStamp()),
-                    provider: PROVIDER,
-                    threadId: input.threadId,
-                    turnId: ctx?.activeTurnId,
-                    requestId: runtimeRequestId,
-                    payload: { answers: resolved },
-                  });
-                  return { answers: resolved };
                 }),
               ),
             );
@@ -821,7 +795,7 @@ export function makeCursorAdapter(
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
-        yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
+        yield* settlePendingAcpUserInputsAsCancelled(ctx.pendingUserInputs);
         yield* Effect.ignore(
           ctx.acp.cancel.pipe(
             Effect.mapError((error) =>
@@ -864,7 +838,7 @@ export function makeCursorAdapter(
             detail: `Unknown pending user-input request: ${requestId}`,
           });
         }
-        yield* Deferred.succeed(pending.answers, answers);
+        yield* answerPendingAcpUserInput(pending, answers);
       });
 
     const readThread: CursorAdapterShape["readThread"] = (threadId) =>

@@ -52,7 +52,6 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 const DEFAULT_PRESENTATION = {
   displayName: "Grok Build" as const,
   showInteractionModeToggle: false,
-  requiresNewThreadForModelChange: true,
 };
 
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
@@ -84,7 +83,6 @@ const decodeGrokUpdateCheckResponse = Schema.decodeUnknownEffect(
 export interface GrokBuildPresentation {
   readonly displayName: "Grok Build";
   readonly showInteractionModeToggle: boolean;
-  readonly requiresNewThreadForModelChange: boolean;
 }
 
 export interface GrokModelsCliResult {
@@ -108,7 +106,6 @@ export function buildGrokBuildPresentationFromProbe(input: {
   return {
     displayName: "Grok Build",
     showInteractionModeToggle: hasModes,
-    requiresNewThreadForModelChange: true,
   };
 }
 

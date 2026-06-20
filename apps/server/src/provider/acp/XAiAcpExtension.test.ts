@@ -108,6 +108,17 @@ describe("XAiAcpExtension", () => {
     ]);
   });
 
+  it("exposes an explicit continue action when xAI sends no options", () => {
+    const questions = extractXAiAskUserQuestions({
+      sessionId: "session-1",
+      toolCallId: "tool-call-1",
+      mode: "default",
+      questions: [{ question: "Continue with the current plan?", options: [] }],
+    });
+
+    expect(questions[0]?.options).toEqual([{ label: "OK", description: "Continue" }]);
+  });
+
   it("maps UI question ids back to xAI question text in accepted responses", () => {
     const response = makeXAiAskUserQuestionResponse(
       {

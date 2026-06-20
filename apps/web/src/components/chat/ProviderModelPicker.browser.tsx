@@ -1148,7 +1148,7 @@ describe("ProviderModelPicker", () => {
 
   it("does not select models blocked by the provider", async () => {
     const disabledReason =
-      "This provider does not allow switching models after a conversation has started. Start a new thread to use this model.";
+      "This provider does not allow switching models after a conversation has started. Start a new chat to use this model.";
     const mounted = await mountPicker({
       activeInstanceId: CLAUDE_INSTANCE_ID,
       model: "claude-opus-4-6",

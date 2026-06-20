@@ -269,9 +269,7 @@ export function deriveLockedProvider(input: {
 }
 
 export function getStartedThreadModelChangeBlockReason(input: {
-  providers: ReadonlyArray<
-    Pick<ServerProvider, "instanceId" | "requiresNewThreadForModelChange">
-  >;
+  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "requiresNewThreadForModelChange">>;
   hasStartedSession: boolean;
   currentModelSelection: ModelSelection;
   currentProviderInstanceId?: ProviderInstanceId | null | undefined;

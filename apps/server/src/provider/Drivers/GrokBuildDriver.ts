@@ -29,6 +29,7 @@ import {
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeGrokBuildTextGeneration } from "../../textGeneration/GrokBuildTextGeneration.ts";
+import { applyProviderAdapterCapabilities, type ServerProviderDraft } from "../providerSnapshot.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("grok-build");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -77,19 +78,18 @@ export const GrokBuildDriver: ProviderDriver<GrokBuildSettings, GrokBuildDriverE
         instanceId,
       });
 
-      const stampIdentity = (snapshot: any): ServerProvider => ({
-        ...snapshot,
+      const adapter = yield* makeGrokBuildAdapter(effectiveConfig, {
+        environment: processEnv,
+        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        instanceId,
+      });
+      const stampIdentity = (snapshot: ServerProviderDraft): ServerProvider => ({
+        ...applyProviderAdapterCapabilities(snapshot, adapter.capabilities),
         instanceId,
         driver: DRIVER_KIND,
         ...(displayName ? { displayName } : {}),
         ...(accentColor ? { accentColor } : {}),
         continuation: { groupKey: continuationIdentity.continuationKey },
-      });
-
-      const adapter = yield* makeGrokBuildAdapter(effectiveConfig, {
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-        instanceId,
       });
 
       const textGeneration = yield* makeGrokBuildTextGeneration(effectiveConfig, processEnv);

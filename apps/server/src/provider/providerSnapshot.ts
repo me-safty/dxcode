@@ -16,6 +16,7 @@ import { normalizeModelSlug } from "@t3tools/shared/model";
 import { isWindowsCommandNotFound } from "../processRunner.ts";
 import { createProviderVersionAdvisory } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+import type { ProviderAdapterCapabilities } from "./Services/ProviderAdapter.ts";
 
 export const DEFAULT_TIMEOUT_MS = 4_000;
 // Auth status checks involve disk/network lookups and can be slow on first run (especially Windows)
@@ -45,10 +46,19 @@ export interface ServerProviderPresentation {
   readonly displayName: string;
   readonly badgeLabel?: string;
   readonly showInteractionModeToggle?: boolean;
-  readonly requiresNewThreadForModelChange?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
+
+export function applyProviderAdapterCapabilities(
+  snapshot: ServerProviderDraft,
+  capabilities: ProviderAdapterCapabilities,
+): ServerProviderDraft {
+  const { requiresNewThreadForModelChange: _requiresNewThreadForModelChange, ...base } = snapshot;
+  return capabilities.sessionModelSwitch === "new-thread"
+    ? { ...base, requiresNewThreadForModelChange: true }
+    : base;
+}
 
 export function nonEmptyTrimmed(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -214,9 +224,6 @@ export function buildServerProvider(input: {
     ...(input.presentation.badgeLabel ? { badgeLabel: input.presentation.badgeLabel } : {}),
     ...(typeof input.presentation.showInteractionModeToggle === "boolean"
       ? { showInteractionModeToggle: input.presentation.showInteractionModeToggle }
-      : {}),
-    ...(typeof input.presentation.requiresNewThreadForModelChange === "boolean"
-      ? { requiresNewThreadForModelChange: input.presentation.requiresNewThreadForModelChange }
       : {}),
     enabled: input.enabled,
     installed: input.probe.installed,

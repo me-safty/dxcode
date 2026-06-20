@@ -267,6 +267,45 @@ grokAdapterTestLayer("GrokBuildAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
     }),
   );
+
+  it.effect("requires a new chat to change models", () =>
+    Effect.gen(function* () {
+      const adapter = yield* GrokBuildAdapter;
+      const threadId = ThreadId.make("grok-model-change-thread");
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok-build"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok-build-test"),
+          model: "grok-build",
+        },
+      });
+
+      assert.equal(adapter.capabilities.sessionModelSwitch, "new-thread");
+      const error = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "switch models",
+          attachments: [],
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("grok-build-test"),
+            model: "composer-2.5",
+          },
+        })
+        .pipe(Effect.flip);
+
+      assert.equal(error._tag, "ProviderAdapterValidationError");
+      if (error._tag !== "ProviderAdapterValidationError") {
+        return;
+      }
+      assert.equal(error.issue, "Start a new chat to change Grok Build models.");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
 });
 
 const grokPromptFailureAdapterTestLayer = it.layer(
