@@ -67,17 +67,20 @@ it.effect("preserves search and refresh failures with operation context", () =>
       vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
 
       const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
-      const searchError = yield* Effect.flip(searchIndex.search("needle", 3));
+      const query = "authorization: Bearer secret-token";
+      const searchError = yield* Effect.flip(searchIndex.search(query, 3));
       const refreshError = yield* Effect.flip(searchIndex.refresh());
 
       expect(searchError).toMatchObject({
         _tag: "WorkspaceSearchIndexSearchFailed",
         cwd: "/workspace/project",
-        query: "needle",
+        queryLength: query.length,
         pageSize: 4,
         reason: "FileFinder.mixedSearch threw unexpectedly.",
         cause: searchCause,
       });
+      expect(searchError).not.toHaveProperty("query");
+      expect(searchError.message).not.toMatch(/Bearer|secret-token/);
       expect(refreshError).toMatchObject({
         _tag: "WorkspaceSearchIndexRefreshFailed",
         cwd: "/workspace/project",
@@ -100,16 +103,19 @@ it.effect("keeps returned search diagnostics out of the cause chain", () =>
       vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
 
       const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
-      const searchError = yield* Effect.flip(searchIndex.search("needle", 3));
+      const query = "authorization: Bearer secret-token";
+      const searchError = yield* Effect.flip(searchIndex.search(query, 3));
       const refreshError = yield* Effect.flip(searchIndex.refresh());
 
       expect(searchError).toMatchObject({
         _tag: "WorkspaceSearchIndexSearchFailed",
         cwd: "/workspace/project",
-        query: "needle",
+        queryLength: query.length,
         pageSize: 4,
         reason: "native query rejected",
       });
+      expect(searchError).not.toHaveProperty("query");
+      expect(searchError.message).not.toMatch(/Bearer|secret-token/);
       expect(searchError.cause).toBeUndefined();
       expect(refreshError).toMatchObject({
         _tag: "WorkspaceSearchIndexRefreshFailed",

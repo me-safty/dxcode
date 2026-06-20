@@ -47,7 +47,7 @@ export class WorkspaceSearchIndexSearchFailed extends Schema.TaggedErrorClass<Wo
   "WorkspaceSearchIndexSearchFailed",
   {
     cwd: Schema.String,
-    query: Schema.String,
+    queryLength: Schema.Number,
     pageSize: Schema.Number,
     reason: Schema.String,
     cause: Schema.optional(Schema.Defect()),
@@ -223,7 +223,7 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (cwd: strin
       catch: (cause) =>
         new WorkspaceSearchIndexSearchFailed({
           cwd,
-          query,
+          queryLength: query.length,
           pageSize,
           reason: "FileFinder.mixedSearch threw unexpectedly.",
           cause,
@@ -232,7 +232,7 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (cwd: strin
     if (!result.ok) {
       return yield* new WorkspaceSearchIndexSearchFailed({
         cwd,
-        query,
+        queryLength: query.length,
         pageSize,
         reason: result.error,
       });
