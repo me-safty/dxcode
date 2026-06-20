@@ -111,11 +111,13 @@ function sshPreparationError(cause: unknown) {
     return new ConnectionBlockedError({
       reason: "authentication",
       detail: message,
+      cause,
     });
   }
   return new ConnectionTransientError({
     reason: "remote-unavailable",
-    detail: `Could not prepare the SSH environment: ${message}`,
+    detail: "Could not prepare the SSH environment.",
+    cause,
   });
 }
 
@@ -252,7 +254,8 @@ const capabilitiesLayer = Layer.effectContext(
           catch: (cause) =>
             new ConnectionTransientError({
               reason: "remote-unavailable",
-              detail: `Could not disconnect the SSH environment: ${String(cause)}`,
+              detail: "Could not disconnect the SSH environment.",
+              cause,
             }),
         });
       }),
