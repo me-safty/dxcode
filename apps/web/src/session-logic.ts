@@ -854,9 +854,9 @@ function mergeDerivedWorkLogEntries(
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
-  const output = mergeTextOutput(previous.output, next.output);
-  const stdout = mergeTextOutput(previous.stdout, next.stdout);
-  const stderr = mergeTextOutput(previous.stderr, next.stderr);
+  const output = mergeTextOutput(previous.output, next.output, next);
+  const stdout = mergeTextOutput(previous.stdout, next.stdout, next);
+  const stderr = mergeTextOutput(previous.stderr, next.stderr, next);
   const exitCode = next.exitCode ?? previous.exitCode;
   const durationMs = next.durationMs ?? previous.durationMs;
   const patch = next.patch ?? previous.patch;
@@ -893,6 +893,7 @@ function mergeDerivedWorkLogEntries(
 function mergeTextOutput(
   previous: string | undefined,
   next: string | undefined,
+  nextEntry: DerivedWorkLogEntry,
 ): string | undefined {
   if (!previous) {
     return next;
@@ -906,7 +907,14 @@ function mergeTextOutput(
   if (next.startsWith(previous)) {
     return next;
   }
+  if (previous.startsWith(next) && shouldKeepLongerOutputSnapshot(next, nextEntry)) {
+    return previous;
+  }
   return `${previous}${next}`;
+}
+
+function shouldKeepLongerOutputSnapshot(next: string, nextEntry: DerivedWorkLogEntry): boolean {
+  return nextEntry.activityKind === "tool.completed" || next.endsWith("\n");
 }
 
 function mergeChangedFiles(
