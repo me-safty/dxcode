@@ -131,6 +131,19 @@ describe("subagentRelationMatchesBlock", () => {
     ).toBe(false);
   });
 
+  it("keeps matching parent item ids when the work-log turn id is missing", async () => {
+    const { subagentRelationMatchesBlock } = await import("./MessagesTimeline");
+
+    expect(
+      subagentRelationMatchesBlock({
+        parentItemId: "call-send-input",
+        parentTurnId: null,
+        relationParentItemId: "call-send-input",
+        relationParentTurnId: TurnId.make("turn-followup"),
+      }),
+    ).toBe(true);
+  });
+
   it("falls back to turn matching when either parent item id is absent", async () => {
     const { subagentRelationMatchesBlock } = await import("./MessagesTimeline");
 

@@ -1801,6 +1801,8 @@ export function subagentRelationMatchesBlock(input: {
   const relationParentItemId = input.relationParentItemId ?? null;
   const parentTurnId = input.parentTurnId ?? null;
   const relationParentTurnId = input.relationParentTurnId ?? null;
+  const turnIdsConflict =
+    parentTurnId && relationParentTurnId && parentTurnId !== relationParentTurnId;
 
   if (parentItemId && relationParentItemId) {
     if (parentItemId !== relationParentItemId) {
@@ -1808,10 +1810,10 @@ export function subagentRelationMatchesBlock(input: {
     }
     // Provider item ids can repeat across turns, so a known turn mismatch must
     // keep a stale relation from claiming a newer work-log block.
-    return parentTurnId || relationParentTurnId ? parentTurnId === relationParentTurnId : true;
+    return !turnIdsConflict;
   }
 
-  return parentTurnId || relationParentTurnId ? parentTurnId === relationParentTurnId : true;
+  return !turnIdsConflict;
 }
 
 const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
