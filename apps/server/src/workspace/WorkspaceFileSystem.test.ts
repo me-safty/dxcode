@@ -105,7 +105,13 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           .readFile({ cwd, relativePath: "linked-secret.txt" })
           .pipe(Effect.flip);
 
-        expect(error.message).toContain("resolves outside the project root");
+        expect(error.message).toBe(
+          `Workspace file operation 'workspaceFileSystem.readFile' failed for 'linked-secret.txt' in '${cwd}'.`,
+        );
+        expect(error.cause).toBeInstanceOf(Error);
+        expect((error.cause as Error).message).toBe(
+          "Workspace file path resolves outside the project root.",
+        );
       }),
     );
   });

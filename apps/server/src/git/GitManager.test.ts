@@ -3217,11 +3217,11 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         setupScriptRunner: {
           runForThread: (input) =>
             Effect.fail(
-              new ProjectSetupScriptRunner.ProjectSetupScriptRunnerError({
+              new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
                 threadId: input.threadId,
                 worktreePath: input.worktreePath,
                 operation: "openTerminal",
-                detail: "terminal start failed",
+                cause: new Error("terminal start failed"),
               }),
             ),
         },

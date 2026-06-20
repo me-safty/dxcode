@@ -32,14 +32,17 @@ export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceF
   {
     cwd: Schema.String,
     relativePath: Schema.optional(Schema.String),
-    operation: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    operation: Schema.Literals([
+      "workspaceFileSystem.readFile",
+      "workspaceFileSystem.makeDirectory",
+      "workspaceFileSystem.writeFile",
+    ]),
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
     const target = this.relativePath ? `'${this.relativePath}' in '${this.cwd}'` : `'${this.cwd}'`;
-    return `Workspace file operation ${this.operation} failed for ${target}: ${this.detail}`;
+    return `Workspace file operation '${this.operation}' failed for ${target}.`;
   }
 }
 
@@ -127,7 +130,6 @@ export const make = Effect.gen(function* () {
           cwd: input.cwd,
           relativePath: input.relativePath,
           operation: "workspaceFileSystem.readFile",
-          detail: cause instanceof Error ? cause.message : String(cause),
           cause,
         }),
     });
@@ -148,7 +150,6 @@ export const make = Effect.gen(function* () {
             cwd: input.cwd,
             relativePath: input.relativePath,
             operation: "workspaceFileSystem.makeDirectory",
-            detail: cause.message,
             cause,
           }),
       ),
@@ -160,7 +161,6 @@ export const make = Effect.gen(function* () {
             cwd: input.cwd,
             relativePath: input.relativePath,
             operation: "workspaceFileSystem.writeFile",
-            detail: cause.message,
             cause,
           }),
       ),

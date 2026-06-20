@@ -33,22 +33,41 @@ export interface ProjectSetupScriptRunnerInput {
   readonly preferredTerminalId?: string;
 }
 
-export class ProjectSetupScriptRunnerError extends Schema.TaggedErrorClass<ProjectSetupScriptRunnerError>()(
-  "ProjectSetupScriptRunnerError",
+export class ProjectSetupScriptOperationError extends Schema.TaggedErrorClass<ProjectSetupScriptOperationError>()(
+  "ProjectSetupScriptOperationError",
   {
     threadId: Schema.String,
     projectId: Schema.optional(Schema.String),
     projectCwd: Schema.optional(Schema.String),
     worktreePath: Schema.String,
-    operation: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    operation: Schema.Literals(["resolveProject", "openTerminal", "writeCommand"]),
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Project setup script failed in ${this.operation} for thread '${this.threadId}': ${this.detail}`;
+    return `Project setup script operation '${this.operation}' failed for thread '${this.threadId}' in '${this.worktreePath}'.`;
   }
 }
+
+export class ProjectSetupScriptProjectNotFoundError extends Schema.TaggedErrorClass<ProjectSetupScriptProjectNotFoundError>()(
+  "ProjectSetupScriptProjectNotFoundError",
+  {
+    threadId: Schema.String,
+    projectId: Schema.optional(Schema.String),
+    projectCwd: Schema.optional(Schema.String),
+    worktreePath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Project setup script project was not found for thread '${this.threadId}'.`;
+  }
+}
+
+export const ProjectSetupScriptRunnerError = Schema.Union([
+  ProjectSetupScriptOperationError,
+  ProjectSetupScriptProjectNotFoundError,
+]);
+export type ProjectSetupScriptRunnerError = typeof ProjectSetupScriptRunnerError.Type;
 
 export class ProjectSetupScriptRunner extends Context.Service<
   ProjectSetupScriptRunner,
@@ -61,40 +80,27 @@ export class ProjectSetupScriptRunner extends Context.Service<
 
 const isProjectSetupScriptRunnerError = Schema.is(ProjectSetupScriptRunnerError);
 
-function detailFromUnknown(cause: unknown): string {
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    "message" in cause &&
-    typeof cause.message === "string"
-  ) {
-    return cause.message;
-  }
-  return String(cause);
-}
-
-function runnerError(
+function operationError(
   input: ProjectSetupScriptRunnerInput,
-  operation: string,
-  detail: string,
-  cause?: unknown,
-): ProjectSetupScriptRunnerError {
-  return new ProjectSetupScriptRunnerError({
+  operation: ProjectSetupScriptOperationError["operation"],
+  cause: unknown,
+): ProjectSetupScriptOperationError {
+  return new ProjectSetupScriptOperationError({
     threadId: input.threadId,
     worktreePath: input.worktreePath,
     operation,
-    detail,
+    cause,
     ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
     ...(input.projectCwd === undefined ? {} : { projectCwd: input.projectCwd }),
-    ...(cause === undefined ? {} : { cause }),
   });
 }
 
-function mapRunnerError(input: ProjectSetupScriptRunnerInput, operation: string) {
+function mapRunnerError(
+  input: ProjectSetupScriptRunnerInput,
+  operation: ProjectSetupScriptOperationError["operation"],
+) {
   return Effect.mapError((cause: unknown) =>
-    isProjectSetupScriptRunnerError(cause)
-      ? cause
-      : runnerError(input, operation, detailFromUnknown(cause), cause),
+    isProjectSetupScriptRunnerError(cause) ? cause : operationError(input, operation, cause),
   );
 }
 
@@ -119,11 +125,12 @@ export const make = Effect.gen(function* () {
         : null);
 
     if (!project) {
-      return yield* runnerError(
-        input,
-        "resolveProject",
-        "Project was not found for setup script execution.",
-      );
+      return yield* new ProjectSetupScriptProjectNotFoundError({
+        threadId: input.threadId,
+        worktreePath: input.worktreePath,
+        ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+        ...(input.projectCwd === undefined ? {} : { projectCwd: input.projectCwd }),
+      });
     }
 
     const script = setupProjectScript(project.scripts);

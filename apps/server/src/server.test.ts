@@ -4447,10 +4447,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assertTrue(result._tag === "Failure");
       assertTrue(result.failure._tag === "ProjectSearchEntriesError");
-      assertInclude(
-        result.failure.message,
-        "Workspace root does not exist: /definitely/not/a/real/workspace/path",
-      );
+      assert.equal(result.failure.message, "Failed to search workspace entries.");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -6101,11 +6098,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           >[0],
         ) =>
           Effect.fail(
-            new ProjectSetupScriptRunner.ProjectSetupScriptRunnerError({
+            new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
               threadId: input.threadId,
               worktreePath: input.worktreePath,
               operation: "openTerminal",
-              detail: "pty unavailable",
+              cause: new Error("pty unavailable"),
             }),
           ),
       );
@@ -6181,7 +6178,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(setupFailureActivity?.activity.kind, "setup-script.failed");
       assert.deepEqual(setupFailureActivity?.activity.payload, {
         detail:
-          "Project setup script failed in openTerminal for thread 'thread-bootstrap-setup-failure': pty unavailable",
+          "Project setup script operation 'openTerminal' failed for thread 'thread-bootstrap-setup-failure' in '/tmp/bootstrap-worktree'.",
         worktreePath: "/tmp/bootstrap-worktree",
       });
       assertTrue(dispatchedCommands.every((command) => command.type !== "thread.delete"));

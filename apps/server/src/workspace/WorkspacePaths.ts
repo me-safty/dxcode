@@ -32,7 +32,7 @@ export class WorkspaceRootCreateFailedError extends Schema.TaggedErrorClass<Work
   {
     workspaceRoot: Schema.String,
     normalizedWorkspaceRoot: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {

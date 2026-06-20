@@ -363,7 +363,10 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
           })
           .pipe(Effect.flip);
 
-        expect(error.detail).toBe("Relative filesystem browse paths require a current project.");
+        expect(error._tag).toBe("WorkspaceEntriesCurrentProjectRequiredError");
+        expect(error.message).toBe(
+          "A current project is required to browse relative workspace path './src'.",
+        );
       }),
     );
 

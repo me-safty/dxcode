@@ -27,31 +27,65 @@ export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntr
   "WorkspaceEntriesError",
   {
     cwd: Schema.String,
-    operation: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    operation: Schema.Literals([
+      "workspaceEntries.normalizeWorkspaceRoot",
+      "workspaceEntries.search",
+      "workspaceEntries.list",
+    ]),
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Workspace entries operation ${this.operation} failed for '${this.cwd}': ${this.detail}`;
+    return `Workspace entries operation '${this.operation}' failed for '${this.cwd}'.`;
   }
 }
 
-export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<WorkspaceEntriesBrowseError>()(
-  "WorkspaceEntriesBrowseError",
+export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedErrorClass<WorkspaceEntriesWindowsPathUnsupportedError>()(
+  "WorkspaceEntriesWindowsPathUnsupportedError",
   {
     cwd: Schema.optional(Schema.String),
     partialPath: Schema.String,
-    operation: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    platform: Schema.String,
   },
 ) {
   override get message(): string {
     const cwd = this.cwd ? ` from '${this.cwd}'` : "";
-    return `Workspace browse operation ${this.operation} failed for '${this.partialPath}'${cwd}: ${this.detail}`;
+    return `Windows-style workspace path '${this.partialPath}' is not supported on '${this.platform}'${cwd}.`;
   }
 }
+
+export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedErrorClass<WorkspaceEntriesCurrentProjectRequiredError>()(
+  "WorkspaceEntriesCurrentProjectRequiredError",
+  {
+    partialPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `A current project is required to browse relative workspace path '${this.partialPath}'.`;
+  }
+}
+
+export class WorkspaceEntriesReadDirectoryError extends Schema.TaggedErrorClass<WorkspaceEntriesReadDirectoryError>()(
+  "WorkspaceEntriesReadDirectoryError",
+  {
+    cwd: Schema.optional(Schema.String),
+    partialPath: Schema.String,
+    parentPath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    const cwd = this.cwd ? ` from '${this.cwd}'` : "";
+    return `Failed to read workspace directory '${this.parentPath}' while browsing '${this.partialPath}'${cwd}.`;
+  }
+}
+
+export const WorkspaceEntriesBrowseError = Schema.Union([
+  WorkspaceEntriesWindowsPathUnsupportedError,
+  WorkspaceEntriesCurrentProjectRequiredError,
+  WorkspaceEntriesReadDirectoryError,
+]);
+export type WorkspaceEntriesBrowseError = typeof WorkspaceEntriesBrowseError.Type;
 
 export class WorkspaceEntries extends Context.Service<
   WorkspaceEntries,
@@ -85,11 +119,10 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
 ): Effect.fn.Return<string, WorkspaceEntriesBrowseError> {
   const platform = yield* HostProcessPlatform;
   if (platform !== "win32" && isWindowsAbsolutePath(input.partialPath)) {
-    return yield* new WorkspaceEntriesBrowseError({
+    return yield* new WorkspaceEntriesWindowsPathUnsupportedError({
       cwd: input.cwd,
       partialPath: input.partialPath,
-      operation: "workspaceEntries.resolveBrowseTarget",
-      detail: "Windows-style paths are only supported on Windows.",
+      platform,
     });
   }
 
@@ -98,11 +131,8 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
   }
 
   if (!input.cwd) {
-    return yield* new WorkspaceEntriesBrowseError({
-      cwd: input.cwd,
+    return yield* new WorkspaceEntriesCurrentProjectRequiredError({
       partialPath: input.partialPath,
-      operation: "workspaceEntries.resolveBrowseTarget",
-      detail: "Relative filesystem browse paths require a current project.",
     });
   }
   return path.resolve(expandHomePath(input.cwd, path), input.partialPath);
@@ -122,7 +152,6 @@ export const make = Effect.gen(function* () {
           new WorkspaceEntriesError({
             cwd,
             operation: "workspaceEntries.normalizeWorkspaceRoot",
-            detail: cause.message,
             cause,
           }),
       ),
@@ -165,11 +194,10 @@ export const make = Effect.gen(function* () {
       const dirents = yield* Effect.tryPromise({
         try: () => readdir(parentPath, { withFileTypes: true }),
         catch: (cause) =>
-          new WorkspaceEntriesBrowseError({
+          new WorkspaceEntriesReadDirectoryError({
             cwd: input.cwd,
             partialPath: input.partialPath,
-            operation: "workspaceEntries.browse.readDirectory",
-            detail: `Unable to browse '${parentPath}': ${cause instanceof Error ? cause.message : String(cause)}`,
+            parentPath,
             cause,
           }),
       }).pipe(
@@ -222,7 +250,6 @@ export const make = Effect.gen(function* () {
             new WorkspaceEntriesError({
               cwd: input.cwd,
               operation: "workspaceEntries.search",
-              detail: cause.message,
               cause,
             }),
         ),
@@ -243,7 +270,6 @@ export const make = Effect.gen(function* () {
             new WorkspaceEntriesError({
               cwd: input.cwd,
               operation: "workspaceEntries.list",
-              detail: cause.message,
               cause,
             }),
         ),

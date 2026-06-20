@@ -44,8 +44,10 @@ import {
 export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
   "ServerRuntimeStartupError",
   {
-    stage: Schema.Literal("command-readiness"),
-    cause: Schema.optional(Schema.Defect()),
+    mode: ServerConfig.RuntimeMode,
+    host: Schema.NullOr(Schema.String),
+    port: Schema.Number,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
@@ -414,7 +416,9 @@ export const make = Effect.gen(function* () {
       const startupExit = yield* Effect.exit(startup);
       if (Exit.isFailure(startupExit)) {
         const error = new ServerRuntimeStartupError({
-          stage: "command-readiness",
+          mode: serverConfig.mode,
+          host: serverConfig.host ?? null,
+          port: serverConfig.port,
           cause: startupExit.cause,
         });
         yield* Effect.logError("server runtime startup failed", { cause: startupExit.cause });
