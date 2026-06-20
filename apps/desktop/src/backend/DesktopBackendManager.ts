@@ -119,6 +119,25 @@ export class BackendProcessOutputReadError extends Schema.TaggedErrorClass<Backe
   }
 }
 
+export class BackendProcessOutputHandlingError extends Schema.TaggedErrorClass<BackendProcessOutputHandlingError>()(
+  "BackendProcessOutputHandlingError",
+  {
+    ...backendProcessContextSchema,
+    pid: Schema.Number,
+    streamName: Schema.Literals(["stdout", "stderr"]),
+    chunkByteLength: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to handle ${this.chunkByteLength} bytes from ${this.streamName} of desktop backend process ${this.pid}.`;
+  }
+}
+
+export type BackendProcessOutputError =
+  | BackendProcessOutputReadError
+  | BackendProcessOutputHandlingError;
+
 export class BackendProcessExitStatusError extends Schema.TaggedErrorClass<BackendProcessExitStatusError>()(
   "BackendProcessExitStatusError",
   {
@@ -160,8 +179,8 @@ interface RunBackendProcessOptions extends DesktopBackendStartConfig {
   readonly onOutput?: (
     streamName: BackendProcessOutputStream,
     chunk: Uint8Array,
-  ) => Effect.Effect<void>;
-  readonly onOutputFailure?: (error: BackendProcessOutputReadError) => Effect.Effect<void>;
+  ) => Effect.Effect<void, Error>;
+  readonly onOutputFailure?: (error: BackendProcessOutputError) => Effect.Effect<void>;
 }
 
 export interface DesktopBackendSnapshot {
@@ -272,12 +291,14 @@ function drainBackendOutput(
   context: BackendProcessContext & { readonly pid: number },
   streamName: BackendProcessOutputStream,
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
-  onOutput: (streamName: BackendProcessOutputStream, chunk: Uint8Array) => Effect.Effect<void>,
-  onOutputFailure: (error: BackendProcessOutputReadError) => Effect.Effect<void>,
+  onOutput: (
+    streamName: BackendProcessOutputStream,
+    chunk: Uint8Array,
+  ) => Effect.Effect<void, Error>,
+  onOutputFailure: (error: BackendProcessOutputError) => Effect.Effect<void>,
 ): Effect.Effect<void> {
   return stream.pipe(
-    Stream.runForEach((chunk) => onOutput(streamName, chunk)),
-    Effect.mapError(
+    Stream.mapError(
       (cause) =>
         new BackendProcessOutputReadError({
           ...context,
@@ -285,8 +306,22 @@ function drainBackendOutput(
           cause,
         }),
     ),
+    Stream.runForEach((chunk) =>
+      onOutput(streamName, chunk).pipe(
+        Effect.mapError(
+          (cause) =>
+            new BackendProcessOutputHandlingError({
+              ...context,
+              streamName,
+              chunkByteLength: chunk.byteLength,
+              cause,
+            }),
+        ),
+      ),
+    ),
     Effect.catchTags({
       BackendProcessOutputReadError: onOutputFailure,
+      BackendProcessOutputHandlingError: onOutputFailure,
     }),
   );
 }
