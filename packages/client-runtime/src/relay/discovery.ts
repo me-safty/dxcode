@@ -3,6 +3,7 @@ import type {
   RelayEnvironmentStatusResponse,
 } from "@t3tools/contracts/relay";
 import { decodeRelayJwt } from "@t3tools/shared/relayJwt";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import {
   RelayEnvironmentConnectScope,
   RelayEnvironmentStatusScope,
@@ -178,9 +179,16 @@ export const make = Effect.fn("RelayEnvironmentDiscovery.make")(function* () {
           return [true, new Map(current).set(environment.environmentId, fingerprint)];
         });
         if (shouldReport) {
+          const endpointDiagnostics = getUrlDiagnostics(result.success.endpoint.httpBaseUrl);
           yield* Effect.logWarning("Relay environment health check reported offline", {
             environmentId: result.success.environmentId,
-            endpoint: result.success.endpoint.httpBaseUrl,
+            endpointInputLength: endpointDiagnostics.inputLength,
+            ...(endpointDiagnostics.protocol === undefined
+              ? {}
+              : { endpointProtocol: endpointDiagnostics.protocol }),
+            ...(endpointDiagnostics.hostname === undefined
+              ? {}
+              : { endpointHostname: endpointDiagnostics.hostname }),
             message: result.success.error,
             traceId: result.success.traceId,
           });
