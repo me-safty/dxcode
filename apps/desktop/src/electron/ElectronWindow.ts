@@ -11,12 +11,11 @@ import { app, BrowserWindow, type BrowserWindowConstructorOptions } from "electr
 export class ElectronWindowCreateError extends Schema.TaggedErrorClass<ElectronWindowCreateError>()(
   "ElectronWindowCreateError",
   {
-    resource: Schema.String,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to create ${this.resource}.`;
+    return "Failed to create Electron BrowserWindow.";
   }
 }
 
@@ -73,8 +72,7 @@ export const make = Effect.gen(function* () {
     create: (options) =>
       Effect.try({
         try: () => new BrowserWindow(options),
-        catch: (cause) =>
-          new ElectronWindowCreateError({ resource: "Electron BrowserWindow", cause }),
+        catch: (cause) => new ElectronWindowCreateError({ cause }),
       }),
     main: liveMain,
     currentMainOrFirst,
