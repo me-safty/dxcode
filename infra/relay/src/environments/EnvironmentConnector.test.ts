@@ -159,8 +159,8 @@ function connectorTestLayer(
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse>,
   options?: {
-    readonly links?: EnvironmentLinks.EnvironmentLinksShape;
-    readonly allocations?: ManagedEndpointAllocations.ManagedEndpointAllocationsShape;
+    readonly links?: EnvironmentLinks.EnvironmentLinks["Service"];
+    readonly allocations?: ManagedEndpointAllocations.ManagedEndpointAllocations["Service"];
   },
 ) {
   return EnvironmentConnector.layer.pipe(
@@ -172,7 +172,7 @@ function connectorTestLayer(
         options?.allocations ?? makeAllocations(),
       ),
     ),
-    Layer.provide(Layer.succeed(RelayConfiguration.RelayConfiguration, settings)),
+    Layer.provide(RelayConfiguration.layer(settings)),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, HttpClient.make(execute))),
   );
 }
@@ -187,7 +187,7 @@ function makeAllocations(
     dnsRecordId: "dns-record-id",
     readyAt: "2026-05-25T00:00:00.000Z",
   },
-): ManagedEndpointAllocations.ManagedEndpointAllocationsShape {
+): ManagedEndpointAllocations.ManagedEndpointAllocations["Service"] {
   return {
     get: () => Effect.succeed(allocation),
     reserve: () => Effect.die("unused"),
@@ -200,7 +200,7 @@ function makeAllocations(
 
 function makeLinks(
   overrides: Partial<EnvironmentLinks.RelayLinkedEnvironmentRecord> = {},
-): EnvironmentLinks.EnvironmentLinksShape {
+): EnvironmentLinks.EnvironmentLinks["Service"] {
   return {
     upsert: () => Effect.void,
     listUsersForEnvironment: () => Effect.succeed([]),
