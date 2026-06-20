@@ -211,7 +211,7 @@ function validateLinkedCloudUser(input: {
   return input.secrets.get(CLOUD_LINKED_USER_ID).pipe(
     Effect.mapError(
       (cause) =>
-        new EnvironmentAuth.ServerAuthLinkedCloudAccountVerificationError({
+        new EnvironmentAuth.ServerAuthOperationError({
           operation: "verify_linked_cloud_account",
           cause,
         }),
@@ -239,7 +239,7 @@ function readInstalledCloudUserId(
   return secrets.get(CLOUD_LINKED_USER_ID).pipe(
     Effect.mapError(
       (cause) =>
-        new EnvironmentAuth.ServerAuthLinkedCloudAccountReadError({
+        new EnvironmentAuth.ServerAuthOperationError({
           operation: "read_linked_cloud_account",
           cause,
         }),
@@ -247,11 +247,7 @@ function readInstalledCloudUserId(
     Effect.flatMap((bytes) =>
       Option.isSome(bytes)
         ? Effect.succeed(bytesToString(bytes.value))
-        : Effect.fail(
-            new EnvironmentAuth.ServerAuthLinkedCloudAccountMissingError({
-              operation: "missing_linked_cloud_account",
-            }),
-          ),
+        : Effect.fail(new EnvironmentAuth.ServerAuthLinkedCloudAccountMissingError({})),
     ),
   );
 }
@@ -394,7 +390,7 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
   }).pipe(
     Effect.mapError(
       (cause) =>
-        new EnvironmentAuth.ServerAuthCloudLinkJwtSigningError({
+        new EnvironmentAuth.ServerAuthOperationError({
           operation: "sign_cloud_link_jwt",
           cause,
         }),
@@ -691,34 +687,32 @@ const cloudPreferencesHandler = Effect.fn("environment.cloud.preferences")(
 
 const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
   function* (dependencies: CloudHttpDependencies, request: RelayCloudEnvironmentHealthRequest) {
-    const cloudMintPublicKey = yield* dependencies.secrets.get(CLOUD_MINT_PUBLIC_KEY).pipe(
-      Effect.flatMap((bytes) =>
-        Option.isSome(bytes)
-          ? Effect.succeed(bytesToString(bytes.value))
-          : Effect.fail(
-              new EnvironmentAuth.ServerAuthCloudMintPublicKeyMissingError({
-                operation: "missing_cloud_mint_public_key",
-              }),
-            ),
-      ),
-    );
-    const relayIssuer = yield* dependencies.secrets.get(RELAY_ISSUER_SECRET).pipe(
-      Effect.flatMap((bytes) =>
-        Option.isSome(bytes)
-          ? Effect.succeed(bytesToString(bytes.value))
-          : dependencies.secrets.get(RELAY_URL_SECRET).pipe(
-              Effect.flatMap((fallbackBytes) =>
-                Option.isSome(fallbackBytes)
-                  ? Effect.succeed(bytesToString(fallbackBytes.value))
-                  : Effect.fail(
-                      new EnvironmentAuth.ServerAuthCloudRelayIssuerMissingError({
-                        operation: "missing_cloud_relay_issuer",
-                      }),
-                    ),
-              ),
-            ),
-      ),
-    );
+    const cloudMintPublicKey = yield* dependencies.secrets
+      .get(CLOUD_MINT_PUBLIC_KEY)
+      .pipe(
+        Effect.flatMap((bytes) =>
+          Option.isSome(bytes)
+            ? Effect.succeed(bytesToString(bytes.value))
+            : Effect.fail(new EnvironmentAuth.ServerAuthCloudMintPublicKeyMissingError({})),
+        ),
+      );
+    const relayIssuer = yield* dependencies.secrets
+      .get(RELAY_ISSUER_SECRET)
+      .pipe(
+        Effect.flatMap((bytes) =>
+          Option.isSome(bytes)
+            ? Effect.succeed(bytesToString(bytes.value))
+            : dependencies.secrets
+                .get(RELAY_URL_SECRET)
+                .pipe(
+                  Effect.flatMap((fallbackBytes) =>
+                    Option.isSome(fallbackBytes)
+                      ? Effect.succeed(bytesToString(fallbackBytes.value))
+                      : Effect.fail(new EnvironmentAuth.ServerAuthCloudRelayIssuerMissingError({})),
+                  ),
+                ),
+        ),
+      );
     const environmentId = yield* dependencies.environment.getEnvironmentId;
     const linkedCloudUserId = yield* readInstalledCloudUserId(dependencies.secrets);
     const now = yield* DateTime.now;
@@ -780,7 +774,7 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
     }).pipe(
       Effect.mapError(
         (cause) =>
-          new EnvironmentAuth.ServerAuthCloudHealthJwtSigningError({
+          new EnvironmentAuth.ServerAuthOperationError({
             operation: "sign_cloud_health_jwt",
             cause,
           }),
@@ -812,34 +806,32 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
 
 const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")(
   function* (dependencies: CloudHttpDependencies, request: RelayCloudMintCredentialRequest) {
-    const cloudMintPublicKey = yield* dependencies.secrets.get(CLOUD_MINT_PUBLIC_KEY).pipe(
-      Effect.flatMap((bytes) =>
-        Option.isSome(bytes)
-          ? Effect.succeed(bytesToString(bytes.value))
-          : Effect.fail(
-              new EnvironmentAuth.ServerAuthCloudMintPublicKeyMissingError({
-                operation: "missing_cloud_mint_public_key",
-              }),
-            ),
-      ),
-    );
-    const relayIssuer = yield* dependencies.secrets.get(RELAY_ISSUER_SECRET).pipe(
-      Effect.flatMap((bytes) =>
-        Option.isSome(bytes)
-          ? Effect.succeed(bytesToString(bytes.value))
-          : dependencies.secrets.get(RELAY_URL_SECRET).pipe(
-              Effect.flatMap((fallbackBytes) =>
-                Option.isSome(fallbackBytes)
-                  ? Effect.succeed(bytesToString(fallbackBytes.value))
-                  : Effect.fail(
-                      new EnvironmentAuth.ServerAuthCloudRelayIssuerMissingError({
-                        operation: "missing_cloud_relay_issuer",
-                      }),
-                    ),
-              ),
-            ),
-      ),
-    );
+    const cloudMintPublicKey = yield* dependencies.secrets
+      .get(CLOUD_MINT_PUBLIC_KEY)
+      .pipe(
+        Effect.flatMap((bytes) =>
+          Option.isSome(bytes)
+            ? Effect.succeed(bytesToString(bytes.value))
+            : Effect.fail(new EnvironmentAuth.ServerAuthCloudMintPublicKeyMissingError({})),
+        ),
+      );
+    const relayIssuer = yield* dependencies.secrets
+      .get(RELAY_ISSUER_SECRET)
+      .pipe(
+        Effect.flatMap((bytes) =>
+          Option.isSome(bytes)
+            ? Effect.succeed(bytesToString(bytes.value))
+            : dependencies.secrets
+                .get(RELAY_URL_SECRET)
+                .pipe(
+                  Effect.flatMap((fallbackBytes) =>
+                    Option.isSome(fallbackBytes)
+                      ? Effect.succeed(bytesToString(fallbackBytes.value))
+                      : Effect.fail(new EnvironmentAuth.ServerAuthCloudRelayIssuerMissingError({})),
+                  ),
+                ),
+        ),
+      );
     const environmentId = yield* dependencies.environment.getEnvironmentId;
     const linkedCloudUserId = yield* readInstalledCloudUserId(dependencies.secrets);
     const now = yield* DateTime.now;
@@ -906,7 +898,7 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
     }).pipe(
       Effect.mapError(
         (cause) =>
-          new EnvironmentAuth.ServerAuthCloudMintJwtSigningError({
+          new EnvironmentAuth.ServerAuthOperationError({
             operation: "sign_cloud_mint_jwt",
             cause,
           }),

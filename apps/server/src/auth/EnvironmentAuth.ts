@@ -84,241 +84,36 @@ const ServerAuthInternalOperation = Schema.Literals([
   "calculate_dpop_replay_key",
   "verify_linked_cloud_account",
   "read_linked_cloud_account",
-  "missing_linked_cloud_account",
   "sign_cloud_link_jwt",
-  "missing_cloud_mint_public_key",
-  "missing_cloud_relay_issuer",
   "sign_cloud_health_jwt",
   "sign_cloud_mint_jwt",
 ]);
 type ServerAuthInternalOperation = typeof ServerAuthInternalOperation.Type;
 
-const serverAuthInternalErrorContext = {
-  cause: Schema.optional(Schema.Defect()),
-};
-
-export class ServerAuthBootstrapCredentialValidationError extends Schema.TaggedErrorClass<ServerAuthBootstrapCredentialValidationError>()(
-  "ServerAuthBootstrapCredentialValidationError",
+export class ServerAuthOperationError extends Schema.TaggedErrorClass<ServerAuthOperationError>()(
+  "ServerAuthOperationError",
   {
-    operation: Schema.Literal("validate_bootstrap_credential"),
-    ...serverAuthInternalErrorContext,
+    operation: ServerAuthInternalOperation,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return "Failed to validate bootstrap credential.";
-  }
-}
-
-export class ServerAuthSessionCredentialValidationError extends Schema.TaggedErrorClass<ServerAuthSessionCredentialValidationError>()(
-  "ServerAuthSessionCredentialValidationError",
-  {
-    operation: Schema.Literal("validate_session_credential"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to validate session credential.";
-  }
-}
-
-export class ServerAuthAuthenticatedSessionIssueError extends Schema.TaggedErrorClass<ServerAuthAuthenticatedSessionIssueError>()(
-  "ServerAuthAuthenticatedSessionIssueError",
-  {
-    operation: Schema.Literal("issue_authenticated_session"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to issue authenticated session.";
-  }
-}
-
-export class ServerAuthAuthenticatedAccessTokenIssueError extends Schema.TaggedErrorClass<ServerAuthAuthenticatedAccessTokenIssueError>()(
-  "ServerAuthAuthenticatedAccessTokenIssueError",
-  {
-    operation: Schema.Literal("issue_authenticated_access_token"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to issue authenticated access token.";
-  }
-}
-
-export class ServerAuthPairingLinkCreationError extends Schema.TaggedErrorClass<ServerAuthPairingLinkCreationError>()(
-  "ServerAuthPairingLinkCreationError",
-  {
-    operation: Schema.Literal("create_pairing_link"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to create pairing link.";
-  }
-}
-
-export class ServerAuthPairingLinksListError extends Schema.TaggedErrorClass<ServerAuthPairingLinksListError>()(
-  "ServerAuthPairingLinksListError",
-  {
-    operation: Schema.Literal("list_pairing_links"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to list pairing links.";
-  }
-}
-
-export class ServerAuthPairingLinkRevocationError extends Schema.TaggedErrorClass<ServerAuthPairingLinkRevocationError>()(
-  "ServerAuthPairingLinkRevocationError",
-  {
-    operation: Schema.Literal("revoke_pairing_link"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to revoke pairing link.";
-  }
-}
-
-export class ServerAuthSessionTokenIssueError extends Schema.TaggedErrorClass<ServerAuthSessionTokenIssueError>()(
-  "ServerAuthSessionTokenIssueError",
-  {
-    operation: Schema.Literal("issue_session_token"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to issue session token.";
-  }
-}
-
-export class ServerAuthSessionsListError extends Schema.TaggedErrorClass<ServerAuthSessionsListError>()(
-  "ServerAuthSessionsListError",
-  {
-    operation: Schema.Literal("list_sessions"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to list sessions.";
-  }
-}
-
-export class ServerAuthSessionRevocationError extends Schema.TaggedErrorClass<ServerAuthSessionRevocationError>()(
-  "ServerAuthSessionRevocationError",
-  {
-    operation: Schema.Literal("revoke_session"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to revoke session.";
-  }
-}
-
-export class ServerAuthOtherSessionsRevocationError extends Schema.TaggedErrorClass<ServerAuthOtherSessionsRevocationError>()(
-  "ServerAuthOtherSessionsRevocationError",
-  {
-    operation: Schema.Literal("revoke_other_sessions"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to revoke other sessions.";
-  }
-}
-
-export class ServerAuthWebSocketTokenIssueError extends Schema.TaggedErrorClass<ServerAuthWebSocketTokenIssueError>()(
-  "ServerAuthWebSocketTokenIssueError",
-  {
-    operation: Schema.Literal("issue_websocket_token"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to issue websocket token.";
-  }
-}
-
-export class ServerAuthDpopReplayStateRecordError extends Schema.TaggedErrorClass<ServerAuthDpopReplayStateRecordError>()(
-  "ServerAuthDpopReplayStateRecordError",
-  {
-    operation: Schema.Literal("record_dpop_replay_state"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to record DPoP proof replay state.";
-  }
-}
-
-export class ServerAuthDpopReplayKeyCalculationError extends Schema.TaggedErrorClass<ServerAuthDpopReplayKeyCalculationError>()(
-  "ServerAuthDpopReplayKeyCalculationError",
-  {
-    operation: Schema.Literal("calculate_dpop_replay_key"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to calculate DPoP replay key.";
-  }
-}
-
-export class ServerAuthLinkedCloudAccountVerificationError extends Schema.TaggedErrorClass<ServerAuthLinkedCloudAccountVerificationError>()(
-  "ServerAuthLinkedCloudAccountVerificationError",
-  {
-    operation: Schema.Literal("verify_linked_cloud_account"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Could not verify the linked cloud account.";
-  }
-}
-
-export class ServerAuthLinkedCloudAccountReadError extends Schema.TaggedErrorClass<ServerAuthLinkedCloudAccountReadError>()(
-  "ServerAuthLinkedCloudAccountReadError",
-  {
-    operation: Schema.Literal("read_linked_cloud_account"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Could not read the linked cloud account.";
+    return `Server authentication operation '${this.operation}' failed.`;
   }
 }
 
 export class ServerAuthLinkedCloudAccountMissingError extends Schema.TaggedErrorClass<ServerAuthLinkedCloudAccountMissingError>()(
   "ServerAuthLinkedCloudAccountMissingError",
-  {
-    operation: Schema.Literal("missing_linked_cloud_account"),
-    ...serverAuthInternalErrorContext,
-  },
+  {},
 ) {
   override get message(): string {
     return "Cloud linked user is not installed for this environment.";
   }
 }
 
-export class ServerAuthCloudLinkJwtSigningError extends Schema.TaggedErrorClass<ServerAuthCloudLinkJwtSigningError>()(
-  "ServerAuthCloudLinkJwtSigningError",
-  {
-    operation: Schema.Literal("sign_cloud_link_jwt"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to sign cloud link JWT.";
-  }
-}
-
 export class ServerAuthCloudMintPublicKeyMissingError extends Schema.TaggedErrorClass<ServerAuthCloudMintPublicKeyMissingError>()(
   "ServerAuthCloudMintPublicKeyMissingError",
-  {
-    operation: Schema.Literal("missing_cloud_mint_public_key"),
-    ...serverAuthInternalErrorContext,
-  },
+  {},
 ) {
   override get message(): string {
     return "Cloud mint public key is not installed for this environment.";
@@ -327,77 +122,25 @@ export class ServerAuthCloudMintPublicKeyMissingError extends Schema.TaggedError
 
 export class ServerAuthCloudRelayIssuerMissingError extends Schema.TaggedErrorClass<ServerAuthCloudRelayIssuerMissingError>()(
   "ServerAuthCloudRelayIssuerMissingError",
-  {
-    operation: Schema.Literal("missing_cloud_relay_issuer"),
-    ...serverAuthInternalErrorContext,
-  },
+  {},
 ) {
   override get message(): string {
     return "Cloud relay issuer is not installed for this environment.";
   }
 }
 
-export class ServerAuthCloudHealthJwtSigningError extends Schema.TaggedErrorClass<ServerAuthCloudHealthJwtSigningError>()(
-  "ServerAuthCloudHealthJwtSigningError",
-  {
-    operation: Schema.Literal("sign_cloud_health_jwt"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to sign cloud health JWT.";
-  }
-}
-
-export class ServerAuthCloudMintJwtSigningError extends Schema.TaggedErrorClass<ServerAuthCloudMintJwtSigningError>()(
-  "ServerAuthCloudMintJwtSigningError",
-  {
-    operation: Schema.Literal("sign_cloud_mint_jwt"),
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to sign cloud mint JWT.";
-  }
-}
-
 export const ServerAuthInternalError = Schema.Union([
-  ServerAuthBootstrapCredentialValidationError,
-  ServerAuthSessionCredentialValidationError,
-  ServerAuthAuthenticatedSessionIssueError,
-  ServerAuthAuthenticatedAccessTokenIssueError,
-  ServerAuthPairingLinkCreationError,
-  ServerAuthPairingLinksListError,
-  ServerAuthPairingLinkRevocationError,
-  ServerAuthSessionTokenIssueError,
-  ServerAuthSessionsListError,
-  ServerAuthSessionRevocationError,
-  ServerAuthOtherSessionsRevocationError,
-  ServerAuthWebSocketTokenIssueError,
-  ServerAuthDpopReplayStateRecordError,
-  ServerAuthDpopReplayKeyCalculationError,
-  ServerAuthLinkedCloudAccountVerificationError,
-  ServerAuthLinkedCloudAccountReadError,
+  ServerAuthOperationError,
   ServerAuthLinkedCloudAccountMissingError,
-  ServerAuthCloudLinkJwtSigningError,
   ServerAuthCloudMintPublicKeyMissingError,
   ServerAuthCloudRelayIssuerMissingError,
-  ServerAuthCloudHealthJwtSigningError,
-  ServerAuthCloudMintJwtSigningError,
 ]);
 export type ServerAuthInternalError = typeof ServerAuthInternalError.Type;
 export const isServerAuthInternalError = Schema.is(ServerAuthInternalError);
 
-const serverAuthCredentialErrorContext = {
-  cause: Schema.optional(Schema.Defect()),
-};
-
 export class ServerAuthMissingCredentialError extends Schema.TaggedErrorClass<ServerAuthMissingCredentialError>()(
   "ServerAuthMissingCredentialError",
-  {
-    reason: Schema.Literal("missing_credential"),
-    ...serverAuthCredentialErrorContext,
-  },
+  {},
 ) {
   override get message(): string {
     return "Server authentication credential is missing.";
@@ -407,8 +150,8 @@ export class ServerAuthMissingCredentialError extends Schema.TaggedErrorClass<Se
 export class ServerAuthInvalidCredentialError extends Schema.TaggedErrorClass<ServerAuthInvalidCredentialError>()(
   "ServerAuthInvalidCredentialError",
   {
-    reason: Schema.Literal("invalid_credential"),
-    ...serverAuthCredentialErrorContext,
+    diagnostic: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -422,12 +165,14 @@ export const ServerAuthCredentialError = Schema.Union([
 ]);
 export type ServerAuthCredentialError = typeof ServerAuthCredentialError.Type;
 export const isServerAuthCredentialError = Schema.is(ServerAuthCredentialError);
+export const serverAuthCredentialReason = (
+  error: ServerAuthCredentialError,
+): "missing_credential" | "invalid_credential" =>
+  error._tag === "ServerAuthMissingCredentialError" ? "missing_credential" : "invalid_credential";
 
 export class ServerAuthInvalidScopeError extends Schema.TaggedErrorClass<ServerAuthInvalidScopeError>()(
   "ServerAuthInvalidScopeError",
-  {
-    reason: Schema.Literal("invalid_scope"),
-  },
+  {},
 ) {
   override get message(): string {
     return "The requested authentication scope is invalid.";
@@ -436,9 +181,7 @@ export class ServerAuthInvalidScopeError extends Schema.TaggedErrorClass<ServerA
 
 export class ServerAuthScopeNotGrantedError extends Schema.TaggedErrorClass<ServerAuthScopeNotGrantedError>()(
   "ServerAuthScopeNotGrantedError",
-  {
-    reason: Schema.Literal("scope_not_granted"),
-  },
+  {},
 ) {
   override get message(): string {
     return "The requested authentication scope was not granted.";
@@ -451,12 +194,14 @@ export const ServerAuthInvalidRequestError = Schema.Union([
 ]);
 export type ServerAuthInvalidRequestError = typeof ServerAuthInvalidRequestError.Type;
 export const isServerAuthInvalidRequestError = Schema.is(ServerAuthInvalidRequestError);
+export const serverAuthInvalidRequestReason = (
+  error: ServerAuthInvalidRequestError,
+): "invalid_scope" | "scope_not_granted" =>
+  error._tag === "ServerAuthInvalidScopeError" ? "invalid_scope" : "scope_not_granted";
 
 export class ServerAuthForbiddenOperationError extends Schema.TaggedErrorClass<ServerAuthForbiddenOperationError>()(
   "ServerAuthForbiddenOperationError",
-  {
-    reason: Schema.Literal("current_session_revoke_not_allowed"),
-  },
+  {},
 ) {
   override get message(): string {
     return "The current authentication session cannot revoke itself.";
@@ -573,55 +318,8 @@ const bySessionPriority = (left: AuthClientSession, right: AuthClientSession) =>
 
 const serverAuthInternalError = (
   operation: ServerAuthInternalOperation,
-  cause?: unknown,
-): ServerAuthInternalError => {
-  switch (operation) {
-    case "validate_bootstrap_credential":
-      return new ServerAuthBootstrapCredentialValidationError({ operation, cause });
-    case "validate_session_credential":
-      return new ServerAuthSessionCredentialValidationError({ operation, cause });
-    case "issue_authenticated_session":
-      return new ServerAuthAuthenticatedSessionIssueError({ operation, cause });
-    case "issue_authenticated_access_token":
-      return new ServerAuthAuthenticatedAccessTokenIssueError({ operation, cause });
-    case "create_pairing_link":
-      return new ServerAuthPairingLinkCreationError({ operation, cause });
-    case "list_pairing_links":
-      return new ServerAuthPairingLinksListError({ operation, cause });
-    case "revoke_pairing_link":
-      return new ServerAuthPairingLinkRevocationError({ operation, cause });
-    case "issue_session_token":
-      return new ServerAuthSessionTokenIssueError({ operation, cause });
-    case "list_sessions":
-      return new ServerAuthSessionsListError({ operation, cause });
-    case "revoke_session":
-      return new ServerAuthSessionRevocationError({ operation, cause });
-    case "revoke_other_sessions":
-      return new ServerAuthOtherSessionsRevocationError({ operation, cause });
-    case "issue_websocket_token":
-      return new ServerAuthWebSocketTokenIssueError({ operation, cause });
-    case "record_dpop_replay_state":
-      return new ServerAuthDpopReplayStateRecordError({ operation, cause });
-    case "calculate_dpop_replay_key":
-      return new ServerAuthDpopReplayKeyCalculationError({ operation, cause });
-    case "verify_linked_cloud_account":
-      return new ServerAuthLinkedCloudAccountVerificationError({ operation, cause });
-    case "read_linked_cloud_account":
-      return new ServerAuthLinkedCloudAccountReadError({ operation, cause });
-    case "missing_linked_cloud_account":
-      return new ServerAuthLinkedCloudAccountMissingError({ operation, cause });
-    case "sign_cloud_link_jwt":
-      return new ServerAuthCloudLinkJwtSigningError({ operation, cause });
-    case "missing_cloud_mint_public_key":
-      return new ServerAuthCloudMintPublicKeyMissingError({ operation, cause });
-    case "missing_cloud_relay_issuer":
-      return new ServerAuthCloudRelayIssuerMissingError({ operation, cause });
-    case "sign_cloud_health_jwt":
-      return new ServerAuthCloudHealthJwtSigningError({ operation, cause });
-    case "sign_cloud_mint_jwt":
-      return new ServerAuthCloudMintJwtSigningError({ operation, cause });
-  }
-};
+  cause: unknown,
+): ServerAuthOperationError => new ServerAuthOperationError({ operation, cause });
 
 const toInternalError =
   (operation: ServerAuthInternalOperation) =>
@@ -636,7 +334,6 @@ export function toBootstrapExchangeError(
   }
 
   return new ServerAuthInvalidCredentialError({
-    reason: "invalid_credential",
     cause,
   });
 }
@@ -647,7 +344,7 @@ const mapSessionVerificationErrors = <A, R>(
   effect.pipe(
     Effect.mapError((cause) =>
       SessionStore.isSessionCredentialInvalidError(cause)
-        ? new ServerAuthInvalidCredentialError({ reason: "invalid_credential", cause })
+        ? new ServerAuthInvalidCredentialError({ cause })
         : serverAuthInternalError("validate_session_credential", cause),
     ),
   );
@@ -713,7 +410,7 @@ export const make = Effect.gen(function* () {
     const dpopToken = parseDpopToken(request);
     const credential = cookieToken ?? bearerToken ?? dpopToken;
     if (!credential) {
-      return Effect.fail(new ServerAuthMissingCredentialError({ reason: "missing_credential" }));
+      return Effect.fail(new ServerAuthMissingCredentialError({}));
     }
     return authenticateToken(credential).pipe(
       Effect.flatMap((session) => {
@@ -721,8 +418,7 @@ export const make = Effect.gen(function* () {
           if (!dpopToken || dpopToken !== credential) {
             return Effect.fail(
               new ServerAuthInvalidCredentialError({
-                reason: "invalid_credential",
-                cause: "DPoP-bound access token requires DPoP authorization.",
+                diagnostic: "DPoP-bound access token requires DPoP authorization.",
               }),
             );
           }
@@ -739,8 +435,7 @@ export const make = Effect.gen(function* () {
         if (dpopToken) {
           return Effect.fail(
             new ServerAuthInvalidCredentialError({
-              reason: "invalid_credential",
-              cause: "DPoP authorization requires a proof-bound access token.",
+              diagnostic: "DPoP authorization requires a proof-bound access token.",
             }),
           );
         }
@@ -816,9 +511,7 @@ export const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const grantedScopes = requestedScopes ?? grant.scopes;
             if (!grantedScopes.every((scope) => grant.scopes.includes(scope))) {
-              return yield* new ServerAuthScopeNotGrantedError({
-                reason: "scope_not_granted",
-              });
+              return yield* new ServerAuthScopeNotGrantedError({});
             }
             return yield* sessions
               .issue({
@@ -1020,9 +713,7 @@ export const make = Effect.gen(function* () {
     "EnvironmentAuth.revokeClientSession",
   )(function* (currentSessionId, targetSessionId) {
     if (currentSessionId === targetSessionId) {
-      return yield* new ServerAuthForbiddenOperationError({
-        reason: "current_session_revoke_not_allowed",
-      });
+      return yield* new ServerAuthForbiddenOperationError({});
     }
     return yield* revokeSession(targetSessionId);
   });

@@ -11,131 +11,31 @@ import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 
-const secretStoreErrorContext = {
-  resource: Schema.String,
-  cause: Schema.optional(Schema.Defect()),
-};
-
-export class SecretStoreSecureError extends Schema.TaggedErrorClass<SecretStoreSecureError>()(
-  "SecretStoreSecureError",
-  {
-    operation: Schema.Literal("secure"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to secure ${this.resource}.`;
-  }
-}
-
-export class SecretStoreReadError extends Schema.TaggedErrorClass<SecretStoreReadError>()(
-  "SecretStoreReadError",
-  {
-    operation: Schema.Literal("read"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to read ${this.resource}.`;
-  }
-}
-
-export class SecretStoreTemporaryPathError extends Schema.TaggedErrorClass<SecretStoreTemporaryPathError>()(
-  "SecretStoreTemporaryPathError",
-  {
-    operation: Schema.Literal("create_temporary_path"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to create temporary path for ${this.resource}.`;
-  }
-}
-
-export class SecretStorePersistError extends Schema.TaggedErrorClass<SecretStorePersistError>()(
-  "SecretStorePersistError",
-  {
-    operation: Schema.Literal("persist"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to persist ${this.resource}.`;
-  }
-}
-
-export class SecretStoreRandomGenerationError extends Schema.TaggedErrorClass<SecretStoreRandomGenerationError>()(
-  "SecretStoreRandomGenerationError",
-  {
-    operation: Schema.Literal("generate_random"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to generate random bytes for ${this.resource}.`;
-  }
-}
-
-export class SecretStoreConcurrentReadError extends Schema.TaggedErrorClass<SecretStoreConcurrentReadError>()(
-  "SecretStoreConcurrentReadError",
-  {
-    operation: Schema.Literal("read_after_concurrent_creation"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to read ${this.resource} after concurrent creation.`;
-  }
-}
-
-export class SecretStoreRemoveError extends Schema.TaggedErrorClass<SecretStoreRemoveError>()(
-  "SecretStoreRemoveError",
-  {
-    operation: Schema.Literal("remove"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to remove ${this.resource}.`;
-  }
-}
-
-export class SecretStoreDecodeError extends Schema.TaggedErrorClass<SecretStoreDecodeError>()(
-  "SecretStoreDecodeError",
-  {
-    operation: Schema.Literal("decode"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to decode ${this.resource}.`;
-  }
-}
-
-export class SecretStoreEncodeError extends Schema.TaggedErrorClass<SecretStoreEncodeError>()(
-  "SecretStoreEncodeError",
-  {
-    operation: Schema.Literal("encode"),
-    ...secretStoreErrorContext,
-  },
-) {
-  override get message(): string {
-    return `Failed to encode ${this.resource}.`;
-  }
-}
-
-export const SecretStoreError = Schema.Union([
-  SecretStoreSecureError,
-  SecretStoreReadError,
-  SecretStoreTemporaryPathError,
-  SecretStorePersistError,
-  SecretStoreRandomGenerationError,
-  SecretStoreConcurrentReadError,
-  SecretStoreRemoveError,
-  SecretStoreDecodeError,
-  SecretStoreEncodeError,
+const SecretStoreOperation = Schema.Literals([
+  "secure",
+  "read",
+  "create_temporary_path",
+  "persist",
+  "generate_random",
+  "read_after_concurrent_creation",
+  "remove",
+  "decode",
+  "encode",
 ]);
-export type SecretStoreError = typeof SecretStoreError.Type;
+
+export class SecretStoreError extends Schema.TaggedErrorClass<SecretStoreError>()(
+  "SecretStoreError",
+  {
+    operation: SecretStoreOperation,
+    resource: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Secret store operation '${this.operation}' failed for ${this.resource}.`;
+  }
+}
+
 export const isSecretStoreError = Schema.is(SecretStoreError);
 
 const isPlatformError = (value: unknown): value is PlatformError.PlatformError =>
@@ -168,7 +68,7 @@ export const make = Effect.gen(function* () {
   yield* fileSystem.chmod(serverConfig.secretsDir, 0o700).pipe(
     Effect.mapError(
       (cause) =>
-        new SecretStoreSecureError({
+        new SecretStoreError({
           operation: "secure",
           resource: `secrets directory ${serverConfig.secretsDir}`,
           cause,
@@ -185,7 +85,7 @@ export const make = Effect.gen(function* () {
         cause.reason._tag === "NotFound"
           ? Effect.succeed(Option.none())
           : Effect.fail(
-              new SecretStoreReadError({
+              new SecretStoreError({
                 operation: "read",
                 resource: `secret ${name}`,
                 cause,
@@ -200,7 +100,7 @@ export const make = Effect.gen(function* () {
     return crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
-          new SecretStoreTemporaryPathError({
+          new SecretStoreError({
             operation: "create_temporary_path",
             resource: `secret ${name}`,
             cause,
@@ -219,7 +119,7 @@ export const make = Effect.gen(function* () {
               Effect.ignore,
               Effect.flatMap(() =>
                 Effect.fail(
-                  new SecretStorePersistError({
+                  new SecretStoreError({
                     operation: "persist",
                     resource: `secret ${name}`,
                     cause,
@@ -249,7 +149,7 @@ export const make = Effect.gen(function* () {
     ).pipe(
       Effect.mapError(
         (cause) =>
-          new SecretStorePersistError({
+          new SecretStoreError({
             operation: "persist",
             resource: `secret ${name}`,
             cause,
@@ -267,7 +167,7 @@ export const make = Effect.gen(function* () {
             crypto.randomBytes(bytes).pipe(
               Effect.mapError(
                 (cause) =>
-                  new SecretStoreRandomGenerationError({
+                  new SecretStoreError({
                     operation: "generate_random",
                     resource: `secret ${name}`,
                     cause,
@@ -284,7 +184,7 @@ export const make = Effect.gen(function* () {
                               onSome: Effect.succeed,
                               onNone: () =>
                                 Effect.fail(
-                                  new SecretStoreConcurrentReadError({
+                                  new SecretStoreError({
                                     operation: "read_after_concurrent_creation",
                                     resource: `secret ${name}`,
                                   }),
@@ -308,7 +208,7 @@ export const make = Effect.gen(function* () {
         cause.reason._tag === "NotFound"
           ? Effect.void
           : Effect.fail(
-              new SecretStoreRemoveError({
+              new SecretStoreError({
                 operation: "remove",
                 resource: `secret ${name}`,
                 cause,

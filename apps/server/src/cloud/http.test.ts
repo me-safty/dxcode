@@ -16,7 +16,7 @@ import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "./traceRelayRequest.ts";
 
 const storeFailure = (tag: "AlreadyExists" | "PermissionDenied") =>
-  new ServerSecretStore.SecretStorePersistError({
+  new ServerSecretStore.SecretStoreError({
     operation: "persist",
     resource: "cloud replay guard",
     cause: PlatformError.systemError({

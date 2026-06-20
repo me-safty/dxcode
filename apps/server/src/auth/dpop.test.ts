@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as PlatformError from "effect/PlatformError";
 
-import { SecretStorePersistError } from "./ServerSecretStore.ts";
+import { SecretStoreError } from "./ServerSecretStore.ts";
 import { mapDpopReplayStoreError } from "./dpop.ts";
 
 const storeFailure = (tag: "AlreadyExists" | "PermissionDenied") =>
-  new SecretStorePersistError({
+  new SecretStoreError({
     operation: "persist",
     resource: "DPoP proof",
     cause: PlatformError.systemError({
@@ -26,9 +26,10 @@ describe("mapDpopReplayStoreError", () => {
   it("reports replay-store availability failures as internal errors", () => {
     const error = mapDpopReplayStoreError(storeFailure("PermissionDenied"));
 
-    expect(error._tag).toBe("ServerAuthDpopReplayStateRecordError");
-    if (error._tag === "ServerAuthDpopReplayStateRecordError") {
-      expect(error.message).toBe("Failed to record DPoP proof replay state.");
+    expect(error._tag).toBe("ServerAuthOperationError");
+    if (error._tag === "ServerAuthOperationError") {
+      expect(error.operation).toBe("record_dpop_replay_state");
+      expect(error.message).toContain("record_dpop_replay_state");
     }
   });
 });

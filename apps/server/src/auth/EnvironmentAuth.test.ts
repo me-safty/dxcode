@@ -57,14 +57,12 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
   it.effect("classifies invalid bootstrap credential failures for the HTTP boundary", () =>
     Effect.sync(() => {
       const error = EnvironmentAuth.toBootstrapExchangeError(
-        new PairingGrantStore.UnknownBootstrapCredentialError({
-          reason: "unknown",
-        }),
+        new PairingGrantStore.UnknownBootstrapCredentialError({}),
       );
 
       expect(error._tag).toBe("ServerAuthInvalidCredentialError");
       if (error._tag === "ServerAuthInvalidCredentialError") {
-        expect(error.reason).toBe("invalid_credential");
+        expect(EnvironmentAuth.serverAuthCredentialReason(error)).toBe("invalid_credential");
       }
     }),
   );
@@ -72,14 +70,17 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
   it.effect("maps unexpected bootstrap failures to 500", () =>
     Effect.sync(() => {
       const error = EnvironmentAuth.toBootstrapExchangeError(
-        new PairingGrantStore.BootstrapCredentialConsumeError({
+        new PairingGrantStore.BootstrapCredentialInternalError({
           operation: "consume",
           cause: new Error("sqlite is unavailable"),
         }),
       );
 
-      expect(error._tag).toBe("ServerAuthBootstrapCredentialValidationError");
-      expect(error.message).toBe("Failed to validate bootstrap credential.");
+      expect(error._tag).toBe("ServerAuthOperationError");
+      if (error._tag === "ServerAuthOperationError") {
+        expect(error.operation).toBe("validate_bootstrap_credential");
+        expect(error.message).toContain("validate_bootstrap_credential");
+      }
     }),
   );
 
@@ -123,7 +124,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
 
       expect(error._tag).toBe("ServerAuthScopeNotGrantedError");
       if (error._tag === "ServerAuthScopeNotGrantedError") {
-        expect(error.reason).toBe("scope_not_granted");
+        expect(EnvironmentAuth.serverAuthInvalidRequestReason(error)).toBe("scope_not_granted");
       }
     }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
   );

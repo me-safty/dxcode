@@ -31,9 +31,7 @@ export interface BootstrapGrant {
 
 export class UnknownBootstrapCredentialError extends Schema.TaggedErrorClass<UnknownBootstrapCredentialError>()(
   "UnknownBootstrapCredentialError",
-  {
-    reason: Schema.Literal("unknown"),
-  },
+  {},
 ) {
   override get message(): string {
     return "Unknown bootstrap credential.";
@@ -42,9 +40,7 @@ export class UnknownBootstrapCredentialError extends Schema.TaggedErrorClass<Unk
 
 export class ExpiredBootstrapCredentialError extends Schema.TaggedErrorClass<ExpiredBootstrapCredentialError>()(
   "ExpiredBootstrapCredentialError",
-  {
-    reason: Schema.Literal("expired"),
-  },
+  {},
 ) {
   override get message(): string {
     return "Bootstrap credential expired.";
@@ -53,9 +49,7 @@ export class ExpiredBootstrapCredentialError extends Schema.TaggedErrorClass<Exp
 
 export class BootstrapCredentialProofKeyMismatchError extends Schema.TaggedErrorClass<BootstrapCredentialProofKeyMismatchError>()(
   "BootstrapCredentialProofKeyMismatchError",
-  {
-    reason: Schema.Literal("proof_key_mismatch"),
-  },
+  {},
 ) {
   override get message(): string {
     return "Bootstrap credential proof key mismatch.";
@@ -64,9 +58,7 @@ export class BootstrapCredentialProofKeyMismatchError extends Schema.TaggedError
 
 export class UnavailableBootstrapCredentialError extends Schema.TaggedErrorClass<UnavailableBootstrapCredentialError>()(
   "UnavailableBootstrapCredentialError",
-  {
-    reason: Schema.Literal("unavailable"),
-  },
+  {},
 ) {
   override get message(): string {
     return "Bootstrap credential is no longer available.";
@@ -82,61 +74,25 @@ export const BootstrapCredentialInvalidError = Schema.Union([
 export type BootstrapCredentialInvalidError = typeof BootstrapCredentialInvalidError.Type;
 export const isBootstrapCredentialInvalidError = Schema.is(BootstrapCredentialInvalidError);
 
-export class ActivePairingLinksLoadError extends Schema.TaggedErrorClass<ActivePairingLinksLoadError>()(
-  "ActivePairingLinksLoadError",
-  {
-    operation: Schema.Literal("list_active"),
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return "Failed to load active pairing links.";
-  }
-}
-
-export class PairingLinkRevokeError extends Schema.TaggedErrorClass<PairingLinkRevokeError>()(
-  "PairingLinkRevokeError",
-  {
-    operation: Schema.Literal("revoke"),
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return "Failed to revoke pairing link.";
-  }
-}
-
-export class PairingCredentialIssueError extends Schema.TaggedErrorClass<PairingCredentialIssueError>()(
-  "PairingCredentialIssueError",
-  {
-    operation: Schema.Literal("issue"),
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return "Failed to issue pairing credential.";
-  }
-}
-
-export class BootstrapCredentialConsumeError extends Schema.TaggedErrorClass<BootstrapCredentialConsumeError>()(
-  "BootstrapCredentialConsumeError",
-  {
-    operation: Schema.Literal("consume"),
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return "Failed to consume bootstrap credential.";
-  }
-}
-
-export const BootstrapCredentialInternalError = Schema.Union([
-  ActivePairingLinksLoadError,
-  PairingLinkRevokeError,
-  PairingCredentialIssueError,
-  BootstrapCredentialConsumeError,
+const BootstrapCredentialInternalOperation = Schema.Literals([
+  "list_active",
+  "revoke",
+  "issue",
+  "consume",
 ]);
-export type BootstrapCredentialInternalError = typeof BootstrapCredentialInternalError.Type;
+
+export class BootstrapCredentialInternalError extends Schema.TaggedErrorClass<BootstrapCredentialInternalError>()(
+  "BootstrapCredentialInternalError",
+  {
+    operation: BootstrapCredentialInternalOperation,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Bootstrap credential operation '${this.operation}' failed.`;
+  }
+}
+
 export const isBootstrapCredentialInternalError = Schema.is(BootstrapCredentialInternalError);
 
 export const BootstrapCredentialError = Schema.Union([
@@ -210,36 +166,10 @@ const PAIRING_TOKEN_LENGTH = 12;
 const PAIRING_TOKEN_REJECTION_LIMIT =
   Math.floor(256 / PAIRING_TOKEN_ALPHABET.length) * PAIRING_TOKEN_ALPHABET.length;
 
-const invalidBootstrapCredentialError = (
-  reason: BootstrapCredentialInvalidError["reason"],
-): BootstrapCredentialInvalidError => {
-  switch (reason) {
-    case "unknown":
-      return new UnknownBootstrapCredentialError({ reason });
-    case "expired":
-      return new ExpiredBootstrapCredentialError({ reason });
-    case "proof_key_mismatch":
-      return new BootstrapCredentialProofKeyMismatchError({ reason });
-    case "unavailable":
-      return new UnavailableBootstrapCredentialError({ reason });
-  }
-};
-
 const internalBootstrapCredentialError = (
   operation: BootstrapCredentialInternalError["operation"],
   cause: unknown,
-): BootstrapCredentialInternalError => {
-  switch (operation) {
-    case "list_active":
-      return new ActivePairingLinksLoadError({ operation, cause });
-    case "revoke":
-      return new PairingLinkRevokeError({ operation, cause });
-    case "issue":
-      return new PairingCredentialIssueError({ operation, cause });
-    case "consume":
-      return new BootstrapCredentialConsumeError({ operation, cause });
-  }
-};
+): BootstrapCredentialInternalError => new BootstrapCredentialInternalError({ operation, cause });
 
 export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
@@ -399,7 +329,7 @@ export const make = Effect.gen(function* () {
               {
                 _tag: "error",
                 reason: "not-found",
-                error: invalidBootstrapCredentialError("unknown"),
+                error: new UnknownBootstrapCredentialError({}),
               },
               current,
             ];
@@ -412,7 +342,7 @@ export const make = Effect.gen(function* () {
               {
                 _tag: "error",
                 reason: "expired",
-                error: invalidBootstrapCredentialError("expired"),
+                error: new ExpiredBootstrapCredentialError({}),
               },
               next,
             ];
@@ -423,7 +353,7 @@ export const make = Effect.gen(function* () {
               {
                 _tag: "error",
                 reason: "not-found",
-                error: invalidBootstrapCredentialError("proof_key_mismatch"),
+                error: new BootstrapCredentialProofKeyMismatchError({}),
               },
               next,
             ];
@@ -490,29 +420,29 @@ export const make = Effect.gen(function* () {
 
       const matching = yield* pairingLinks.getByCredential({ credential });
       if (Option.isNone(matching)) {
-        return yield* invalidBootstrapCredentialError("unknown");
+        return yield* new UnknownBootstrapCredentialError({});
       }
 
       if (matching.value.revokedAt !== null) {
-        return yield* invalidBootstrapCredentialError("unavailable");
+        return yield* new UnavailableBootstrapCredentialError({});
       }
 
       if (matching.value.consumedAt !== null) {
-        return yield* invalidBootstrapCredentialError("unknown");
+        return yield* new UnknownBootstrapCredentialError({});
       }
 
       if (DateTime.isGreaterThanOrEqualTo(now, matching.value.expiresAt)) {
-        return yield* invalidBootstrapCredentialError("expired");
+        return yield* new ExpiredBootstrapCredentialError({});
       }
 
       if (
         matching.value.proofKeyThumbprint !== null &&
         matching.value.proofKeyThumbprint !== input?.proofKeyThumbprint
       ) {
-        return yield* invalidBootstrapCredentialError("proof_key_mismatch");
+        return yield* new BootstrapCredentialProofKeyMismatchError({});
       }
 
-      return yield* invalidBootstrapCredentialError("unavailable");
+      return yield* new UnavailableBootstrapCredentialError({});
     },
     Effect.mapError((cause) =>
       isBootstrapCredentialError(cause)

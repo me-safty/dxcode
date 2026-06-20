@@ -30,21 +30,12 @@ function stringToBytes(value: string): Uint8Array {
 const keyPairPersistenceError = (
   operation: "decode" | "encode" | "read_after_concurrent_creation",
   cause?: unknown,
-): ServerSecretStore.SecretStoreError => {
-  const resource = "environment signing key pair";
-  switch (operation) {
-    case "decode":
-      return new ServerSecretStore.SecretStoreDecodeError({ operation, resource, cause });
-    case "encode":
-      return new ServerSecretStore.SecretStoreEncodeError({ operation, resource, cause });
-    case "read_after_concurrent_creation":
-      return new ServerSecretStore.SecretStoreConcurrentReadError({
-        operation,
-        resource,
-        cause,
-      });
-  }
-};
+): ServerSecretStore.SecretStoreError =>
+  new ServerSecretStore.SecretStoreError({
+    operation,
+    resource: "environment signing key pair",
+    cause,
+  });
 
 const readEnvironmentKeyPair = Effect.fn("readEnvironmentKeyPair")(function* (
   secrets: ServerSecretStore.ServerSecretStore["Service"],
