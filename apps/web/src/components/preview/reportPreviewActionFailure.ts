@@ -1,3 +1,5 @@
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
+
 export interface PreviewActionFailureContext {
   readonly operation: string;
   readonly threadKey?: string;
@@ -11,19 +13,11 @@ export interface PreviewActionFailureContext {
 }
 
 export function previewUrlFailureContext(url: string) {
-  let urlHostname: string | undefined;
-  let urlProtocol: string | undefined;
-  try {
-    const parsed = new URL(url);
-    urlHostname = parsed.hostname || undefined;
-    urlProtocol = parsed.protocol || undefined;
-  } catch {
-    // Invalid targets still retain a nonsecret input length for diagnostics.
-  }
+  const diagnostics = getUrlDiagnostics(url);
   return {
-    urlLength: url.length,
-    ...(urlHostname === undefined ? {} : { urlHostname }),
-    ...(urlProtocol === undefined ? {} : { urlProtocol }),
+    urlLength: diagnostics.inputLength,
+    ...(diagnostics.hostname === undefined ? {} : { urlHostname: diagnostics.hostname }),
+    ...(diagnostics.protocol === undefined ? {} : { urlProtocol: diagnostics.protocol }),
   };
 }
 
