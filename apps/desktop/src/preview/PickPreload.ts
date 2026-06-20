@@ -364,6 +364,7 @@ function collectElementsInRect(
             y: viewportRect.y + inset.y,
           }),
         );
+        continue;
       }
     }
 
@@ -680,6 +681,9 @@ function startAnnotation(): void {
   let editorPosition: { left: number; top: number } | null = null;
   let editorDrag: { pointerId: number; offsetX: number; offsetY: number } | null = null;
   let editorLayoutFrame: number | null = null;
+  const frameScrollListenerCleanups: Array<() => void> = [];
+  const attachedFrameScrollDocuments = new WeakSet<Document>();
+  let refreshFrameScrollListeners = (): void => undefined;
 
   const resizeComment = (): void => {
     const maxHeight = 96;
@@ -1163,8 +1167,114 @@ function startAnnotation(): void {
   dragHandle.addEventListener("pointercancel", onEditorPointerUp);
 
   const repaint = (): void => {
+    refreshFrameScrollListeners();
     for (const target of selected.values()) updateSelectedVisual(target);
     queueEditorLayout();
+  };
+
+  const isScrollableForWheel = (element: Element, deltaX: number, deltaY: number): boolean => {
+    const style = getElementComputedStyle(element);
+    const canScrollY =
+      deltaY !== 0 &&
+      /(auto|scroll|overlay)/.test(style.overflowY) &&
+      element.scrollHeight > element.clientHeight;
+    const canScrollX =
+      deltaX !== 0 &&
+      /(auto|scroll|overlay)/.test(style.overflowX) &&
+      element.scrollWidth > element.clientWidth;
+    return canScrollX || canScrollY;
+  };
+
+  const findScrollableWheelTarget = (
+    element: Element | null,
+    deltaX: number,
+    deltaY: number,
+  ): Element | null => {
+    for (let current = element; current; current = current.parentElement) {
+      if (isDocumentChromeElement(current.ownerDocument, current)) continue;
+      if (isScrollableForWheel(current, deltaX, deltaY)) return current;
+    }
+    return null;
+  };
+
+  const scrollElementByWheel = (element: Element, deltaX: number, deltaY: number): boolean => {
+    const previousLeft = element.scrollLeft;
+    const previousTop = element.scrollTop;
+    element.scrollBy({ left: deltaX, top: deltaY, behavior: "auto" });
+    return element.scrollLeft !== previousLeft || element.scrollTop !== previousTop;
+  };
+
+  const scrollDocumentAtPoint = (
+    ownerDocument: Document,
+    clientX: number,
+    clientY: number,
+    deltaX: number,
+    deltaY: number,
+  ): boolean => {
+    let elements: Element[];
+    try {
+      elements = Array.from(ownerDocument.elementsFromPoint(clientX, clientY));
+    } catch {
+      elements = [];
+    }
+
+    for (const element of elements) {
+      if (!isElementNode(element)) continue;
+      if (ownerDocument === document && isAnnotationNode(element)) continue;
+      if (isDocumentChromeElement(ownerDocument, element)) continue;
+
+      if (isFrameElement(element)) {
+        const childDocument = getAccessibleFrameDocument(element);
+        if (childDocument) {
+          const frameRect = element.getBoundingClientRect();
+          const inset = getFrameViewportInset(element);
+          const childX = clientX - frameRect.left - inset.x;
+          const childY = clientY - frameRect.top - inset.y;
+          if (scrollDocumentAtPoint(childDocument, childX, childY, deltaX, deltaY)) return true;
+        }
+      }
+
+      const scrollTarget = findScrollableWheelTarget(element, deltaX, deltaY);
+      if (scrollTarget && scrollElementByWheel(scrollTarget, deltaX, deltaY)) return true;
+    }
+
+    const view = ownerDocument.defaultView;
+    if (!view) return false;
+    const previousX = view.scrollX;
+    const previousY = view.scrollY;
+    view.scrollBy({ left: deltaX, top: deltaY, behavior: "auto" });
+    return view.scrollX !== previousX || view.scrollY !== previousY;
+  };
+
+  refreshFrameScrollListeners = (): void => {
+    const attachDocument = (ownerDocument: Document): void => {
+      let frames: Element[];
+      try {
+        frames = Array.from(ownerDocument.querySelectorAll("iframe,frame"));
+      } catch {
+        return;
+      }
+
+      for (const frame of frames) {
+        const childDocument = getAccessibleFrameDocument(frame);
+        if (!childDocument) continue;
+        if (!attachedFrameScrollDocuments.has(childDocument)) {
+          attachedFrameScrollDocuments.add(childDocument);
+          childDocument.addEventListener("scroll", repaint, { capture: true, passive: true });
+          childDocument.defaultView?.addEventListener("scroll", repaint, {
+            capture: true,
+            passive: true,
+          });
+          frameScrollListenerCleanups.push(() => {
+            childDocument.removeEventListener("scroll", repaint, true);
+            childDocument.defaultView?.removeEventListener("scroll", repaint, true);
+          });
+        }
+        attachDocument(childDocument);
+      }
+    };
+
+    attachDocument(document);
   };
 
   const removeTargetAtPoint = (x: number, y: number): boolean => {
@@ -1326,6 +1436,22 @@ function startAnnotation(): void {
     event.stopPropagation();
   };
 
+  const onWheel = (event: WheelEvent): void => {
+    const previousPointerEvents = captureSurface.style.pointerEvents;
+    captureSurface.style.pointerEvents = "none";
+    try {
+      if (
+        scrollDocumentAtPoint(document, event.clientX, event.clientY, event.deltaX, event.deltaY)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        repaint();
+      }
+    } finally {
+      captureSurface.style.pointerEvents = previousPointerEvents;
+    }
+  };
+
   const onPointerOut = (event: PointerEvent): void => {
     if (event.relatedTarget === null) clearHoverOutline();
   };
@@ -1354,10 +1480,12 @@ function startAnnotation(): void {
     captureSurface.removeEventListener("pointercancel", onPointerCancel);
     captureSurface.removeEventListener("pointerout", onPointerOut);
     captureSurface.removeEventListener("click", onClick);
+    captureSurface.removeEventListener("wheel", onWheel);
     window.removeEventListener("blur", onWindowBlur);
     window.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("scroll", repaint, true);
     window.removeEventListener("resize", repaint);
+    for (const cleanup of frameScrollListenerCleanups.splice(0)) cleanup();
     dragHandle.removeEventListener("pointerdown", onEditorPointerDown);
     dragHandle.removeEventListener("pointermove", onEditorPointerMove);
     dragHandle.removeEventListener("pointerup", onEditorPointerUp);
@@ -1448,10 +1576,12 @@ function startAnnotation(): void {
   captureSurface.addEventListener("pointercancel", onPointerCancel, { passive: true });
   captureSurface.addEventListener("pointerout", onPointerOut, { passive: true });
   captureSurface.addEventListener("click", onClick, { passive: false });
+  captureSurface.addEventListener("wheel", onWheel, { passive: false });
   window.addEventListener("blur", onWindowBlur);
   window.addEventListener("keydown", onKeyDown, { capture: true });
   window.addEventListener("scroll", repaint, { capture: true, passive: true });
   window.addEventListener("resize", repaint, { passive: true });
+  refreshFrameScrollListeners();
   ipcRenderer.on(CANCEL_PICK_CHANNEL, onCancel);
   ipcRenderer.on(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
   document.documentElement.appendChild(host);
