@@ -760,15 +760,16 @@ export const makeCodexSessionRuntime = (
     );
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-    const randomUUIDv4 = crypto.randomUUIDv4.pipe(
-      Effect.mapError(
-        (cause) =>
-          new CodexErrors.CodexAppServerTransportError({
-            detail: "Failed to generate Codex runtime identifier.",
-            cause,
-          }),
-      ),
-    );
+    const randomUUIDv4 = (purpose: CodexErrors.CodexAppServerIdentifierPurpose) =>
+      crypto.randomUUIDv4.pipe(
+        Effect.mapError(
+          (cause) =>
+            new CodexErrors.CodexAppServerIdentifierGenerationError({
+              purpose,
+              cause,
+            }),
+        ),
+      );
 
     const sessionCreatedAt = yield* nowIso;
     const initialSession = {
@@ -788,7 +789,7 @@ export const makeCodexSessionRuntime = (
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
       Effect.gen(function* () {
-        const id = yield* randomUUIDv4;
+        const id = yield* randomUUIDv4("provider-event");
         return yield* offerEvent({
           id: EventId.make(id),
           provider: PROVIDER,
@@ -956,7 +957,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4("command-approval-request"));
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const decision = yield* Deferred.make<ProviderApprovalDecision>();
@@ -1012,7 +1013,9 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/fileChange/requestApproval", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
+        const requestId = ApprovalRequestId.make(
+          yield* randomUUIDv4("file-change-approval-request"),
+        );
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const decision = yield* Deferred.make<ProviderApprovalDecision>();
@@ -1068,7 +1071,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4("user-input-request"));
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const answers = yield* Deferred.make<ProviderUserInputAnswers>();

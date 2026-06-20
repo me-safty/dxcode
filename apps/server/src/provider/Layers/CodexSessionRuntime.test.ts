@@ -19,6 +19,23 @@ import {
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
+describe("CodexSessionRuntimeIdentifierGenerationError", () => {
+  it("retains identifier purpose and the random source failure", () => {
+    const cause = new Error("random source unavailable");
+    const error = new CodexErrors.CodexAppServerIdentifierGenerationError({
+      purpose: "provider-event",
+      cause,
+    });
+
+    NodeAssert.equal(error.purpose, "provider-event");
+    NodeAssert.strictEqual(error.cause, cause);
+    NodeAssert.equal(
+      error.message,
+      "Failed to generate Codex App Server identifier for provider-event.",
+    );
+  });
+});
+
 function makeThreadOpenResponse(
   threadId: string,
 ): CodexRpc.ClientRequestResponsesByMethod["thread/start"] {

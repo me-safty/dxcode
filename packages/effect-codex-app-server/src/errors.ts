@@ -20,6 +20,20 @@ export const CodexAppServerProtocolParseOperation = Schema.Literals([
   "decode-notification-payload",
 ]);
 
+export const CodexAppServerTransportOperation = Schema.Literals([
+  "read-input-stream",
+  "read-process-exit-status",
+]);
+export type CodexAppServerTransportOperation = typeof CodexAppServerTransportOperation.Type;
+
+export const CodexAppServerIdentifierPurpose = Schema.Literals([
+  "provider-event",
+  "command-approval-request",
+  "file-change-approval-request",
+  "user-input-request",
+]);
+export type CodexAppServerIdentifierPurpose = typeof CodexAppServerIdentifierPurpose.Type;
+
 export interface CodexAppServerProtocolErrorShape {
   readonly code: number;
   readonly message: string;
@@ -73,12 +87,24 @@ export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<Co
 export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexAppServerTransportError>()(
   "CodexAppServerTransportError",
   {
-    detail: Schema.String,
+    operation: CodexAppServerTransportOperation,
     cause: Schema.Defect(),
   },
 ) {
   override get message() {
-    return this.detail;
+    return `Codex App Server transport operation '${this.operation}' failed.`;
+  }
+}
+
+export class CodexAppServerIdentifierGenerationError extends Schema.TaggedErrorClass<CodexAppServerIdentifierGenerationError>()(
+  "CodexAppServerIdentifierGenerationError",
+  {
+    purpose: CodexAppServerIdentifierPurpose,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Failed to generate Codex App Server identifier for ${this.purpose}.`;
   }
 }
 
@@ -201,6 +227,7 @@ export const CodexAppServerError = Schema.Union([
   CodexAppServerProcessExitedError,
   CodexAppServerProtocolParseError,
   CodexAppServerTransportError,
+  CodexAppServerIdentifierGenerationError,
   CodexAppServerInputStreamEndedError,
 ]);
 

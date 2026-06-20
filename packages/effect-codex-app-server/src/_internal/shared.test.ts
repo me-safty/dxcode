@@ -67,7 +67,7 @@ it.effect("retains the request-handler error as the internal error cause", () =>
   Effect.gen(function* () {
     const rootCause = new Error("socket closed");
     const source = new CodexError.CodexAppServerTransportError({
-      detail: "Codex App Server transport failed",
+      operation: "read-input-stream",
       cause: rootCause,
     });
     const error = yield* Shared.runHandler(

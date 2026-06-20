@@ -118,11 +118,14 @@ const decodeWireMessage = (
     ),
   );
 
-const normalizeIncomingError = (error: unknown, detail: string): CodexError.CodexAppServerError =>
+const normalizeIncomingError = (
+  error: unknown,
+  operation: CodexError.CodexAppServerTransportOperation,
+): CodexError.CodexAppServerError =>
   isCodexAppServerError(error)
     ? error
     : new CodexError.CodexAppServerTransportError({
-        detail,
+        operation,
         cause: error,
       });
 
@@ -349,7 +352,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       Effect.matchEffect({
         onFailure: (error) =>
           handleTermination(() =>
-            Effect.succeed(normalizeIncomingError(error, "Codex App Server input stream failed")),
+            Effect.succeed(normalizeIncomingError(error, "read-input-stream")),
           ),
         onSuccess: () =>
           Ref.get(remainder).pipe(
