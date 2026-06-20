@@ -108,9 +108,9 @@ import {
 } from "../../reviewCommentContext";
 
 // ---------------------------------------------------------------------------
-// Context — shared state consumed by every row component via Context.
+// Context â€” shared state consumed by every row component via Context.
 // Propagates through LegendList's memo boundaries for shared callbacks and
-// non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
+// non-row-scoped state. `nowIso` is intentionally excluded â€” self-ticking
 // components (WorkingTimer, LiveElapsed) handle it.
 // ---------------------------------------------------------------------------
 
@@ -169,7 +169,7 @@ interface MessagesTimelineProps {
 }
 
 // ---------------------------------------------------------------------------
-// MessagesTimeline — list owner
+// MessagesTimeline â€” list owner
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -197,7 +197,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
 
   // Toggling a fold inserts/removes rows between the fold row and the final
-  // message — everything above the trigger is unchanged, so the trigger stays
+  // message â€” everything above the trigger is unchanged, so the trigger stays
   // put as long as the list doesn't re-anchor. maintainScrollAtEnd would do
   // exactly that (pin the bottom content when row data changes while scrolled
   // to the end), yanking the trigger out of view. Suppress it for the frames
@@ -348,7 +348,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [activeTurnInProgress, isRevertingCheckpoint, isWorking],
   );
 
-  // Stable renderItem — no closure deps. Row components read shared state
+  // Stable renderItem â€” no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
@@ -397,7 +397,7 @@ function keyExtractor(item: MessagesTimelineRow) {
 }
 
 // ---------------------------------------------------------------------------
-// TimelineRowContent — the actual row component
+// TimelineRowContent â€” the actual row component
 // ---------------------------------------------------------------------------
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
@@ -679,7 +679,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
 }
 
 // ---------------------------------------------------------------------------
-// Self-ticking labels — update their own text nodes so elapsed-time display
+// Self-ticking labels â€” update their own text nodes so elapsed-time display
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
 
@@ -707,7 +707,7 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Extracted row sections — own their state / store subscriptions so changes
+// Extracted row sections â€” own their state / store subscriptions so changes
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
@@ -830,7 +830,7 @@ function findNearestVerticalScroller(element: HTMLElement): HTMLElement | null {
 }
 
 /** Subscribes directly to the UI state store for expand/collapse state,
- *  so toggling re-renders only this component — not the entire list. */
+ *  so toggling re-renders only this component â€” not the entire list. */
 const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
   turnSummary,
   routeThreadKey,
@@ -1280,7 +1280,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           {formatWorkspaceRelativePath(comment.filePath, ctx.workspaceRoot)}
         </div>
         <div className="text-[11px] text-muted-foreground">
-          {comment.sectionTitle} · {comment.rangeLabel}
+          {comment.sectionTitle} Â· {comment.rangeLabel}
         </div>
       </div>
       {comment.text.length > 0 && (
@@ -1319,7 +1319,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
 }
 
 // ---------------------------------------------------------------------------
-// Structural sharing — reuse old row references when data hasn't changed
+// Structural sharing â€” reuse old row references when data hasn't changed
 // so LegendList (and React) can skip re-rendering unchanged items.
 // ---------------------------------------------------------------------------
 
