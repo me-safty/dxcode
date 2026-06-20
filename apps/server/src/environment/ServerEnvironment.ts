@@ -1,18 +1,28 @@
-import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Contracts from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/hostProcess";
+import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { ServerConfig } from "../../config.ts";
-import { layer as ProcessRunnerLive } from "../../processRunner.ts";
-import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
-import packageJson from "../../../package.json" with { type: "json" };
-import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
+import packageJson from "../../package.json" with { type: "json" };
+import * as ServerConfig from "../config.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import * as ServerEnvironmentLabel from "./Layers/ServerEnvironmentLabel.ts";
 
-function platformOs(platform: NodeJS.Platform): ExecutionEnvironmentDescriptor["platform"]["os"] {
+export class ServerEnvironment extends Context.Service<
+  ServerEnvironment,
+  {
+    readonly getEnvironmentId: Effect.Effect<Contracts.EnvironmentId>;
+    readonly getDescriptor: Effect.Effect<Contracts.ExecutionEnvironmentDescriptor>;
+  }
+>()("t3/environment/ServerEnvironment") {}
+
+function platformOs(
+  platform: NodeJS.Platform,
+): Contracts.ExecutionEnvironmentDescriptor["platform"]["os"] {
   switch (platform) {
     case "darwin":
       return "darwin";
@@ -27,7 +37,7 @@ function platformOs(platform: NodeJS.Platform): ExecutionEnvironmentDescriptor["
 
 function platformArch(
   architecture: NodeJS.Architecture,
-): ExecutionEnvironmentDescriptor["platform"]["arch"] {
+): Contracts.ExecutionEnvironmentDescriptor["platform"]["arch"] {
   switch (architecture) {
     case "arm64":
       return "arm64";
@@ -38,13 +48,13 @@ function platformArch(
   }
 }
 
-export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function* () {
+export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const serverConfig = yield* ServerConfig;
+  const serverConfig = yield* ServerConfig.ServerConfig;
   const crypto = yield* Crypto.Crypto;
-  const hostPlatform = yield* HostProcessPlatform;
-  const hostArchitecture = yield* HostProcessArchitecture;
+  const hostPlatform = yield* HostProcess.HostProcessPlatform;
+  const hostArchitecture = yield* HostProcess.HostProcessArchitecture;
 
   const readPersistedEnvironmentId = Effect.gen(function* () {
     const exists = yield* fileSystem
@@ -75,13 +85,11 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     return generated;
   });
 
-  const environmentId = EnvironmentId.make(environmentIdRaw);
+  const environmentId = Contracts.EnvironmentId.make(environmentIdRaw);
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
-  const label = yield* resolveServerEnvironmentLabel({
-    cwdBaseName,
-  });
+  const label = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({ cwdBaseName });
 
-  const descriptor: ExecutionEnvironmentDescriptor = {
+  const descriptor: Contracts.ExecutionEnvironmentDescriptor = {
     environmentId,
     label,
     platform: {
@@ -94,12 +102,15 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     },
   };
 
-  return {
+  return ServerEnvironment.of({
     getEnvironmentId: Effect.succeed(environmentId),
     getDescriptor: Effect.succeed(descriptor),
-  } satisfies ServerEnvironmentShape;
+  });
 });
 
-export const ServerEnvironmentLive = Layer.effect(ServerEnvironment, makeServerEnvironment()).pipe(
-  Layer.provide(ProcessRunnerLive),
-);
+/**
+ * ServerEnvironment is acquired from persisted filesystem and host-process
+ * state. It intentionally has no fallback Layer.succeed value: callers must
+ * provide the external platform services and a ServerConfig.
+ */
+export const layer = Layer.effect(ServerEnvironment, make).pipe(Layer.provide(ProcessRunner.layer));

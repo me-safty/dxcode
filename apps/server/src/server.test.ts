@@ -89,13 +89,13 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
-import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
-import * as ProjectSetupScriptRunner from "./project/Services/ProjectSetupScriptRunner.ts";
-import * as RepositoryIdentityResolver from "./project/Services/RepositoryIdentityResolver.ts";
-import * as ServerEnvironment from "./environment/Services/ServerEnvironment.ts";
+import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
+import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
+import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
-import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
-import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -485,17 +485,17 @@ const buildAppUnderTest = (options?: {
       ...options?.layers?.gitManager,
     });
     const workspaceEntriesLayer = WorkspaceEntries.layer.pipe(
-      Layer.provide(WorkspacePathsLive),
+      Layer.provide(WorkspacePaths.layer),
       Layer.provideMerge(vcsDriverRegistryLayer),
     );
     const workspaceAndProjectServicesLayer = Layer.mergeAll(
-      WorkspacePathsLive,
+      WorkspacePaths.layer,
       workspaceEntriesLayer,
-      WorkspaceFileSystemLive.pipe(
-        Layer.provide(WorkspacePathsLive),
+      WorkspaceFileSystem.layer.pipe(
+        Layer.provide(WorkspacePaths.layer),
         Layer.provide(workspaceEntriesLayer),
       ),
-      ProjectFaviconResolverLive.pipe(Layer.provide(WorkspacePathsLive)),
+      ProjectFaviconResolver.layer.pipe(Layer.provide(WorkspacePaths.layer)),
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(
       Layer.provideMerge(vcsDriverRegistryLayer),
@@ -6096,13 +6096,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       const runForThread = vi.fn(
         (
-          _: Parameters<
+          input: Parameters<
             ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
           >[0],
         ) =>
           Effect.fail(
             new ProjectSetupScriptRunner.ProjectSetupScriptRunnerError({
-              message: "pty unavailable",
+              threadId: input.threadId,
+              worktreePath: input.worktreePath,
+              operation: "openTerminal",
+              detail: "pty unavailable",
             }),
           ),
       );
@@ -6177,7 +6180,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.equal(setupFailureActivity?.activity.kind, "setup-script.failed");
       assert.deepEqual(setupFailureActivity?.activity.payload, {
-        detail: "pty unavailable",
+        detail:
+          "Project setup script failed in openTerminal for thread 'thread-bootstrap-setup-failure': pty unavailable",
         worktreePath: "/tmp/bootstrap-worktree",
       });
       assertTrue(dispatchedCommands.every((command) => command.type !== "thread.delete"));

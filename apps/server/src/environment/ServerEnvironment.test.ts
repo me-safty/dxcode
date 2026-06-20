@@ -8,12 +8,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 
-import * as ServerConfig from "../../config.ts";
-import * as ServerEnvironment from "../Services/ServerEnvironment.ts";
-import { ServerEnvironmentLive } from "./ServerEnvironment.ts";
+import * as ServerConfig from "../config.ts";
+import * as ServerEnvironment from "./ServerEnvironment.ts";
 
 const makeServerEnvironmentLayer = (baseDir: string) =>
-  ServerEnvironmentLive.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
+  ServerEnvironment.layer.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
 
 const makeServerConfig = Effect.fn(function* (baseDir: string) {
   const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
@@ -113,7 +112,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         return yield* serverEnvironment.getDescriptor;
       }).pipe(
         Effect.provide(
-          ServerEnvironmentLive.pipe(
+          ServerEnvironment.layer.pipe(
             Layer.provide(Layer.merge(ServerConfig.layer(serverConfig), failingFileSystemLayer)),
           ),
         ),

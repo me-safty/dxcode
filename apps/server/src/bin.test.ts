@@ -25,12 +25,12 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
-import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
+import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
-import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { environmentAuthenticatedAuthLayer } from "./auth/http.ts";
@@ -90,10 +90,10 @@ const makeCliTestServerConfig = (baseDir: string) =>
 const makeProjectPersistenceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
   Layer.mergeAll(
     OrchestrationLayerLive.pipe(
-      Layer.provideMerge(RepositoryIdentityResolverLive),
+      Layer.provideMerge(RepositoryIdentityResolver.layer),
       Layer.provideMerge(SqlitePersistenceLayerLive),
     ),
-    WorkspacePathsLive,
+    WorkspacePaths.layer,
   ).pipe(Layer.provideMerge(NodeServices.layer), Layer.provide(ServerConfig.layer(config)));
 
 const readPersistedSnapshot = (baseDir: string) =>
