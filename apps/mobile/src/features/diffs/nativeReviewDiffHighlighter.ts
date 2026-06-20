@@ -18,12 +18,10 @@ export type NativeReviewDiffHighlightEngine = "native" | "javascript";
 
 export class NativeReviewDiffHighlighterUnavailableError extends Schema.TaggedErrorClass<NativeReviewDiffHighlighterUnavailableError>()(
   "NativeReviewDiffHighlighterUnavailableError",
-  {
-    requestedEngine: Schema.Literal("native"),
-  },
+  {},
 ) {
   override get message(): string {
-    return `The ${this.requestedEngine} review diff highlighter is unavailable in this build.`;
+    return "The native review diff highlighter is unavailable in this build.";
   }
 }
 
@@ -226,7 +224,7 @@ function normalizeTokens(
 async function createNativeReviewDiffHighlighter(): Promise<NativeReviewDiffHighlighterHandle> {
   const nativeEngineModule = await import("react-native-shiki-engine");
   if (!nativeEngineModule.isNativeEngineAvailable()) {
-    throw new NativeReviewDiffHighlighterUnavailableError({ requestedEngine: "native" });
+    throw new NativeReviewDiffHighlighterUnavailableError();
   }
 
   const highlighter = await createHighlighterCore({
