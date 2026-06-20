@@ -121,6 +121,8 @@ it.effect("preserves provider failures without deriving the repository message f
   const providerCause = new SourceControlProviderError({
     provider: "github",
     operation: "getRepositoryCloneUrls",
+    cwd: "/workspace",
+    repository: "octocat/t3code",
     detail: "credential token abc123 was rejected",
   });
   const provider = makeProvider({
