@@ -66,6 +66,7 @@ export class GeneratorFetchError extends Schema.TaggedErrorClass<GeneratorFetchE
   "GeneratorFetchError",
   {
     url: Schema.String,
+    stage: Schema.Literals(["request", "read-response"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -265,12 +266,14 @@ const ensureGeneratedDir = Effect.fn("ensureGeneratedDir")(function* () {
 });
 
 export const fetchText = Effect.fn("fetchText")(function* (url: string) {
-  return yield* HttpClientRequest.get(url).pipe(
+  const response = yield* HttpClientRequest.get(url).pipe(
     HttpClientRequest.setHeader("user-agent", USER_AGENT),
     HttpClient.execute,
     Effect.flatMap(HttpClientResponse.filterStatusOk),
-    Effect.flatMap((okResponse) => okResponse.text),
-    Effect.mapError((cause) => new GeneratorFetchError({ url, cause })),
+    Effect.mapError((cause) => new GeneratorFetchError({ url, stage: "request", cause })),
+  );
+  return yield* response.text.pipe(
+    Effect.mapError((cause) => new GeneratorFetchError({ url, stage: "read-response", cause })),
   );
 });
 

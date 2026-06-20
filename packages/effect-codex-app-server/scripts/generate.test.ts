@@ -47,6 +47,7 @@ describe("Codex schema generator errors", () => {
 
       assert(isGeneratorFetchError(error));
       expect(error.url).toBe(url);
+      expect(error.stage).toBe("request");
       expect(error.cause).toBeDefined();
       expect(error.message).toBe(`Failed to fetch ${url}.`);
     }),
