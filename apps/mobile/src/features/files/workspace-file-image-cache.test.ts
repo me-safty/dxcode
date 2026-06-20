@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Hash from "effect/Hash";
 import { AtomRegistry } from "effect/unstable/reactivity";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -54,10 +55,12 @@ describe("workspaceFileImageAtom", () => {
   });
 
   it("reports an unavailable image when prefetch completes without caching it", async () => {
-    const uri = "https://example.test/missing.png";
+    const uri = "https://example.test/api/assets/signed-secret-token/missing.png?signature=private";
     const imageAtom = createWorkspaceFileImageAtomFamily({ prefetch: async () => false });
     const registry = AtomRegistry.make();
     const atom = imageAtom(uri);
+    expect(atom.label?.[0]).not.toContain("signed-secret-token");
+    expect(atom.label?.[0]).not.toContain("signature=private");
     const unmount = registry.mount(atom);
 
     await vi.waitFor(() => {
@@ -65,17 +68,26 @@ describe("workspaceFileImageAtom", () => {
     });
     const result = registry.get(atom);
     if (AsyncResult.isFailure(result)) {
-      expect(Cause.squash(result.cause)).toEqual(
-        new WorkspaceImagePrefetchUnavailableError({ uri }),
+      const error = Cause.squash(result.cause);
+      expect(error).toEqual(
+        new WorkspaceImagePrefetchUnavailableError({
+          uriHash: Hash.hash(uri),
+          uriLength: uri.length,
+          uriProtocol: "https:",
+        }),
       );
+      expect(error).not.toHaveProperty("uri");
+      expect(String(error)).not.toContain("signed-secret-token");
+      expect(String(error)).not.toContain("signature=private");
     }
 
     unmount();
     registry.dispose();
   });
 
-  it("preserves rejected prefetch causes with the image URI", async () => {
-    const uri = "https://example.test/rejected.png";
+  it("preserves rejected prefetch causes without retaining the signed image URI", async () => {
+    const uri =
+      "https://example.test/api/assets/signed-secret-token/rejected.png?signature=private";
     const cause = new Error("native image loader failed");
     const imageAtom = createWorkspaceFileImageAtomFamily({ prefetch: () => Promise.reject(cause) });
     const registry = AtomRegistry.make();
@@ -88,8 +100,18 @@ describe("workspaceFileImageAtom", () => {
     const result = registry.get(atom);
     if (AsyncResult.isFailure(result)) {
       const error = Cause.squash(result.cause);
-      expect(error).toEqual(new WorkspaceImagePrefetchFailedError({ uri, cause }));
+      expect(error).toEqual(
+        new WorkspaceImagePrefetchFailedError({
+          uriHash: Hash.hash(uri),
+          uriLength: uri.length,
+          uriProtocol: "https:",
+          cause,
+        }),
+      );
       expect((error as WorkspaceImagePrefetchFailedError).cause).toBe(cause);
+      expect(error).not.toHaveProperty("uri");
+      expect(String(error)).not.toContain("signed-secret-token");
+      expect(String(error)).not.toContain("signature=private");
     }
 
     unmount();

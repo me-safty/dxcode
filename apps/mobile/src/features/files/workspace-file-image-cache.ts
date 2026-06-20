@@ -1,5 +1,6 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Hash from "effect/Hash";
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -12,23 +13,27 @@ class WorkspaceImageCacheKey extends Data.Class<{ readonly uri: string }> {}
 export class WorkspaceImagePrefetchUnavailableError extends Schema.TaggedErrorClass<WorkspaceImagePrefetchUnavailableError>()(
   "WorkspaceImagePrefetchUnavailableError",
   {
-    uri: Schema.String,
+    uriHash: Schema.Number,
+    uriLength: Schema.Number,
+    uriProtocol: Schema.NullOr(Schema.String),
   },
 ) {
   override get message(): string {
-    return `Image prefetch did not cache ${this.uri}.`;
+    return `Image prefetch did not cache the requested ${this.uriProtocol ?? "unknown-protocol"} resource (URI length ${this.uriLength}).`;
   }
 }
 
 export class WorkspaceImagePrefetchFailedError extends Schema.TaggedErrorClass<WorkspaceImagePrefetchFailedError>()(
   "WorkspaceImagePrefetchFailedError",
   {
-    uri: Schema.String,
+    uriHash: Schema.Number,
+    uriLength: Schema.Number,
+    uriProtocol: Schema.NullOr(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Image prefetch failed for ${this.uri}.`;
+    return `Image prefetch failed for the requested ${this.uriProtocol ?? "unknown-protocol"} resource (URI length ${this.uriLength}).`;
   }
 }
 
@@ -43,26 +48,44 @@ async function prefetchWithNativeImage(uri: string): Promise<boolean> {
   return Image.prefetch(uri);
 }
 
+function describeWorkspaceImageUri(uri: string) {
+  let uriProtocol: string | null = null;
+  try {
+    uriProtocol = new URL(uri).protocol || null;
+  } catch {
+    // Relative and malformed URIs still retain safe length/hash diagnostics.
+  }
+  return {
+    uriHash: Hash.hash(uri),
+    uriLength: uri.length,
+    uriProtocol,
+  };
+}
+
 export function createWorkspaceFileImageAtomFamily(options?: {
   readonly idleTtlMs?: number;
   readonly prefetch?: ImagePrefetch;
 }) {
   const idleTtlMs = options?.idleTtlMs ?? WORKSPACE_IMAGE_IDLE_TTL_MS;
   const prefetch = options?.prefetch ?? prefetchWithNativeImage;
-  const family = Atom.family((key: WorkspaceImageCacheKey) =>
-    Atom.make(
+  const family = Atom.family((key: WorkspaceImageCacheKey) => {
+    const uriContext = describeWorkspaceImageUri(key.uri);
+    return Atom.make(
       Effect.gen(function* () {
         const cached = yield* Effect.tryPromise({
           try: () => prefetch(key.uri),
-          catch: (cause) => new WorkspaceImagePrefetchFailedError({ uri: key.uri, cause }),
+          catch: (cause) => new WorkspaceImagePrefetchFailedError({ ...uriContext, cause }),
         });
         if (!cached) {
-          return yield* new WorkspaceImagePrefetchUnavailableError({ uri: key.uri });
+          return yield* new WorkspaceImagePrefetchUnavailableError(uriContext);
         }
         return key.uri;
       }),
-    ).pipe(Atom.setIdleTTL(idleTtlMs), Atom.withLabel(`mobile:workspace-image:${key.uri}`)),
-  );
+    ).pipe(
+      Atom.setIdleTTL(idleTtlMs),
+      Atom.withLabel(`mobile:workspace-image:${uriContext.uriHash.toString(36)}`),
+    );
+  });
 
   return (uri: string) => family(new WorkspaceImageCacheKey({ uri }));
 }
