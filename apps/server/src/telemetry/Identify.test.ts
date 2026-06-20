@@ -6,9 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
 import * as References from "effect/References";
-import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 import * as Identify from "./Identify.ts";
@@ -20,9 +18,6 @@ interface CapturedLog {
 
 const sha256 = (value: string) =>
   NodeCrypto.createHash("sha256").update(value, "utf8").digest("hex");
-
-const isTelemetryIdentityDecodeError = Schema.is(Identify.TelemetryIdentityDecodeError);
-const isTelemetryIdentityReadError = Schema.is(Identify.TelemetryIdentityReadError);
 
 const makeCaptureLogger = (logs: CapturedLog[]) =>
   Logger.make(({ fiber, message }) => {
@@ -37,6 +32,26 @@ const findIdentityLog = (
   source: Identify.TelemetryIdentitySource,
   errorTag: string,
 ) => logs.find((log) => log.annotations.source === source && log.annotations.errorTag === errorTag);
+
+it("preserves exact telemetry identity causes without deriving messages from them", () => {
+  const decodeCause = new Error("private nested decode details");
+  const decodeError = new Identify.TelemetryIdentityDecodeError({
+    source: "codex",
+    filePath: "/tmp/auth.json",
+    cause: decodeCause,
+  });
+  const readCause = new Error("private nested read details");
+  const readError = new Identify.TelemetryIdentityReadError({
+    source: "anonymous",
+    filePath: "/tmp/anonymous-id",
+    cause: readCause,
+  });
+
+  assert.strictEqual(decodeError.cause, decodeCause);
+  assert.strictEqual(readError.cause, readCause);
+  assert.notInclude(decodeError.message, decodeCause.message);
+  assert.notInclude(readError.message, readCause.message);
+});
 
 it.layer(NodeServices.layer)("telemetry identity", (it) => {
   it.effect("uses the persisted anonymous id when provider identities are absent", () =>
@@ -73,9 +88,13 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
       const homeDirectory = path.join(config.baseDir, "home");
       const codexAuthPath = path.join(homeDirectory, ".codex", "auth.json");
       const anonymousId = "decode-fallback-anonymous-id";
+      const privateAccessToken = "private-codex-access-token";
 
       yield* fileSystem.makeDirectory(path.dirname(codexAuthPath), { recursive: true });
-      yield* fileSystem.writeFileString(codexAuthPath, '{"tokens":{}}');
+      yield* fileSystem.writeFileString(
+        codexAuthPath,
+        `{"tokens":{"access_token":"${privateAccessToken}"}}`,
+      );
       yield* fileSystem.writeFileString(config.anonymousIdPath, anonymousId);
 
       const identifier = yield* Identify.getTelemetryIdentifierForHome(homeDirectory);
@@ -88,13 +107,16 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
         `Failed to decode codex telemetry identity at '${codexAuthPath}'.`,
       );
 
-      const error = decodeLog?.annotations.cause;
-      assert.instanceOf(error, Identify.TelemetryIdentityDecodeError);
-      if (isTelemetryIdentityDecodeError(error)) {
-        assert.equal(error.filePath, codexAuthPath);
-        assert.equal(error.source, "codex");
-        assert.instanceOf(error.cause, Schema.SchemaError);
-      }
+      assert.equal(decodeLog?.annotations.filePath, codexAuthPath);
+      assert.equal(decodeLog?.annotations.causeKind, "schema");
+      assert.notProperty(decodeLog?.annotations ?? {}, "cause");
+      const errorStack = decodeLog?.annotations.errorStack;
+      assert.isString(errorStack);
+      assert.include(errorStack, "Failed to decode codex telemetry identity");
+      const annotations = Object.values(decodeLog?.annotations ?? {})
+        .map(String)
+        .join("\n");
+      assert.notInclude(annotations, privateAccessToken);
     }).pipe(
       Effect.provide(
         Layer.merge(
@@ -126,15 +148,13 @@ it.layer(NodeServices.layer)("telemetry identity", (it) => {
 
       const readLog = findIdentityLog(logs, "anonymous", "TelemetryIdentityReadError");
       assert.isDefined(readLog);
-      const error = readLog?.annotations.cause;
-      assert.instanceOf(error, Identify.TelemetryIdentityReadError);
-      if (isTelemetryIdentityReadError(error)) {
-        assert.equal(error.filePath, config.anonymousIdPath);
-        assert.instanceOf(error.cause, PlatformError.PlatformError);
-        if (error.cause instanceof PlatformError.PlatformError) {
-          assert.notEqual(error.cause.reason._tag, "NotFound");
-        }
-      }
+      assert.equal(readLog?.annotations.filePath, config.anonymousIdPath);
+      assert.equal(readLog?.annotations.causeKind, "platform");
+      assert.notEqual(readLog?.annotations.platformReason, "NotFound");
+      assert.notProperty(readLog?.annotations ?? {}, "cause");
+      const errorStack = readLog?.annotations.errorStack;
+      assert.isString(errorStack);
+      assert.include(errorStack, "Failed to read anonymous telemetry identity");
       assert.isUndefined(
         findIdentityLog(logs, "anonymous", "TelemetryAnonymousIdPersistenceError"),
       );

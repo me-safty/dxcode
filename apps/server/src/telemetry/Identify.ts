@@ -102,13 +102,27 @@ function isNotFoundError(error: PlatformError.PlatformError): boolean {
   return error.reason._tag === "NotFound";
 }
 
+const getTelemetryIdentityCauseAnnotations = (cause: unknown) => {
+  if (cause instanceof PlatformError.PlatformError) {
+    return {
+      causeKind: "platform",
+      platformReason: cause.reason._tag,
+    };
+  }
+  if (cause instanceof Schema.SchemaError) {
+    return { causeKind: "schema" };
+  }
+  return { causeKind: "other" };
+};
+
 const logTelemetryIdentityError = (error: TelemetryIdentityError) =>
   Effect.logWarning(error.message).pipe(
     Effect.annotateLogs({
       errorTag: error._tag,
       source: error.source,
       ...("filePath" in error ? { filePath: error.filePath } : {}),
-      cause: error,
+      ...getTelemetryIdentityCauseAnnotations(error.cause),
+      ...(error.stack === undefined ? {} : { errorStack: error.stack }),
     }),
   );
 
