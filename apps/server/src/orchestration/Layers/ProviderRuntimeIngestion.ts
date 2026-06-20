@@ -1516,6 +1516,12 @@ const make = Effect.gen(function* () {
           parentRelation,
           createdAt: event.createdAt,
         });
+        yield* maybeGenerateSubagentThreadTitle({
+          childThreadId: parentCollab.childThreadId,
+          titleSeed: parentRelation.titleSeed,
+          cwd: parentThread.worktreePath ?? process.cwd(),
+          createdAt: event.createdAt,
+        }).pipe(Effect.forkScoped);
       }
 
       let loadedThreadDetail: OrchestrationThread | null | undefined;

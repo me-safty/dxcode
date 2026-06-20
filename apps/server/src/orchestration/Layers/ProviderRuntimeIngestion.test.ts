@@ -2600,7 +2600,14 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("creates a child shell before ingesting child events with parent collab metadata", async () => {
-    const harness = await createHarness();
+    const harness = await createHarness({
+      textGeneration: {
+        generateThreadTitle: (input) => {
+          expect(input.message).toBe("Inspect early output");
+          return Effect.succeed({ title: "Inspect early output" });
+        },
+      },
+    });
     const now = "2026-01-01T00:00:00.000Z";
     const childThreadId = asThreadId("subagent-early-shell-test");
 
@@ -2633,6 +2640,7 @@ describe("ProviderRuntimeIngestion", () => {
     const childThread = await waitForThread(
       harness.readModel,
       (entry) =>
+        entry.title === "Inspect early output" &&
         entry.parentRelation?.kind === "subagent" &&
         entry.activities.some(
           (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.updated",

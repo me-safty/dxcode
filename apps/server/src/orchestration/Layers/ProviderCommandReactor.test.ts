@@ -1795,7 +1795,8 @@ describe("ProviderCommandReactor", () => {
     const child = readModel.threads.find((entry) => entry.id === childThreadId);
     expect(child?.parentRelation).toMatchObject({
       kind: "subagent",
-      status: "running",
+      status: "stopped",
+      completedAt: now,
     });
   });
 
