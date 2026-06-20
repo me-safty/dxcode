@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "@effect/vitest";
-import * as Contracts from "@t3tools/contracts";
+import { type OrchestrationProject, ProjectId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -8,10 +8,8 @@ import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSn
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
 
-const makeProject = (
-  scripts: Contracts.OrchestrationProject["scripts"],
-): Contracts.OrchestrationProject => ({
-  id: Contracts.ProjectId.make("project-1"),
+const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationProject => ({
+  id: ProjectId.make("project-1"),
   title: "Project",
   workspaceRoot: "/repo/project",
   defaultModelSelection: null,
@@ -21,7 +19,7 @@ const makeProject = (
   deletedAt: null,
 });
 
-const makeProjectionSnapshotQueryLayer = (project: Contracts.OrchestrationProject) =>
+const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
   Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
     getCommandReadModel: () => Effect.die("unused"),
     getSnapshot: () => Effect.die("unused"),
@@ -57,7 +55,7 @@ const makeTerminalManagerLayer = (
   });
 
 const testLayer = (
-  project: Contracts.OrchestrationProject,
+  project: OrchestrationProject,
   terminal: Pick<TerminalManager.TerminalManager["Service"], "open" | "write">,
 ) =>
   ProjectSetupScriptRunner.layer.pipe(

@@ -9,7 +9,12 @@
  */
 import * as NodeFSP from "node:fs/promises";
 
-import type * as Contracts from "@t3tools/contracts";
+import type {
+  ProjectReadFileInput,
+  ProjectReadFileResult,
+  ProjectWriteFileInput,
+  ProjectWriteFileResult,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -44,9 +49,9 @@ export class WorkspaceFileSystem extends Context.Service<
   {
     /** Read a UTF-8 text file relative to the workspace root. */
     readonly readFile: (
-      input: Contracts.ProjectReadFileInput,
+      input: ProjectReadFileInput,
     ) => Effect.Effect<
-      Contracts.ProjectReadFileResult,
+      ProjectReadFileResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
     >;
     /**
@@ -56,9 +61,9 @@ export class WorkspaceFileSystem extends Context.Service<
      * workspace root.
      */
     readonly writeFile: (
-      input: Contracts.ProjectWriteFileInput,
+      input: ProjectWriteFileInput,
     ) => Effect.Effect<
-      Contracts.ProjectWriteFileResult,
+      ProjectWriteFileResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
     >;
   }

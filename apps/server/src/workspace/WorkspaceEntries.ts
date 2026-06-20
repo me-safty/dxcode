@@ -9,9 +9,16 @@ import * as Path from "effect/Path";
 import * as RcMap from "effect/RcMap";
 import * as Schema from "effect/Schema";
 
-import type * as Contracts from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/hostProcess";
-import * as SharedPath from "@t3tools/shared/path";
+import type {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
+  ProjectListEntriesInput,
+  ProjectListEntriesResult,
+  ProjectSearchEntriesInput,
+  ProjectSearchEntriesResult,
+} from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
@@ -50,14 +57,14 @@ export class WorkspaceEntries extends Context.Service<
   WorkspaceEntries,
   {
     readonly browse: (
-      input: Contracts.FilesystemBrowseInput,
-    ) => Effect.Effect<Contracts.FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
+      input: FilesystemBrowseInput,
+    ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
     readonly list: (
-      input: Contracts.ProjectListEntriesInput,
-    ) => Effect.Effect<Contracts.ProjectListEntriesResult, WorkspaceEntriesError>;
+      input: ProjectListEntriesInput,
+    ) => Effect.Effect<ProjectListEntriesResult, WorkspaceEntriesError>;
     readonly search: (
-      input: Contracts.ProjectSearchEntriesInput,
-    ) => Effect.Effect<Contracts.ProjectSearchEntriesResult, WorkspaceEntriesError>;
+      input: ProjectSearchEntriesInput,
+    ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>;
     readonly refresh: (cwd: string) => Effect.Effect<void>;
   }
 >()("t3/workspace/WorkspaceEntries") {}
@@ -73,11 +80,11 @@ function expandHomePath(input: string, path: Path.Path): string {
 }
 
 const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(function* (
-  input: Contracts.FilesystemBrowseInput,
+  input: FilesystemBrowseInput,
   path: Path.Path,
 ): Effect.fn.Return<string, WorkspaceEntriesBrowseError> {
-  const platform = yield* HostProcess.HostProcessPlatform;
-  if (platform !== "win32" && SharedPath.isWindowsAbsolutePath(input.partialPath)) {
+  const platform = yield* HostProcessPlatform;
+  if (platform !== "win32" && isWindowsAbsolutePath(input.partialPath)) {
     return yield* new WorkspaceEntriesBrowseError({
       cwd: input.cwd,
       partialPath: input.partialPath,
@@ -86,7 +93,7 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
     });
   }
 
-  if (!SharedPath.isExplicitRelativePath(input.partialPath)) {
+  if (!isExplicitRelativePath(input.partialPath)) {
     return path.resolve(expandHomePath(input.partialPath, path));
   }
 

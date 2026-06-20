@@ -1,5 +1,5 @@
-import * as Contracts from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/hostProcess";
+import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -10,19 +10,17 @@ import * as Path from "effect/Path";
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
-import * as ServerEnvironmentLabel from "./Layers/ServerEnvironmentLabel.ts";
+import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
 export class ServerEnvironment extends Context.Service<
   ServerEnvironment,
   {
-    readonly getEnvironmentId: Effect.Effect<Contracts.EnvironmentId>;
-    readonly getDescriptor: Effect.Effect<Contracts.ExecutionEnvironmentDescriptor>;
+    readonly getEnvironmentId: Effect.Effect<EnvironmentId>;
+    readonly getDescriptor: Effect.Effect<ExecutionEnvironmentDescriptor>;
   }
 >()("t3/environment/ServerEnvironment") {}
 
-function platformOs(
-  platform: NodeJS.Platform,
-): Contracts.ExecutionEnvironmentDescriptor["platform"]["os"] {
+function platformOs(platform: NodeJS.Platform): ExecutionEnvironmentDescriptor["platform"]["os"] {
   switch (platform) {
     case "darwin":
       return "darwin";
@@ -37,7 +35,7 @@ function platformOs(
 
 function platformArch(
   architecture: NodeJS.Architecture,
-): Contracts.ExecutionEnvironmentDescriptor["platform"]["arch"] {
+): ExecutionEnvironmentDescriptor["platform"]["arch"] {
   switch (architecture) {
     case "arm64":
       return "arm64";
@@ -53,8 +51,8 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const crypto = yield* Crypto.Crypto;
-  const hostPlatform = yield* HostProcess.HostProcessPlatform;
-  const hostArchitecture = yield* HostProcess.HostProcessArchitecture;
+  const hostPlatform = yield* HostProcessPlatform;
+  const hostArchitecture = yield* HostProcessArchitecture;
 
   const readPersistedEnvironmentId = Effect.gen(function* () {
     const exists = yield* fileSystem
@@ -85,11 +83,11 @@ export const make = Effect.gen(function* () {
     return generated;
   });
 
-  const environmentId = Contracts.EnvironmentId.make(environmentIdRaw);
+  const environmentId = EnvironmentId.make(environmentIdRaw);
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
-  const label = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({ cwdBaseName });
+  const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
 
-  const descriptor: Contracts.ExecutionEnvironmentDescriptor = {
+  const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
     label,
     platform: {

@@ -1,4 +1,4 @@
-import * as FFF from "@ff-labs/fff-node";
+import { FileFinder, type MixedItem, type MixedSearchResult } from "@ff-labs/fff-node";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -6,7 +6,11 @@ import * as LayerMap from "effect/LayerMap";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
-import type * as Contracts from "@t3tools/contracts";
+import type {
+  ProjectEntry,
+  ProjectListEntriesResult,
+  ProjectSearchEntriesResult,
+} from "@t3tools/contracts";
 
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
@@ -71,14 +75,11 @@ export type WorkspaceSearchIndexError =
 export class WorkspaceSearchIndex extends Context.Service<
   WorkspaceSearchIndex,
   {
-    readonly list: () => Effect.Effect<
-      Contracts.ProjectListEntriesResult,
-      WorkspaceSearchIndexSearchFailed
-    >;
+    readonly list: () => Effect.Effect<ProjectListEntriesResult, WorkspaceSearchIndexSearchFailed>;
     readonly search: (
       query: string,
       limit: number,
-    ) => Effect.Effect<Contracts.ProjectSearchEntriesResult, WorkspaceSearchIndexSearchFailed>;
+    ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceSearchIndexSearchFailed>;
     readonly refresh: () => Effect.Effect<
       void,
       WorkspaceSearchIndexRefreshFailed | WorkspaceSearchIndexScanTimedOut
@@ -99,7 +100,7 @@ function parentPathOf(input: string): string | undefined {
   return separatorIndex === -1 ? undefined : input.slice(0, separatorIndex);
 }
 
-function toProjectEntry(item: FFF.MixedItem): Contracts.ProjectEntry | null {
+function toProjectEntry(item: MixedItem): ProjectEntry | null {
   const normalizedPath = trimDirectorySeparator(toPosixPath(item.item.relativePath));
   if (!normalizedPath) {
     return null;
@@ -112,10 +113,10 @@ function toProjectEntry(item: FFF.MixedItem): Contracts.ProjectEntry | null {
 }
 
 function mapMixedSearchResult(
-  result: FFF.MixedSearchResult,
+  result: MixedSearchResult,
   limit: number,
-): { readonly entries: Contracts.ProjectEntry[]; readonly truncated: boolean } {
-  const entries: Contracts.ProjectEntry[] = [];
+): { readonly entries: ProjectEntry[]; readonly truncated: boolean } {
+  const entries: ProjectEntry[] = [];
   for (const item of result.items) {
     const entry = toProjectEntry(item);
     if (entry) {
@@ -137,9 +138,7 @@ function mapMixedSearchResult(
   };
 }
 
-function withDirectoryAncestors(
-  entries: ReadonlyArray<Contracts.ProjectEntry>,
-): Contracts.ProjectEntry[] {
+function withDirectoryAncestors(entries: ReadonlyArray<ProjectEntry>): ProjectEntry[] {
   const entryByPath = new Map(entries.map((entry) => [entry.path, entry]));
   for (const entry of entries) {
     let parentPath = parentPathOf(entry.path);
@@ -154,7 +153,7 @@ function withDirectoryAncestors(
 }
 
 const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (cwd: string) {
-  const result = FFF.FileFinder.create({
+  const result = FileFinder.create({
     basePath: cwd,
     disableMmapCache: true,
     disableContentIndexing: true,
@@ -168,7 +167,7 @@ const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (c
 
 const waitForScan = Effect.fn("WorkspaceSearchIndex.waitForScan")(function* (
   cwd: string,
-  finder: FFF.FileFinder,
+  finder: FileFinder,
 ) {
   yield* Effect.sync(() => finder.isScanning()).pipe(
     Effect.repeat({

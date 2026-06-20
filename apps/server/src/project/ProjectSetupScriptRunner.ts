@@ -1,5 +1,5 @@
-import * as Contracts from "@t3tools/contracts";
-import * as ProjectScripts from "@t3tools/shared/projectScripts";
+import { ProjectId } from "@t3tools/contracts";
+import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -107,7 +107,7 @@ export const make = Effect.gen(function* () {
   )(function* (input) {
     const projectById = input.projectId
       ? yield* projectionSnapshotQuery
-          .getProjectShellById(Contracts.ProjectId.make(input.projectId))
+          .getProjectShellById(ProjectId.make(input.projectId))
           .pipe(Effect.map(Option.getOrUndefined), mapRunnerError(input, "resolveProject"))
       : null;
     const project =
@@ -126,7 +126,7 @@ export const make = Effect.gen(function* () {
       );
     }
 
-    const script = ProjectScripts.setupProjectScript(project.scripts);
+    const script = setupProjectScript(project.scripts);
     if (!script) {
       return {
         status: "no-script",
@@ -135,7 +135,7 @@ export const make = Effect.gen(function* () {
 
     const terminalId = input.preferredTerminalId ?? `setup-${script.id}`;
     const cwd = input.worktreePath;
-    const env = ProjectScripts.projectScriptRuntimeEnv({
+    const env = projectScriptRuntimeEnv({
       project: { cwd: project.workspaceRoot },
       worktreePath: input.worktreePath,
     });

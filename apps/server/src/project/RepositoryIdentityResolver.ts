@@ -1,5 +1,8 @@
-import type * as Contracts from "@t3tools/contracts";
-import * as SharedGit from "@t3tools/shared/git";
+import type { RepositoryIdentity } from "@t3tools/contracts";
+import {
+  detectSourceControlProviderFromGitRemoteUrl,
+  normalizeGitRemoteUrl,
+} from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -22,7 +25,7 @@ export interface RepositoryIdentityResolverOptions {
 export class RepositoryIdentityResolver extends Context.Service<
   RepositoryIdentityResolver,
   {
-    readonly resolve: (cwd: string) => Effect.Effect<Contracts.RepositoryIdentity | null>;
+    readonly resolve: (cwd: string) => Effect.Effect<RepositoryIdentity | null>;
   }
 >()("t3/project/RepositoryIdentityResolver") {}
 
@@ -61,11 +64,9 @@ function buildRepositoryIdentity(input: {
   readonly remoteName: string;
   readonly remoteUrl: string;
   readonly rootPath: string;
-}): Contracts.RepositoryIdentity {
-  const canonicalKey = SharedGit.normalizeGitRemoteUrl(input.remoteUrl);
-  const sourceControlProvider = SharedGit.detectSourceControlProviderFromGitRemoteUrl(
-    input.remoteUrl,
-  );
+}): RepositoryIdentity {
+  const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl);
+  const sourceControlProvider = detectSourceControlProviderFromGitRemoteUrl(input.remoteUrl);
   const repositoryPath = canonicalKey.split("/").slice(1).join("/");
   const repositoryPathSegments = repositoryPath.split("/").filter((segment) => segment.length > 0);
   const [owner] = repositoryPathSegments;
@@ -117,7 +118,7 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   "RepositoryIdentityResolver.resolveFromCacheKey",
 )(function* (
   cacheKey: string,
-): Effect.fn.Return<Contracts.RepositoryIdentity | null, never, ProcessRunner.ProcessRunner> {
+): Effect.fn.Return<RepositoryIdentity | null, never, ProcessRunner.ProcessRunner> {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const remoteResult = yield* processRunner
     .run({
@@ -139,10 +140,7 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
 ) {
   const processRunner = yield* ProcessRunner.ProcessRunner;
 
-  const repositoryIdentityCache = yield* Cache.makeWith<
-    string,
-    Contracts.RepositoryIdentity | null
-  >(
+  const repositoryIdentityCache = yield* Cache.makeWith<string, RepositoryIdentity | null>(
     (cacheKey) =>
       resolveRepositoryIdentityFromCacheKey(cacheKey).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
