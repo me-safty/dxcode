@@ -5,12 +5,10 @@ import {
   type ModelSelection,
   type ProviderDriverKind,
   type ServerProvider,
-  type ServerSettings,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { type ChatMessage, type SessionPhase, type Thread } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -28,17 +26,6 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
-
-/**
- * Keep client-local preferences while replacing the server-authoritative
- * portion with settings from the environment that owns the active thread.
- */
-export function replaceUnifiedServerSettings(
-  settings: UnifiedSettings,
-  serverSettings: ServerSettings,
-): UnifiedSettings {
-  return { ...settings, ...serverSettings };
-}
 
 export function buildLocalDraftThread(
   threadId: ThreadId,
