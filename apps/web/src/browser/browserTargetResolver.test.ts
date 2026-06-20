@@ -65,7 +65,9 @@ describe("browser target resolver", () => {
   });
 
   it("preserves invalid environment URL causes with connection context", async () => {
-    readPreparedConnection.mockReturnValue({ httpBaseUrl: "not a url" });
+    const sensitiveUrl =
+      "https://user:password@[invalid-host]/private/workspace?access_token=secret#fragment";
+    readPreparedConnection.mockReturnValue({ httpBaseUrl: sensitiveUrl });
     const { BrowserTargetEnvironmentUrlInvalidError, resolveBrowserNavigationTarget } =
       await import("./browserTargetResolver");
 
@@ -79,11 +81,17 @@ describe("browser target resolver", () => {
       expect(error).toMatchObject({
         _tag: "BrowserTargetEnvironmentUrlInvalidError",
         environmentId: "environment-1",
-        httpBaseUrl: "not a url",
+        httpBaseUrlInputLength: sensitiveUrl.length,
         cause: expect.any(TypeError),
-        message: "Environment environment-1 has an invalid HTTP base URL: not a url.",
+        message: `Environment environment-1 has an invalid HTTP base URL input of length ${sensitiveUrl.length}.`,
       });
       expect(error).toBeInstanceOf(BrowserTargetEnvironmentUrlInvalidError);
+      expect(error).not.toHaveProperty("httpBaseUrl");
+      expect(error).not.toHaveProperty("httpBaseUrlProtocol");
+      expect(error).not.toHaveProperty("httpBaseUrlHostname");
+      expect(String((error as Error).message)).not.toMatch(
+        /user|password|private|workspace|access_token|secret|fragment/,
+      );
     }
   });
 

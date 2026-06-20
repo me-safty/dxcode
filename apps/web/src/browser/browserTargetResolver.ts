@@ -4,6 +4,7 @@ import {
   type PreviewUrlResolution,
 } from "@t3tools/contracts";
 import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Schema from "effect/Schema";
 
 import { readPreparedConnection } from "~/state/session";
@@ -23,12 +24,14 @@ export class BrowserTargetEnvironmentUrlInvalidError extends Schema.TaggedErrorC
   "BrowserTargetEnvironmentUrlInvalidError",
   {
     environmentId: EnvironmentId,
-    httpBaseUrl: Schema.String,
+    httpBaseUrlInputLength: Schema.Number,
+    httpBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    httpBaseUrlHostname: Schema.optionalKey(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Environment ${this.environmentId} has an invalid HTTP base URL: ${this.httpBaseUrl}.`;
+    return `Environment ${this.environmentId} has an invalid HTTP base URL input of length ${this.httpBaseUrlInputLength}.`;
   }
 }
 
@@ -81,9 +84,12 @@ export function resolveBrowserNavigationTarget(
   try {
     environmentUrl = new URL(connection.httpBaseUrl);
   } catch (cause) {
+    const diagnostics = getUrlDiagnostics(connection.httpBaseUrl);
     throw new BrowserTargetEnvironmentUrlInvalidError({
       environmentId,
-      httpBaseUrl: connection.httpBaseUrl,
+      httpBaseUrlInputLength: diagnostics.inputLength,
+      ...(diagnostics.protocol === undefined ? {} : { httpBaseUrlProtocol: diagnostics.protocol }),
+      ...(diagnostics.hostname === undefined ? {} : { httpBaseUrlHostname: diagnostics.hostname }),
       cause,
     });
   }
