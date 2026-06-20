@@ -36,7 +36,6 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
-const isGitCommandError = Schema.is(GitCommandError);
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
@@ -100,7 +99,7 @@ interface ExecuteGitOptions {
   stdin?: string | undefined;
   timeoutMs?: number | undefined;
   allowNonZeroExit?: boolean | undefined;
-  fallbackErrorMessage?: string | undefined;
+  fallbackErrorDetail?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   maxOutputBytes?: number | undefined;
   appendTruncationMarker?: boolean | undefined;
@@ -340,50 +339,24 @@ function parseDefaultBranchFromRemoteHeadRef(value: string, remoteName: string):
   return refName.length > 0 ? refName : null;
 }
 
-function createGitCommandError(
-  operation: string,
-  cwd: string,
-  args: readonly string[],
-  detail: string,
-  cause?: unknown,
-): GitCommandError {
-  return new GitCommandError({
-    operation,
-    command: commandLabel(args),
-    cwd,
-    detail,
-    ...(cause !== undefined ? { cause } : {}),
-  });
-}
-
-function quoteGitCommand(args: ReadonlyArray<string>): string {
-  return `git ${args.join(" ")}`;
-}
-
 function isMissingGitCwdError(error: GitCommandError): boolean {
-  const normalized = `${error.detail}\n${error.message}`.toLowerCase();
-  return (
-    normalized.includes("no such file or directory") ||
-    normalized.includes("notfound: filesystem.access") ||
-    normalized.includes("enoent") ||
-    normalized.includes("not a directory")
-  );
-}
+  if (!(error.cause instanceof PlatformError.PlatformError)) {
+    return false;
+  }
 
-function toGitCommandError(
-  input: Pick<GitVcsDriver.ExecuteGitInput, "operation" | "cwd" | "args">,
-  detail: string,
-) {
-  return (cause: unknown) =>
-    isGitCommandError(cause)
-      ? cause
-      : new GitCommandError({
-          operation: input.operation,
-          command: quoteGitCommand(input.args),
-          cwd: input.cwd,
-          detail: `${cause instanceof Error && cause.message.length > 0 ? cause.message : "Unknown error"} - ${detail}`,
-          ...(cause !== undefined ? { cause } : {}),
-        });
+  const reason = error.cause.reason;
+  if (reason._tag === "NotFound") {
+    return reason.pathOrDescriptor === error.cwd;
+  }
+
+  return (
+    reason._tag === "BadResource" &&
+    reason.pathOrDescriptor === error.cwd &&
+    typeof reason.cause === "object" &&
+    reason.cause !== null &&
+    "code" in reason.cause &&
+    reason.cause.code === "ENOTDIR"
+  );
 }
 
 interface Trace2Monitor {
@@ -402,7 +375,11 @@ const addCurrentSpanEvent = (name: string, attributes: Record<string, unknown>) 
     yield* Effect.sync(() => {
       span.event(name, timestamp, compactTraceAttributes(attributes));
     });
-  }).pipe(Effect.catch(() => Effect.void));
+  }).pipe(
+    Effect.catchTags({
+      NoSuchElementError: () => Effect.void,
+    }),
+  );
 
 function trace2ChildKey(record: Record<string, unknown>): string | null {
   const childId = record.child_id;
@@ -451,7 +428,7 @@ const createTrace2Monitor = Effect.fn("createTrace2Monitor")(function* (
     const traceRecord = decodeJsonResult(Trace2Record)(trimmedLine);
     if (Result.isFailure(traceRecord)) {
       yield* Effect.logDebug(
-        `GitVcsDriver.trace2: failed to parse trace line for ${quoteGitCommand(input.args)} in ${input.cwd}`,
+        `GitVcsDriver.trace2: failed to parse trace line for ${commandLabel(input.args)} in ${input.cwd}`,
         traceRecord.failure,
       );
       return;
@@ -574,9 +551,9 @@ const createTrace2Monitor = Effect.fn("createTrace2Monitor")(function* (
   };
 });
 
-const collectOutput = Effect.fnUntraced(function* <E>(
+const collectOutput = Effect.fnUntraced(function* (
   input: Pick<GitVcsDriver.ExecuteGitInput, "operation" | "cwd" | "args">,
-  stream: Stream.Stream<Uint8Array, E>,
+  stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
   maxOutputBytes: number,
   appendTruncationMarker: boolean,
   onLine: ((line: string) => Effect.Effect<void, never>) | undefined,
@@ -615,9 +592,9 @@ const collectOutput = Effect.fnUntraced(function* <E>(
     if (!appendTruncationMarker && nextBytes > maxOutputBytes) {
       return yield* new GitCommandError({
         operation: input.operation,
-        command: quoteGitCommand(input.args),
+        command: commandLabel(input.args),
         cwd: input.cwd,
-        detail: `${quoteGitCommand(input.args)} output exceeded ${maxOutputBytes} bytes and was truncated.`,
+        detail: `Git output exceeded ${maxOutputBytes} bytes and was truncated.`,
       });
     }
 
@@ -635,7 +612,16 @@ const collectOutput = Effect.fnUntraced(function* <E>(
   });
 
   yield* Stream.runForEach(stream, processChunk).pipe(
-    Effect.mapError(toGitCommandError(input, "output stream failed.")),
+    Effect.catchTags({
+      PlatformError: (cause) =>
+        new GitCommandError({
+          operation: input.operation,
+          command: commandLabel(input.args),
+          cwd: input.cwd,
+          detail: "Failed to read Git process output.",
+          cause,
+        }),
+    }),
   );
 
   const remainder = truncated ? "" : decoder.decode();
@@ -669,7 +655,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         const trace2Monitor = yield* createTrace2Monitor(commandInput, input.progress).pipe(
           Effect.provideService(Path.Path, path),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.mapError(toGitCommandError(commandInput, "failed to create trace2 monitor.")),
+          Effect.mapError(
+            (cause) =>
+              new GitCommandError({
+                operation: commandInput.operation,
+                command: commandLabel(commandInput.args),
+                cwd: commandInput.cwd,
+                detail: "Failed to create Git trace monitor.",
+                cause,
+              }),
+          ),
         );
         const child = yield* commandSpawner
           .spawn(
@@ -682,7 +677,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               },
             }),
           )
-          .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new GitCommandError({
+                  operation: commandInput.operation,
+                  command: commandLabel(commandInput.args),
+                  cwd: commandInput.cwd,
+                  detail: "Failed to spawn Git process.",
+                  cause,
+                }),
+            ),
+          );
 
         const [stdout, stderr, exitCode] = yield* Effect.all(
           [
@@ -701,12 +707,30 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               input.progress?.onStderrLine,
             ),
             child.exitCode.pipe(
-              Effect.mapError(toGitCommandError(commandInput, "failed to report exit code.")),
+              Effect.mapError(
+                (cause) =>
+                  new GitCommandError({
+                    operation: commandInput.operation,
+                    command: commandLabel(commandInput.args),
+                    cwd: commandInput.cwd,
+                    detail: "Failed to read Git process exit code.",
+                    cause,
+                  }),
+              ),
             ),
             input.stdin === undefined
               ? Effect.void
               : Stream.run(Stream.encodeText(Stream.make(input.stdin)), child.stdin).pipe(
-                  Effect.mapError(toGitCommandError(commandInput, "failed to write stdin.")),
+                  Effect.mapError(
+                    (cause) =>
+                      new GitCommandError({
+                        operation: commandInput.operation,
+                        command: commandLabel(commandInput.args),
+                        cwd: commandInput.cwd,
+                        detail: "Failed to write Git process input.",
+                        cause,
+                      }),
+                  ),
                 ),
           ],
           { concurrency: "unbounded" },
@@ -717,12 +741,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           const trimmedStderr = stderr.text.trim();
           return yield* new GitCommandError({
             operation: commandInput.operation,
-            command: quoteGitCommand(commandInput.args),
+            command: commandLabel(commandInput.args),
             cwd: commandInput.cwd,
             detail:
               trimmedStderr.length > 0
-                ? `${quoteGitCommand(commandInput.args)} failed: ${trimmedStderr}`
-                : `${quoteGitCommand(commandInput.args)} failed with code ${exitCode}.`,
+                ? `${commandLabel(commandInput.args)} failed: ${trimmedStderr}`
+                : `${commandLabel(commandInput.args)} failed with code ${exitCode}.`,
           });
         }
 
@@ -744,9 +768,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               Effect.fail(
                 new GitCommandError({
                   operation: commandInput.operation,
-                  command: quoteGitCommand(commandInput.args),
+                  command: commandLabel(commandInput.args),
                   cwd: commandInput.cwd,
-                  detail: `${quoteGitCommand(commandInput.args)} timed out.`,
+                  detail: `${commandLabel(commandInput.args)} timed out.`,
                 }),
               ),
             onSome: Effect.succeed,
@@ -801,20 +825,32 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         }
         const stderr = result.stderr.trim();
         if (stderr.length > 0) {
-          return Effect.fail(createGitCommandError(operation, cwd, args, stderr));
-        }
-        if (options.fallbackErrorMessage) {
           return Effect.fail(
-            createGitCommandError(operation, cwd, args, options.fallbackErrorMessage),
+            new GitCommandError({
+              operation,
+              command: commandLabel(args),
+              cwd,
+              detail: stderr,
+            }),
+          );
+        }
+        if (options.fallbackErrorDetail) {
+          return Effect.fail(
+            new GitCommandError({
+              operation,
+              command: commandLabel(args),
+              cwd,
+              detail: options.fallbackErrorDetail,
+            }),
           );
         }
         return Effect.fail(
-          createGitCommandError(
+          new GitCommandError({
             operation,
+            command: commandLabel(args),
             cwd,
-            args,
-            `${commandLabel(args)} failed: code=${result.exitCode ?? "null"}`,
-          ),
+            detail: `${commandLabel(args)} failed: code=${result.exitCode ?? "null"}`,
+          }),
         );
       }),
     );
@@ -877,12 +913,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
     }
 
-    return yield* createGitCommandError(
-      "GitVcsDriver.renameBranch",
+    return yield* new GitCommandError({
+      operation: "GitVcsDriver.renameBranch",
+      command: commandLabel(["branch", "-m", "--", desiredBranch]),
       cwd,
-      ["branch", "-m", "--", desiredBranch],
-      `Could not find an available branch name for '${desiredBranch}'.`,
-    );
+      detail: `Could not find an available branch name for '${desiredBranch}'.`,
+    });
   });
 
   const resolveCurrentUpstream = Effect.fn("resolveCurrentUpstream")(function* (cwd: string) {
@@ -1024,12 +1060,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (firstRemote) {
       return firstRemote;
     }
-    return yield* createGitCommandError(
-      "GitVcsDriver.resolvePrimaryRemoteName",
+    return yield* new GitCommandError({
+      operation: "GitVcsDriver.resolvePrimaryRemoteName",
+      command: commandLabel(["remote"]),
       cwd,
-      ["remote"],
-      "No git remote is configured for this repository.",
-    );
+      detail: "No git remote is configured for this repository.",
+    });
   });
 
   const resolvePushRemoteName = Effect.fn("resolvePushRemoteName")(function* (
@@ -1174,19 +1210,24 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       cwd,
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { allowNonZeroExit: true },
-    ).pipe(Effect.catchIf(isMissingGitCwdError, () => Effect.succeed(null)));
+    ).pipe(
+      Effect.catchTags({
+        GitCommandError: (error) =>
+          isMissingGitCwdError(error) ? Effect.succeed(null) : Effect.fail(error),
+      }),
+    );
 
     if (branchResult === null) {
       return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
     }
     if (branchResult.exitCode !== 0) {
       const stderr = branchResult.stderr.trim();
-      return yield* createGitCommandError(
-        "GitVcsDriver.statusDetailsRemote.branch",
+      return yield* new GitCommandError({
+        operation: "GitVcsDriver.statusDetailsRemote.branch",
+        command: commandLabel(["rev-parse", "--abbrev-ref", "HEAD"]),
         cwd,
-        ["rev-parse", "--abbrev-ref", "HEAD"],
-        stderr || "git branch lookup failed",
-      );
+        detail: stderr || "git branch lookup failed",
+      });
     }
 
     const branchValue = branchResult.stdout.trim();
@@ -1284,7 +1325,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       {
         allowNonZeroExit: true,
       },
-    ).pipe(Effect.catchIf(isMissingGitCwdError, () => Effect.succeed(null)));
+    ).pipe(
+      Effect.catchTags({
+        GitCommandError: (error) =>
+          isMissingGitCwdError(error) ? Effect.succeed(null) : Effect.fail(error),
+      }),
+    );
 
     if (statusResult === null) {
       return NON_REPOSITORY_STATUS_DETAILS;
@@ -1292,12 +1338,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     if (statusResult.exitCode !== 0) {
       const stderr = statusResult.stderr.trim();
-      return yield* createGitCommandError(
-        "GitVcsDriver.statusDetails.status",
+      return yield* new GitCommandError({
+        operation: "GitVcsDriver.statusDetails.status",
+        command: commandLabel(["status", "--porcelain=2", "--branch"]),
         cwd,
-        ["status", "--porcelain=2", "--branch"],
-        stderr || "git status failed",
-      );
+        detail: stderr || "git status failed",
+      });
     }
 
     const [unstagedNumstatStdout, stagedNumstatStdout, defaultRefResult, hasPrimaryRemote] =
@@ -1436,7 +1482,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     "statusDetails",
   )(function* (cwd) {
     yield* refreshStatusUpstreamIfStale(cwd).pipe(
-      Effect.catchIf(isMissingGitCwdError, () => Effect.void),
+      Effect.catchTags({
+        GitCommandError: (error) =>
+          isMissingGitCwdError(error) ? Effect.void : Effect.fail(error),
+      }),
       Effect.ignoreCause({ log: true }),
     );
     return yield* readStatusDetailsLocal(cwd);
@@ -1446,7 +1495,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     Effect.fn("statusDetailsRemote")(function* (cwd, options) {
       if (options?.refreshUpstream !== false) {
         yield* refreshStatusUpstreamIfStale(cwd).pipe(
-          Effect.catchIf(isMissingGitCwdError, () => Effect.void),
+          Effect.catchTags({
+            GitCommandError: (error) =>
+              isMissingGitCwdError(error) ? Effect.void : Effect.fail(error),
+          }),
           Effect.ignoreCause({ log: true }),
         );
       }
@@ -1474,7 +1526,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     Effect.fn("prepareCommitContext")(function* (cwd, filePaths) {
       if (filePaths && filePaths.length > 0) {
         yield* runGit("GitVcsDriver.prepareCommitContext.reset", cwd, ["reset"]).pipe(
-          Effect.catch(() => Effect.void),
+          Effect.catchTags({
+            GitCommandError: () => Effect.void,
+          }),
         );
         yield* runGit("GitVcsDriver.prepareCommitContext.addSelected", cwd, [
           "add",
@@ -1550,12 +1604,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const details = yield* statusDetails(cwd);
     const branch = details.branch ?? fallbackBranch;
     if (!branch) {
-      return yield* createGitCommandError(
-        "GitVcsDriver.pushCurrentBranch",
+      return yield* new GitCommandError({
+        operation: "GitVcsDriver.pushCurrentBranch",
+        command: commandLabel(["push"]),
         cwd,
-        ["push"],
-        "Cannot push from detached HEAD.",
-      );
+        detail: "Cannot push from detached HEAD.",
+      });
     }
 
     const requestedRemoteName = options?.remoteName?.trim() || null;
@@ -1614,12 +1668,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (!details.hasUpstream) {
       const publishRemoteName = yield* resolvePushRemoteName(cwd, branch);
       if (!publishRemoteName) {
-        return yield* createGitCommandError(
-          "GitVcsDriver.pushCurrentBranch",
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.pushCurrentBranch",
+          command: commandLabel(["push"]),
           cwd,
-          ["push"],
-          "Cannot push because no git remote is configured for this repository.",
-        );
+          detail: "Cannot push because no git remote is configured for this repository.",
+        });
       }
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
       yield* runGit("GitVcsDriver.pushCurrentBranch.pushWithUpstream", cwd, [
@@ -1668,20 +1722,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const details = yield* statusDetails(cwd);
     const refName = details.branch;
     if (!refName) {
-      return yield* createGitCommandError(
-        "GitVcsDriver.pullCurrentBranch",
+      return yield* new GitCommandError({
+        operation: "GitVcsDriver.pullCurrentBranch",
+        command: commandLabel(["pull", "--ff-only"]),
         cwd,
-        ["pull", "--ff-only"],
-        "Cannot pull from detached HEAD.",
-      );
+        detail: "Cannot pull from detached HEAD.",
+      });
     }
     if (!details.hasUpstream) {
-      return yield* createGitCommandError(
-        "GitVcsDriver.pullCurrentBranch",
+      return yield* new GitCommandError({
+        operation: "GitVcsDriver.pullCurrentBranch",
+        command: commandLabel(["pull", "--ff-only"]),
         cwd,
-        ["pull", "--ff-only"],
-        "Current branch has no upstream configured. Push with upstream first.",
-      );
+        detail: "Current branch has no upstream configured. Push with upstream first.",
+      });
     }
     const beforeSha = yield* runGitStdout(
       "GitVcsDriver.pullCurrentBranch.beforeSha",
@@ -1691,7 +1745,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     ).pipe(Effect.map((stdout) => stdout.trim()));
     yield* executeGit("GitVcsDriver.pullCurrentBranch.pull", cwd, ["pull", "--ff-only"], {
       timeoutMs: 30_000,
-      fallbackErrorMessage: "git pull failed",
+      fallbackErrorDetail: "git pull failed",
     });
     const afterSha = yield* runGitStdout(
       "GitVcsDriver.pullCurrentBranch.afterSha",
@@ -1874,14 +1928,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       crypto.digest("SHA-256", new TextEncoder().encode(diff)).pipe(
         Effect.map(Encoding.encodeHex),
         Effect.mapError(
-          toGitCommandError(
-            {
+          (cause) =>
+            new GitCommandError({
               operation: "GitVcsDriver.getReviewDiffPreview.hash",
+              command: "crypto.digest SHA-256",
               cwd: input.cwd,
-              args: [],
-            },
-            "failed to hash review diff.",
-          ),
+              detail: "Failed to hash review diff.",
+              cause,
+            }),
         ),
       );
     const [dirtyDiffHash, baseDiffHash] = yield* Effect.all([
@@ -1939,15 +1993,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           allowNonZeroExit: true,
         },
       ).pipe(
-        Effect.catchIf(isMissingGitCwdError, () =>
-          Effect.succeed({
-            exitCode: ChildProcessSpawner.ExitCode(128),
-            stdout: "",
-            stderr: "fatal: not a git repository",
-            stdoutTruncated: false,
-            stderrTruncated: false,
-          }),
-        ),
+        Effect.catchTags({
+          GitCommandError: (error) =>
+            isMissingGitCwdError(error)
+              ? Effect.succeed({
+                  exitCode: ChildProcessSpawner.ExitCode(128),
+                  stdout: "",
+                  stderr: "fatal: not a git repository",
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                })
+              : Effect.fail(error),
+        }),
       );
 
       if (localBranchResult.exitCode !== 0) {
@@ -1961,12 +2018,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             totalCount: 0,
           };
         }
-        return yield* createGitCommandError(
-          "GitVcsDriver.listRefs",
-          input.cwd,
-          ["branch", "--no-color", "--no-column"],
-          stderr || "git branch failed",
-        );
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.listRefs",
+          command: commandLabel(["branch", "--no-color", "--no-column"]),
+          cwd: input.cwd,
+          detail: stderr || "git branch failed",
+        });
       }
 
       const remoteBranchResultEffect = executeGit(
@@ -1978,19 +2035,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           allowNonZeroExit: true,
         },
       ).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning(
-            `GitVcsDriver.listRefs: remote refName lookup failed for ${input.cwd}: ${error.message}. Falling back to an empty remote refName list.`,
-          ).pipe(
-            Effect.as({
-              exitCode: ChildProcessSpawner.ExitCode(1),
-              stdout: "",
-              stderr: "",
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            } satisfies GitVcsDriver.ExecuteGitResult),
-          ),
-        ),
+        Effect.catchTags({
+          GitCommandError: (error) =>
+            Effect.logWarning(
+              `GitVcsDriver.listRefs: remote refName lookup failed for ${input.cwd}: ${error.message}. Falling back to an empty remote refName list.`,
+            ).pipe(
+              Effect.as({
+                exitCode: ChildProcessSpawner.ExitCode(1),
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              } satisfies GitVcsDriver.ExecuteGitResult),
+            ),
+        }),
       );
 
       const remoteNamesResultEffect = executeGit(
@@ -2002,19 +2060,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           allowNonZeroExit: true,
         },
       ).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning(
-            `GitVcsDriver.listRefs: remote name lookup failed for ${input.cwd}: ${error.message}. Falling back to an empty remote name list.`,
-          ).pipe(
-            Effect.as({
-              exitCode: ChildProcessSpawner.ExitCode(1),
-              stdout: "",
-              stderr: "",
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            } satisfies GitVcsDriver.ExecuteGitResult),
-          ),
-        ),
+        Effect.catchTags({
+          GitCommandError: (error) =>
+            Effect.logWarning(
+              `GitVcsDriver.listRefs: remote name lookup failed for ${input.cwd}: ${error.message}. Falling back to an empty remote name list.`,
+            ).pipe(
+              Effect.as({
+                exitCode: ChildProcessSpawner.ExitCode(1),
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              } satisfies GitVcsDriver.ExecuteGitResult),
+            ),
+        }),
       );
 
       const [defaultRef, worktreeList, remoteBranchResult, remoteNamesResult, branchLastCommit] =
@@ -2175,7 +2234,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       : ["worktree", "add", worktreePath, input.refName];
 
     yield* executeGit("GitVcsDriver.createWorktree", input.cwd, args, {
-      fallbackErrorMessage: "git worktree add failed",
+      fallbackErrorDetail: "git worktree add failed",
     });
 
     if (input.newRefName && input.baseRefName) {
@@ -2214,7 +2273,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           `+refs/pull/${input.prNumber}/head:refs/heads/${input.branch}`,
         ],
         {
-          fallbackErrorMessage: "git fetch pull request branch failed",
+          fallbackErrorDetail: "git fetch pull request branch failed",
         },
       );
     });
@@ -2227,7 +2286,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ["fetch", "--quiet", input.remoteName],
         {
           env: STATUS_UPSTREAM_REFRESH_ENV,
-          fallbackErrorMessage: `git fetch ${input.remoteName} failed`,
+          fallbackErrorDetail: `git fetch ${input.remoteName} failed`,
         },
       );
     },
@@ -2302,18 +2361,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     args.push(input.path);
     yield* executeGit("GitVcsDriver.removeWorktree", input.cwd, args, {
       timeoutMs: 15_000,
-      fallbackErrorMessage: "git worktree remove failed",
-    }).pipe(
-      Effect.mapError((error) =>
-        createGitCommandError(
-          "GitVcsDriver.removeWorktree",
-          input.cwd,
-          args,
-          `${commandLabel(args)} failed (cwd: ${input.cwd}): ${error.message}`,
-          error,
-        ),
-      ),
-    );
+      fallbackErrorDetail: "git worktree remove failed",
+    });
   });
 
   const renameBranch: GitVcsDriver.GitVcsDriver["Service"]["renameBranch"] = Effect.fn(
@@ -2330,7 +2379,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ["branch", "-m", "--", input.oldBranch, targetBranch],
       {
         timeoutMs: 10_000,
-        fallbackErrorMessage: "git branch rename failed",
+        fallbackErrorDetail: "git branch rename failed",
       },
     );
 
@@ -2407,7 +2456,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       yield* executeGit("GitVcsDriver.switchRef.checkout", input.cwd, checkoutArgs, {
         timeoutMs: 10_000,
-        fallbackErrorMessage: "git checkout failed",
+        fallbackErrorDetail: "git checkout failed",
       });
 
       const refName = yield* runGitStdout("GitVcsDriver.switchRef.currentBranch", input.cwd, [
@@ -2423,7 +2472,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     function* (input) {
       yield* executeGit("GitVcsDriver.createRef", input.cwd, ["branch", input.refName], {
         timeoutMs: 10_000,
-        fallbackErrorMessage: "git branch create failed",
+        fallbackErrorDetail: "git branch create failed",
       });
       if (input.switchRef) {
         yield* switchRef({ cwd: input.cwd, refName: input.refName });
@@ -2436,7 +2485,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const initRepo: GitVcsDriver.GitVcsDriver["Service"]["initRepo"] = (input) =>
     executeGit("GitVcsDriver.initRepo", input.cwd, ["init"], {
       timeoutMs: 10_000,
-      fallbackErrorMessage: "git init failed",
+      fallbackErrorDetail: "git init failed",
     }).pipe(Effect.asVoid);
 
   const listLocalBranchNames: GitVcsDriver.GitVcsDriver["Service"]["listLocalBranchNames"] = (
