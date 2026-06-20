@@ -10,6 +10,7 @@ This tracks planned improvements to make T3 Code a stronger harness around codin
 | -------- | ------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | P0       | Workspace identity and sidebar hierarchy          | Compat complete | Creates the Project -> Workspace -> Chat model that every other harness feature can attach to.                                    |
 | P0       | Workspace migration and compatibility layer       | Compat complete | Lets existing projects, threads, routes, and APIs keep working while workspace ownership rolls out.                               |
+| P0       | Durable workspace persistence model               | Not started     | Gives workspaces stable IDs and stored ownership so branch/worktree state no longer depends on thread metadata.                   |
 | P0       | Dev/prod data isolation and feature flag rollout  | Complete        | Lets the new workspace layout run in dev without risking the user's deployed/current T3 Code data.                                |
 | P0       | Workspace context folder                          | Not started     | Gives each workspace durable memory across turns, restarts, and provider handoffs.                                                |
 | P0       | Durable task list                                 | Not started     | Gives every workspace a trustworthy task state instead of relying on the agent to update a checklist.                             |
@@ -146,6 +147,41 @@ Still pending:
 - Add persistent workspace IDs and workspace-aware routes/API commands.
 - Backfill durable workspace records once the schema exists.
 - Keep old thread routes as aliases during the durable migration.
+
+## P0: Durable Workspace Persistence Model
+
+Replace the compatibility-only synthesized workspace groups with stored workspace records.
+
+This is the next task after the completed sidebar compatibility slice. It should preserve the
+current Project -> Workspace -> Chat UI while making workspace identity durable across restarts,
+branch renames, archive/restore cycles, and future workspace-level features.
+
+Target ownership model:
+
+- Workspace has a stable ID and belongs to one project.
+- Thread/chat points to a workspace.
+- Workspace owns branch, worktree path, local-checkout mode, terminal sessions, right-panel state,
+  lifecycle status, and future `.context` and task state.
+- Thread keeps conversation-specific state: messages, provider session, turns, approvals, and
+  turn-level diffs.
+
+Expected behavior:
+
+- Existing threads are backfilled into durable workspace records using the same stable execution
+  identity rules as the compatibility sidebar: worktree path first, then branch, then local checkout.
+- Branch names are mutable workspace metadata, not workspace identity.
+- Renaming a branch updates the workspace label/status instead of creating a different workspace.
+- Old thread URLs continue to resolve and select the containing workspace and chat.
+- New workspace-aware routes and commands can be added without breaking existing `threadId` flows.
+- Every visible chat belongs to exactly one persisted workspace.
+
+Initial implementation notes:
+
+- Add the workspace schema/contract first, then projection backfill, then UI consumption.
+- Keep thread-owned branch/worktree fields readable until the durable migration is proven.
+- Add tests for old snapshots, new snapshots, mixed snapshots, branch rename, archive/restore, and
+  project-scoped new chat creation.
+- Only after this model is stable should branch/worktree ownership move fully off thread records.
 
 ## P0: Dev/Prod Data Isolation and Feature Flag Rollout
 
@@ -612,19 +648,20 @@ Initial implementation notes:
 2. Add workspace identity above thread/chat with additive migration/backfill for old threads.
 3. Preserve old thread routes and thread-id commands while resolving the containing workspace internally.
 4. Change the sidebar to Project -> Workspace -> Chat while keeping the center one-chat layout behind the feature flag.
-5. Move branch/worktree ownership toward workspace while preserving existing turn/diff behavior.
-6. Add `.context/` creation and basic read/write helpers scoped to workspace.
-7. Add durable workspace task-list schemas and a basic task UI.
-8. Mirror task state into `.context/tasks.md`.
-9. Add repo setup profiles and prebuilt `.env*` worktree copy rules.
-10. Inject a small T3 Code harness prompt for Codex sessions using workspace context.
-11. Add manual "Update handoff" and "Read workspace context" actions.
-12. Add deterministic context and task updates after turn completion.
-13. Add action-specific prompts for review and PR creation.
-14. Make changed-file clicks use the current integrated review surface by default.
-15. Add diff grouping, filters, collapse state, clearer turn labels, and per-file review state.
-16. Build the workspace lifecycle dashboard.
-17. Add the merge readiness checks panel.
-18. Persist structured review comments.
-19. Add issue/PR fanout.
-20. Design and build Spotlight-style root runner.
+5. Add the durable workspace persistence model with stable workspace IDs and thread-to-workspace links.
+6. Move branch/worktree ownership toward workspace while preserving existing turn/diff behavior.
+7. Add `.context/` creation and basic read/write helpers scoped to workspace.
+8. Add durable workspace task-list schemas and a basic task UI.
+9. Mirror task state into `.context/tasks.md`.
+10. Add repo setup profiles and prebuilt `.env*` worktree copy rules.
+11. Inject a small T3 Code harness prompt for Codex sessions using workspace context.
+12. Add manual "Update handoff" and "Read workspace context" actions.
+13. Add deterministic context and task updates after turn completion.
+14. Add action-specific prompts for review and PR creation.
+15. Make changed-file clicks use the current integrated review surface by default.
+16. Add diff grouping, filters, collapse state, clearer turn labels, and per-file review state.
+17. Build the workspace lifecycle dashboard.
+18. Add the merge readiness checks panel.
+19. Persist structured review comments.
+20. Add issue/PR fanout.
+21. Design and build Spotlight-style root runner.
