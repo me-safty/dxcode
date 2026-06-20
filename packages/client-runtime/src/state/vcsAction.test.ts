@@ -64,8 +64,8 @@ function progress<T extends GitActionProgressEvent>(event: T): T {
 }
 
 describe("vcsActionState", () => {
-  it("preserves malformed target keys and their native cause", () => {
-    const key = "not-json";
+  it("preserves malformed target key diagnostics and the native cause without copying the key", () => {
+    const key = "not-json-with-credential=do-not-log";
     let error: unknown;
 
     try {
@@ -75,7 +75,9 @@ describe("vcsActionState", () => {
     }
 
     expect(error).toBeInstanceOf(VcsActionTargetKeyParseError);
-    expect(error).toMatchObject({ key, cause: expect.any(SyntaxError) });
+    expect(error).toMatchObject({ keyLength: key.length, cause: expect.any(SyntaxError) });
+    expect(error).not.toHaveProperty("key");
+    expect((error as Error).message).not.toContain(key);
   });
 
   it("rejects invalid target key shapes", () => {
@@ -294,10 +296,11 @@ describe("vcsActionState", () => {
     }),
   );
 
-  it.effect("retains remote failure context in a distinct error", () =>
+  it.effect("retains structural remote failure context without copying the remote payload", () =>
     Effect.gen(function* () {
       const target = { environmentId, cwd };
       const transportActionId = createVcsActionTransportId(target, actionId);
+      const remoteMessage = "The remote rejected the push with credential=do-not-log.";
       const error = yield* consumeVcsActionProgress(
         Stream.fromIterable<GitActionProgressEvent>([
           {
@@ -306,7 +309,7 @@ describe("vcsActionState", () => {
             cwd,
             kind: "action_failed",
             phase: "push",
-            message: "The remote rejected the push.",
+            message: remoteMessage,
           },
         ]),
         {
@@ -326,11 +329,11 @@ describe("vcsActionState", () => {
         environmentId,
         cwd,
         phase: "push",
-        detail: "The remote rejected the push.",
+        remoteMessageLength: remoteMessage.length,
       });
-      expect(error.message).toBe(
-        "Source control action 'commit_push' failed during push: The remote rejected the push.",
-      );
+      expect(error).not.toHaveProperty("detail");
+      expect(error.message).toBe("Source control action 'commit_push' failed during push.");
+      expect(error.message).not.toContain(remoteMessage);
     }),
   );
 

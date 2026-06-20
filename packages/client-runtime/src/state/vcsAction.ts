@@ -99,12 +99,12 @@ export class VcsActionRemoteFailureError extends Schema.TaggedErrorClass<VcsActi
     environmentId: EnvironmentId,
     cwd: Schema.String,
     phase: Schema.NullOr(GitActionProgressPhase),
-    detail: Schema.String,
+    remoteMessageLength: Schema.Number,
   },
 ) {
   override get message(): string {
     const phase = this.phase === null ? "execution" : this.phase;
-    return `Source control action '${this.action}' failed during ${phase}: ${this.detail}`;
+    return `Source control action '${this.action}' failed during ${phase}.`;
   }
 }
 
@@ -126,12 +126,12 @@ export class VcsActionMissingTerminalEventError extends Schema.TaggedErrorClass<
 export class VcsActionTargetKeyParseError extends Schema.TaggedErrorClass<VcsActionTargetKeyParseError>()(
   "VcsActionTargetKeyParseError",
   {
-    key: Schema.String,
+    keyLength: Schema.Number,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Invalid source control action target key: ${JSON.stringify(this.key)}.`;
+    return `Invalid source control action target key (${this.keyLength} characters).`;
   }
 }
 
@@ -185,7 +185,7 @@ export function parseVcsActionTargetKey(key: string): ResolvedVcsActionTarget {
     const [environmentId, cwd] = decodeVcsActionTargetKey(JSON.parse(key));
     return { environmentId, cwd };
   } catch (cause) {
-    throw new VcsActionTargetKeyParseError({ key, cause });
+    throw new VcsActionTargetKeyParseError({ keyLength: key.length, cause });
   }
 }
 
@@ -292,7 +292,7 @@ export function consumeVcsActionProgress<E, R>(
               environmentId: input.target.environmentId,
               cwd: input.target.cwd,
               phase: terminalEvent.phase,
-              detail: terminalEvent.message,
+              remoteMessageLength: terminalEvent.message.length,
             }),
           );
         }
