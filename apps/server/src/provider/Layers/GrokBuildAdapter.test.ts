@@ -608,6 +608,80 @@ grokUserInputAdapterTestLayer("GrokBuildAdapter user input", (it) => {
       yield* adapter.stopSession(threadId);
     }),
   );
+
+  it.effect("handles xAI ask_user_question extension requests", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-xai-ask-user-question");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_EMIT_XAI_ASK_USER_QUESTION: "1" }),
+      );
+      const xaiAdapter = yield* makeGrokBuildAdapter(
+        decodeGrokBuildSettings({
+          enabled: true,
+          command: wrapperPath,
+          args: [],
+          envJson: "{}",
+          customModels: [],
+        }),
+        { instanceId: ProviderInstanceId.make("grok-build-test") },
+      );
+      const requested =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>>();
+      const resolved =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.resolved" }>>();
+
+      const eventsFiber = yield* Stream.runForEach(xaiAdapter.streamEvents, (event) => {
+        if (String(event.threadId) !== String(threadId)) {
+          return Effect.void;
+        }
+        if (event.type === "user-input.requested") {
+          return Deferred.succeed(requested, event).pipe(Effect.ignore);
+        }
+        if (event.type === "user-input.resolved") {
+          return Deferred.succeed(resolved, event).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }).pipe(Effect.forkChild);
+
+      yield* xaiAdapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok-build"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok-build-test"),
+          model: "grok-build",
+        },
+      });
+
+      const sendTurnFiber = yield* xaiAdapter
+        .sendTurn({ threadId, input: "ask before continuing", attachments: [] })
+        .pipe(Effect.forkChild);
+
+      const requestedEvent = yield* Deferred.await(requested);
+      expect(requestedEvent.payload.questions.length).toBe(1);
+      expect(requestedEvent.payload.questions[0]?.id).toBe("Which scope should Grok use?");
+      expect(requestedEvent.payload.questions[0]?.question).toBe("Which scope should Grok use?");
+      expect(requestedEvent.raw?.method).toBe("_x.ai/ask_user_question");
+
+      yield* xaiAdapter.respondToUserInput(
+        threadId,
+        ApprovalRequestId.make(String(requestedEvent.requestId)),
+        {
+          "Which scope should Grok use?": "Workspace",
+        },
+      );
+
+      const resolvedEvent = yield* Deferred.await(resolved);
+      expect(resolvedEvent.payload.answers).toEqual({
+        "Which scope should Grok use?": "Workspace",
+      });
+      yield* Fiber.await(sendTurnFiber);
+
+      yield* Fiber.interrupt(eventsFiber);
+      yield* xaiAdapter.stopSession(threadId);
+    }),
+  );
 });
 
 const grokPlanAdapterTestLayer = it.layer(
