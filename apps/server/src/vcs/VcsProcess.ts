@@ -46,19 +46,15 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 
-function commandLabel(command: string, args: ReadonlyArray<string>): string {
-  return [command, ...args].join(" ");
-}
-
 export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
 
   const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
-    const label = commandLabel(input.command, input.args);
     const baseError = {
       operation: input.operation,
-      command: label,
+      command: input.command,
       cwd: input.cwd,
+      argumentCount: input.args.length,
     };
 
     const result = yield* processRunner
@@ -98,11 +94,11 @@ export const make = Effect.gen(function* () {
 
     if (!input.allowNonZeroExit && result.code !== 0) {
       return yield* new VcsProcessExitError({
-        operation: input.operation,
-        command: label,
-        cwd: input.cwd,
+        ...baseError,
         exitCode: result.code,
-        detail: result.stderr.trim() || `${label} exited with code ${result.code}.`,
+        detail: "Process exited with a non-zero status.",
+        stderrLength: result.stderr.length,
+        stderrTruncated: result.stderrTruncated,
       });
     }
 

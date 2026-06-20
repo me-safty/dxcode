@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const VcsDriverKind = Schema.Literals(["git", "jj", "unknown"]);
 export type VcsDriverKind = typeof VcsDriverKind.Type;
@@ -62,6 +62,7 @@ export interface VcsProcessErrorContext {
   readonly operation: string;
   readonly command: string;
   readonly cwd: string;
+  readonly argumentCount?: number;
 }
 
 export interface VcsProcessSpawnFailure {
@@ -92,6 +93,7 @@ export class VcsProcessSpawnError extends Schema.TaggedErrorClass<VcsProcessSpaw
     operation: Schema.String,
     command: Schema.String,
     cwd: Schema.String,
+    argumentCount: Schema.optional(NonNegativeInt),
     cause: Schema.Defect(),
   },
 ) {
@@ -113,8 +115,11 @@ export class VcsProcessExitError extends Schema.TaggedErrorClass<VcsProcessExitE
     operation: Schema.String,
     command: Schema.String,
     cwd: Schema.String,
+    argumentCount: Schema.optional(NonNegativeInt),
     exitCode: Schema.Number,
     detail: Schema.String,
+    stderrLength: Schema.optional(NonNegativeInt),
+    stderrTruncated: Schema.optional(Schema.Boolean),
   },
 ) {
   override get message(): string {
@@ -128,6 +133,7 @@ export class VcsProcessTimeoutError extends Schema.TaggedErrorClass<VcsProcessTi
     operation: Schema.String,
     command: Schema.String,
     cwd: Schema.String,
+    argumentCount: Schema.optional(NonNegativeInt),
     timeoutMs: Schema.Number,
   },
 ) {
@@ -149,6 +155,7 @@ export class VcsOutputDecodeError extends Schema.TaggedErrorClass<VcsOutputDecod
     operation: Schema.String,
     command: Schema.String,
     cwd: Schema.String,
+    argumentCount: Schema.optional(NonNegativeInt),
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
