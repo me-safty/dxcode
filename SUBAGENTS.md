@@ -74,7 +74,7 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 ## Web Implementation
 
-1. Sidebar nesting is driven by `parentRelation`. Active subagents render under their direct parent only. Terminal subagents are omitted from the sidebar during normal parent browsing, but the currently open terminal child path remains visible and indented while that child or nested descendant is selected.
+1. Sidebar nesting is driven by `parentRelation`. Active subagents render under their direct parent only. Terminal subagents are omitted from the sidebar during normal parent browsing, but the currently open terminal child path remains visible and indented while that child or nested descendant is selected. Sidebar tree construction keeps the full non-archived parent chain as structural context before applying terminal-row visibility, so a running descendant does not get promoted to a root row just because an intermediate terminal ancestor is hidden. The currently routed child shell is also included in the sidebar's in-memory route context when available, which preserves active-path visibility while hidden thread details are still catching up to the normal sidebar list.
 
 2. Conversation detail routing accepts hidden child threads through projected/synthetic shells. A child thread can be opened from its parent block even after it has disappeared from the active sidebar.
 
@@ -86,7 +86,7 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 6. Child conversation views replace the normal composer with a subagent control bar. Users cannot send prompts to a subagent. While a child is running, the available user control is stop. The chat header also includes an up-navigation button that opens the direct parent conversation.
 
-7. Review fixes removed duplicate compact subagent rows from Codex control sequences such as `wait` and `closeAgent`. Parent timelines now de-dupe child reference rows by child thread id plus parent collab item id, so control repeats collapse while each prompt-bearing resumed child activity with a new parent item id renders as a new appended block, even when multiple activities happen in the same parent turn.
+7. Review fixes removed duplicate compact subagent rows from Codex control sequences such as `wait` and `closeAgent`. Parent timelines now de-dupe child reference rows by child thread id plus parent collab item id, so control repeats collapse while each prompt-bearing resumed child activity with a new parent item id renders as a new appended block, even when multiple activities happen in the same parent turn. Subagent row live-status matching treats the parent collab item id as authoritative when present, also requires turn agreement when both sides know the turn id, and falls back to turn matching for legacy rows where one side lacks the item id.
 
 8. Shared subagent display helpers keep duration and fallback labels consistent across parent blocks and child controls. Terminal child rows with missing completion timestamps show an explicit unknown-duration fallback instead of implying successful completion, and active children use `working` wording instead of `running` wording.
 
@@ -111,7 +111,7 @@ The implementation and review fixes have been covered by focused automated tests
 
 - Server tests cover Codex subagent ingestion, parent-collab child shell synthesis, child terminal status, parent-relation persistence, projection upsert preservation, child stop/interrupt routing through the provider-bound root session without root-turn fallback, and archive/delete lifecycle cascades through subagent descendants.
 - Server tests cover raw subagent prompt projection into child threads, including start-then-complete late prompt updates and whitespace-only prompt suppression.
-- Web tests cover sidebar/thread state behavior, duplicate parent subagent control-row removal, same-turn resumed child activity rows, child composer suppression, subagent stop control behavior, and duration fallback labels.
+- Web tests cover sidebar/thread state behavior, hidden terminal ancestor traversal, active terminal child path retention, subagent sibling ordering, duplicate parent subagent control-row removal, same-turn resumed child activity rows, child composer suppression, subagent stop control behavior, and duration fallback labels.
 - Client-runtime tests cover shared idle retention for stream-backed thread state across short subscriber gaps.
 - Playwright checked Codex subagent behavior with marker prompts: before the prompt projection fix, the child view showed the output marker but not the initial prompt marker; after the fix, the child view showed the initial prompt marker followed by the output marker. Earlier Playwright coverage also checked that the parent showed exactly one compact subagent block, child output/actions did not leak into the parent, the child view was reachable from the parent block, the child view showed the child command/output, and the child view did not expose a prompt composer.
 
