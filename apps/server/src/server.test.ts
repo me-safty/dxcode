@@ -4554,27 +4554,73 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("routes websocket rpc projects.searchEntries errors", () =>
+  it.effect("preserves structured workspace rpc failures", () =>
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-workspace-errors-",
+      });
+
       yield* buildAppUnderTest();
 
+      const invalidWorkspace = path.join(workspaceDir, "missing-workspace");
+      const missingBrowseParent = path.join(workspaceDir, "missing-browse");
+      const sensitiveQuery = "authorization: Bearer secret-token";
       const wsUrl = yield* getWsServerUrl("/ws");
-      const result = yield* Effect.scoped(
+      const results = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.projectsSearchEntries]({
-            cwd: "/definitely/not/a/real/workspace/path",
-            query: "needle",
-            limit: 10,
+          Effect.all({
+            search: client[WS_METHODS.projectsSearchEntries]({
+              cwd: invalidWorkspace,
+              query: sensitiveQuery,
+              limit: 10,
+            }).pipe(Effect.result),
+            browse: client[WS_METHODS.filesystemBrowse]({
+              cwd: workspaceDir,
+              partialPath: "./missing-browse/child",
+            }).pipe(Effect.result),
           }),
-        ).pipe(Effect.result),
+        ),
       );
 
-      assertTrue(result._tag === "Failure");
-      assertTrue(result.failure._tag === "ProjectSearchEntriesError");
-      assertInclude(
-        result.failure.message,
-        "Workspace root does not exist: /definitely/not/a/real/workspace/path",
+      if (
+        results.search._tag !== "Failure" ||
+        results.search.failure._tag !== "ProjectSearchEntriesError"
+      ) {
+        assert.fail("Expected a ProjectSearchEntriesError");
+      }
+      const searchError = results.search.failure;
+      assert.equal(
+        searchError.message,
+        `Failed to search workspace entries in '${invalidWorkspace}'.`,
       );
+      assert.equal(searchError.cwd, invalidWorkspace);
+      assert.equal(searchError.queryLength, sensitiveQuery.length);
+      assert.notProperty(searchError, "query");
+      assert.notInclude(searchError.message, "Bearer");
+      assert.notInclude(searchError.message, "secret-token");
+      assert.equal(searchError.limit, 10);
+      assert.equal(searchError.failure, "workspace_root_not_found");
+      assert.equal(searchError.normalizedCwd, invalidWorkspace);
+      assert.isDefined(searchError.cause);
+
+      if (
+        results.browse._tag !== "Failure" ||
+        results.browse.failure._tag !== "FilesystemBrowseError"
+      ) {
+        assert.fail("Expected a FilesystemBrowseError");
+      }
+      const browseError = results.browse.failure;
+      assert.equal(
+        browseError.message,
+        `Failed to browse filesystem path './missing-browse/child' from '${workspaceDir}'.`,
+      );
+      assert.equal(browseError.cwd, workspaceDir);
+      assert.equal(browseError.partialPath, "./missing-browse/child");
+      assert.equal(browseError.failure, "read_directory_failed");
+      assert.equal(browseError.parentPath, missingBrowseParent);
+      assert.isDefined(browseError.cause);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -4655,12 +4701,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ).pipe(Effect.result),
       );
 
-      assertTrue(result._tag === "Failure");
-      assertTrue(result.failure._tag === "ProjectWriteFileError");
+      if (result._tag !== "Failure" || result.failure._tag !== "ProjectWriteFileError") {
+        assert.fail("Expected a ProjectWriteFileError");
+      }
+      const writeError = result.failure;
       assert.equal(
-        result.failure.message,
-        "Workspace file path must stay within the project root.",
+        writeError.message,
+        `Failed to write workspace file '../escape.txt' in '${workspaceDir}'.`,
       );
+      assert.equal(writeError.cwd, workspaceDir);
+      assert.equal(writeError.relativePath, "../escape.txt");
+      assert.equal(writeError.failure, "workspace_path_outside_root");
+      assert.isDefined(writeError.cause);
+      assert.notProperty(writeError, "contents");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

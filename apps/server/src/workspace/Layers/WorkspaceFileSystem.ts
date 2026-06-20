@@ -5,7 +5,7 @@ import * as Path from "effect/Path";
 
 import {
   WorkspaceFileSystem,
-  WorkspaceFileSystemError,
+  WorkspaceFileSystemOperationError,
   type WorkspaceFileSystemShape,
 } from "../Services/WorkspaceFileSystem.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
@@ -28,11 +28,12 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* fileSystem.makeDirectory(path.dirname(target.absolutePath), { recursive: true }).pipe(
       Effect.mapError(
         (cause) =>
-          new WorkspaceFileSystemError({
-            cwd: input.cwd,
+          new WorkspaceFileSystemOperationError({
+            workspaceRoot: input.cwd,
             relativePath: input.relativePath,
-            operation: "workspaceFileSystem.makeDirectory",
-            detail: cause.message,
+            resolvedPath: target.absolutePath,
+            operationPath: path.dirname(target.absolutePath),
+            operation: "make-directory",
             cause,
           }),
       ),
@@ -40,11 +41,12 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* fileSystem.writeFileString(target.absolutePath, input.contents).pipe(
       Effect.mapError(
         (cause) =>
-          new WorkspaceFileSystemError({
-            cwd: input.cwd,
+          new WorkspaceFileSystemOperationError({
+            workspaceRoot: input.cwd,
             relativePath: input.relativePath,
-            operation: "workspaceFileSystem.writeFile",
-            detail: cause.message,
+            resolvedPath: target.absolutePath,
+            operationPath: target.absolutePath,
+            operation: "write-file",
             cause,
           }),
       ),

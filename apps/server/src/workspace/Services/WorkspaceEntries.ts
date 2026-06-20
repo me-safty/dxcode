@@ -17,26 +17,104 @@ import type {
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
 
-export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntriesError>()(
-  "WorkspaceEntriesError",
-  {
-    cwd: Schema.String,
-    operation: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {}
+import {
+  WorkspaceRootCreateFailedError,
+  WorkspaceRootNotDirectoryError,
+  WorkspaceRootNotExistsError,
+} from "./WorkspacePaths.ts";
 
-export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<WorkspaceEntriesBrowseError>()(
-  "WorkspaceEntriesBrowseError",
+export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedErrorClass<WorkspaceEntriesWindowsPathUnsupportedError>()(
+  "WorkspaceEntriesWindowsPathUnsupportedError",
   {
     cwd: Schema.optional(Schema.String),
     partialPath: Schema.String,
-    operation: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    platform: Schema.String,
   },
-) {}
+) {
+  override get message(): string {
+    const cwd = this.cwd ? ` from '${this.cwd}'` : "";
+    return `Windows-style workspace path '${this.partialPath}' is not supported on '${this.platform}'${cwd}.`;
+  }
+}
+
+export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedErrorClass<WorkspaceEntriesCurrentProjectRequiredError>()(
+  "WorkspaceEntriesCurrentProjectRequiredError",
+  {
+    partialPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `A current project is required to browse relative workspace path '${this.partialPath}'.`;
+  }
+}
+
+export class WorkspaceEntriesReadDirectoryError extends Schema.TaggedErrorClass<WorkspaceEntriesReadDirectoryError>()(
+  "WorkspaceEntriesReadDirectoryError",
+  {
+    cwd: Schema.optional(Schema.String),
+    partialPath: Schema.String,
+    parentPath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    const cwd = this.cwd ? ` from '${this.cwd}'` : "";
+    return `Failed to read workspace directory '${this.parentPath}' while browsing '${this.partialPath}'${cwd}.`;
+  }
+}
+
+export const WorkspaceEntriesBrowseError = Schema.Union([
+  WorkspaceEntriesWindowsPathUnsupportedError,
+  WorkspaceEntriesCurrentProjectRequiredError,
+  WorkspaceEntriesReadDirectoryError,
+]);
+export type WorkspaceEntriesBrowseError = typeof WorkspaceEntriesBrowseError.Type;
+
+export class WorkspaceSearchIndexCreateFailed extends Schema.TaggedErrorClass<WorkspaceSearchIndexCreateFailed>()(
+  "WorkspaceSearchIndexCreateFailed",
+  {
+    cwd: Schema.String,
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Failed to create the workspace search index for '${this.cwd}': ${this.reason}`;
+  }
+}
+
+export class WorkspaceSearchIndexScanTimedOut extends Schema.TaggedErrorClass<WorkspaceSearchIndexScanTimedOut>()(
+  "WorkspaceSearchIndexScanTimedOut",
+  {
+    cwd: Schema.String,
+    timeout: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Workspace search index for '${this.cwd}' did not finish scanning within ${this.timeout}`;
+  }
+}
+
+export class WorkspaceSearchIndexSearchFailed extends Schema.TaggedErrorClass<WorkspaceSearchIndexSearchFailed>()(
+  "WorkspaceSearchIndexSearchFailed",
+  {
+    cwd: Schema.String,
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Workspace search failed for '${this.cwd}': ${this.reason}`;
+  }
+}
+
+export const WorkspaceEntriesError = Schema.Union([
+  WorkspaceRootNotExistsError,
+  WorkspaceRootCreateFailedError,
+  WorkspaceRootNotDirectoryError,
+  WorkspaceSearchIndexCreateFailed,
+  WorkspaceSearchIndexScanTimedOut,
+  WorkspaceSearchIndexSearchFailed,
+]);
+export type WorkspaceEntriesError = typeof WorkspaceEntriesError.Type;
 
 /**
  * WorkspaceEntriesShape - Service API for workspace entry search and cache
