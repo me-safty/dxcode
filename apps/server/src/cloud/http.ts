@@ -565,7 +565,6 @@ const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(fu
     endpointRuntimeStatus.status === "disabled" || endpointRuntimeStatus.status === "running";
   if (!ok) {
     return yield* new EnvironmentCloudEndpointUnavailableError({
-      reason: "runtime_start_failed",
       endpointRuntimeStatus,
     });
   }

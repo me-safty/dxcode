@@ -203,9 +203,6 @@ const environmentHttpUnauthorizedMessages = {
   invalid_cloud_mint_request: "Invalid cloud mint request.",
 } satisfies Record<EnvironmentHttpUnauthorizedReason, string>;
 
-export const EnvironmentHttpForbiddenReason = Schema.Literal("cloud_operation_forbidden");
-export type EnvironmentHttpForbiddenReason = typeof EnvironmentHttpForbiddenReason.Type;
-
 export const EnvironmentHttpInternalOperation = Schema.Literals([
   "generate_link_proof",
   "verify_linked_cloud_account",
@@ -355,18 +352,13 @@ export class EnvironmentHttpUnauthorizedError extends Schema.TaggedErrorClass<En
 export class EnvironmentHttpForbiddenError extends Schema.TaggedErrorClass<EnvironmentHttpForbiddenError>()(
   "EnvironmentHttpForbiddenError",
   {
-    reason: Schema.optional(EnvironmentHttpForbiddenReason),
     message: Schema.String,
   },
   { httpApiStatus: 403 },
 ) {
   // @effect-diagnostics-next-line overriddenSchemaConstructor:off
-  constructor(props: {
-    readonly reason: EnvironmentHttpForbiddenReason;
-    readonly cause?: unknown;
-  }) {
+  constructor(props: { readonly cause?: unknown } = {}) {
     super({
-      reason: props.reason,
       message: decodedEnvironmentHttpErrorMessage(props) ?? "Cloud operation is forbidden.",
       ...(props.cause === undefined ? {} : { cause: props.cause }),
     } as any);
@@ -449,18 +441,13 @@ export class EnvironmentHttpConflictError extends Schema.TaggedErrorClass<Enviro
 export class EnvironmentCloudEndpointUnavailableError extends Schema.TaggedErrorClass<EnvironmentCloudEndpointUnavailableError>()(
   "EnvironmentCloudEndpointUnavailableError",
   {
-    reason: Schema.optional(Schema.Literal("runtime_start_failed")),
     message: Schema.String,
     endpointRuntimeStatus: Schema.Unknown,
   },
   { httpApiStatus: 503 },
 ) {
   // @effect-diagnostics-next-line overriddenSchemaConstructor:off
-  constructor(props: {
-    readonly reason: "runtime_start_failed";
-    readonly endpointRuntimeStatus: unknown;
-    readonly cause?: unknown;
-  }) {
+  constructor(props: { readonly endpointRuntimeStatus: unknown; readonly cause?: unknown }) {
     super({
       ...props,
       message:
