@@ -13,8 +13,11 @@ import {
 } from "@t3tools/client-runtime/platform";
 import { TokenStore } from "@t3tools/client-runtime/authorization";
 import {
+  ConnectionStorageOperationError,
   ConnectionTransientError,
   CredentialStore,
+  DesktopSecureStorageUnavailableError,
+  IndexedDbUnavailableError,
   ProfileStore,
 } from "@t3tools/client-runtime/connection";
 import {
@@ -64,12 +67,7 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
   return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume) => {
     if (typeof indexedDB === "undefined") {
       resume(
-        Effect.fail(
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "IndexedDB is unavailable in this browser context.",
-          }),
-        ),
+        Effect.fail(ConnectionTransientError.fromStorageFailure(new IndexedDbUnavailableError())),
       );
       return;
     }
@@ -85,14 +83,16 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
         request.result.createObjectStore(THREAD_STORE_NAME);
       }
     });
-    request.addEventListener("error", () => {
+    request.addEventListener("error", (event) => {
       resume(
         Effect.fail(
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "Could not open the local connection catalog database.",
-            cause: request.error ?? undefined,
-          }),
+          ConnectionTransientError.fromStorageFailure(
+            new ConnectionStorageOperationError({
+              operation: "open",
+              backend: "indexed-db",
+              cause: request.error ?? event,
+            }),
+          ),
         ),
       );
     });
@@ -105,14 +105,18 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
 function readDatabaseValue(database: IDBDatabase, storeName: string, key: IDBValidKey) {
   return Effect.callback<unknown, ConnectionTransientError>((resume) => {
     const request = database.transaction(storeName, "readonly").objectStore(storeName).get(key);
-    request.addEventListener("error", () => {
+    request.addEventListener("error", (event) => {
       resume(
         Effect.fail(
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "Could not read the local connection database.",
-            cause: request.error ?? undefined,
-          }),
+          ConnectionTransientError.fromStorageFailure(
+            new ConnectionStorageOperationError({
+              operation: "read",
+              backend: "indexed-db",
+              storeName,
+              key,
+              cause: request.error ?? event,
+            }),
+          ),
         ),
       );
     });
@@ -130,14 +134,18 @@ function writeDatabaseValue(
 ) {
   return Effect.callback<void, ConnectionTransientError>((resume) => {
     const transaction = database.transaction(storeName, "readwrite");
-    transaction.addEventListener("error", () => {
+    transaction.addEventListener("error", (event) => {
       resume(
         Effect.fail(
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "Could not write the local connection database.",
-            cause: transaction.error ?? undefined,
-          }),
+          ConnectionTransientError.fromStorageFailure(
+            new ConnectionStorageOperationError({
+              operation: "write",
+              backend: "indexed-db",
+              storeName,
+              key,
+              cause: transaction.error ?? event,
+            }),
+          ),
         ),
       );
     });
@@ -151,14 +159,18 @@ function writeDatabaseValue(
 function removeDatabaseValue(database: IDBDatabase, storeName: string, key: IDBValidKey) {
   return Effect.callback<void, ConnectionTransientError>((resume) => {
     const transaction = database.transaction(storeName, "readwrite");
-    transaction.addEventListener("error", () => {
+    transaction.addEventListener("error", (event) => {
       resume(
         Effect.fail(
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "Could not remove data from the local connection database.",
-            cause: transaction.error ?? undefined,
-          }),
+          ConnectionTransientError.fromStorageFailure(
+            new ConnectionStorageOperationError({
+              operation: "remove",
+              backend: "indexed-db",
+              storeName,
+              key,
+              cause: transaction.error ?? event,
+            }),
+          ),
         ),
       );
     });
@@ -172,14 +184,17 @@ function removeDatabaseValue(database: IDBDatabase, storeName: string, key: IDBV
 function removeDatabaseValuesInRange(database: IDBDatabase, storeName: string, range: IDBKeyRange) {
   return Effect.callback<void, ConnectionTransientError>((resume) => {
     const transaction = database.transaction(storeName, "readwrite");
-    transaction.addEventListener("error", () => {
+    transaction.addEventListener("error", (event) => {
       resume(
         Effect.fail(
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "Could not remove data from the local connection database.",
-            cause: transaction.error ?? undefined,
-          }),
+          ConnectionTransientError.fromStorageFailure(
+            new ConnectionStorageOperationError({
+              operation: "remove",
+              backend: "indexed-db",
+              storeName,
+              cause: transaction.error ?? event,
+            }),
+          ),
         ),
       );
     });
@@ -187,14 +202,17 @@ function removeDatabaseValuesInRange(database: IDBDatabase, storeName: string, r
       resume(Effect.void);
     });
     const request = transaction.objectStore(storeName).openCursor(range);
-    request.addEventListener("error", () => {
+    request.addEventListener("error", (event) => {
       resume(
         Effect.fail(
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "Could not scan the local connection database for removal.",
-            cause: request.error ?? undefined,
-          }),
+          ConnectionTransientError.fromStorageFailure(
+            new ConnectionStorageOperationError({
+              operation: "remove",
+              backend: "indexed-db",
+              storeName,
+              cause: request.error ?? event,
+            }),
+          ),
         ),
       );
     });
@@ -215,13 +233,14 @@ function threadCacheKey(environmentId: EnvironmentId, threadId: ThreadId) {
 
 const decodeCatalog = Effect.fn("web.connectionStorage.decodeCatalog")(function* (raw: string) {
   return yield* decodeConnectionCatalogDocument(raw).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ConnectionTransientError({
-          reason: "remote-unavailable",
-          detail: "Could not decode the local connection catalog.",
+    Effect.mapError((cause) =>
+      ConnectionTransientError.fromStorageFailure(
+        new ConnectionStorageOperationError({
+          operation: "decode",
+          backend: "schema",
           cause,
         }),
+      ),
     ),
   );
 });
@@ -230,13 +249,14 @@ const encodeCatalog = Effect.fn("web.connectionStorage.encodeCatalog")(function*
   catalog: ConnectionCatalogDocumentType,
 ) {
   return yield* encodeConnectionCatalogDocument(catalog).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ConnectionTransientError({
-          reason: "remote-unavailable",
-          detail: "Could not encode the local connection catalog.",
+    Effect.mapError((cause) =>
+      ConnectionTransientError.fromStorageFailure(
+        new ConnectionStorageOperationError({
+          operation: "encode",
+          backend: "schema",
           cause,
         }),
+      ),
     ),
   );
 });
@@ -254,30 +274,33 @@ export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
       read: Effect.tryPromise({
         try: () => bridge.getConnectionCatalog!(),
         catch: (cause) =>
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: "Could not load the local connection catalog from desktop secure storage.",
-            cause,
-          }),
+          ConnectionTransientError.fromStorageFailure(
+            new ConnectionStorageOperationError({
+              operation: "load",
+              backend: "desktop-secure-storage",
+              cause,
+            }),
+          ),
       }),
       write: (raw) =>
         Effect.tryPromise({
           try: () => bridge.setConnectionCatalog!(raw),
           catch: (cause) =>
-            new ConnectionTransientError({
-              reason: "remote-unavailable",
-              detail: "Could not save the local connection catalog to desktop secure storage.",
-              cause,
-            }),
+            ConnectionTransientError.fromStorageFailure(
+              new ConnectionStorageOperationError({
+                operation: "save",
+                backend: "desktop-secure-storage",
+                cause,
+              }),
+            ),
         }).pipe(
           Effect.flatMap((stored) =>
             stored
               ? Effect.void
               : Effect.fail(
-                  new ConnectionTransientError({
-                    reason: "remote-unavailable",
-                    detail: "Desktop secure storage is unavailable in this system context.",
-                  }),
+                  ConnectionTransientError.fromStorageFailure(
+                    new DesktopSecureStorageUnavailableError(),
+                  ),
                 ),
           ),
         ),

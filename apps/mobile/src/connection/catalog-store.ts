@@ -3,7 +3,10 @@ import {
   type ConnectionCatalogDocument as ConnectionCatalogDocumentType,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
 } from "@t3tools/client-runtime/platform";
-import { ConnectionTransientError } from "@t3tools/client-runtime/connection";
+import {
+  ConnectionStorageOperationError,
+  ConnectionTransientError,
+} from "@t3tools/client-runtime/connection";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -21,13 +24,14 @@ const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDoc
 
 const decodeCatalog = Effect.fn("mobile.connectionStorage.decodeCatalog")(function* (raw: string) {
   return yield* decodeConnectionCatalogDocument(raw).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ConnectionTransientError({
-          reason: "remote-unavailable",
-          detail: "Could not decode the local connection catalog.",
+    Effect.mapError((cause) =>
+      ConnectionTransientError.fromStorageFailure(
+        new ConnectionStorageOperationError({
+          operation: "decode",
+          backend: "schema",
           cause,
         }),
+      ),
     ),
   );
 });
@@ -36,13 +40,14 @@ const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(functi
   catalog: ConnectionCatalogDocumentType,
 ) {
   return yield* encodeConnectionCatalogDocument(catalog).pipe(
-    Effect.mapError(
-      (cause) =>
-        new ConnectionTransientError({
-          reason: "remote-unavailable",
-          detail: "Could not encode the local connection catalog.",
+    Effect.mapError((cause) =>
+      ConnectionTransientError.fromStorageFailure(
+        new ConnectionStorageOperationError({
+          operation: "encode",
+          backend: "schema",
           cause,
         }),
+      ),
     ),
   );
 });
@@ -72,13 +77,14 @@ export const makeCatalogStore = Effect.fn("mobile.connectionStorage.makeCatalogS
       legacyRaw === null || legacyRaw.trim() === ""
         ? EMPTY_CONNECTION_CATALOG_DOCUMENT
         : yield* migrateLegacyConnectionCatalog(legacyRaw).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ConnectionTransientError({
-                  reason: "remote-unavailable",
-                  detail: "Could not migrate the legacy local connection catalog.",
+            Effect.mapError((cause) =>
+              ConnectionTransientError.fromStorageFailure(
+                new ConnectionStorageOperationError({
+                  operation: "migrate",
+                  backend: "legacy-migration",
                   cause,
                 }),
+              ),
             ),
             Effect.catchTags({
               ConnectionTransientError: (error) =>

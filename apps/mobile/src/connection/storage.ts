@@ -10,6 +10,7 @@ import {
 } from "@t3tools/client-runtime/platform";
 import { TokenStore } from "@t3tools/client-runtime/authorization";
 import {
+  ConnectionStorageOperationError,
   ConnectionTransientError,
   CredentialStore,
   ProfileStore,
@@ -122,31 +123,40 @@ const secureCatalogStorage: SecureCatalogStorage = {
     Effect.tryPromise({
       try: () => SecureStore.getItemAsync(key),
       catch: (cause) =>
-        new ConnectionTransientError({
-          reason: "remote-unavailable",
-          detail: "Could not load the local connection catalog from secure storage.",
-          cause,
-        }),
+        ConnectionTransientError.fromStorageFailure(
+          new ConnectionStorageOperationError({
+            operation: "load",
+            backend: "mobile-secure-storage",
+            key,
+            cause,
+          }),
+        ),
     }),
   setItem: (key, value) =>
     Effect.tryPromise({
       try: () => SecureStore.setItemAsync(key, value),
       catch: (cause) =>
-        new ConnectionTransientError({
-          reason: "remote-unavailable",
-          detail: "Could not save the local connection catalog to secure storage.",
-          cause,
-        }),
+        ConnectionTransientError.fromStorageFailure(
+          new ConnectionStorageOperationError({
+            operation: "save",
+            backend: "mobile-secure-storage",
+            key,
+            cause,
+          }),
+        ),
     }),
   deleteItem: (key) =>
     Effect.tryPromise({
       try: () => SecureStore.deleteItemAsync(key),
       catch: (cause) =>
-        new ConnectionTransientError({
-          reason: "remote-unavailable",
-          detail: "Could not remove the local connection catalog from secure storage.",
-          cause,
-        }),
+        ConnectionTransientError.fromStorageFailure(
+          new ConnectionStorageOperationError({
+            operation: "delete",
+            backend: "mobile-secure-storage",
+            key,
+            cause,
+          }),
+        ),
     }),
 };
 
