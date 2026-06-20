@@ -40,6 +40,7 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
 } from "@t3tools/contracts";
+import { formatSchemaIssue } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -137,12 +138,13 @@ const buildEntry = <R>(input: {
     const decoder = Schema.decodeUnknownEffect(driver.configSchema);
     const decodeResult = yield* decoder(entry.config ?? driver.defaultConfig()).pipe(Effect.result);
     if (decodeResult._tag === "Failure") {
-      const issue = decodeResult.failure;
-      const detail = issue.message ?? String(issue);
+      const error = decodeResult.failure;
+      const issue = formatSchemaIssue(error.issue);
       yield* Effect.logError("Failed to decode provider instance config", {
         instanceId: rawInstanceId,
         driver: entry.driver,
-        detail,
+        errorTag: error._tag,
+        issue,
       });
       return {
         kind: "unavailable" as const,
@@ -151,7 +153,7 @@ const buildEntry = <R>(input: {
           instanceId,
           displayName: entry.displayName,
           accentColor: entry.accentColor,
-          reason: `Invalid config for instance '${rawInstanceId}': ${detail}`,
+          reason: `Invalid config for instance '${rawInstanceId}': ${issue}`,
         }),
       };
     }

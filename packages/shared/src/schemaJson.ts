@@ -106,6 +106,30 @@ function collectSchemaDiagnosticIssues(
   return 1;
 }
 
+function formatCollectedSchemaDiagnostics(
+  issues: ReadonlyArray<SchemaDiagnosticIssue>,
+  issueCount: number,
+  fallback: string,
+): string {
+  if (issues.length === 0) {
+    return fallback;
+  }
+
+  const omittedIssueCount = issueCount - issues.length;
+  const formatted = issues.map(formatDiagnosticIssue).join("\n");
+  if (omittedIssueCount === 0) {
+    return truncateDiagnostic(formatted, MAX_SCHEMA_DIAGNOSTIC_LENGTH);
+  }
+  const suffix = `\n... and ${omittedIssueCount} more issue(s)`;
+  return truncateDiagnostic(formatted, MAX_SCHEMA_DIAGNOSTIC_LENGTH - suffix.length) + suffix;
+}
+
+export const formatSchemaIssue = (issue: SchemaIssue.Issue): string => {
+  const issues: Array<SchemaDiagnosticIssue> = [];
+  const issueCount = collectSchemaDiagnosticIssues(issue, [], issues);
+  return formatCollectedSchemaDiagnostics(issues, issueCount, "Schema validation failed.");
+};
+
 export const decodeJsonResult = <S extends Schema.Codec<unknown, unknown, never, never>>(
   schema: S,
 ) => {
@@ -156,17 +180,11 @@ export const formatSchemaError = (cause: Cause.Cause<Schema.SchemaError>) => {
     }
   }
 
-  if (issues.length === 0) {
-    return `Schema validation failed (failureCount=${failureCount}, defectCount=${defectCount}, interruptionCount=${interruptionCount}).`;
-  }
-
-  const omittedIssueCount = issueCount - issues.length;
-  const formatted = issues.map(formatDiagnosticIssue).join("\n");
-  if (omittedIssueCount === 0) {
-    return truncateDiagnostic(formatted, MAX_SCHEMA_DIAGNOSTIC_LENGTH);
-  }
-  const suffix = `\n... and ${omittedIssueCount} more issue(s)`;
-  return truncateDiagnostic(formatted, MAX_SCHEMA_DIAGNOSTIC_LENGTH - suffix.length) + suffix;
+  return formatCollectedSchemaDiagnostics(
+    issues,
+    issueCount,
+    `Schema validation failed (failureCount=${failureCount}, defectCount=${defectCount}, interruptionCount=${interruptionCount}).`,
+  );
 };
 
 /**
