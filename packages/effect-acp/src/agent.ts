@@ -391,39 +391,40 @@ export const make = Effect.fn("effect-acp/AcpAgent.make")(function* (
         callRpc(CLIENT_METHODS.fs_write_text_file, rpc[CLIENT_METHODS.fs_write_text_file](payload)),
       createTerminal: (payload) =>
         callRpc(CLIENT_METHODS.terminal_create, rpc[CLIENT_METHODS.terminal_create](payload)).pipe(
-          Effect.map((response) =>
-            AcpTerminal.makeTerminal({
-              sessionId: payload.sessionId,
-              terminalId: response.terminalId,
-              output: callRpc(
-                CLIENT_METHODS.terminal_output,
-                rpc[CLIENT_METHODS.terminal_output]({
-                  sessionId: payload.sessionId,
-                  terminalId: response.terminalId,
-                }),
-              ),
-              waitForExit: callRpc(
-                CLIENT_METHODS.terminal_wait_for_exit,
-                rpc[CLIENT_METHODS.terminal_wait_for_exit]({
-                  sessionId: payload.sessionId,
-                  terminalId: response.terminalId,
-                }),
-              ),
-              kill: callRpc(
-                CLIENT_METHODS.terminal_kill,
-                rpc[CLIENT_METHODS.terminal_kill]({
-                  sessionId: payload.sessionId,
-                  terminalId: response.terminalId,
-                }),
-              ),
-              release: callRpc(
-                CLIENT_METHODS.terminal_release,
-                rpc[CLIENT_METHODS.terminal_release]({
-                  sessionId: payload.sessionId,
-                  terminalId: response.terminalId,
-                }),
-              ),
-            }),
+          Effect.map(
+            (response) =>
+              ({
+                sessionId: payload.sessionId,
+                terminalId: response.terminalId,
+                output: callRpc(
+                  CLIENT_METHODS.terminal_output,
+                  rpc[CLIENT_METHODS.terminal_output]({
+                    sessionId: payload.sessionId,
+                    terminalId: response.terminalId,
+                  }),
+                ),
+                waitForExit: callRpc(
+                  CLIENT_METHODS.terminal_wait_for_exit,
+                  rpc[CLIENT_METHODS.terminal_wait_for_exit]({
+                    sessionId: payload.sessionId,
+                    terminalId: response.terminalId,
+                  }),
+                ),
+                kill: callRpc(
+                  CLIENT_METHODS.terminal_kill,
+                  rpc[CLIENT_METHODS.terminal_kill]({
+                    sessionId: payload.sessionId,
+                    terminalId: response.terminalId,
+                  }),
+                ),
+                release: callRpc(
+                  CLIENT_METHODS.terminal_release,
+                  rpc[CLIENT_METHODS.terminal_release]({
+                    sessionId: payload.sessionId,
+                    terminalId: response.terminalId,
+                  }),
+                ),
+              }) satisfies AcpTerminal.AcpTerminal,
           ),
         ),
       sessionUpdate: (payload) => transport.notify(CLIENT_METHODS.session_update, payload),
