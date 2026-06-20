@@ -296,7 +296,10 @@ describe("DesktopUpdates", () => {
     const cause = new Error(
       "request failed for https://user:secret@example.com/update?token=secret",
     );
-    const updaterError = new ElectronUpdater.ElectronUpdaterCheckForUpdatesError({ cause });
+    const updaterError = new ElectronUpdater.ElectronUpdaterCheckForUpdatesError({
+      channel: null,
+      cause,
+    });
     const harness = makeHarness({ checkForUpdates: Effect.fail(updaterError) });
     const loggedErrors: Array<unknown> = [];
     const logger = Logger.make(({ fiber }) => {
@@ -318,7 +321,10 @@ describe("DesktopUpdates", () => {
         assert.isDefined(loggedError);
         assert.strictEqual(loggedError, updaterError);
         assert.strictEqual(loggedError.cause, cause);
-        assert.equal(state.message, "Electron updater failed to check for updates.");
+        assert.equal(
+          state.message,
+          "Electron updater failed to check for updates on channel default.",
+        );
         assert.notInclude(state.message ?? "", "secret");
       }),
     ).pipe(
