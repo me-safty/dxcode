@@ -6,9 +6,10 @@ import * as Encoding from "effect/Encoding";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
 import {
+  ServerAuthDpopReplayKeyCalculationError,
+  ServerAuthDpopReplayStateRecordError,
   ServerAuthInvalidCredentialError,
-  ServerAuthInternalError,
-  ServerAuthOperationError,
+  type ServerAuthInternalError,
 } from "./EnvironmentAuth.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 
@@ -33,10 +34,10 @@ export const mapDpopReplayStoreError = (
 ): ServerAuthInvalidCredentialError | ServerAuthInternalError =>
   ServerSecretStore.isSecretAlreadyExistsError(error)
     ? new ServerAuthInvalidCredentialError({
+        diagnostic: "DPoP proof replayed.",
         cause: error,
       })
-    : new ServerAuthOperationError({
-        operation: "record_dpop_replay_state",
+    : new ServerAuthDpopReplayStateRecordError({
         cause: error,
       });
 
@@ -69,8 +70,7 @@ export const verifyRequestDpopProof = (input: {
       Effect.map(Encoding.encodeBase64Url),
       Effect.mapError(
         (cause) =>
-          new ServerAuthOperationError({
-            operation: "calculate_dpop_replay_key",
+          new ServerAuthDpopReplayKeyCalculationError({
             cause,
           }),
       ),

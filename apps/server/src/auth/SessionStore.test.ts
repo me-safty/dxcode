@@ -109,14 +109,8 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       const sessionError = yield* Effect.flip(sessions.verify(issued.token));
       const websocketError = yield* Effect.flip(sessions.verifyWebSocketToken(websocket.token));
 
-      expect(sessionError._tag).toBe("SessionCredentialInternalError");
-      expect(websocketError._tag).toBe("SessionCredentialInternalError");
-      if (sessionError._tag === "SessionCredentialInternalError") {
-        expect(sessionError.operation).toBe("verify_session_credential");
-      }
-      if (websocketError._tag === "SessionCredentialInternalError") {
-        expect(websocketError.operation).toBe("verify_websocket_token");
-      }
+      expect(sessionError._tag).toBe("SessionCredentialVerificationError");
+      expect(websocketError._tag).toBe("WebSocketTokenVerificationError");
       expect(sessionError.cause).toBe(repositoryFailure);
       expect(websocketError.cause).toBe(repositoryFailure);
     }).pipe(Effect.provide(failingSessionLookupCredentialLayer)),

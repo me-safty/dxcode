@@ -27,15 +27,16 @@ function stringToBytes(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
-const keyPairPersistenceError = (
-  operation: "decode" | "encode" | "read_after_concurrent_creation",
-  cause?: unknown,
-): ServerSecretStore.SecretStoreError =>
-  new ServerSecretStore.SecretStoreError({
-    operation,
-    resource: "environment signing key pair",
-    cause,
-  });
+const KEY_PAIR_RESOURCE = "environment signing key pair";
+
+const keyPairDecodeError = (cause: unknown): ServerSecretStore.SecretStoreDecodeError =>
+  new ServerSecretStore.SecretStoreDecodeError({ resource: KEY_PAIR_RESOURCE, cause });
+
+const keyPairEncodeError = (cause: unknown): ServerSecretStore.SecretStoreEncodeError =>
+  new ServerSecretStore.SecretStoreEncodeError({ resource: KEY_PAIR_RESOURCE, cause });
+
+const keyPairConcurrentReadError = (): ServerSecretStore.SecretStoreConcurrentReadError =>
+  new ServerSecretStore.SecretStoreConcurrentReadError({ resource: KEY_PAIR_RESOURCE });
 
 const readEnvironmentKeyPair = Effect.fn("readEnvironmentKeyPair")(function* (
   secrets: ServerSecretStore.ServerSecretStore["Service"],
@@ -45,7 +46,7 @@ const readEnvironmentKeyPair = Effect.fn("readEnvironmentKeyPair")(function* (
     return Option.none<EnvironmentKeyPair>();
   }
   const decoded = yield* decodeEnvironmentKeyPair(bytesToString(encoded.value)).pipe(
-    Effect.mapError((cause) => keyPairPersistenceError("decode", cause)),
+    Effect.mapError(keyPairDecodeError),
   );
   return Option.some(decoded);
 });
@@ -55,7 +56,7 @@ const persistEnvironmentKeyPair = Effect.fn("persistEnvironmentKeyPair")(functio
   keyPair: EnvironmentKeyPair,
 ) {
   const encoded = yield* encodeEnvironmentKeyPair(keyPair).pipe(
-    Effect.mapError((cause) => keyPairPersistenceError("encode", cause)),
+    Effect.mapError(keyPairEncodeError),
   );
   return yield* secrets.create(CLOUD_LINK_KEY_PAIR, stringToBytes(encoded)).pipe(
     Effect.as(keyPair),
@@ -65,8 +66,7 @@ const persistEnvironmentKeyPair = Effect.fn("persistEnvironmentKeyPair")(functio
             Effect.flatMap(
               Option.match({
                 onSome: Effect.succeed,
-                onNone: () =>
-                  Effect.fail(keyPairPersistenceError("read_after_concurrent_creation")),
+                onNone: () => Effect.fail(keyPairConcurrentReadError()),
               }),
             ),
           )

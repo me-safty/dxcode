@@ -67,8 +67,7 @@ it.layer(NodeServices.layer)("getOrCreateEnvironmentKeyPairFromSecretStore", (it
           }).pipe(
             Effect.flatMap(() =>
               Effect.fail(
-                new ServerSecretStore.SecretStoreError({
-                  operation: "persist",
+                new ServerSecretStore.SecretStorePersistError({
                   resource: "environment signing key pair",
                   cause: PlatformError.systemError({
                     _tag: "AlreadyExists",

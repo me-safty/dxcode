@@ -98,7 +98,7 @@ const failEnvironmentCloudInternalError =
     );
 
 const failCloudCliTokenManagerError = (error: CliTokenManager.CloudCliTokenManagerError) =>
-  failEnvironmentCloudInternalError(error.message)(error.cause);
+  failEnvironmentCloudInternalError(error.message)(error);
 
 const requireRelayUrl = relayUrlConfig.pipe(
   Effect.mapError(
@@ -211,8 +211,7 @@ function validateLinkedCloudUser(input: {
   return input.secrets.get(CLOUD_LINKED_USER_ID).pipe(
     Effect.mapError(
       (cause) =>
-        new EnvironmentAuth.ServerAuthOperationError({
-          operation: "verify_linked_cloud_account",
+        new EnvironmentAuth.ServerAuthLinkedCloudAccountVerificationError({
           cause,
         }),
     ),
@@ -239,8 +238,7 @@ function readInstalledCloudUserId(
   return secrets.get(CLOUD_LINKED_USER_ID).pipe(
     Effect.mapError(
       (cause) =>
-        new EnvironmentAuth.ServerAuthOperationError({
-          operation: "read_linked_cloud_account",
+        new EnvironmentAuth.ServerAuthLinkedCloudAccountReadError({
           cause,
         }),
     ),
@@ -390,8 +388,7 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
   }).pipe(
     Effect.mapError(
       (cause) =>
-        new EnvironmentAuth.ServerAuthOperationError({
-          operation: "sign_cloud_link_jwt",
+        new EnvironmentAuth.ServerAuthCloudLinkJwtSigningError({
           cause,
         }),
     ),
@@ -413,7 +410,7 @@ const cloudLinkProofHandler = Effect.fn("environment.cloud.linkProof")(
     return proof satisfies RelayEnvironmentLinkProof;
   },
   Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-    failEnvironmentCloudInternalError(error.message)(error.cause),
+    failEnvironmentCloudInternalError(error.message)(error),
   ),
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,
@@ -476,7 +473,7 @@ const cloudRelayConfigHandler = Effect.fn("environment.cloud.relayConfig")(
     return yield* applyCloudRelayConfig(dependencies, payload);
   },
   Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-    failEnvironmentCloudInternalError(error.message)(error.cause),
+    failEnvironmentCloudInternalError(error.message)(error),
   ),
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,
@@ -774,8 +771,7 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
     }).pipe(
       Effect.mapError(
         (cause) =>
-          new EnvironmentAuth.ServerAuthOperationError({
-            operation: "sign_cloud_health_jwt",
+          new EnvironmentAuth.ServerAuthCloudHealthJwtSigningError({
             cause,
           }),
       ),
@@ -792,7 +788,7 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
     return response;
   },
   Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-    failEnvironmentCloudInternalError(error.message)(error.cause),
+    failEnvironmentCloudInternalError(error.message)(error),
   ),
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,
@@ -898,8 +894,7 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
     }).pipe(
       Effect.mapError(
         (cause) =>
-          new EnvironmentAuth.ServerAuthOperationError({
-            operation: "sign_cloud_mint_jwt",
+          new EnvironmentAuth.ServerAuthCloudMintJwtSigningError({
             cause,
           }),
       ),
@@ -914,7 +909,7 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
     return response;
   },
   Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-    failEnvironmentCloudInternalError(error.message)(error.cause),
+    failEnvironmentCloudInternalError(error.message)(error),
   ),
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,

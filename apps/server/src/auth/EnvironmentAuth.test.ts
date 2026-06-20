@@ -61,25 +61,20 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       );
 
       expect(error._tag).toBe("ServerAuthInvalidCredentialError");
-      if (error._tag === "ServerAuthInvalidCredentialError") {
-        expect(EnvironmentAuth.serverAuthCredentialReason(error)).toBe("invalid_credential");
-      }
     }),
   );
 
   it.effect("maps unexpected bootstrap failures to 500", () =>
     Effect.sync(() => {
-      const error = EnvironmentAuth.toBootstrapExchangeError(
-        new PairingGrantStore.BootstrapCredentialInternalError({
-          operation: "consume",
-          cause: new Error("sqlite is unavailable"),
-        }),
-      );
+      const cause = new PairingGrantStore.BootstrapCredentialConsumeError({
+        cause: new Error("sqlite is unavailable"),
+      });
+      const error = EnvironmentAuth.toBootstrapExchangeError(cause);
 
-      expect(error._tag).toBe("ServerAuthOperationError");
-      if (error._tag === "ServerAuthOperationError") {
-        expect(error.operation).toBe("validate_bootstrap_credential");
-        expect(error.message).toContain("validate_bootstrap_credential");
+      expect(error._tag).toBe("ServerAuthBootstrapCredentialValidationError");
+      expect(error.message).toBe("Failed to validate bootstrap credential.");
+      if (error._tag === "ServerAuthBootstrapCredentialValidationError") {
+        expect(error.cause).toBe(cause);
       }
     }),
   );
@@ -123,9 +118,6 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         .pipe(Effect.flip);
 
       expect(error._tag).toBe("ServerAuthScopeNotGrantedError");
-      if (error._tag === "ServerAuthScopeNotGrantedError") {
-        expect(EnvironmentAuth.serverAuthInvalidRequestReason(error)).toBe("scope_not_granted");
-      }
     }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
   );
 

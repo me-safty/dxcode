@@ -211,30 +211,110 @@ export const SessionCredentialInvalidError = Schema.Union([
 export type SessionCredentialInvalidError = typeof SessionCredentialInvalidError.Type;
 export const isSessionCredentialInvalidError = Schema.is(SessionCredentialInvalidError);
 
-const SessionCredentialInternalOperation = Schema.Literals([
-  "encode_session_claims",
-  "encode_websocket_claims",
-  "issue_session_credential",
-  "verify_session_credential",
-  "issue_websocket_token",
-  "verify_websocket_token",
-  "list_active_sessions",
-  "revoke_session",
-  "revoke_other_sessions",
-]);
+const sessionCredentialInternalErrorContext = {
+  cause: Schema.Defect(),
+};
 
-export class SessionCredentialInternalError extends Schema.TaggedErrorClass<SessionCredentialInternalError>()(
-  "SessionCredentialInternalError",
+export class SessionClaimsEncodingError extends Schema.TaggedErrorClass<SessionClaimsEncodingError>()(
+  "SessionClaimsEncodingError",
   {
-    operation: SessionCredentialInternalOperation,
-    cause: Schema.Defect(),
+    operation: Schema.Literals(["encode_session_claims", "encode_websocket_claims"]),
+    ...sessionCredentialInternalErrorContext,
   },
 ) {
   override get message(): string {
-    return `Session credential operation '${this.operation}' failed.`;
+    return "Failed to encode claims";
   }
 }
 
+export class SessionCredentialIssueError extends Schema.TaggedErrorClass<SessionCredentialIssueError>()(
+  "SessionCredentialIssueError",
+  {
+    ...sessionCredentialInternalErrorContext,
+  },
+) {
+  override get message(): string {
+    return "Failed to issue session credential.";
+  }
+}
+
+export class SessionCredentialVerificationError extends Schema.TaggedErrorClass<SessionCredentialVerificationError>()(
+  "SessionCredentialVerificationError",
+  {
+    ...sessionCredentialInternalErrorContext,
+  },
+) {
+  override get message(): string {
+    return "Failed to verify session credential.";
+  }
+}
+
+export class WebSocketTokenIssueError extends Schema.TaggedErrorClass<WebSocketTokenIssueError>()(
+  "WebSocketTokenIssueError",
+  {
+    ...sessionCredentialInternalErrorContext,
+  },
+) {
+  override get message(): string {
+    return "Failed to issue websocket token.";
+  }
+}
+
+export class WebSocketTokenVerificationError extends Schema.TaggedErrorClass<WebSocketTokenVerificationError>()(
+  "WebSocketTokenVerificationError",
+  {
+    ...sessionCredentialInternalErrorContext,
+  },
+) {
+  override get message(): string {
+    return "Failed to verify websocket token.";
+  }
+}
+
+export class ActiveSessionsListError extends Schema.TaggedErrorClass<ActiveSessionsListError>()(
+  "ActiveSessionsListError",
+  {
+    ...sessionCredentialInternalErrorContext,
+  },
+) {
+  override get message(): string {
+    return "Failed to list active sessions.";
+  }
+}
+
+export class SessionRevocationError extends Schema.TaggedErrorClass<SessionRevocationError>()(
+  "SessionRevocationError",
+  {
+    ...sessionCredentialInternalErrorContext,
+  },
+) {
+  override get message(): string {
+    return "Failed to revoke session.";
+  }
+}
+
+export class OtherSessionsRevocationError extends Schema.TaggedErrorClass<OtherSessionsRevocationError>()(
+  "OtherSessionsRevocationError",
+  {
+    ...sessionCredentialInternalErrorContext,
+  },
+) {
+  override get message(): string {
+    return "Failed to revoke other sessions.";
+  }
+}
+
+export const SessionCredentialInternalError = Schema.Union([
+  SessionClaimsEncodingError,
+  SessionCredentialIssueError,
+  SessionCredentialVerificationError,
+  WebSocketTokenIssueError,
+  WebSocketTokenVerificationError,
+  ActiveSessionsListError,
+  SessionRevocationError,
+  OtherSessionsRevocationError,
+]);
+export type SessionCredentialInternalError = typeof SessionCredentialInternalError.Type;
 export const isSessionCredentialInternalError = Schema.is(SessionCredentialInternalError);
 
 export const SessionCredentialError = Schema.Union([
@@ -347,15 +427,6 @@ function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthCli
     current: false,
   };
 }
-
-const sessionCredentialInternalError = (
-  operation: SessionCredentialInternalError["operation"],
-  cause: unknown,
-): SessionCredentialInternalError => new SessionCredentialInternalError({ operation, cause });
-
-const toSessionCredentialInternalError =
-  (operation: SessionCredentialInternalError["operation"]) => (cause: unknown) =>
-    sessionCredentialInternalError(operation, cause);
 
 export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
@@ -487,7 +558,9 @@ export const make = Effect.gen(function* () {
 
       const encodedPayload = yield* encodeClaims(claims).pipe(
         Effect.map(base64UrlEncode),
-        Effect.mapError((cause) => sessionCredentialInternalError("encode_session_claims", cause)),
+        Effect.mapError(
+          (cause) => new SessionClaimsEncodingError({ operation: "encode_session_claims", cause }),
+        ),
       );
       const signature = signPayload(encodedPayload, signingSecret);
       const client = input?.client ?? createDefaultClientMetadata();
@@ -531,7 +604,7 @@ export const make = Effect.gen(function* () {
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
       } satisfies IssuedSession;
     },
-    Effect.mapError(toSessionCredentialInternalError("issue_session_credential")),
+    Effect.mapError((cause) => new SessionCredentialIssueError({ cause })),
   );
 
   const verify: SessionStore["Service"]["verify"] = Effect.fn("SessionStore.verify")(
@@ -582,7 +655,7 @@ export const make = Effect.gen(function* () {
     Effect.mapError((cause) =>
       isSessionCredentialInvalidError(cause)
         ? cause
-        : sessionCredentialInternalError("verify_session_credential", cause),
+        : new SessionCredentialVerificationError({ cause }),
     ),
   );
 
@@ -604,8 +677,9 @@ export const make = Effect.gen(function* () {
       };
       const encodedPayload = yield* encodeWsClaims(claims).pipe(
         Effect.map(base64UrlEncode),
-        Effect.mapError((cause) =>
-          sessionCredentialInternalError("encode_websocket_claims", cause),
+        Effect.mapError(
+          (cause) =>
+            new SessionClaimsEncodingError({ operation: "encode_websocket_claims", cause }),
         ),
       );
       const signature = signPayload(encodedPayload, signingSecret);
@@ -614,7 +688,7 @@ export const make = Effect.gen(function* () {
         expiresAt,
       };
     },
-    Effect.mapError(toSessionCredentialInternalError("issue_websocket_token")),
+    Effect.mapError((cause) => new WebSocketTokenIssueError({ cause })),
   );
 
   const verifyWebSocketToken: SessionStore["Service"]["verifyWebSocketToken"] = Effect.fn(
@@ -664,7 +738,7 @@ export const make = Effect.gen(function* () {
     Effect.mapError((cause) =>
       isSessionCredentialInvalidError(cause)
         ? cause
-        : sessionCredentialInternalError("verify_websocket_token", cause),
+        : new WebSocketTokenVerificationError({ cause }),
     ),
   );
 
@@ -688,7 +762,7 @@ export const make = Effect.gen(function* () {
         }),
       );
     },
-    Effect.mapError(toSessionCredentialInternalError("list_active_sessions")),
+    Effect.mapError((cause) => new ActiveSessionsListError({ cause })),
   );
 
   const revoke: SessionStore["Service"]["revoke"] = Effect.fn("SessionStore.revoke")(
@@ -708,7 +782,7 @@ export const make = Effect.gen(function* () {
       }
       return revoked;
     },
-    Effect.mapError(toSessionCredentialInternalError("revoke_session")),
+    Effect.mapError((cause) => new SessionRevocationError({ cause })),
   );
 
   const revokeAllExcept: SessionStore["Service"]["revokeAllExcept"] = Effect.fn(
@@ -739,7 +813,7 @@ export const make = Effect.gen(function* () {
       }
       return revokedSessionIds.length;
     },
-    Effect.mapError(toSessionCredentialInternalError("revoke_other_sessions")),
+    Effect.mapError((cause) => new OtherSessionsRevocationError({ cause })),
   );
 
   return SessionStore.of({
