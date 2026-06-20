@@ -31,15 +31,7 @@ import {
   DispatchResult,
   OrchestrationReadModel,
 } from "./orchestration.ts";
-import {
-  RelayCloudEnvironmentHealthRequest,
-  RelayCloudMintCredentialRequest,
-  RelayEnvironmentConfigRequest,
-  RelayEnvironmentHealthResponse,
-  RelayEnvironmentLinkProof,
-  RelayEnvironmentMintResponse,
-  RelayLinkProofRequest,
-} from "./relay.ts";
+import * as Relay from "./relay.ts";
 
 const OptionalBearerHeaders = Schema.Struct({
   authorization: Schema.optionalKey(Schema.String),
@@ -275,18 +267,16 @@ const EnvironmentOrchestrationDispatchErrors = [
   EnvironmentInternalError,
 ] as const;
 
-export interface EnvironmentSessionPrincipalShape {
-  readonly sessionId: AuthSessionId;
-  readonly subject: string;
-  readonly method: ServerAuthSessionMethod;
-  readonly scopes: ReadonlySet<AuthEnvironmentScope>;
-  readonly proofKeyThumbprint?: string;
-  readonly expiresAt?: DateTime.DateTime;
-}
-
 export class EnvironmentAuthenticatedPrincipal extends Context.Service<
   EnvironmentAuthenticatedPrincipal,
-  EnvironmentSessionPrincipalShape
+  {
+    readonly sessionId: AuthSessionId;
+    readonly subject: string;
+    readonly method: ServerAuthSessionMethod;
+    readonly scopes: ReadonlySet<AuthEnvironmentScope>;
+    readonly proofKeyThumbprint?: string;
+    readonly expiresAt?: DateTime.DateTime;
+  }
 >()("@t3tools/contracts/environmentHttp/EnvironmentAuthenticatedPrincipal") {}
 
 export class EnvironmentAuthenticatedAuth extends HttpApiMiddleware.Service<
@@ -443,15 +433,15 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
       headers: OptionalBearerHeaders,
-      payload: RelayLinkProofRequest,
-      success: RelayEnvironmentLinkProof,
+      payload: Relay.RelayLinkProofRequest,
+      success: Relay.RelayEnvironmentLinkProof,
       error: EnvironmentHttpCloudErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
     HttpApiEndpoint.post("relayConfig", "/api/connect/relay-config", {
       headers: OptionalBearerHeaders,
-      payload: RelayEnvironmentConfigRequest,
+      payload: Relay.RelayEnvironmentConfigRequest,
       success: EnvironmentCloudRelayConfigResult,
       error: [...EnvironmentHttpCloudErrors, EnvironmentCloudEndpointUnavailableError],
     }).middleware(EnvironmentAuthenticatedAuth),
@@ -480,22 +470,22 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   )
   .add(
     HttpApiEndpoint.post("health", "/api/t3-connect/health", {
-      payload: RelayCloudEnvironmentHealthRequest,
-      success: RelayEnvironmentHealthResponse,
+      payload: Relay.RelayCloudEnvironmentHealthRequest,
+      success: Relay.RelayEnvironmentHealthResponse,
       error: EnvironmentHttpCloudErrors,
     }),
   )
   .add(
     HttpApiEndpoint.post("mintCredential", "/api/connect/mint-credential", {
-      payload: RelayCloudMintCredentialRequest,
-      success: RelayEnvironmentMintResponse,
+      payload: Relay.RelayCloudMintCredentialRequest,
+      success: Relay.RelayEnvironmentMintResponse,
       error: EnvironmentHttpCloudErrors,
     }),
   )
   .add(
     HttpApiEndpoint.post("t3MintCredential", "/api/t3-connect/mint-credential", {
-      payload: RelayCloudMintCredentialRequest,
-      success: RelayEnvironmentMintResponse,
+      payload: Relay.RelayCloudMintCredentialRequest,
+      success: Relay.RelayEnvironmentMintResponse,
       error: EnvironmentHttpCloudErrors,
     }),
   ) {}
