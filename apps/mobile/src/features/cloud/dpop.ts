@@ -12,6 +12,7 @@ import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
   DpopPublicJwk,
+  redactDpopRequestTarget,
 } from "@t3tools/shared/dpop";
 
 export class CloudDpopStorageError extends Schema.TaggedErrorClass<CloudDpopStorageError>()(
@@ -166,15 +167,6 @@ const DPOP_PROOF_KEY_STORAGE_KEY = "t3code.cloud.dpop-proof-key";
 
 function base64UrlToBytes(value: string): Uint8Array {
   return Result.getOrThrow(Encoding.decodeBase64Url(value));
-}
-
-function redactDpopRequestTarget(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
-  } catch {
-    return "<invalid-url>";
-  }
 }
 
 function publicJwkFromUncompressedPublicKey(publicKey: Uint8Array): DpopPublicJwk {
