@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   RemoteBackendUrlInvalidError,
   RemoteBackendUrlMissingError,
-  RemotePairingCodeMissingError,
   RemotePairingTokenMissingError,
   RemotePairingUrlInvalidError,
   resolveRemotePairingTarget,
@@ -78,8 +77,15 @@ describe("remote", () => {
     expect(() =>
       resolveRemotePairingTarget({ pairingUrl: "https://remote.example.com/pair" }),
     ).toThrowError(RemotePairingTokenMissingError);
-    expect(() => resolveRemotePairingTarget({ host: "remote.example.com" })).toThrowError(
-      RemotePairingCodeMissingError,
+    expect(() =>
+      resolveRemotePairingTarget({
+        host: "https://user:secret@remote.example.com/path?token=sensitive#fragment",
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        _tag: "RemotePairingCodeMissingError",
+        host: "remote.example.com",
+      }),
     );
   });
 

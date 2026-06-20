@@ -213,11 +213,11 @@ export const resolveRemotePairingTarget = (input: {
   if (!host) {
     throw new RemoteBackendUrlMissingError();
   }
+  const normalizedHost = normalizeRemoteBaseUrl(host, "direct-host");
   if (!pairingCode) {
-    throw new RemotePairingCodeMissingError({ host });
+    throw new RemotePairingCodeMissingError({ host: normalizedHost.host });
   }
 
-  const normalizedHost = normalizeRemoteBaseUrl(host, "direct-host");
   return {
     credential: pairingCode,
     httpBaseUrl: toHttpBaseUrl(normalizedHost),
