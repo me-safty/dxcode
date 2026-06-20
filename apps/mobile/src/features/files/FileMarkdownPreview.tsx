@@ -5,8 +5,9 @@ import {
   type NodeStyleOverrides,
   type PartialMarkdownTheme,
 } from "react-native-nitro-markdown";
-import { Linking, ScrollView, Text as NativeText, View } from "react-native";
+import { ScrollView, Text as NativeText, View } from "react-native";
 
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { useThemeColor } from "../../lib/useThemeColor";
 import {
@@ -38,7 +39,7 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
         <NativeText
           onPress={() => {
             if (href) {
-              void Linking.openURL(href);
+              void tryOpenExternalUrl(href, "markdown-link");
             }
           }}
           style={{
