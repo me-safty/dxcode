@@ -36,7 +36,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
-import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -372,8 +372,8 @@ function AboutVersionSection() {
 
 export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
-  const settings = useSettings();
-  const updateSettings = useUpdateSettings();
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
 
   const isGitWritingModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
@@ -472,8 +472,8 @@ export function useSettingsRestore(onRestored?: () => void) {
 
 export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
-  const settings = useSettings();
-  const updateSettings = useUpdateSettings();
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
   const observability = useAtomValue(primaryServerObservabilityAtom);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const diagnosticsDescription = formatDiagnosticsDescription({
@@ -908,8 +908,8 @@ export function GeneralSettingsPanel() {
 }
 
 export function ProviderSettingsPanel() {
-  const settings = useSettings();
-  const updateSettings = useUpdateSettings();
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const primaryEnvironment = usePrimaryEnvironment();
   const refreshServerProviders = useAtomCommand(serverEnvironment.refreshProviders, {
