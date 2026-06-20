@@ -258,11 +258,9 @@ describe("RelayEnvironmentDiscovery", () => {
         relayUrl: "https://relay.example.test",
         listEnvironments: () =>
           Effect.fail(
-            new ManagedRelay.ManagedRelayClientError({
-              message: "Relay environment listing timed out.",
-              cause: new ManagedRelay.ManagedRelayRequestTimeoutError({
-                message: "Relay environment listing timed out.",
-              }),
+            new ManagedRelay.ManagedRelayRequestTimeoutError({
+              request: "list-environments",
+              timeoutMs: ManagedRelay.MANAGED_RELAY_REQUEST_TIMEOUT_MS,
             }),
           ),
         getEnvironmentStatus: () => Effect.die("unused"),
@@ -304,7 +302,7 @@ describe("RelayEnvironmentDiscovery", () => {
         expect(Option.getOrThrow(state.error)).toMatchObject({
           _tag: "ConnectionTransientError",
           reason: "timeout",
-          message: "Relay environment listing timed out.",
+          message: `Managed relay request 'list-environments' timed out after ${ManagedRelay.MANAGED_RELAY_REQUEST_TIMEOUT_MS}ms.`,
         });
       }).pipe(Effect.provide(layer));
     }),
@@ -327,8 +325,9 @@ describe("RelayEnvironmentDiscovery", () => {
 
         yield* Ref.set(
           harness.listFailure,
-          new ManagedRelay.ManagedRelayClientError({
-            message: "Relay environment listing failed.",
+          new ManagedRelay.ManagedRelayRequestFailedError({
+            request: "list-environments",
+            cause: new Error("Relay request failed."),
           }),
         );
         yield* discovery.refresh;
