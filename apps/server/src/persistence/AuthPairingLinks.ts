@@ -11,6 +11,7 @@ import { AuthEnvironmentScopes } from "@t3tools/contracts";
 import {
   type AuthPairingLinkRepositoryError,
   PersistenceDecodeError,
+  type PersistenceErrorCorrelation,
   PersistenceSqlError,
 } from "./Errors.ts";
 
@@ -87,11 +88,19 @@ export class AuthPairingLinkRepository extends Context.Service<
   }
 >()("t3/persistence/AuthPairingLinks/AuthPairingLinkRepository") {}
 
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
+function toPersistenceSqlOrDecodeError(
+  sqlOperation: string,
+  decodeOperation: string,
+  correlation?: PersistenceErrorCorrelation,
+) {
   return (cause: unknown): AuthPairingLinkRepositoryError =>
     Schema.isSchemaError(cause)
-      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause)
-      : new PersistenceSqlError({ operation: sqlOperation, cause });
+      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
+      : new PersistenceSqlError({
+          operation: sqlOperation,
+          ...(correlation === undefined ? {} : { correlation }),
+          cause,
+        });
 }
 
 export const make = Effect.gen(function* () {
@@ -227,6 +236,7 @@ export const make = Effect.gen(function* () {
         toPersistenceSqlOrDecodeError(
           "AuthPairingLinkRepository.create:query",
           "AuthPairingLinkRepository.create:encodeRequest",
+          { pairingLinkId: input.id },
         ),
       ),
     );
@@ -257,6 +267,7 @@ export const make = Effect.gen(function* () {
         toPersistenceSqlOrDecodeError(
           "AuthPairingLinkRepository.revoke:query",
           "AuthPairingLinkRepository.revoke:decodeRows",
+          { pairingLinkId: input.id },
         ),
       ),
       Effect.map((rows) => rows.length > 0),
