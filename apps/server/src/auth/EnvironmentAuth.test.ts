@@ -21,11 +21,7 @@ const makeServerConfigLayer = (overrides?: Partial<ServerConfig.ServerConfig["Se
         ...overrides,
       } satisfies ServerConfig.ServerConfig["Service"];
     }),
-  ).pipe(
-    Layer.provide(
-      ServerConfig.ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-server-test-" }),
-    ),
-  );
+  ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-server-test-" })));
 
 const makeEnvironmentAuthLayer = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
   EnvironmentAuth.layer.pipe(

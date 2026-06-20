@@ -23,7 +23,7 @@ const makeServerConfigLayer = (
     }),
   ).pipe(
     Layer.provide(
-      ServerConfig.ServerConfig.layerTest(process.cwd(), {
+      ServerConfig.layerTest(process.cwd(), {
         prefix: "t3-auth-control-plane-test-",
       }),
     ),
