@@ -27,25 +27,13 @@ export const decodeOptionalPayload = <A, I>(
       return Effect.sync(() => undefined as A);
     }
     return Effect.fail(
-      CodexError.CodexAppServerRequestError.invalidParams(
-        `Method '${method}' does not accept a payload during 'decode-payload'`,
-        raw,
-        { method, operation: "decode-payload" },
-      ),
+      CodexError.CodexAppServerRequestError.unexpectedPayload(method, "decode-payload", raw),
     );
   }
 
   return Schema.decodeUnknownEffect(schema)(raw).pipe(
     Effect.mapError((error) =>
-      CodexError.CodexAppServerRequestError.invalidParams(
-        `Invalid payload for method '${method}' during 'decode-payload'`,
-        { issue: error.issue },
-        {
-          method,
-          operation: "decode-payload",
-          cause: error,
-        },
-      ),
+      CodexError.CodexAppServerRequestError.invalidPayload(method, "decode-payload", error),
     ),
   );
 };
@@ -60,25 +48,13 @@ export const encodeOptionalPayload = <A, I>(
       return Effect.sync(() => undefined);
     }
     return Effect.fail(
-      CodexError.CodexAppServerRequestError.invalidParams(
-        `Method '${method}' does not accept a payload during 'encode-payload'`,
-        payload,
-        { method, operation: "encode-payload" },
-      ),
+      CodexError.CodexAppServerRequestError.unexpectedPayload(method, "encode-payload", payload),
     );
   }
 
   return Schema.encodeEffect(schema)(payload).pipe(
     Effect.mapError((error) =>
-      CodexError.CodexAppServerRequestError.invalidParams(
-        `Invalid payload for method '${method}' during 'encode-payload'`,
-        { issue: error.issue },
-        {
-          method,
-          operation: "encode-payload",
-          cause: error,
-        },
-      ),
+      CodexError.CodexAppServerRequestError.invalidPayload(method, "encode-payload", error),
     ),
   );
 };

@@ -5,6 +5,11 @@ import * as Schema from "effect/Schema";
 import * as CodexError from "../errors.ts";
 import * as Shared from "./shared.ts";
 
+const decodeNestedNumberPayload = Schema.decodeUnknownEffect(
+  Schema.Struct({ profile: Schema.Struct({ token: Schema.Number }) }),
+);
+const encodeUnknownJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+
 it.effect("preserves schema decode diagnostics without deriving the message from the cause", () =>
   Effect.gen(function* () {
     const error = yield* Shared.decodeOptionalPayload("thread/start", Schema.String, 42).pipe(
@@ -51,15 +56,43 @@ it.effect("preserves schema encode diagnostics", () =>
 
 it.effect("does not invent a cause when a method has no payload schema", () =>
   Effect.gen(function* () {
-    const error = yield* Shared.decodeOptionalPayload<never, never>(
-      "initialized",
-      undefined,
-      "unexpected",
-    ).pipe(Effect.flip);
+    const secret = "unexpected-payload-secret";
+    const error = yield* Shared.decodeOptionalPayload<never, never>("initialized", undefined, {
+      token: secret,
+    }).pipe(Effect.flip);
 
     assert.equal(error.method, "initialized");
     assert.equal(error.operation, "decode-payload");
+    assert.equal(error.payloadKind, "object");
+    assert.deepEqual(error.data, { payloadKind: "object" });
     assert.isUndefined(error.cause);
+    assert.notInclude(error.message, secret);
+    assert.notInclude(encodeUnknownJson(error.toProtocolError()), secret);
+  }),
+);
+
+it.effect("keeps invalid payload values only in the exact schema cause", () =>
+  Effect.gen(function* () {
+    const secret = "codex-schema-payload-secret";
+    const cause = yield* decodeNestedNumberPayload({ profile: { token: secret } }).pipe(
+      Effect.flip,
+    );
+    const error = CodexError.CodexAppServerRequestError.invalidPayload(
+      "thread/start",
+      "decode-payload",
+      cause,
+    );
+    const { cause: directCause, ...directDiagnostics } = error;
+
+    assert.strictEqual(directCause, cause);
+    assert.equal(error.method, "thread/start");
+    assert.equal(error.operation, "decode-payload");
+    assert.equal(error.maximumPathDepth, 2);
+    assert.isAbove(error.issueCount ?? 0, 0);
+    assert.include(error.issueKinds ?? [], "Pointer");
+    assert.notInclude(error.message, secret);
+    assert.notInclude(encodeUnknownJson(directDiagnostics), secret);
+    assert.notInclude(encodeUnknownJson(error.toProtocolError()), secret);
   }),
 );
 

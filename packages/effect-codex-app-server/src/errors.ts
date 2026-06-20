@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import type * as SchemaIssue from "effect/SchemaIssue";
 
 export const CodexAppServerRequestOperation = Schema.Literals([
   "decode-payload",
@@ -7,10 +8,87 @@ export const CodexAppServerRequestOperation = Schema.Literals([
 ]);
 export type CodexAppServerRequestOperation = typeof CodexAppServerRequestOperation.Type;
 
+export const CodexAppServerSchemaIssueKind = Schema.Literals([
+  "Filter",
+  "Encoding",
+  "Pointer",
+  "Composite",
+  "AnyOf",
+  "InvalidType",
+  "InvalidValue",
+  "MissingKey",
+  "UnexpectedKey",
+  "Forbidden",
+  "OneOf",
+]);
+export type CodexAppServerSchemaIssueKind = typeof CodexAppServerSchemaIssueKind.Type;
+
+export interface CodexAppServerSchemaIssueDiagnostics {
+  readonly issueCount: number;
+  readonly issueKinds: ReadonlyArray<CodexAppServerSchemaIssueKind>;
+  readonly maximumPathDepth: number;
+}
+
+const schemaIssueDiagnostics = (root: SchemaIssue.Issue): CodexAppServerSchemaIssueDiagnostics => {
+  let issueCount = 0;
+  let maximumPathDepth = 0;
+  const issueKinds = new Set<CodexAppServerSchemaIssueKind>();
+
+  const visit = (issue: SchemaIssue.Issue, pathDepth: number): void => {
+    issueCount += 1;
+    issueKinds.add(issue._tag);
+    maximumPathDepth = Math.max(maximumPathDepth, pathDepth);
+    switch (issue._tag) {
+      case "Filter":
+      case "Encoding":
+        visit(issue.issue, pathDepth);
+        break;
+      case "Pointer":
+        visit(issue.issue, pathDepth + issue.path.length);
+        break;
+      case "Composite":
+      case "AnyOf":
+        for (const child of issue.issues) visit(child, pathDepth);
+        break;
+    }
+  };
+
+  visit(root, 0);
+  return {
+    issueCount,
+    issueKinds: [...issueKinds],
+    maximumPathDepth,
+  };
+};
+
+export const CodexAppServerPayloadKind = Schema.Literals([
+  "null",
+  "array",
+  "string",
+  "number",
+  "boolean",
+  "bigint",
+  "object",
+  "symbol",
+  "function",
+  "undefined",
+]);
+export type CodexAppServerPayloadKind = typeof CodexAppServerPayloadKind.Type;
+
+const payloadKind = (payload: unknown): CodexAppServerPayloadKind => {
+  if (payload === null) return "null";
+  if (Array.isArray(payload)) return "array";
+  return typeof payload;
+};
+
 export interface CodexAppServerRequestDiagnostics {
   readonly method?: string;
   readonly operation?: CodexAppServerRequestOperation;
   readonly cause?: unknown;
+  readonly issueCount?: number;
+  readonly issueKinds?: ReadonlyArray<CodexAppServerSchemaIssueKind>;
+  readonly maximumPathDepth?: number;
+  readonly payloadKind?: CodexAppServerPayloadKind;
 }
 
 export const CodexAppServerProtocolParseOperation = Schema.Literals([
@@ -127,6 +205,10 @@ export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexApp
     data: Schema.optional(Schema.Unknown),
     method: Schema.optionalKey(Schema.String),
     operation: Schema.optionalKey(CodexAppServerRequestOperation),
+    issueCount: Schema.optionalKey(Schema.Number),
+    issueKinds: Schema.optionalKey(Schema.Array(CodexAppServerSchemaIssueKind)),
+    maximumPathDepth: Schema.optionalKey(Schema.Number),
+    payloadKind: Schema.optionalKey(CodexAppServerPayloadKind),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
@@ -189,6 +271,39 @@ export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexApp
       code: -32602,
       errorMessage: message,
       ...(data !== undefined ? { data } : {}),
+      ...diagnostics,
+    });
+  }
+
+  static invalidPayload(
+    method: string,
+    operation: "decode-payload" | "encode-payload",
+    cause: Schema.SchemaError,
+  ) {
+    const diagnostics = schemaIssueDiagnostics(cause.issue);
+    return new CodexAppServerRequestError({
+      code: -32602,
+      errorMessage: `Invalid payload for method '${method}' during '${operation}'`,
+      data: diagnostics,
+      method,
+      operation,
+      ...diagnostics,
+      cause,
+    });
+  }
+
+  static unexpectedPayload(
+    method: string,
+    operation: "decode-payload" | "encode-payload",
+    payload: unknown,
+  ) {
+    const diagnostics = { payloadKind: payloadKind(payload) };
+    return new CodexAppServerRequestError({
+      code: -32602,
+      errorMessage: `Method '${method}' does not accept a payload during '${operation}'`,
+      data: diagnostics,
+      method,
+      operation,
       ...diagnostics,
     });
   }
