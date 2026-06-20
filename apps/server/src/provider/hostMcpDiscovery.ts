@@ -38,6 +38,11 @@ export interface HostMcpDiscoveryDiagnostic {
   readonly socketPath?: string;
 }
 
+interface HostMcpAvailability {
+  readonly available: boolean;
+  readonly diagnosticReported: boolean;
+}
+
 export const resolveHostMcpServersForWorkspaceEffect = Effect.fn(
   "HostMcpDiscovery.resolveHostMcpServersForWorkspace",
 )(function* (input: ResolveHostMcpServersInput) {
@@ -75,7 +80,9 @@ export const resolveHostMcpServersForWorkspaceEffect = Effect.fn(
       });
       continue;
     }
-    if (!(yield* hostMcpSocketPathExists(input, server))) {
+    const socketAvailability = yield* hostMcpSocketPathExists(input, server);
+    if (!socketAvailability.available) {
+      if (socketAvailability.diagnosticReported) continue;
       reportHostMcpDiagnostic(input, {
         reason: "socket-missing",
         serverName: server.name,
@@ -83,7 +90,9 @@ export const resolveHostMcpServersForWorkspaceEffect = Effect.fn(
       });
       continue;
     }
-    if (!(yield* probeHostMcpSocket(input, server))) {
+    const probeAvailability = yield* probeHostMcpSocket(input, server);
+    if (!probeAvailability.available) {
+      if (probeAvailability.diagnosticReported) continue;
       reportHostMcpDiagnostic(input, {
         reason: "probe-failed",
         serverName: server.name,
@@ -146,11 +155,18 @@ function describeUnknownCause(cause: unknown): string {
 function hostMcpSocketPathExists(
   input: ResolveHostMcpServersInput,
   server: DesktopBootstrapMcpServer,
-) {
-  if (!input.socketPathExists) return defaultSocketPathExistsEffect(server.socketPath);
+): Effect.Effect<HostMcpAvailability> {
+  if (!input.socketPathExists) {
+    return defaultSocketPathExistsEffect(server.socketPath).pipe(
+      Effect.map((available) => ({ available, diagnosticReported: false })),
+    );
+  }
   return Effect.sync(() => {
     try {
-      return input.socketPathExists?.(server.socketPath) === true;
+      return {
+        available: input.socketPathExists?.(server.socketPath) === true,
+        diagnosticReported: false,
+      };
     } catch (cause) {
       reportHostMcpDiagnostic(input, {
         reason: "socket-check-failed",
@@ -158,16 +174,26 @@ function hostMcpSocketPathExists(
         socketPath: server.socketPath,
         detail: describeUnknownCause(cause),
       });
-      return false;
+      return { available: false, diagnosticReported: true };
     }
   });
 }
 
-function probeHostMcpSocket(input: ResolveHostMcpServersInput, server: DesktopBootstrapMcpServer) {
-  if (!input.probe) return probeMcpSocketEffect(server.socketPath);
+function probeHostMcpSocket(
+  input: ResolveHostMcpServersInput,
+  server: DesktopBootstrapMcpServer,
+): Effect.Effect<HostMcpAvailability> {
+  if (!input.probe) {
+    return probeMcpSocketEffect(server.socketPath).pipe(
+      Effect.map((available) => ({ available, diagnosticReported: false })),
+    );
+  }
   return Effect.promise(async () => {
     try {
-      return (await input.probe?.(server.socketPath)) === true;
+      return {
+        available: (await input.probe?.(server.socketPath)) === true,
+        diagnosticReported: false,
+      };
     } catch (cause) {
       reportHostMcpDiagnostic(input, {
         reason: "probe-rejected",
@@ -175,7 +201,7 @@ function probeHostMcpSocket(input: ResolveHostMcpServersInput, server: DesktopBo
         socketPath: server.socketPath,
         detail: describeUnknownCause(cause),
       });
-      return false;
+      return { available: false, diagnosticReported: true };
     }
   });
 }

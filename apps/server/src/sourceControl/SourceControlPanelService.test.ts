@@ -213,7 +213,7 @@ describe("SourceControlPanelService", () => {
     );
   });
 
-  it.effect("preserves original causes when wrapping git execution failures", () => {
+  it.effect("preserves sanitized causes when wrapping git execution failures", () => {
     const cause = new Error("transport closed");
     return Effect.gen(function* () {
       const service = yield* SourceControlPanelService;
@@ -231,7 +231,10 @@ describe("SourceControlPanelService", () => {
 
       assert.strictEqual(isGitCommandError(error), true);
       assert.strictEqual(error.detail, "transport closed");
-      assert.strictEqual(error.cause, cause);
+      assert.deepStrictEqual(error.cause, {
+        name: "Error",
+        message: "transport closed",
+      });
     }).pipe(
       Effect.provide(
         makeTestLayer(

@@ -45,6 +45,7 @@ import {
 } from "@t3tools/contracts";
 import type { ChangeRequest } from "@t3tools/contracts";
 
+import { sanitizeErrorCause } from "../diagnostics/ErrorCause.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { parseRemoteNames, parseRemoteRefWithRemoteNames } from "../git/remoteRefs.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -133,7 +134,7 @@ function gitError(
     command: commandLabel(args),
     cwd,
     detail,
-    ...(cause === undefined ? {} : { cause }),
+    ...(cause === undefined ? {} : { cause: sanitizeErrorCause(cause) }),
   });
 }
 

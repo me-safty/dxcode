@@ -203,7 +203,71 @@ layer("GitLabCli.layer", (it) => {
       });
 
       expect(error.detail).toBe("GitLab CLI (`glab`) is required but not available on PATH.");
-      expect(error.cause).toBe(cause);
+      expect(error.cause).toEqual({
+        tag: "VcsProcessSpawnError",
+        detail: "Command not found: glab",
+      });
+    }),
+  );
+
+  it.effect("classifies GitLab CLI errors from detail text without rendering tags", () =>
+    Effect.gen(function* () {
+      const cause = new VcsProcessExitError({
+        operation: "gitlab.execute",
+        command: "glab mr view 42",
+        cwd: "/repo",
+        exitCode: 1,
+        detail: "fatal: could not read from remote repository",
+      });
+      mockedRun.mockReturnValueOnce(Effect.fail(cause) as never);
+
+      const error = yield* Effect.gen(function* () {
+        const glab = yield* GitLabCli.GitLabCli;
+        return yield* glab
+          .execute({
+            cwd: "/repo",
+            args: ["mr", "view", "42"],
+          })
+          .pipe(Effect.flip);
+      });
+
+      expect(error.detail).toBe(
+        "GitLab CLI command failed: fatal: could not read from remote repository",
+      );
+      expect(error.detail).not.toContain("VcsProcessExitError");
+      expect(error.cause).toEqual({
+        tag: "VcsProcessExitError",
+        name: "VcsProcessExitError",
+        message:
+          "VCS process failed in gitlab.execute: glab mr view 42 (/repo) exited with 1 - fatal: could not read from remote repository",
+        detail: "fatal: could not read from remote repository",
+        exitCode: 1,
+      });
+    }),
+  );
+
+  it.effect("does not classify ambiguous token text as authentication failures", () =>
+    Effect.gen(function* () {
+      mockedRun.mockReturnValueOnce(
+        Effect.fail({
+          _tag: "VcsProcessExitError",
+          detail: "GraphQL parser found token near merge request query",
+        }) as never,
+      );
+
+      const error = yield* Effect.gen(function* () {
+        const glab = yield* GitLabCli.GitLabCli;
+        return yield* glab
+          .execute({
+            cwd: "/repo",
+            args: ["mr", "list"],
+          })
+          .pipe(Effect.flip);
+      });
+
+      expect(error.detail).toBe(
+        "GitLab CLI command failed: GraphQL parser found token near merge request query",
+      );
     }),
   );
 

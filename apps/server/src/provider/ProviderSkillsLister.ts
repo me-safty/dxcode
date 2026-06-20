@@ -20,6 +20,7 @@ import { listCodexProviderSkills } from "./Layers/CodexProvider.ts";
 import { deriveProviderInstanceConfigMap } from "./Layers/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "./ProviderInstanceEnvironment.ts";
 import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
+import { sanitizeErrorCause } from "../diagnostics/ErrorCause.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 
@@ -66,6 +67,11 @@ function describeUnknownCause(cause: unknown): string {
   return "Unknown error";
 }
 
+function optionalTrimmedNonEmptyString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? value : undefined;
+}
+
 function providerSkillsListError(input: {
   readonly reason: ServerProviderSkillsListFailureReason;
   readonly operation: string;
@@ -74,13 +80,14 @@ function providerSkillsListError(input: {
   readonly cwd?: string | undefined;
   readonly cause?: unknown;
 }) {
+  const cwd = optionalTrimmedNonEmptyString(input.cwd);
   return new ServerProviderSkillsListError({
     reason: input.reason,
     operation: input.operation,
     message: input.message,
     ...(input.instanceId === undefined ? {} : { instanceId: input.instanceId }),
-    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-    ...(input.cause === undefined ? {} : { cause: input.cause }),
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(input.cause === undefined ? {} : { cause: sanitizeErrorCause(input.cause) }),
   });
 }
 
@@ -237,7 +244,7 @@ export const makeProviderSkillsLister = Effect.fn("makeProviderSkillsLister")(fu
           reason: "home-prepare-failed",
           operation: "ProviderSkillsLister.prepareCodexHome",
           instanceId: input.instanceId,
-          cwd: normalizedCwd,
+          cwd: input.cwd,
           message: `Failed to prepare Codex home for '${input.instanceId}': ${describeUnknownCause(cause)}`,
           cause,
         }),

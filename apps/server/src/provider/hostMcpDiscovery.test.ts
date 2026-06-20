@@ -183,11 +183,6 @@ describe("host MCP discovery", () => {
         socketPath: "/tmp/throws.sock",
         detail: "socket check failed",
       },
-      {
-        reason: "socket-missing",
-        serverName: "throws",
-        socketPath: "/tmp/throws.sock",
-      },
     ]);
   });
 
@@ -238,11 +233,6 @@ describe("host MCP discovery", () => {
         serverName: "rejects",
         socketPath: "/tmp/rejects.sock",
         detail: "probe failed",
-      },
-      {
-        reason: "probe-failed",
-        serverName: "rejects",
-        socketPath: "/tmp/rejects.sock",
       },
     ]);
   });
@@ -313,6 +303,7 @@ describe("host MCP discovery", () => {
   it("falls back to bootstrap servers when direct workspace discovery fails", async () => {
     const t3Home = NodePath.join(makeT3Home(), "not-a-directory");
     NodeFS.writeFileSync(t3Home, "");
+    const diagnostics: HostMcpDiscoveryDiagnostic[] = [];
     const bootstrapServer = {
       name: "bootstrap",
       socketPath: "/tmp/bootstrap.sock",
@@ -323,7 +314,14 @@ describe("host MCP discovery", () => {
         t3Home,
         workspaceRoot: "/repo",
         bootstrapServers: [bootstrapServer],
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       }),
     ).resolves.toEqual([bootstrapServer]);
+    expect(diagnostics).toEqual([
+      {
+        reason: "advertisements-read-failed",
+        detail: expect.any(String),
+      },
+    ]);
   });
 });

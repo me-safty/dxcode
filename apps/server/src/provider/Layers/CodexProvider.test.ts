@@ -209,6 +209,10 @@ describe("listCodexProviderSkills", () => {
       expect(error.operation).toBe("ProviderSkillsLister.listCodexProviderSkills");
       expect(error.instanceId).toBe("codex");
       expect(error.cwd).toBe(fixture.cwd);
+      expect(error.cause).toEqual({
+        tag: "TimeoutError",
+        name: "TimeoutError",
+      });
       expect(yield* waitForFileContent(fixture.exitLogPath)).toContain("SIGTERM");
     }).pipe(Effect.provide(NodeServices.layer)),
   );

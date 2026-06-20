@@ -15,6 +15,7 @@ import {
   decodeGitLabMergeRequestListJson,
   formatGitLabJsonDecodeError,
 } from "./gitLabMergeRequests.ts";
+import { sanitizeErrorCause } from "../diagnostics/ErrorCause.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -116,14 +117,21 @@ function isVcsProcessSpawnError(error: unknown): boolean {
 
 function errorText(error: unknown): string {
   if (typeof error === "object" && error !== null) {
-    const tag = "_tag" in error && typeof error._tag === "string" ? error._tag : "";
     const detail = "detail" in error && typeof error.detail === "string" ? error.detail : "";
     const message = "message" in error && typeof error.message === "string" ? error.message : "";
-    const text = [tag, detail, message].filter(Boolean).join("\n");
-    if (text.length > 0) return text;
+    if (detail.length > 0) return detail;
+    if (message.length > 0) return message;
   }
   if (typeof error === "string") return error;
   return "Unknown GitLab CLI failure.";
+}
+
+function mentionsGitLabAuthToken(text: string): boolean {
+  return /\b(?:invalid|expired|missing)\s+(?:access\s+)?token\b/.test(text);
+}
+
+function mentionsMissingMergeRequest(text: string): boolean {
+  return /\bmerge request not found\b/.test(text) || /\b404\b/.test(text);
 }
 
 function normalizeGitLabCliError(operation: "execute" | "stdout", error: unknown): GitLabCliError {
@@ -134,7 +142,7 @@ function normalizeGitLabCliError(operation: "execute" | "stdout", error: unknown
     return new GitLabCliError({
       operation,
       detail: "GitLab CLI (`glab`) is required but not available on PATH.",
-      cause: error,
+      cause: sanitizeErrorCause(error),
     });
   }
 
@@ -142,31 +150,27 @@ function normalizeGitLabCliError(operation: "execute" | "stdout", error: unknown
     lower.includes("authentication failed") ||
     lower.includes("not logged in") ||
     lower.includes("glab auth login") ||
-    lower.includes("token")
+    mentionsGitLabAuthToken(lower)
   ) {
     return new GitLabCliError({
       operation,
       detail: "GitLab CLI is not authenticated. Run `glab auth login` and retry.",
-      cause: error,
+      cause: sanitizeErrorCause(error),
     });
   }
 
-  if (
-    lower.includes("merge request not found") ||
-    lower.includes("not found") ||
-    lower.includes("404")
-  ) {
+  if (mentionsMissingMergeRequest(lower)) {
     return new GitLabCliError({
       operation,
       detail: "Merge request not found. Check the MR number or URL and try again.",
-      cause: error,
+      cause: sanitizeErrorCause(error),
     });
   }
 
   return new GitLabCliError({
     operation,
     detail: `GitLab CLI command failed: ${text}`,
-    cause: error,
+    cause: sanitizeErrorCause(error),
   });
 }
 
