@@ -17,23 +17,23 @@ import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
-import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
+import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
-import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime.ts";
+import * as ProviderSessionRuntime from "./persistence/ProviderSessionRuntime.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
-import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery.ts";
-import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore.ts";
+import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
-import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
+import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -101,11 +101,11 @@ const HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS = 0;
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
     if (typeof Bun !== "undefined") {
-      const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY.ts"));
-      return BunPTY.layer;
+      const BunPtyAdapter = yield* Effect.promise(() => import("./terminal/BunPtyAdapter.ts"));
+      return BunPtyAdapter.layer;
     } else {
-      const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY.ts"));
-      return NodePTY.layer;
+      const NodePtyAdapter = yield* Effect.promise(() => import("./terminal/NodePtyAdapter.ts"));
+      return NodePtyAdapter.layer;
     }
   }),
 );
@@ -166,7 +166,7 @@ const ReactorLayerLive = Layer.empty.pipe(
 );
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
-  Layer.provide(ProviderSessionRuntimeRepositoryLive),
+  Layer.provide(ProviderSessionRuntime.layer),
 );
 
 // `ProviderAdapterRegistryLive` is now a facade that resolves kind → adapter
@@ -232,13 +232,13 @@ const VcsLayerLive = Layer.empty.pipe(
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(CheckpointDiffQueryLive),
-  Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
+  Layer.provideMerge(CheckpointDiffQuery.layer),
+  Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
 const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
 
-const TerminalLayerLive = TerminalManagerLive.pipe(
+const TerminalLayerLive = TerminalManager.layer.pipe(
   Layer.provide(PtyAdapterLive),
   Layer.provide(PortScannerLayerLive),
 );
@@ -332,7 +332,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(ProcessDiagnostics.layer),
   Layer.provideMerge(ProcessResourceMonitor.layer),
   Layer.provideMerge(TraceDiagnostics.layer),
-  Layer.provideMerge(AnalyticsServiceLayerLive),
+  Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),

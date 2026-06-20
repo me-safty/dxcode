@@ -14,7 +14,7 @@ import {
   GitCommandError,
   KeybindingRule,
   MessageId,
-  ExternalLauncherError,
+  ExternalLauncherCommandNotFoundError,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
@@ -71,7 +71,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import * as ServerConfig from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
-import * as CheckpointDiffQuery from "./checkpointing/Services/CheckpointDiffQuery.ts";
+import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -85,10 +85,10 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/provid
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
-import * as TerminalManager from "./terminal/Services/Manager.ts";
+import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
-import * as BrowserTraceCollector from "./observability/Services/BrowserTraceCollector.ts";
+import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import * as ProjectSetupScriptRunner from "./project/Services/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "./project/Services/RepositoryIdentityResolver.ts";
@@ -4570,8 +4570,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("routes websocket rpc shell.openInEditor errors", () =>
     Effect.gen(function* () {
-      const externalLauncherError = new ExternalLauncherError({
-        message: "Editor command not found: cursor",
+      const externalLauncherError = new ExternalLauncherCommandNotFoundError({
+        editor: "cursor",
+        command: "cursor",
       });
       yield* buildAppUnderTest({
         layers: {
@@ -6040,6 +6041,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cwd: "/tmp/project",
           refName: fetchedOriginCommit,
           newRefName: "t3code/bootstrap-refName",
+          baseRefName: "main",
           path: null,
         });
         assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
