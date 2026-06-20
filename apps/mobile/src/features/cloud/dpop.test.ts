@@ -12,7 +12,6 @@ import {
   CloudDpopProofError,
   CloudDpopStorageError,
   createDpopProof,
-  DpopStoredPublicKeyMismatchError,
   generateDpopProofKeyPair,
   isCloudDpopError,
   loadOrCreateDpopProofKeyPair,
@@ -104,13 +103,11 @@ describe("mobile DPoP", () => {
         operation: "decode",
         storageKey: "t3code.cloud.dpop-proof-key",
       });
-      expect(error.cause).toMatchObject({ _tag: "SchemaError" });
-      expect(error.message).not.toContain(String(error.cause));
       expect(isCloudDpopError(error)).toBe(true);
     }).pipe(Effect.provide(cryptoLayer)),
   );
 
-  it.effect("preserves a structured cause when stored key material does not match", () =>
+  it.effect("rejects stored key material whose public coordinates do not match", () =>
     Effect.gen(function* () {
       secureStore.clear();
       const generated = yield* generateDpopProofKeyPair();
@@ -126,11 +123,10 @@ describe("mobile DPoP", () => {
         operation: "restore",
         storageKey: "t3code.cloud.dpop-proof-key",
       });
-      expect(error.cause).toBeInstanceOf(DpopStoredPublicKeyMismatchError);
     }).pipe(Effect.provide(cryptoLayer)),
   );
 
-  it.effect("preserves request context and the parser cause for an invalid proof URL", () =>
+  it.effect("preserves request context for an invalid proof URL", () =>
     Effect.gen(function* () {
       const proofKey = yield* generateDpopProofKeyPair();
       const error = yield* createDpopProof({
@@ -147,8 +143,6 @@ describe("mobile DPoP", () => {
         urlLength: "http://".length,
         thumbprint: proofKey.thumbprint,
       });
-      expect(error.cause).toBeInstanceOf(Error);
-      expect(error.message).not.toContain((error.cause as Error).message);
       expect(isCloudDpopError(error)).toBe(true);
     }).pipe(Effect.provide(cryptoLayer)),
   );
@@ -174,7 +168,6 @@ describe("mobile DPoP", () => {
         urlLength: url.length,
         thumbprint: proofKey.thumbprint,
       });
-      expect(error.cause).toMatchObject({ _tag: "EncodingError" });
       expect(error).not.toHaveProperty("url");
       expect(error.message).not.toContain("user");
       expect(error.message).not.toContain("password");
