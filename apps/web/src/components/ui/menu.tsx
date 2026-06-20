@@ -5,6 +5,7 @@ import { ChevronRightIcon } from "lucide-react";
 import type * as React from "react";
 
 import { cn } from "~/lib/utils";
+import { Kbd } from "./kbd";
 
 const MenuCreateHandle = MenuPrimitive.createHandle;
 
