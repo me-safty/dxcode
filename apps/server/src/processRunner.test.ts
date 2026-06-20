@@ -4,6 +4,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
@@ -55,7 +56,9 @@ function makeHandle(input: {
 }
 
 function makeSpawner(
-  f: (command: ChildProcessCommand) => Effect.Effect<ChildProcessSpawner.ChildProcessHandle>,
+  f: (
+    command: ChildProcessCommand,
+  ) => Effect.Effect<ChildProcessSpawner.ChildProcessHandle, PlatformError.PlatformError>,
 ) {
   return ChildProcessSpawner.make((command) => f(asChildProcessCommand(command)));
 }
@@ -159,6 +162,41 @@ describe("runProcess", () => {
     );
   });
 
+  it.effect("preserves resolved spawn context and cause", () =>
+    Effect.gen(function* () {
+      const cause = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "ChildProcessSpawner",
+        method: "spawn",
+        pathOrDescriptor: "/actual/fake",
+      });
+      const spawner = makeSpawner(() => Effect.fail(cause));
+
+      const error = yield* runWith(spawner)({
+        command: "fake",
+        args: ["--flag"],
+        cwd: "/logical",
+        spawnCwd: "/actual",
+      }).pipe(Effect.flip);
+
+      expect(error._tag).toBe("ProcessSpawnError");
+      if (error._tag !== "ProcessSpawnError") {
+        return expect.fail("Expected ProcessSpawnError");
+      }
+      expect(error).toMatchObject({
+        command: "fake",
+        args: ["--flag"],
+        cwd: "/logical",
+        spawnCwd: "/actual",
+        resolvedCommand: "fake",
+        resolvedArgs: ["--flag"],
+        shell: false,
+      });
+      expect(error.cause).toBe(cause);
+      expect(error.message).toBe("Failed to spawn process 'fake --flag' in '/actual'");
+    }),
+  );
+
   it.effect("fails when output exceeds max buffer in default mode", () =>
     Effect.gen(function* () {
       const spawner = makeSpawner(() => Effect.succeed(makeHandle({ stdout: "x".repeat(2048) })));
@@ -169,7 +207,18 @@ describe("runProcess", () => {
         maxOutputBytes: 128,
       }).pipe(Effect.flip);
 
-      expect(error).toBeInstanceOf(ProcessRunner.ProcessOutputLimitError);
+      expect(error._tag).toBe("ProcessOutputLimitError");
+      if (error._tag !== "ProcessOutputLimitError") {
+        return expect.fail("Expected ProcessOutputLimitError");
+      }
+      expect(error).toMatchObject({
+        stream: "stdout",
+        maxBytes: 128,
+        observedBytes: 2048,
+      });
+      expect(error.message).toBe(
+        "Process 'fake stdout-bytes 2048' stdout produced 2048 bytes, exceeding the 128 byte limit",
+      );
     }),
   );
 
@@ -272,6 +321,8 @@ describe("runProcess", () => {
       const errorFiber = yield* runWith(spawner)({
         command: "fake",
         args: ["sleep"],
+        cwd: "/logical",
+        spawnCwd: "/actual",
         timeout: "50 millis",
       }).pipe(Effect.flip, Effect.forkScoped);
 
@@ -279,7 +330,18 @@ describe("runProcess", () => {
       yield* TestClock.adjust(Duration.millis(50));
       const error = yield* Fiber.join(errorFiber);
 
-      expect(error).toBeInstanceOf(ProcessRunner.ProcessTimeoutError);
+      expect(error._tag).toBe("ProcessTimeoutError");
+      if (error._tag !== "ProcessTimeoutError") {
+        return expect.fail("Expected ProcessTimeoutError");
+      }
+      expect(error).toMatchObject({
+        command: "fake",
+        args: ["sleep"],
+        cwd: "/logical",
+        spawnCwd: "/actual",
+        timeoutMs: 50,
+      });
+      expect(error.message).toBe("Process 'fake sleep' in '/actual' timed out after 50ms");
     }),
   );
 
