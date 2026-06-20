@@ -18,6 +18,10 @@ const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
+const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION === "1";
+const emitCreatePlan = process.env.T3_ACP_EMIT_CREATE_PLAN === "1";
+const emitUpdateTodos = process.env.T3_ACP_EMIT_UPDATE_TODOS === "1";
+const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
@@ -176,6 +180,8 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
       options: [
         { value: "default", name: "Auto" },
         { value: "composer-2", name: "Composer 2" },
+        { value: "grok-build", name: "Grok Build" },
+        { value: "grok-composer-2.5-fast", name: "Composer 2.5 Fast" },
         { value: "composer-2[fast=true]", name: "Composer 2 Fast" },
         { value: "gpt-5.3-codex[reasoning=medium,fast=false]", name: "Codex 5.3" },
       ],
@@ -325,6 +331,13 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
 
+      if (failPrompt) {
+        return yield* AcpError.AcpRequestError.invalidParams("Mock prompt failure", {
+          method: "session/prompt",
+          params: request,
+        });
+      }
+
       if (emitInterleavedAssistantToolCalls) {
         const toolCallId = "tool-call-1";
 
@@ -449,7 +462,7 @@ const program = Effect.gen(function* () {
           sessionId: requestedSessionId,
           update: {
             sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: "hello from mock" },
+            content: { type: "text", text: promptResponseText ?? "hello from mock" },
           },
         });
 
@@ -495,6 +508,41 @@ const program = Effect.gen(function* () {
         return { stopReason: "end_turn" };
       }
 
+      if (emitCreatePlan) {
+        yield* agent.client.extRequest("cursor/create_plan", {
+          toolCallId: "create-plan-tool-call-1",
+          name: "Mock implementation plan",
+          plan: "# Mock plan\n\n- [ ] First todo\n- [ ] Second todo",
+          todos: [
+            { id: "todo-1", content: "First todo", status: "pending" },
+            { id: "todo-2", content: "Second todo", status: "pending" },
+          ],
+        });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitUpdateTodos) {
+        yield* agent.client.extNotification("cursor/update_todos", {
+          toolCallId: "update-todos-tool-call-1",
+          todos: [
+            { id: "todo-1", content: "First todo", status: "completed" },
+            { id: "todo-2", content: "Second todo", status: "in_progress" },
+          ],
+          merge: true,
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: promptResponseText ?? "todo progress updated" },
+          },
+        });
+
+        return { stopReason: "end_turn" };
+      }
+
       if (emitAskQuestion) {
         yield* agent.client.extRequest("cursor/ask_question", {
           toolCallId: "ask-question-tool-call-1",
@@ -510,6 +558,43 @@ const program = Effect.gen(function* () {
             },
           ],
         });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitXAiAskUserQuestion) {
+        const result = yield* agent.client.extRequest("_x.ai/ask_user_question", {
+          method: "x.ai/ask_user_question",
+          params: {
+            sessionId: requestedSessionId,
+            toolCallId: "ask-user-question-tool-call-1",
+            questions: [
+              {
+                question: "Which scope should Grok use?",
+                multiSelect: null,
+                options: [
+                  { label: "Workspace", description: "Use the current workspace" },
+                  { label: "Session", description: "Only use this session" },
+                ],
+              },
+            ],
+            mode: "default",
+          },
+        });
+        if (typeof result !== "object" || result === null || !("outcome" in result)) {
+          throw new Error("Expected _x.ai/ask_user_question response outcome.");
+        }
+        if (result.outcome === "cancelled") {
+          return { stopReason: "end_turn" };
+        }
+        if (
+          result.outcome !== "accepted" ||
+          !("answers" in result) ||
+          typeof result.answers !== "object" ||
+          result.answers === null
+        ) {
+          throw new Error("Expected accepted _x.ai/ask_user_question response answers.");
+        }
 
         return { stopReason: "end_turn" };
       }

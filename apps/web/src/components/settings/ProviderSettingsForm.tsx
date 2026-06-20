@@ -117,6 +117,21 @@ export function readProviderConfigString(config: unknown, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+export function readProviderConfigStringArray(config: unknown, key: string): ReadonlyArray<string> {
+  if (config === null || typeof config !== "object") return [];
+  const value = (config as Record<string, unknown>)[key];
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+  return [];
+}
+
 export function readProviderConfigBoolean(
   config: unknown,
   key: string,
@@ -127,13 +142,27 @@ export function readProviderConfigBoolean(
   return typeof value === "boolean" ? value : defaultValue;
 }
 
+function isReadonlyStringArray(value: unknown): value is ReadonlyArray<string> {
+  return Array.isArray(value);
+}
+
 export function nextProviderConfigWithFieldValue(
   config: unknown,
   field: ProviderSettingsFieldModel,
-  value: string | boolean,
+  value: string | boolean | ReadonlyArray<string>,
 ): Record<string, unknown> | undefined {
   const base: Record<string, unknown> =
     config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
+
+  if (isReadonlyStringArray(value)) {
+    const nextValues = value.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+    if (field.clearWhenEmpty === "omit" && nextValues.length === 0) {
+      delete base[field.key];
+    } else {
+      base[field.key] = nextValues;
+    }
+    return Object.keys(base).length > 0 ? base : undefined;
+  }
 
   if (typeof value === "boolean") {
     const emptyBooleanValue = field.defaultBooleanValue ?? false;
@@ -152,6 +181,13 @@ export function nextProviderConfigWithFieldValue(
     base[field.key] = value;
   }
   return Object.keys(base).length > 0 ? base : undefined;
+}
+
+export function parseProviderConfigStringArrayDraft(value: string): ReadonlyArray<string> {
+  return value
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 interface ProviderSettingsFormProps {
@@ -228,6 +264,33 @@ function ProviderSettingsFieldRow({
             value={readProviderConfigString(value, field.key)}
             onChange={(event) =>
               onChange(nextProviderConfigWithFieldValue(value, field, event.target.value))
+            }
+            placeholder={field.placeholder}
+            spellCheck={false}
+          />
+          {description}
+        </label>
+      </FieldFrame>
+    );
+  }
+
+  if (field.control === "string-array") {
+    return (
+      <FieldFrame variant={variant}>
+        <label htmlFor={inputId} className={cn(variant === "card" && "block")}>
+          {label}
+          <Textarea
+            id={inputId}
+            className={cn(variant === "card" && "mt-1.5")}
+            value={readProviderConfigStringArray(value, field.key).join("\n")}
+            onChange={(event) =>
+              onChange(
+                nextProviderConfigWithFieldValue(
+                  value,
+                  field,
+                  parseProviderConfigStringArrayDraft(event.target.value),
+                ),
+              )
             }
             placeholder={field.placeholder}
             spellCheck={false}

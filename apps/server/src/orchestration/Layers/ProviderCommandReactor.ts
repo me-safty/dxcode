@@ -29,6 +29,10 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import {
+  resolveProviderModelChangeAction,
+  shouldPreserveActiveModelWhenSelectionIsOmitted,
+} from "../../provider/providerModelSwitchPolicy.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -508,7 +512,18 @@ const make = Effect.gen(function* () {
       const instanceChanged =
         requestedModelSelection !== undefined &&
         activeSession?.providerInstanceId !== requestedModelSelection.instanceId;
-      const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "unsupported";
+      const modelChangeAction = resolveProviderModelChangeAction({
+        modelChanged,
+        sessionModelSwitch,
+      });
+      if (modelChangeAction === "require-new-thread") {
+        return yield* new ProviderAdapterRequestError({
+          provider: preferredProvider,
+          method: "thread.turn.start",
+          detail: `Thread '${threadId}' must start a new chat to change models for provider '${preferredProvider}'.`,
+        });
+      }
+      const shouldRestartForModelChange = modelChangeAction === "restart-session";
       const previousModelSelection = threadModelSelections.get(threadId);
       const shouldRestartForModelSelectionChange =
         preferredProvider === "claudeAgent" &&
@@ -617,7 +632,8 @@ const make = Effect.gen(function* () {
     const requestedModelSelection =
       input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;
     const modelForTurn =
-      sessionModelSwitch === "unsupported" && input.modelSelection === undefined
+      shouldPreserveActiveModelWhenSelectionIsOmitted(sessionModelSwitch) &&
+      input.modelSelection === undefined
         ? activeSession?.model !== undefined
           ? {
               ...requestedModelSelection,

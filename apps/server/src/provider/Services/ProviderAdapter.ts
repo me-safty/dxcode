@@ -23,11 +23,12 @@ import type {
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
-export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
+export type ProviderSessionModelSwitchMode = "in-session" | "new-thread" | "unsupported";
 
 export interface ProviderAdapterCapabilities {
   /**
-   * Declares whether changing the model on an existing session is supported.
+   * Declares whether changing the model is supported in-session, requires a new
+   * conversation thread, or can be handled by restarting the current session.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
 }

@@ -120,7 +120,12 @@ const makeBinaryPathSetting = (fallback: string) =>
     Schema.withDecodingDefault(Effect.succeed(fallback)),
   );
 
-export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch";
+export type ProviderSettingsFormControl =
+  | "text"
+  | "password"
+  | "textarea"
+  | "switch"
+  | "string-array";
 
 export interface ProviderSettingsFormAnnotation {
   readonly control?: ProviderSettingsFormControl | undefined;
@@ -337,6 +342,56 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
 );
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 
+export const GrokBuildSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    command: makeBinaryPathSetting("grok").pipe(
+      Schema.annotateKey({
+        title: "Command path",
+        description: "Path to the Grok Build CLI.",
+        providerSettingsForm: {
+          placeholder: "grok",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    args: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed(["agent", "stdio"])),
+      Schema.annotateKey({
+        title: "Arguments",
+        description: "Arguments to pass to the Grok Build CLI, one per line.",
+        providerSettingsForm: {
+          control: "string-array",
+          placeholder: "agent\nstdio",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    envJson: Schema.String.pipe(
+      Schema.withDecodingDefault(Effect.succeed("{}")),
+      Schema.annotateKey({
+        title: "Environment Overrides (JSON)",
+        description: "JSON string containing environment variables.",
+        providerSettingsForm: {
+          control: "textarea",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["command", "args", "envJson"],
+  },
+);
+export type GrokBuildSettings = typeof GrokBuildSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -376,6 +431,7 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    "grok-build": GrokBuildSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -455,6 +511,14 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const GrokBuildSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  command: Schema.optionalKey(TrimmedString),
+  args: Schema.optionalKey(Schema.Array(Schema.String)),
+  envJson: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
@@ -474,6 +538,7 @@ export const ServerSettingsPatch = Schema.Struct({
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
+      "grok-build": Schema.optionalKey(GrokBuildSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual

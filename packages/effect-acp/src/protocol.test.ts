@@ -420,6 +420,29 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
     }),
   );
 
+  it.effect("ignores agent responses with non-numeric json-rpc ids", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        serverRequestMethods: new Set(),
+      });
+      const received = yield* Ref.make<ReadonlyArray<unknown>>([]);
+
+      yield* transport.clientProtocol
+        .run(0, (message) => Ref.update(received, (messages) => [...messages, message]))
+        .pipe(Effect.forkScoped);
+
+      yield* Queue.offer(
+        input,
+        new TextEncoder().encode('{"jsonrpc":"2.0","id":"skills-reload","result":{"ok":true}}\n'),
+      );
+      yield* Effect.yieldNow;
+
+      assert.deepEqual(yield* Ref.get(received), []);
+    }),
+  );
+
   it.effect("fails pending extension requests with the propagated exit code", () =>
     Effect.gen(function* () {
       const { stdio, input, output } = yield* makeInMemoryStdio();
