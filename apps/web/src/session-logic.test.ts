@@ -1302,6 +1302,36 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("falls back to aggregated command output when stdout is blank-only", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "codex-command-tool-blank-stdout",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            command: "vp test",
+            rawOutput: {
+              stdout: " \n\t ",
+            },
+            item: {
+              aggregatedOutput: "tests passed\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry).toMatchObject({
+      command: "vp test",
+      output: "tests passed\n",
+      itemType: "command_execution",
+    });
+    expect(entry?.stdout).toBeUndefined();
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

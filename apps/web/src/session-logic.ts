@@ -1188,22 +1188,22 @@ function extractCommandResult(payload: Record<string, unknown> | null): {
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const rawOutput = asRecord(data?.rawOutput);
-  const rawOutputStdout = firstRawStringFromRecord(rawOutput, ["stdout"]);
+  const rawOutputStdout = firstCommandOutputStringFromRecord(rawOutput, ["stdout"]);
   const stdout =
     rawOutputStdout ??
-    firstRawStringFromRecord(itemResult, ["stdout"]) ??
-    firstRawStringFromRecord(data, ["stdout"]) ??
-    firstRawStringFromRecord(payload, ["stdout"]);
+    firstCommandOutputStringFromRecord(itemResult, ["stdout"]) ??
+    firstCommandOutputStringFromRecord(data, ["stdout"]) ??
+    firstCommandOutputStringFromRecord(payload, ["stdout"]);
   const stderr =
-    firstRawStringFromRecord(rawOutput, ["stderr"]) ??
-    firstRawStringFromRecord(itemResult, ["stderr"]) ??
-    firstRawStringFromRecord(data, ["stderr"]) ??
-    firstRawStringFromRecord(payload, ["stderr"]);
+    firstCommandOutputStringFromRecord(rawOutput, ["stderr"]) ??
+    firstCommandOutputStringFromRecord(itemResult, ["stderr"]) ??
+    firstCommandOutputStringFromRecord(data, ["stderr"]) ??
+    firstCommandOutputStringFromRecord(payload, ["stderr"]);
   const content =
     stdout ??
-    firstRawStringFromRecord(rawOutput, ["content", "output", "text", "result"]) ??
-    firstRawStringFromRecord(itemResult, ["content", "output", "text", "result"]) ??
-    firstRawStringFromRecord(item, ["aggregatedOutput", "output", "text", "result"]);
+    firstCommandOutputStringFromRecord(rawOutput, ["content", "output", "text", "result"]) ??
+    firstCommandOutputStringFromRecord(itemResult, ["content", "output", "text", "result"]) ??
+    firstCommandOutputStringFromRecord(item, ["aggregatedOutput", "output", "text", "result"]);
   const strippedContent = content ? stripTrailingExitCode(content) : null;
   const detailExit =
     typeof payload?.detail === "string" ? stripTrailingExitCode(payload.detail) : null;
@@ -1390,6 +1390,14 @@ function firstRawStringFromRecord(
     }
   }
   return null;
+}
+
+function firstCommandOutputStringFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): string | null {
+  const value = firstRawStringFromRecord(record, keys);
+  return value !== null && value.trim().length > 0 ? value : null;
 }
 
 function looksLikeUnifiedDiff(value: string): boolean {
