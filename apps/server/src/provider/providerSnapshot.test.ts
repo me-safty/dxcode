@@ -4,6 +4,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -54,6 +55,20 @@ describe("providerModelsFromSettings", () => {
 });
 
 describe("ProviderCommandNotFoundError", () => {
+  it("classifies normalized platform failures without parsing messages", () => {
+    expect(
+      isCommandMissingCause(
+        PlatformError.systemError({
+          _tag: "NotFound",
+          module: "ChildProcess",
+          method: "spawn",
+          description: "arbitrary host detail",
+        }),
+      ),
+    ).toBe(true);
+    expect(isCommandMissingCause(new Error("spawn provider ENOENT"))).toBe(false);
+  });
+
   it.effect("retains safe failed-command diagnostics without process output", () => {
     const stderr = "'codex' is not recognized: secret-token-value";
     const spawner = ChildProcessSpawner.make(() =>

@@ -9,6 +9,7 @@ import type {
   ServerProviderState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -66,10 +67,9 @@ export function nonEmptyTrimmed(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function isCommandMissingCause(error: { readonly message: string }): boolean {
+export function isCommandMissingCause(error: unknown): boolean {
   if (isProviderCommandNotFoundError(error)) return true;
-  const lower = error.message.toLowerCase();
-  return lower.includes("enoent") || lower.includes("notfound");
+  return error instanceof PlatformError.PlatformError && error.reason._tag === "NotFound";
 }
 
 export const spawnAndCollect = (binaryPath: string, command: ChildProcess.Command) =>
