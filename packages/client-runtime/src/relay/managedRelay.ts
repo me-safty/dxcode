@@ -57,7 +57,7 @@ export class ManagedRelayDpopKeyLoadError extends Schema.TaggedErrorClass<Manage
   },
 ) {
   override get message(): string {
-    return `Could not load or create the relay DPoP proof key from ${this.keyStore}.`;
+    return "Could not load relay DPoP proof key.";
   }
 }
 
@@ -80,30 +80,45 @@ export const ManagedRelayDpopSignerError = Schema.Union([
 ]);
 export type ManagedRelayDpopSignerError = typeof ManagedRelayDpopSignerError.Type;
 
-export const ManagedRelayRequest = Schema.Literals([
-  "exchange-access-token",
-  "list-environments",
-  "list-devices",
-  "create-environment-link-challenge",
-  "link-environment",
-  "unlink-environment",
-  "get-environment-status",
-  "connect-environment",
-  "register-device",
-  "unregister-device",
-  "register-live-activity",
+export const ManagedRelayRequestAction = Schema.Literals([
+  "exchange relay DPoP access token",
+  "list relay-managed environments",
+  "list relay client devices",
+  "create relay environment link challenge",
+  "link relay environment",
+  "unlink relay environment",
+  "get relay environment status",
+  "connect relay environment",
+  "register relay mobile device",
+  "unregister relay mobile device",
+  "register relay live activity",
 ]);
-export type ManagedRelayRequest = typeof ManagedRelayRequest.Type;
+export type ManagedRelayRequestAction = typeof ManagedRelayRequestAction.Type;
+
+export const ManagedRelayRequestActivity = Schema.Literals([
+  "Relay DPoP access token exchange",
+  "Relay environment listing",
+  "Relay client device listing",
+  "Relay environment link challenge",
+  "Relay environment linking",
+  "Relay environment unlinking",
+  "Relay environment status request",
+  "Relay environment connection",
+  "Relay mobile device registration",
+  "Relay mobile device unregistration",
+  "Relay Live Activity registration",
+]);
+export type ManagedRelayRequestActivity = typeof ManagedRelayRequestActivity.Type;
 
 export class ManagedRelayRequestTimeoutError extends Schema.TaggedErrorClass<ManagedRelayRequestTimeoutError>()(
   "ManagedRelayRequestTimeoutError",
   {
-    request: ManagedRelayRequest,
+    activity: ManagedRelayRequestActivity,
     timeoutMs: Schema.Number,
   },
 ) {
   override get message(): string {
-    return `Managed relay request '${this.request}' timed out after ${this.timeoutMs}ms.`;
+    return `${this.activity} timed out.`;
   }
 }
 
@@ -114,21 +129,21 @@ export class ManagedRelayUrlInvalidError extends Schema.TaggedErrorClass<Managed
   },
 ) {
   override get message(): string {
-    return `Relay URL '${this.relayUrl}' must be a secure absolute HTTPS origin.`;
+    return "Relay URL must be a secure absolute HTTPS origin.";
   }
 }
 
 export class ManagedRelayRequestFailedError extends Schema.TaggedErrorClass<ManagedRelayRequestFailedError>()(
   "ManagedRelayRequestFailedError",
   {
-    request: ManagedRelayRequest,
+    action: ManagedRelayRequestAction,
     cause: Schema.Defect(),
     relayError: Schema.optional(RelayProtectedError),
     traceId: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
-    return `Managed relay request '${this.request}' failed.`;
+    return `Could not ${this.action}.`;
   }
 }
 
@@ -140,7 +155,7 @@ export class ManagedRelayAccessTokenScopesUnexpectedError extends Schema.TaggedE
   },
 ) {
   override get message(): string {
-    return `Relay granted unexpected DPoP access token scopes: requested '${encodeOAuthScope(this.requestedScopes)}', received '${this.grantedScope}'.`;
+    return "Relay granted unexpected DPoP access token scopes.";
   }
 }
 
@@ -153,7 +168,7 @@ export class ManagedRelayTokenProofCreationError extends Schema.TaggedErrorClass
   },
 ) {
   override get message(): string {
-    return `Could not create relay token DPoP proof for ${this.method} ${this.url}.`;
+    return "Could not create relay token DPoP proof.";
   }
 }
 
@@ -166,7 +181,7 @@ export class ManagedRelayRequestProofCreationError extends Schema.TaggedErrorCla
   },
 ) {
   override get message(): string {
-    return `Could not create relay request DPoP proof for ${this.method} ${this.url}.`;
+    return "Could not create relay request DPoP proof.";
   }
 }
 
@@ -277,10 +292,10 @@ export class ManagedRelayClient extends Context.Service<
 
 const isRelayProtectedError = Schema.is(RelayProtectedError);
 
-function relayRequestError(request: ManagedRelayRequest) {
+function relayRequestError(action: ManagedRelayRequestAction) {
   return (cause: RelayHttpRequestError): ManagedRelayClientError =>
     new ManagedRelayRequestFailedError({
-      request,
+      action,
       cause,
       ...(isRelayProtectedError(cause) ? { relayError: cause, traceId: cause.traceId } : {}),
     });
@@ -302,7 +317,7 @@ function isRejectedDpopAccessToken(error: ManagedRelayClientError): boolean {
   );
 }
 
-function timeoutRelayRequest(request: ManagedRelayRequest) {
+function timeoutRelayRequest(activity: ManagedRelayRequestActivity) {
   return <A, E, R>(
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | ManagedRelayClientError, R> =>
@@ -313,7 +328,7 @@ function timeoutRelayRequest(request: ManagedRelayRequest) {
           onNone: () =>
             Effect.fail(
               new ManagedRelayRequestTimeoutError({
-                request,
+                activity,
                 timeoutMs: MANAGED_RELAY_REQUEST_TIMEOUT_MS,
               }),
             ),
@@ -467,8 +482,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           },
         })
         .pipe(
-          Effect.mapError(relayRequestError("exchange-access-token")),
-          timeoutRelayRequest("exchange-access-token"),
+          Effect.mapError(relayRequestError("exchange relay DPoP access token")),
+          timeoutRelayRequest("Relay DPoP access token exchange"),
         );
       if (!oauthScopeSetEquals(response.scope, input.scopes)) {
         return yield* new ManagedRelayAccessTokenScopesUnexpectedError({
@@ -661,8 +676,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           .listEnvironments({ headers: bearerHeaders(input.clerkToken) })
           .pipe(
             Effect.map((response) => response.environments),
-            Effect.mapError(relayRequestError("list-environments")),
-            timeoutRelayRequest("list-environments"),
+            Effect.mapError(relayRequestError("list relay-managed environments")),
+            timeoutRelayRequest("Relay environment listing"),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.listEnvironments"),
@@ -676,8 +691,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           })
           .pipe(
             Effect.map((response) => response.devices),
-            Effect.mapError(relayRequestError("list-devices")),
-            timeoutRelayRequest("list-devices"),
+            Effect.mapError(relayRequestError("list relay client devices")),
+            timeoutRelayRequest("Relay client device listing"),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.listDevices"),
@@ -691,8 +706,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
             payload: input.payload,
           })
           .pipe(
-            Effect.mapError(relayRequestError("create-environment-link-challenge")),
-            timeoutRelayRequest("create-environment-link-challenge"),
+            Effect.mapError(relayRequestError("create relay environment link challenge")),
+            timeoutRelayRequest("Relay environment link challenge"),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.createEnvironmentLinkChallenge"),
@@ -706,8 +721,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
             payload: input.payload,
           })
           .pipe(
-            Effect.mapError(relayRequestError("link-environment")),
-            timeoutRelayRequest("link-environment"),
+            Effect.mapError(relayRequestError("link relay environment")),
+            timeoutRelayRequest("Relay environment linking"),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.linkEnvironment"),
@@ -721,8 +736,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
             params: { environmentId: input.environmentId },
           })
           .pipe(
-            Effect.mapError(relayRequestError("unlink-environment")),
-            timeoutRelayRequest("unlink-environment"),
+            Effect.mapError(relayRequestError("unlink relay environment")),
+            timeoutRelayRequest("Relay environment unlinking"),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.unlinkEnvironment"),
@@ -746,8 +761,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
                 params: { environmentId: input.environmentId },
               })
               .pipe(
-                Effect.mapError(relayRequestError("get-environment-status")),
-                timeoutRelayRequest("get-environment-status"),
+                Effect.mapError(relayRequestError("get relay environment status")),
+                timeoutRelayRequest("Relay environment status request"),
               ),
         );
       },
@@ -777,8 +792,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
                 payload,
               })
               .pipe(
-                Effect.mapError(relayRequestError("connect-environment")),
-                timeoutRelayRequest("connect-environment"),
+                Effect.mapError(relayRequestError("connect relay environment")),
+                timeoutRelayRequest("Relay environment connection"),
               );
           },
         );
@@ -800,8 +815,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
                 payload: input.payload,
               })
               .pipe(
-                Effect.mapError(relayRequestError("register-device")),
-                timeoutRelayRequest("register-device"),
+                Effect.mapError(relayRequestError("register relay mobile device")),
+                timeoutRelayRequest("Relay mobile device registration"),
               ),
         );
       },
@@ -822,8 +837,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
                 params: { deviceId: input.deviceId },
               })
               .pipe(
-                Effect.mapError(relayRequestError("unregister-device")),
-                timeoutRelayRequest("unregister-device"),
+                Effect.mapError(relayRequestError("unregister relay mobile device")),
+                timeoutRelayRequest("Relay mobile device unregistration"),
               ),
         );
       },
@@ -844,8 +859,8 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
                 payload: input.payload,
               })
               .pipe(
-                Effect.mapError(relayRequestError("register-live-activity")),
-                timeoutRelayRequest("register-live-activity"),
+                Effect.mapError(relayRequestError("register relay live activity")),
+                timeoutRelayRequest("Relay Live Activity registration"),
               ),
         );
       },

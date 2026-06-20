@@ -360,7 +360,7 @@ describe("createManagedRelayQueryManager", () => {
       getEnvironmentStatus: () =>
         Effect.fail(
           new ManagedRelay.ManagedRelayRequestFailedError({
-            request: "get-environment-status",
+            action: "get relay environment status",
             cause: new Error("Relay request failed."),
             traceId: "trace-status",
           }),
@@ -372,7 +372,7 @@ describe("createManagedRelayQueryManager", () => {
     registry.get(atom);
     await vi.waitFor(() => {
       expect(readManagedRelaySnapshotState(registry.get(atom))).toMatchObject({
-        error: "Managed relay request 'get-environment-status' failed.",
+        error: "Could not get relay environment status.",
         errorTraceId: "trace-status",
       });
     });

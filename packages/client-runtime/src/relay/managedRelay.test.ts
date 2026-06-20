@@ -125,7 +125,7 @@ describe("ManagedRelayClient", () => {
       expect(error).toMatchObject({
         _tag: "ManagedRelayUrlInvalidError",
         relayUrl: "http://relay.example.test",
-        message: "Relay URL 'http://relay.example.test' must be a secure absolute HTTPS origin.",
+        message: "Relay URL must be a secure absolute HTTPS origin.",
       });
       expect(requestCount).toBe(0);
     }).pipe(Effect.provide(managedRelayTestLayer(fetchFn, "http://relay.example.test")));
@@ -428,9 +428,9 @@ describe("ManagedRelayClient", () => {
 
       expect(error).toMatchObject({
         _tag: "ManagedRelayRequestTimeoutError",
-        request: "list-environments",
+        activity: "Relay environment listing",
         timeoutMs: ManagedRelay.MANAGED_RELAY_REQUEST_TIMEOUT_MS,
-        message: `Managed relay request 'list-environments' timed out after ${ManagedRelay.MANAGED_RELAY_REQUEST_TIMEOUT_MS}ms.`,
+        message: "Relay environment listing timed out.",
       });
     }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
   });

@@ -447,7 +447,7 @@ describe("ConnectionResolver", () => {
         connectEnvironment: () =>
           Effect.fail(
             new ManagedRelay.ManagedRelayRequestTimeoutError({
-              request: "connect-environment",
+              activity: "Relay environment connection",
               timeoutMs: ManagedRelay.MANAGED_RELAY_REQUEST_TIMEOUT_MS,
             }),
           ),
