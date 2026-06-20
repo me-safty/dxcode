@@ -26,6 +26,8 @@ export class EnvironmentRpcUnavailableError extends Schema.TaggedErrorClass<Envi
   }
 }
 
+export const isEnvironmentRpcUnavailableError = Schema.is(EnvironmentRpcUnavailableError);
+
 export interface EnvironmentRpcRequestObservation {
   readonly environmentId: string;
   readonly method: string;
