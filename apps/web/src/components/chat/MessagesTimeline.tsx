@@ -108,9 +108,9 @@ import {
 } from "../../reviewCommentContext";
 
 // ---------------------------------------------------------------------------
-// Context â€” shared state consumed by every row component via Context.
+// Context — shared state consumed by every row component via Context.
 // Propagates through LegendList's memo boundaries for shared callbacks and
-// non-row-scoped state. `nowIso` is intentionally excluded â€” self-ticking
+// non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
 // components (WorkingTimer, LiveElapsed) handle it.
 // ---------------------------------------------------------------------------
 
@@ -169,7 +169,7 @@ interface MessagesTimelineProps {
 }
 
 // ---------------------------------------------------------------------------
-// MessagesTimeline â€” list owner
+// MessagesTimeline — list owner
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -197,7 +197,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
 
   // Toggling a fold inserts/removes rows between the fold row and the final
-  // message â€” everything above the trigger is unchanged, so the trigger stays
+  // message — everything above the trigger is unchanged, so the trigger stays
   // put as long as the list doesn't re-anchor. maintainScrollAtEnd would do
   // exactly that (pin the bottom content when row data changes while scrolled
   // to the end), yanking the trigger out of view. Suppress it for the frames
@@ -348,7 +348,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [activeTurnInProgress, isRevertingCheckpoint, isWorking],
   );
 
-  // Stable renderItem â€” no closure deps. Row components read shared state
+  // Stable renderItem — no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
@@ -397,7 +397,7 @@ function keyExtractor(item: MessagesTimelineRow) {
 }
 
 // ---------------------------------------------------------------------------
-// TimelineRowContent â€” the actual row component
+// TimelineRowContent — the actual row component
 // ---------------------------------------------------------------------------
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
@@ -679,7 +679,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
 }
 
 // ---------------------------------------------------------------------------
-// Self-ticking labels â€” update their own text nodes so elapsed-time display
+// Self-ticking labels — update their own text nodes so elapsed-time display
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
 
@@ -707,7 +707,7 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Extracted row sections â€” own their state / store subscriptions so changes
+// Extracted row sections — own their state / store subscriptions so changes
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
@@ -830,7 +830,7 @@ function findNearestVerticalScroller(element: HTMLElement): HTMLElement | null {
 }
 
 /** Subscribes directly to the UI state store for expand/collapse state,
- *  so toggling re-renders only this component â€” not the entire list. */
+ *  so toggling re-renders only this component — not the entire list. */
 const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
   turnSummary,
   routeThreadKey,
@@ -877,18 +877,18 @@ function AssistantChangedFilesSectionInner({
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-  const changedFileCountLabel = String(checkpointFiles.length);
-
   return (
-    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-      <div className="sticky top-2 z-10 mb-1.5 flex items-center justify-between gap-2 bg-[color-mix(in_srgb,var(--card)_45%,var(--background))] before:absolute before:inset-x-0 before:-top-2 before:h-2 before:bg-[color-mix(in_srgb,var(--card)_45%,var(--background))] before:content-['']">
-        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-          <span>Changed files ({changedFileCountLabel})</span>
+    <div className="mt-4 rounded-2xl border border-input bg-background p-2 pt-4 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
+      <div className="mb-3 flex items-center justify-between gap-2 px-2">
+        <p className="flex self-start items-center gap-1 font-medium text-foreground text-xs leading-4">
+          <span>{checkpointFiles.length} changed files</span>
           {hasNonZeroStat(summaryStat) && (
-            <>
-              <span className="mx-1">â€¢</span>
-              <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} />
-            </>
+            <DiffStatLabel
+              additions={summaryStat.additions}
+              className="text-xs leading-4"
+              deletions={summaryStat.deletions}
+              layout="inline"
+            />
           )}
         </p>
         <div className="flex items-center gap-1.5">
@@ -896,6 +896,7 @@ function AssistantChangedFilesSectionInner({
             type="button"
             size="xs"
             variant="outline"
+            className="px-1.5"
             data-scroll-anchor-ignore
             onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
           >
@@ -905,6 +906,7 @@ function AssistantChangedFilesSectionInner({
             type="button"
             size="xs"
             variant="outline"
+            className="px-1.5"
             onClick={() => onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
           >
             View diff
@@ -1278,7 +1280,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           {formatWorkspaceRelativePath(comment.filePath, ctx.workspaceRoot)}
         </div>
         <div className="text-[11px] text-muted-foreground">
-          {comment.sectionTitle} Â· {comment.rangeLabel}
+          {comment.sectionTitle} · {comment.rangeLabel}
         </div>
       </div>
       {comment.text.length > 0 && (
@@ -1317,7 +1319,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
 }
 
 // ---------------------------------------------------------------------------
-// Structural sharing â€” reuse old row references when data hasn't changed
+// Structural sharing — reuse old row references when data hasn't changed
 // so LegendList (and React) can skip re-rendering unchanged items.
 // ---------------------------------------------------------------------------
 
