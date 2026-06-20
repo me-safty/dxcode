@@ -190,6 +190,7 @@ describe("VcsStatusBroadcaster", () => {
                 ? Effect.fail(
                     new GitManagerError({
                       operation: "VcsStatusBroadcaster.test",
+                      cwd: "/repo",
                       detail: "remote status failed",
                     }),
                   )
@@ -449,6 +450,7 @@ describe("VcsStatusBroadcaster", () => {
                 return Effect.fail(
                   new GitManagerError({
                     operation: "VcsStatusBroadcaster.test",
+                    cwd: "/repo",
                     detail: "initial remote status failed",
                   }),
                 ).pipe(

@@ -1,6 +1,8 @@
-import { assert, describe, it, vi } from "@effect/vitest";
+import { assert, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+
+import { VcsRepositoryDetectionError } from "@t3tools/contracts";
 
 import * as GitManager from "./GitManager.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
@@ -132,4 +134,61 @@ describe("GitWorkflowService", () => {
       ),
     ),
   );
+
+  it.effect("preserves structured workflow detection failures and their cause", () => {
+    const cause = new VcsRepositoryDetectionError({
+      operation: "VcsDriverRegistry.detect",
+      cwd: "/repo",
+      detail: "upstream detail must stay in the cause chain",
+    });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const error = yield* workflow.status({ cwd: "/repo" }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitManagerError",
+        operation: "GitWorkflowService.status",
+        cwd: "/repo",
+        detail: "Failed to detect a VCS repository for this Git workflow.",
+        cause,
+      });
+      expect(error.message).not.toContain(cause.detail);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          detect: () => Effect.fail(cause),
+        }),
+      ),
+    );
+  });
+
+  it.effect("preserves structured command detection failures and their cause", () => {
+    const cause = new VcsRepositoryDetectionError({
+      operation: "VcsDriverRegistry.detect",
+      cwd: "/repo",
+      detail: "upstream command detail must stay in the cause chain",
+    });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const error = yield* workflow.listRefs({ cwd: "/repo" }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitCommandError",
+        operation: "GitWorkflowService.listRefs",
+        command: "vcs-route",
+        cwd: "/repo",
+        detail: "Failed to detect a VCS repository for this Git command.",
+        cause,
+      });
+      expect(error.message).not.toContain(cause.detail);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          detect: () => Effect.fail(cause),
+        }),
+      ),
+    );
+  });
 });
