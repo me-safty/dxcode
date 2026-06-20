@@ -134,10 +134,7 @@ export class CloudEnvironmentLinkOperationError extends Schema.TaggedErrorClass<
   override get message(): string {
     const environment =
       this.environmentId === undefined ? "" : ` for environment "${this.environmentId}"`;
-    const detail = this.relayError?.message ?? this.environmentError?.message;
-    return detail
-      ? `Could not ${this.action}${environment}: ${detail}`
-      : `Could not ${this.action}${environment}.`;
+    return `Could not ${this.action}${environment}.`;
   }
 }
 

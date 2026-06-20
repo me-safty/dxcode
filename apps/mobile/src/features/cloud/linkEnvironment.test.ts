@@ -671,7 +671,7 @@ describe("mobile cloud link environment client", () => {
       });
       expect(error.cause).toBeDefined();
       expect(error.message).toBe(
-        'Could not obtain an environment link proof for environment "env-1": Invalid environment bearer session.',
+        'Could not obtain an environment link proof for environment "env-1".',
       );
       expect(fetchMock).toHaveBeenCalledTimes(2);
     }),
@@ -720,9 +720,7 @@ describe("mobile cloud link environment client", () => {
           _tag: "ManagedRelayRequestFailedError",
         },
       });
-      expect(error.message).toBe(
-        'Could not link the environment for environment "env-1": Relay environment link proof is invalid: origin_not_allowed',
-      );
+      expect(error.message).toBe('Could not link the environment for environment "env-1".');
       expect(fetchMock).toHaveBeenCalledTimes(3);
     }),
   );
@@ -1082,7 +1080,7 @@ describe("mobile cloud link environment client", () => {
         },
       });
       expect(error.message).toBe(
-        'Could not connect to the cloud environment for environment "env-1": Relay authentication failed: invalid_dpop',
+        'Could not connect to the cloud environment for environment "env-1".',
       );
     }),
   );
