@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
@@ -304,6 +305,10 @@ describe("reconcileDesiredCloudLink", () => {
 
   it.effect("redacts relay transport failures behind a stable structural message", () => {
     const transportCause = new Error("upstream included a sensitive database password");
+    const capturedLogs: Array<ReadonlyArray<unknown>> = [];
+    const logger = Logger.make(({ message }) => {
+      capturedLogs.push(Array.isArray(message) ? message : [message]);
+    });
     const httpClient = HttpClient.make((request) =>
       Effect.fail(
         new HttpClientError.HttpClientError({
@@ -324,7 +329,7 @@ describe("reconcileDesiredCloudLink", () => {
           ),
           httpClient,
           env: { T3CODE_RELAY_URL: "https://relay.example.test" },
-        }),
+        }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false }))),
       );
 
       expect(error).toMatchObject({
@@ -337,6 +342,15 @@ describe("reconcileDesiredCloudLink", () => {
         },
       });
       expect(error.message).not.toContain(transportCause.message);
+      expect(capturedLogs).toHaveLength(1);
+      const logFields = capturedLogs[0]?.find(
+        (value): value is Record<string, unknown> => typeof value === "object" && value !== null,
+      );
+      expect(logFields).toMatchObject({ causeTag: "CloudRelayRequestError" });
+      expect(logFields).not.toHaveProperty("cause");
+      expect(capturedLogs[0]?.filter((value) => typeof value === "string").join(" ")).not.toContain(
+        transportCause.message,
+      );
     });
   });
 });

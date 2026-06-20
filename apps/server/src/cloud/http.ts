@@ -198,10 +198,23 @@ const appendCloudCredentialResponseHeaders = HttpEffect.appendPreResponseHandler
     Effect.succeed(HttpServerResponse.setHeaders(response, CLOUD_CREDENTIAL_RESPONSE_HEADERS)),
 );
 
+function errorDiagnosticTag(cause: unknown): string {
+  if (
+    typeof cause === "object" &&
+    cause !== null &&
+    "_tag" in cause &&
+    typeof cause._tag === "string"
+  ) {
+    return cause._tag;
+  }
+  if (cause instanceof Error) return cause.name;
+  return typeof cause;
+}
+
 const failEnvironmentCloudInternalError =
   (message: string) =>
   (cause: unknown): Effect.Effect<never, EnvironmentHttpInternalServerError> =>
-    Effect.logError(message).pipe(
+    Effect.logError(message, { causeTag: errorDiagnosticTag(cause) }).pipe(
       Effect.flatMap(() => Effect.fail(new EnvironmentHttpInternalServerError({ message, cause }))),
     );
 
