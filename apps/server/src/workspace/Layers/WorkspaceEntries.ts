@@ -292,6 +292,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         new WorkspaceSearchIndexCreateFailed({
           cwd,
           reason: cause instanceof Error ? cause.message : String(cause),
+          cause,
         }),
     }).pipe(
       Effect.catchIf(

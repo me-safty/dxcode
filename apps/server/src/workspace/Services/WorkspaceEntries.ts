@@ -75,10 +75,11 @@ export class WorkspaceSearchIndexCreateFailed extends Schema.TaggedErrorClass<Wo
   {
     cwd: Schema.String,
     reason: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Failed to create the workspace search index for '${this.cwd}': ${this.reason}`;
+    return `Failed to create the workspace search index for '${this.cwd}'.`;
   }
 }
 
@@ -98,11 +99,27 @@ export class WorkspaceSearchIndexSearchFailed extends Schema.TaggedErrorClass<Wo
   "WorkspaceSearchIndexSearchFailed",
   {
     cwd: Schema.String,
+    queryLength: Schema.Number,
+    pageSize: Schema.Number,
     reason: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Workspace search failed for '${this.cwd}': ${this.reason}`;
+    return `Workspace search failed for '${this.cwd}'.`;
+  }
+}
+
+export class WorkspaceSearchIndexRefreshFailed extends Schema.TaggedErrorClass<WorkspaceSearchIndexRefreshFailed>()(
+  "WorkspaceSearchIndexRefreshFailed",
+  {
+    cwd: Schema.String,
+    reason: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Failed to refresh the workspace search index for '${this.cwd}'.`;
   }
 }
 
