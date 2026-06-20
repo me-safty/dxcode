@@ -17,7 +17,7 @@ import * as PreviewManager from "./Manager.ts";
 
 const { createFromPath, fromId, mkdir, showItemInFolder, webviewSend, writeFile, writeImage } =
   vi.hoisted(() => ({
-    createFromPath: vi.fn(() => ({ isEmpty: () => false })),
+    createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
     fromId: vi.fn(() => null),
     mkdir: vi.fn((_path: string) => undefined),
     showItemInFolder: vi.fn(),
@@ -237,6 +237,20 @@ describe("PreviewManager", () => {
         expect(artifact.path).toMatch(
           /\/browser-artifacts\/browser-screenshot-example-com-[^.]+\.png$/,
         );
+
+        const captureCause = new Error("capture failed");
+        capturePage.mockRejectedValueOnce(captureCause);
+        const exit = yield* Effect.exit(manager.captureScreenshot("tab_1"));
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isSuccess(exit)) return;
+        const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
+        expect(error).toMatchObject({
+          _tag: "PreviewOperationError",
+          operation: "captureScreenshot.capturePage",
+          tabId: "tab_1",
+          webContentsId: 42,
+          cause: captureCause,
+        });
       }),
     ),
   );
@@ -302,9 +316,12 @@ describe("PreviewManager", () => {
         expect(Exit.isFailure(exit)).toBe(true);
         if (Exit.isSuccess(exit)) return;
         const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
-        expect(error.cause).toMatchObject({
-          message: "Preview artifact path is outside the configured artifact directory.",
+        expect(error).toMatchObject({
+          _tag: "PreviewArtifactPathOutsideDirectoryError",
+          artifactPath: "/tmp/t3/dev/settings.json",
+          artifactDirectory: "/tmp/t3/dev/browser-artifacts",
         });
+        expect("cause" in error).toBe(false);
       }),
     ),
   );
@@ -324,8 +341,20 @@ describe("PreviewManager", () => {
         expect(Exit.isFailure(exit)).toBe(true);
         if (Exit.isSuccess(exit)) return;
         const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
-        expect(error.cause).toMatchObject({
-          message: "Preview artifact path is outside the configured artifact directory.",
+        expect(error).toMatchObject({
+          _tag: "PreviewArtifactPathOutsideDirectoryError",
+          artifactPath: "/tmp/t3/dev/settings.json",
+          artifactDirectory: "/tmp/t3/dev/browser-artifacts",
+        });
+        expect("cause" in error).toBe(false);
+
+        createFromPath.mockReturnValueOnce({ isEmpty: () => true });
+        const invalidImageExit = yield* Effect.exit(manager.copyArtifactToClipboard(artifactPath));
+        expect(Exit.isFailure(invalidImageExit)).toBe(true);
+        if (Exit.isSuccess(invalidImageExit)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(invalidImageExit.cause))).toMatchObject({
+          _tag: "PreviewArtifactImageLoadError",
+          artifactPath,
         });
       }),
     ),
@@ -466,9 +495,17 @@ describe("PreviewManager", () => {
         expect(Exit.isFailure(exit)).toBe(true);
         if (Exit.isSuccess(exit)) return;
         const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
-        expect(error.cause).toMatchObject({
-          name: "PreviewAutomationControlInterruptedError",
+        expect(error).toMatchObject({
+          _tag: "PreviewAutomationControlInterruptedError",
+          operation: "click",
+          tabId: "tab_1",
+          webContentsId: 42,
         });
+        expect(error).toBeInstanceOf(Error);
+        if (error instanceof Error) {
+          expect(error.name).toBe("PreviewAutomationControlInterruptedError");
+        }
+        expect("cause" in error).toBe(false);
       }),
     ),
   );
