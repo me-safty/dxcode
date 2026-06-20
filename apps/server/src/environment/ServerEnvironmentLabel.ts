@@ -2,11 +2,38 @@ import { HostProcessHostname, HostProcessPlatform } from "@t3tools/shared/hostPr
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 import * as ProcessRunner from "../processRunner.ts";
 
 interface ResolveServerEnvironmentLabelInput {
   readonly cwdBaseName: string;
+}
+
+export class ServerEnvironmentLabelFileError extends Schema.TaggedErrorClass<ServerEnvironmentLabelFileError>()(
+  "ServerEnvironmentLabelFileError",
+  {
+    operation: Schema.Literals(["inspect", "read"]),
+    path: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to ${this.operation} environment-label file at ${this.path}.`;
+  }
+}
+
+export class ServerEnvironmentLabelCommandError extends Schema.TaggedErrorClass<ServerEnvironmentLabelCommandError>()(
+  "ServerEnvironmentLabelCommandError",
+  {
+    command: Schema.String,
+    args: Schema.Array(Schema.String),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to run environment-label command '${[this.command, ...this.args].join(" ")}'.`;
+  }
 }
 
 function normalizeLabel(value: string | null | undefined): string | null {
@@ -34,16 +61,42 @@ function parseMachineInfoValue(raw: string, key: string): string | null {
 
 const readLinuxMachineInfo = Effect.fn("readLinuxMachineInfo")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const exists = yield* fileSystem
-    .exists("/etc/machine-info")
-    .pipe(Effect.orElseSucceed(() => false));
-  if (!exists) {
-    return null;
-  }
-
-  return yield* fileSystem
-    .readFileString("/etc/machine-info")
-    .pipe(Effect.orElseSucceed(() => null));
+  const machineInfoPath = "/etc/machine-info";
+  return yield* fileSystem.exists(machineInfoPath).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ServerEnvironmentLabelFileError({
+          operation: "inspect",
+          path: machineInfoPath,
+          cause,
+        }),
+    ),
+    Effect.flatMap((exists) =>
+      exists
+        ? fileSystem.readFileString(machineInfoPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerEnvironmentLabelFileError({
+                  operation: "read",
+                  path: machineInfoPath,
+                  cause,
+                }),
+            ),
+          )
+        : Effect.succeed(null),
+    ),
+    Effect.catchTags({
+      ServerEnvironmentLabelFileError: (error) =>
+        Effect.logDebug(error.message).pipe(
+          Effect.annotateLogs({
+            operation: error.operation,
+            path: error.path,
+            cause: error,
+          }),
+          Effect.as(null),
+        ),
+    }),
+  );
 });
 
 const runFriendlyLabelCommand = Effect.fn("runFriendlyLabelCommand")(function* (
@@ -57,7 +110,28 @@ const runFriendlyLabelCommand = Effect.fn("runFriendlyLabelCommand")(function* (
       args,
       timeoutBehavior: "timedOutResult",
     })
-    .pipe(Effect.option);
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new ServerEnvironmentLabelCommandError({
+            command,
+            args,
+            cause,
+          }),
+      ),
+      Effect.map(Option.some),
+      Effect.catchTags({
+        ServerEnvironmentLabelCommandError: (error) =>
+          Effect.logDebug(error.message).pipe(
+            Effect.annotateLogs({
+              command: error.command,
+              args: error.args,
+              cause: error,
+            }),
+            Effect.as(Option.none()),
+          ),
+      }),
+    );
 
   if (Option.isNone(result) || result.value.code !== 0) {
     return null;
