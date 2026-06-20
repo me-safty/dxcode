@@ -5,11 +5,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { ProjectFaviconResolver } from "../Services/ProjectFaviconResolver.ts";
-import { ProjectFaviconResolverLive } from "./ProjectFaviconResolver.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
 
 const TestLayer = Layer.empty.pipe(
-  Layer.provideMerge(ProjectFaviconResolverLive),
+  Layer.provideMerge(ProjectFaviconResolver.layer.pipe(Layer.provide(WorkspacePaths.layer))),
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -38,7 +38,7 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
   describe("resolvePath", () => {
     it.effect("prefers well-known favicon files", () =>
       Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
         const cwd = yield* makeTempDir;
         yield* writeTextFile(cwd, "favicon.svg", "<svg>favicon</svg>");
 
@@ -51,7 +51,7 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
 
     it.effect("resolves icon hrefs from project source files", () =>
       Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
         const cwd = yield* makeTempDir;
         yield* writeTextFile(cwd, "index.html", '<link rel="icon" href="/brand/logo.svg">');
         yield* writeTextFile(cwd, "public/brand/logo.svg", "<svg>brand</svg>");
@@ -65,7 +65,7 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
 
     it.effect("returns null when no icon is present", () =>
       Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
         const cwd = yield* makeTempDir;
 
         const resolved = yield* resolver.resolvePath(cwd);

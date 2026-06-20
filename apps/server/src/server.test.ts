@@ -98,23 +98,13 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
-import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
-import {
-  ProjectSetupScriptRunner,
-  ProjectSetupScriptRunnerError,
-  type ProjectSetupScriptRunnerShape,
-} from "./project/Services/ProjectSetupScriptRunner.ts";
-import {
-  RepositoryIdentityResolver,
-  type RepositoryIdentityResolverShape,
-} from "./project/Services/RepositoryIdentityResolver.ts";
-import {
-  ServerEnvironment,
-  type ServerEnvironmentShape,
-} from "./environment/Services/ServerEnvironment.ts";
-import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
-import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
-import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
+import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
+import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
+import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -347,7 +337,9 @@ const buildAppUnderTest = (options?: {
     sourceControlRepositoryService?: Partial<SourceControlRepositoryService.SourceControlRepositoryServiceShape>;
     reviewService?: Partial<ReviewService.ReviewServiceShape>;
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcasterShape>;
-    projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
+    projectSetupScriptRunner?: Partial<
+      ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]
+    >;
     terminalManager?: Partial<TerminalManager.TerminalManager["Service"]>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
@@ -355,8 +347,10 @@ const buildAppUnderTest = (options?: {
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
-    serverEnvironment?: Partial<ServerEnvironmentShape>;
-    repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
+    serverEnvironment?: Partial<ServerEnvironment.ServerEnvironment["Service"]>;
+    repositoryIdentityResolver?: Partial<
+      RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]
+    >;
     cloudManagedEndpointRuntime?: Partial<CloudManagedEndpointRuntimeShape>;
     relayClient?: Partial<RelayClient.RelayClientShape>;
     cloudCliTokenManager?: Partial<CloudCliTokenManager.CloudCliTokenManagerShape>;
@@ -498,18 +492,18 @@ const buildAppUnderTest = (options?: {
     const gitManagerLayer = Layer.mock(GitManager)({
       ...options?.layers?.gitManager,
     });
-    const workspaceEntriesLayer = WorkspaceEntriesLive.pipe(
-      Layer.provide(WorkspacePathsLive),
+    const workspaceEntriesLayer = WorkspaceEntries.layer.pipe(
+      Layer.provide(WorkspacePaths.layer),
       Layer.provideMerge(vcsDriverRegistryLayer),
     );
     const workspaceAndProjectServicesLayer = Layer.mergeAll(
-      WorkspacePathsLive,
+      WorkspacePaths.layer,
       workspaceEntriesLayer,
-      WorkspaceFileSystemLive.pipe(
-        Layer.provide(WorkspacePathsLive),
+      WorkspaceFileSystem.layer.pipe(
+        Layer.provide(WorkspacePaths.layer),
         Layer.provide(workspaceEntriesLayer),
       ),
-      ProjectFaviconResolverLive,
+      ProjectFaviconResolver.layer.pipe(Layer.provide(WorkspacePaths.layer)),
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(
       Layer.provideMerge(vcsDriverRegistryLayer),
@@ -651,7 +645,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provide(
-        Layer.mock(ProjectSetupScriptRunner)({
+        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
           runForThread: () => Effect.succeed({ status: "no-script" as const }),
           ...options?.layers?.projectSetupScriptRunner,
         }),
@@ -743,14 +737,14 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ServerEnvironment)({
+        Layer.mock(ServerEnvironment.ServerEnvironment)({
           getEnvironmentId: Effect.succeed(testEnvironmentDescriptor.environmentId),
           getDescriptor: Effect.succeed(testEnvironmentDescriptor),
           ...options?.layers?.serverEnvironment,
         }),
       ),
       Layer.provide(
-        Layer.mock(RepositoryIdentityResolver)({
+        Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
           resolve: () => Effect.succeed(null),
           ...options?.layers?.repositoryIdentityResolver,
         }),
@@ -6047,7 +6041,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             }),
         );
         const runForThread = vi.fn(
-          (_: Parameters<ProjectSetupScriptRunnerShape["runForThread"]>[0]) =>
+          (_: Parameters<ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]>[0]) =>
             Effect.succeed({
               status: "started" as const,
               scriptId: "setup",
@@ -6173,8 +6167,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           }),
       );
       const runForThread = vi.fn(
-        (_: Parameters<ProjectSetupScriptRunnerShape["runForThread"]>[0]) =>
-          Effect.fail(new ProjectSetupScriptRunnerError({ message: "pty unavailable" })),
+        (
+          input: Parameters<
+            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+          >[0],
+        ) =>
+          Effect.fail(
+            new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
+              threadId: input.threadId,
+              worktreePath: input.worktreePath,
+              operation: "openTerminal",
+              cause: new Error("pty unavailable"),
+            }),
+          ),
       );
 
       yield* buildAppUnderTest({
@@ -6267,7 +6272,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           }),
       );
       const runForThread = vi.fn(
-        (_: Parameters<ProjectSetupScriptRunnerShape["runForThread"]>[0]) =>
+        (_: Parameters<ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]>[0]) =>
           Effect.succeed({
             status: "started" as const,
             scriptId: "setup",

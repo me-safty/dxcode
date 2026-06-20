@@ -15,9 +15,9 @@ import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../config.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { RepositoryIdentityResolverLive } from "../project/Layers/RepositoryIdentityResolver.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import { WorkspacePathsLive } from "../workspace/Layers/WorkspacePaths.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationLayerLive } from "./runtimeLayer.ts";
@@ -27,10 +27,10 @@ const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
 });
 const TestLayer = Layer.mergeAll(
   OrchestrationLayerLive.pipe(
-    Layer.provideMerge(RepositoryIdentityResolverLive),
+    Layer.provideMerge(RepositoryIdentityResolver.layer),
     Layer.provideMerge(SqlitePersistenceMemory),
   ),
-  WorkspacePathsLive,
+  WorkspacePaths.layer,
   GitVcsDriver.layer,
 ).pipe(Layer.provideMerge(ServerConfigLayer), Layer.provideMerge(NodeServices.layer));
 
