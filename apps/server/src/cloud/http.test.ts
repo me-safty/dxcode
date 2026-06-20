@@ -225,6 +225,21 @@ it("preserves internal causes without encoding them into HTTP error bodies", () 
   });
 });
 
+it("keeps internal causes out of encoded HTTP error bodies", () => {
+  const cause = new Error("private upstream detail");
+  const error = new EnvironmentHttpInternalServerError({
+    operation: "generate_link_proof",
+    cause,
+  });
+
+  expect(error.cause).toBe(cause);
+  expect(Schema.encodeUnknownSync(EnvironmentHttpInternalServerError)(error)).toEqual({
+    _tag: "EnvironmentHttpInternalServerError",
+    operation: "generate_link_proof",
+    message: "Could not generate environment link proof.",
+  });
+});
+
 describe("relay request tracing", () => {
   it.effect("does not accept an unauthenticated request trace parent", () =>
     Effect.gen(function* () {
@@ -298,6 +313,7 @@ describe("reconcileDesiredCloudLink", () => {
 
       expect(error).toMatchObject({
         _tag: "EnvironmentHttpUnauthorizedError",
+        reason: "cloud_cli_authorization_required",
         message: "Run `t3 connect link` to authorize this environment.",
       });
     }),
@@ -334,6 +350,9 @@ describe("reconcileDesiredCloudLink", () => {
 
       expect(error).toMatchObject({
         _tag: "EnvironmentHttpInternalServerError",
+        operation: "relay_request",
+        relayOperation: "create-link-challenge",
+        relayPhase: "send-request",
         message: "T3 Connect relay create-link-challenge failed during send-request.",
         cause: {
           _tag: "CloudRelayRequestError",
