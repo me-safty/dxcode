@@ -24,6 +24,7 @@ interface UpdatesHarnessOptions {
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
   >;
+  readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly env?: Record<string, string | undefined>;
 }
 
@@ -138,12 +139,23 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     ),
   );
 
+  const setUpdateChannelError = options.setUpdateChannelError;
+  const settingsLayer = setUpdateChannelError
+    ? Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
+        get: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
+        load: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
+        setServerExposureMode: () => Effect.die("unexpected server exposure update"),
+        setTailscaleServe: () => Effect.die("unexpected Tailscale Serve update"),
+        setUpdateChannel: () => Effect.fail(setUpdateChannelError),
+      } satisfies DesktopAppSettings.DesktopAppSettings["Service"])
+    : DesktopAppSettings.layer;
+
   const layer = DesktopUpdates.layer.pipe(
     Layer.provideMerge(updaterLayer),
     Layer.provideMerge(windowLayer),
     Layer.provideMerge(backendLayer),
     Layer.provideMerge(DesktopState.layer),
-    Layer.provideMerge(DesktopAppSettings.layer),
+    Layer.provideMerge(settingsLayer),
     Layer.provideMerge(
       DesktopConfig.layerTest({
         T3CODE_HOME: `/tmp/t3-desktop-updates-test-${process.pid}`,
@@ -284,6 +296,7 @@ describe("DesktopUpdates", () => {
             const error = Cause.squash(exit.cause);
             assert.instanceOf(error, DesktopUpdates.DesktopUpdateActionInProgressError);
             assert.equal(error.action, "check");
+            assert.equal(error.requestedChannel, "nightly");
           }
 
           yield* Deferred.succeed(releaseCheck, undefined);
@@ -292,4 +305,31 @@ describe("DesktopUpdates", () => {
       ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     }),
   );
+
+  it.effect("preserves settings failure context when an update channel cannot be persisted", () => {
+    const diskFailure = new Error("disk exploded");
+    const settingsFailure = new DesktopAppSettings.DesktopSettingsWriteError({
+      operation: "replace-settings-file",
+      path: "/tmp/settings.json",
+      cause: diskFailure,
+    });
+    const harness = makeHarness({ setUpdateChannelError: settingsFailure });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const error = yield* updates.setChannel("nightly").pipe(Effect.flip);
+
+        assert.instanceOf(error, DesktopUpdates.DesktopUpdateChannelPersistenceError);
+        assert.isTrue(DesktopUpdates.isDesktopUpdateSetChannelError(error));
+        assert.equal(error.channel, "nightly");
+        assert.strictEqual(error.cause, settingsFailure);
+        assert.strictEqual(error.cause.cause, diskFailure);
+        assert.equal(error.message, "Failed to persist the nightly desktop update channel.");
+        assert.notInclude(error.message, diskFailure.message);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
 });
