@@ -1,5 +1,7 @@
 # Custom Branch Changes
 
+> Keep this file readable for humans: do not hard-wrap prose lines; let editors wrap long lines visually. Keep headings, lists, tables, and code blocks structurally formatted.
+
 ## Last Upstream Merge
 
 Generated after upstream merge commit `ab8a221e4`, with `origin/main` at `7b378ec6d` and `upstream/main` at `cc69aef4d`. Thirteen new upstream commits were merged since the previously recorded upstream ref `97e5cd3bf`, spanning `86db35ca6` (`[codex] Structure mobile native static-check failures (#3302)`) through `cc69aef4d` (`[codex] Structure relay domain label errors (#3347)`). No new `origin/main` commits were available beyond the current fork-tracking origin ref `7b378ec6d`. After this merge and reconciliation, local `main` is 243 commits ahead and 0 commits behind `upstream/main`, and 78 commits ahead and 0 commits behind `origin/main`; the remaining fork delta against current `upstream/main` is 264 files changed, 36972 insertions, and 1077 deletions.
