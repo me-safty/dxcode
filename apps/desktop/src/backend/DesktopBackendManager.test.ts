@@ -389,6 +389,46 @@ describe("DesktopBackendManager", () => {
     }),
   );
 
+  it.effect("reports output stream failures with process and stream context", () =>
+    Effect.gen(function* () {
+      const outputCause = PlatformError.systemError({
+        _tag: "BadResource",
+        module: "ChildProcess",
+        method: "stdout",
+        description: "output-stream-secret-sentinel",
+      });
+      const reported = yield* Deferred.make<DesktopBackendManager.BackendProcessOutputReadError>();
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            makeProcess({
+              stdout: Stream.fail(outputCause),
+              exitCode: Deferred.await(reported).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+            }),
+          ),
+        ),
+      );
+
+      const exit = yield* DesktopBackendManager.runBackendProcess({
+        ...baseConfig,
+        onOutputFailure: (error) => Deferred.succeed(reported, error).pipe(Effect.asVoid),
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)));
+      const error = yield* Deferred.await(reported);
+
+      assert.equal(exit.code.pipe(Option.getOrUndefined), 0);
+      assert.equal(error.executablePath, "/electron");
+      assert.equal(error.entryPath, "/server/bin.mjs");
+      assert.equal(error.cwd, "/server");
+      assert.equal(error.httpBaseUrl.href, "http://127.0.0.1:3773/");
+      assert.equal(error.pid, 123);
+      assert.equal(error.streamName, "stdout");
+      assert.strictEqual(error.cause, outputCause);
+      assert.equal(error.message, "Failed to read stdout from desktop backend process 123.");
+      assert.notInclude(error.message, "output-stream-secret-sentinel");
+    }),
+  );
+
   it.effect("retries HTTP readiness before reporting the backend ready", () =>
     Effect.gen(function* () {
       const requestUrls: Array<string> = [];

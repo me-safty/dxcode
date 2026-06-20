@@ -105,6 +105,20 @@ export class BackendProcessSpawnError extends Schema.TaggedErrorClass<BackendPro
   }
 }
 
+export class BackendProcessOutputReadError extends Schema.TaggedErrorClass<BackendProcessOutputReadError>()(
+  "BackendProcessOutputReadError",
+  {
+    ...backendProcessContextSchema,
+    pid: Schema.Number,
+    streamName: Schema.Literals(["stdout", "stderr"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to read ${this.streamName} from desktop backend process ${this.pid}.`;
+  }
+}
+
 export class BackendProcessExitStatusError extends Schema.TaggedErrorClass<BackendProcessExitStatusError>()(
   "BackendProcessExitStatusError",
   {
@@ -147,6 +161,7 @@ interface RunBackendProcessOptions extends DesktopBackendStartConfig {
     streamName: BackendProcessOutputStream,
     chunk: Uint8Array,
   ) => Effect.Effect<void>;
+  readonly onOutputFailure?: (error: BackendProcessOutputReadError) => Effect.Effect<void>;
 }
 
 export interface DesktopBackendSnapshot {
@@ -254,13 +269,25 @@ export const waitForHttpReady = Effect.fn("desktop.backendManager.waitForHttpRea
 });
 
 function drainBackendOutput(
+  context: BackendProcessContext & { readonly pid: number },
   streamName: BackendProcessOutputStream,
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
   onOutput: (streamName: BackendProcessOutputStream, chunk: Uint8Array) => Effect.Effect<void>,
+  onOutputFailure: (error: BackendProcessOutputReadError) => Effect.Effect<void>,
 ): Effect.Effect<void> {
   return stream.pipe(
     Stream.runForEach((chunk) => onOutput(streamName, chunk)),
-    Effect.ignore,
+    Effect.mapError(
+      (cause) =>
+        new BackendProcessOutputReadError({
+          ...context,
+          streamName,
+          cause,
+        }),
+    ),
+    Effect.catchTags({
+      BackendProcessOutputReadError: onOutputFailure,
+    }),
   );
 }
 
@@ -321,8 +348,28 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
 
   yield* options.onStarted?.(handle.pid) ?? Effect.void;
   if (options.captureOutput) {
-    yield* drainBackendOutput("stdout", handle.stdout, onOutput).pipe(Effect.forkScoped);
-    yield* drainBackendOutput("stderr", handle.stderr, onOutput).pipe(Effect.forkScoped);
+    const outputContext = {
+      executablePath: options.executablePath,
+      entryPath: options.entryPath,
+      cwd: options.cwd,
+      httpBaseUrl: options.httpBaseUrl,
+      pid: Number(handle.pid),
+    };
+    const onOutputFailure = options.onOutputFailure ?? (() => Effect.void);
+    yield* drainBackendOutput(
+      outputContext,
+      "stdout",
+      handle.stdout,
+      onOutput,
+      onOutputFailure,
+    ).pipe(Effect.forkScoped);
+    yield* drainBackendOutput(
+      outputContext,
+      "stderr",
+      handle.stderr,
+      onOutput,
+      onOutputFailure,
+    ).pipe(Effect.forkScoped);
   }
   yield* waitForHttpReady({
     executablePath: options.executablePath,
@@ -560,6 +607,7 @@ export const make = Effect.gen(function* () {
               error,
             }),
           onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
+          onOutputFailure: (error) => logBackendManagerError(error.message, { error }),
         }).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(HttpClient.HttpClient, httpClient),
