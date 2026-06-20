@@ -256,7 +256,7 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
     }),
   );
 
-  it.effect("reports non-zero git exits with command and stderr context", () => {
+  it.effect("reports non-zero git exits without retaining process output", () => {
     const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = [];
 
     return Effect.gen(function* () {
@@ -272,7 +272,10 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
 
       const error = yield* syncReferenceRepos({ rootDir, repoId: "effect-smol" }).pipe(
         Effect.provide(
-          mockSpawnerLayer(commands, mockHandle({ exitCode: 23, stderr: "subtree failed\n" })),
+          mockSpawnerLayer(
+            commands,
+            mockHandle({ exitCode: 23, stderr: "subtree failed secret-token-value\n" }),
+          ),
         ),
         Effect.flip,
       );
@@ -286,9 +289,13 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
       assert.equal(error.repository, effectSmol.repository);
       assert.equal(error.ref, "effect@4.0.0-beta.73");
       assert.equal(error.rootDir, rootDir);
-      assert.deepStrictEqual(error.args, commands[0]?.args);
+      assert.equal(error.argumentCount, commands[0]?.args.length);
       assert.equal(error.exitCode, 23);
-      assert.equal(error.stderr, "subtree failed");
+      assert.equal(error.stdoutLength, 5);
+      assert.equal(error.stderrLength, 34);
+      assert.notProperty(error, "args");
+      assert.notProperty(error, "stderr");
+      assert.notInclude(error.message, "secret-token-value");
       assert.ok(!("cause" in error));
     });
   });

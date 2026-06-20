@@ -79,9 +79,10 @@ export class ReferenceRepoGitSubtreeError extends Schema.TaggedErrorClass<Refere
     repository: Schema.String,
     ref: Schema.String,
     rootDir: Schema.String,
-    args: Schema.Array(Schema.String),
+    argumentCount: Schema.Number,
     exitCode: Schema.optional(Schema.Number),
-    stderr: Schema.optional(Schema.String),
+    stdoutLength: Schema.optional(Schema.Number),
+    stderrLength: Schema.optional(Schema.Number),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -227,7 +228,7 @@ const runGit = Effect.fn("runGit")(function* (rootDir: string, plan: ReferenceRe
     repository: plan.repo.repository,
     ref: plan.ref,
     rootDir,
-    args: plan.args,
+    argumentCount: plan.args.length,
   } as const;
   const child = yield* spawner.spawn(ChildProcess.make("git", plan.args, { cwd: rootDir })).pipe(
     Effect.mapError(
@@ -262,7 +263,8 @@ const runGit = Effect.fn("runGit")(function* (rootDir: string, plan: ReferenceRe
       ...errorContext,
       operation: "exit",
       exitCode,
-      stderr: stderr.trim(),
+      stdoutLength: stdout.length,
+      stderrLength: stderr.length,
     });
   }
 
