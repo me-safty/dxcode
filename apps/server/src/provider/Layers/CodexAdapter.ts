@@ -123,6 +123,7 @@ interface CodexAdapterSessionContext {
 interface BufferedSubagentOutput {
   readonly parentCollab: {
     readonly itemId: string;
+    readonly parentThreadId?: string | undefined;
     readonly detail?: string | undefined;
   };
   readonly content: string;
@@ -544,22 +545,34 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 }
 
-function parentCollabFromPayload(
-  payload: ProviderEvent["payload"],
-): { itemId?: string | undefined; detail?: string | undefined } | undefined {
+function parentCollabFromPayload(payload: ProviderEvent["payload"]):
+  | {
+      itemId?: string | undefined;
+      parentThreadId?: string | undefined;
+      detail?: string | undefined;
+    }
+  | undefined {
   const parentCollab = asRecord(asRecord(payload)?.parentCollab);
   if (!parentCollab) {
     return undefined;
   }
   const itemId =
     typeof parentCollab.itemId === "string" ? trimText(parentCollab.itemId) : undefined;
+  const parentThreadId =
+    typeof parentCollab.parentThreadId === "string"
+      ? trimText(parentCollab.parentThreadId)
+      : undefined;
   const detail =
     typeof parentCollab.detail === "string" ? trimText(parentCollab.detail) : undefined;
-  return itemId || detail ? { itemId, detail } : undefined;
+  return itemId || parentThreadId || detail ? { itemId, parentThreadId, detail } : undefined;
 }
 
 function childCollabAgentMessageDelta(event: ProviderEvent): {
-  readonly parentCollab: { itemId?: string | undefined; detail?: string | undefined };
+  readonly parentCollab: {
+    itemId?: string | undefined;
+    parentThreadId?: string | undefined;
+    detail?: string | undefined;
+  };
   readonly delta: string;
   readonly payload: EffectCodexSchema.V2AgentMessageDeltaNotification | undefined;
   readonly rawPayload: Record<string, unknown> | undefined;
@@ -598,14 +611,19 @@ function bufferChildCollabAgentMessageDelta(
     return false;
   }
 
-  const key = subagentOutputBufferKey(event.threadId, childDelta.parentCollab.itemId);
+  const parentThreadId = childDelta.parentCollab.parentThreadId
+    ? ThreadId.make(childDelta.parentCollab.parentThreadId)
+    : event.threadId;
+  const key = subagentOutputBufferKey(parentThreadId, childDelta.parentCollab.itemId);
   const previous = buffers.get(key);
+  const bufferedParentThreadId =
+    childDelta.parentCollab.parentThreadId ?? previous?.parentCollab.parentThreadId;
+  const bufferedDetail = childDelta.parentCollab.detail ?? previous?.parentCollab.detail;
   buffers.set(key, {
     parentCollab: {
       itemId: childDelta.parentCollab.itemId,
-      ...((childDelta.parentCollab.detail ?? previous?.parentCollab.detail)
-        ? { detail: childDelta.parentCollab.detail ?? previous?.parentCollab.detail }
-        : {}),
+      parentThreadId: bufferedParentThreadId,
+      detail: bufferedDetail,
     },
     content: `${previous?.content ?? ""}${childDelta.delta}`,
   });

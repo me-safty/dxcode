@@ -13,9 +13,9 @@ Concrete conflict notes from this merge:
 
 ## Latest Worktree Port
 
-Generated from local `main` at `3cbf5a53d` after inspecting active worktrees `fix/codex-skills`, `split/file-command-activity-boxes`, `split/subagent-threading-work`, `split/terminal-backed-project-actions`, `fix/thread-detail-subscription-race`, `split/version-control-panel-work`, and `split/vscode-extension-work`.
+Generated from local `main` at `3782fa712` after a PR-comment pass and follow-up port inspection across active worktrees `fix/codex-skills`, `split/file-command-activity-boxes`, `split/subagent-threading-work`, `split/terminal-backed-project-actions`, `fix/thread-detail-subscription-race`, `split/version-control-panel-work`, and `split/vscode-extension-work`.
 
-The port retained only targeted branch-local fixes that were absent from `main`: refreshing workspace-scoped provider-skill queries when fallback provider skills change for the same workspace key, including command/file row preview text in expanded-row ARIA labels, preserving subagent `parentRelation` on fresh client-runtime `thread.created` detail initialization, modeling read-only Version Control panel RPCs as query atoms while keeping mutating operations as commands, suppressing stale `Refreshing repository state...` text when only the live VCS status subscription is pending, and refreshing the related `SOURCE_CONTROL.md`, `SUBAGENTS.md`, and VS Code implementation notes. The terminal-backed project action worktree and thread-detail subscription race worktree had no additional code to port; their useful behavior was already represented on `main`. Do not replay split worktrees wholesale: several remaining diffs are stale branch shape or would regress newer `main` behavior.
+The port retained only targeted branch-local fixes that were absent from `main`: command output extraction and merge hardening for blank-only streams, whitespace-only incremental chunks, split chunks, and shorter completed/updated snapshots; terminal-backed project action terminal id collision fixes and conservative busy detection when POSIX process-tree inspection is incomplete; subagent parent metadata propagation, parent-collab child-shell synthesis, child-stop no-root-fallback behavior, resumed-child parent block de-duplication, and active terminal subagent sidebar path visibility; Version Control panel fixes for default compare refs, non-current diverged merge sync, discard failure surfacing, fallback rename parsing, merged staged-plus-unstaged row stats, and late-month relative dates; and related `SOURCE_CONTROL.md` and `SUBAGENTS.md` documentation refreshes. The workspace-scoped skill-loading, thread-detail subscription race, and VS Code extension worktrees had no additional production code to port because their useful behavior was already represented on `main`. Do not replay split worktrees wholesale: several remaining diffs are stale branch shape or would regress newer `main` behavior.
 
 ## Debug Browser Launch
 
@@ -103,6 +103,8 @@ Expected behavior:
 - Clicking a command row expands it inline and shows the command, raw command when it differs, stdout, stderr, exit code, and duration.
 - Differing raw command text is rendered inline as a normal detail block in the expanded row, not hidden behind a second nested disclosure.
 - Stdout and stderr show only the last 40 lines by default when longer than 40 lines; clicking either output block toggles the full stream.
+- Command output extraction ignores blank-only completed stdout/stderr fallbacks so aggregated command output is still shown, but preserves whitespace-only incremental `tool.updated` chunks, including raw output `content`, so streamed output is not collapsed away.
+- Incremental command output chunks concatenate without injected separators, while shorter completed snapshots and newline-terminated shorter updated snapshots do not overwrite a previously merged longer output snapshot.
 
 Primary files:
 
@@ -163,6 +165,8 @@ Expected behavior:
 - A project action must not write its command until the target terminal session is ready to receive input. This avoids shells with slow startup, such as login `bash`, rendering the command before the prompt and leaving the command unexecuted.
 - If the selected reusable terminal is busy running a subprocess, the action may choose another action terminal rather than injecting input into a live process.
 - The readiness wait uses the current terminal session summary when available, and otherwise attaches to the terminal stream and waits briefly for prompt-like output before writing. If the prompt is never observed, the wait times out and the action still writes rather than hanging indefinitely.
+- Action terminal ids encode script ids and reserve numeric `:<suffix>` ids for fallback terminals, so script ids such as `build-2` or legacy colon ids such as `build:dev` cannot be mistaken for fallback terminals of another action.
+- POSIX subprocess detection is conservative when full process-tree inspection fails: a shell child is treated as busy rather than idle so commands are not injected into a terminal that may still have a hidden descendant process.
 
 Primary files:
 
@@ -175,6 +179,8 @@ Primary files:
 Relevant tests live in:
 
 - `apps/web/src/projectScriptTerminals.test.ts`
+- `apps/server/src/terminal/Layers/Manager.test.ts`
+- `packages/shared/src/terminalLabels.test.ts`
 
 Useful focused command:
 
@@ -254,9 +260,11 @@ Primary reference:
 
 ## Subagent Threading Work
 
-This branch also carries the Codex subagent-threading work that is not assumed to exist on `main`. Treat Codex subagent lineage, child-thread projection, contextual active sidebar rows, parent subagent reference blocks, child-thread output isolation, child stop behavior, and related tests as part of this branch's customization set during upstream merges.
+This branch also carries the Codex subagent-threading work that is not assumed to exist on `main`. Treat Codex subagent lineage, child-thread projection, contextual active sidebar rows, active terminal subagent ancestor visibility, parent subagent reference blocks, resumed-child parent activity rows, child-thread output isolation, child stop behavior, parent metadata ingestion, and related tests as part of this branch's customization set during upstream merges.
 
 Thread archive/delete lifecycle behavior is enforced server-side in the orchestration decider: archiving or deleting a parent thread cascades through active subagent descendants before the parent event, and force-deleting a project delegates through lifecycle roots so descendant subagents are not double-deleted.
+
+Child runtime events that arrive with parent-collab metadata may synthesize the missing child shell before their output/actions are ingested. Child stop requests must target the selected child turn when known, and if no active child turn can be identified the server records a child interrupt failure and marks the child stopped instead of falling back to the root session's active turn.
 
 The implementation details are intentionally kept in `SUBAGENTS.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the subagent threading work unless `main` has gained an equivalent UI-aware subagent architecture, then reconcile against the detailed subagent note.
 
@@ -266,11 +274,13 @@ Primary reference:
 
 ## Version Control Panel Work
 
-This branch includes a first-class Version Control panel that is not assumed to exist on `main`. Treat the Version Control singleton right-panel surface, VS Code host display setting, live VCS status watcher, Actionable and Remotes panel model, selected-file commit/stash flow, branch/commit/stash/remote actions, and Version Control panel RPC/contracts as part of this branch's customization set during upstream merges.
+This branch includes a first-class Version Control panel that is not assumed to exist on `main`. Treat the Version Control singleton right-panel surface, VS Code host display setting, live VCS status watcher, Actionable and Remotes panel model, selected-file commit/stash flow, branch/commit/stash/remote actions, compare-base semantics, and Version Control panel RPC/contracts as part of this branch's customization set during upstream merges.
 
 Preserve the branch-local idle-power safeguards for VCS status: ignore internal `.git/` watcher events before refreshing local status, and keep the default automatic remote Git fetch interval conservative unless upstream provides equivalent lower-churn VCS status behavior.
 
 Provider-backed change-request lookups remain best-effort in the panel service. Provider/auth/CLI failures must not fail the whole panel snapshot or hide git-derived actionable branch rows.
+
+Preserve the panel's review-hardened edge cases: the current default branch remains a valid default compare ref, diverged normal merge sync is available only for the current branch, tracked discard restore failures surface instead of being swallowed, fallback rename parsing preserves original paths, merged staged-plus-unstaged row stats are summed, and late-month relative dates do not fall through to `0 years ago`.
 
 The implementation details are intentionally kept in `SOURCE_CONTROL.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the Version Control panel work unless `main` has gained an equivalent agent-aware version-control panel, then reconcile against the detailed source-control note.
 
@@ -309,7 +319,9 @@ When merging from upstream, keep these local behaviors unless upstream has an eq
 8. Thread-detail subscriptions preserve first-message events emitted during initial snapshot loading unless upstream ships equivalent snapshot-plus-live-tail buffering.
 9. Terminal-backed project actions reuse action terminals where possible and wait for terminal readiness before writing commands.
 10. Expanded command activity rows show differing raw command text inline with the other command details.
-11. Mobile EAS project ownership remains pointed at the local Expo project used for installable preview builds unless deliberately changed.
+11. Command output merging preserves meaningful streamed output across blank fallbacks, whitespace chunks, split chunks, and shorter snapshots.
+12. Terminal-backed project action terminal ids remain collision-resistant and busy detection stays conservative when subprocess inspection is incomplete.
+13. Mobile EAS project ownership remains pointed at the local Expo project used for installable preview builds unless deliberately changed.
 
 ## Retirement Criteria
 

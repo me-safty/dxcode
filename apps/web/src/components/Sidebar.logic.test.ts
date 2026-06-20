@@ -934,6 +934,52 @@ describe("buildSidebarThreadRows", () => {
       { thread: runningChild, indentLevel: 1 },
     ]);
   });
+
+  it("keeps terminal active subagent ancestors visible in nested order", () => {
+    const root = makeThread({ id: ThreadId.make("thread-root") });
+    const terminalParent = makeThread({
+      id: ThreadId.make("thread-terminal-parent"),
+      parentRelation: {
+        kind: "subagent",
+        rootThreadId: root.id,
+        parentThreadId: root.id,
+        parentTurnId: TurnId.make("turn-root"),
+        parentItemId: ProviderItemId.make("item-parent"),
+        parentActivitySequence: 0,
+        providerThreadId: "provider-thread-terminal-parent",
+        titleSeed: "Inspect auth flow",
+        depth: 1,
+        startedAt: "2026-03-09T10:00:00.000Z",
+        completedAt: "2026-03-09T10:02:00.000Z",
+        status: "completed",
+      },
+    });
+    const activeGrandchild = makeThread({
+      id: ThreadId.make("thread-active-grandchild"),
+      parentRelation: {
+        kind: "subagent",
+        rootThreadId: root.id,
+        parentThreadId: terminalParent.id,
+        parentTurnId: TurnId.make("turn-child"),
+        parentItemId: ProviderItemId.make("item-grandchild"),
+        parentActivitySequence: 1,
+        providerThreadId: "provider-thread-active-grandchild",
+        titleSeed: "Check nested route",
+        depth: 2,
+        startedAt: "2026-03-09T10:03:00.000Z",
+        completedAt: "2026-03-09T10:04:00.000Z",
+        status: "completed",
+      },
+    });
+
+    expect(
+      buildSidebarThreadRows([root, terminalParent, activeGrandchild], activeGrandchild.id),
+    ).toEqual([
+      { thread: root, indentLevel: 0 },
+      { thread: terminalParent, indentLevel: 1 },
+      { thread: activeGrandchild, indentLevel: 2 },
+    ]);
+  });
 });
 
 describe("isContextMenuPointerDown", () => {

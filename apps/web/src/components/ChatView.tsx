@@ -4111,10 +4111,16 @@ function ChatViewContent(props: ChatViewProps) {
 
   const onInterrupt = async () => {
     if (!activeThread) return;
+    const activeSubagentIsRunning =
+      activeThread.parentRelation?.kind === "subagent" &&
+      activeThread.parentRelation.status === "running";
     const result = await interruptThreadTurn({
       environmentId,
       input: {
         threadId: activeThread.id,
+        ...(activeSubagentIsRunning && activeThread.latestTurn?.turnId
+          ? { turnId: activeThread.latestTurn.turnId }
+          : {}),
       },
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {

@@ -701,7 +701,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? (activity.payload as Record<string, unknown>)
       : null;
   const commandPreview = extractToolCommand(payload);
-  const commandResult = extractCommandResult(payload);
+  const commandResult = extractCommandResult(payload, {
+    preserveBlankRawOutputStreams: activity.kind === "tool.updated",
+  });
   const changedFiles = extractChangedFiles(payload);
   const patch = extractToolPatch(payload);
   const title = extractToolTitle(payload);
@@ -855,7 +857,7 @@ function dedupeSubagentChildWorkEntries(
       continue;
     }
     const unseenChildren = entry.subagentChildren.filter((child) => {
-      const activityScope = entry.turnId ?? child.parentItemId ?? "";
+      const activityScope = child.parentItemId ?? entry.turnId ?? "";
       const key = `${child.threadId}:${activityScope}`;
       if (seenChildActivityKeys.has(key)) {
         return false;
@@ -935,9 +937,9 @@ function mergeDerivedWorkLogEntries(
   const output =
     itemType === "collab_agent_tool_call"
       ? mergeTextOutputChunk(previous.output, next.output)
-      : mergeTextOutput(previous.output, next.output);
-  const stdout = mergeTextOutput(previous.stdout, next.stdout);
-  const stderr = mergeTextOutput(previous.stderr, next.stderr);
+      : mergeTextOutput(previous.output, next.output, next);
+  const stdout = mergeTextOutput(previous.stdout, next.stdout, next);
+  const stderr = mergeTextOutput(previous.stderr, next.stderr, next);
   const exitCode = next.exitCode ?? previous.exitCode;
   const durationMs = next.durationMs ?? previous.durationMs;
   const patch = next.patch ?? previous.patch;
@@ -1007,6 +1009,7 @@ function mergeSubagentChildren(
 function mergeTextOutput(
   previous: string | undefined,
   next: string | undefined,
+  nextEntry: DerivedWorkLogEntry,
 ): string | undefined {
   if (!previous) {
     return next;
@@ -1020,11 +1023,10 @@ function mergeTextOutput(
   if (next.startsWith(previous)) {
     return next;
   }
-  if (previous.startsWith(next)) {
+  if (previous.startsWith(next) && shouldKeepLongerOutputSnapshot(next, nextEntry)) {
     return previous;
   }
-  const separator = previous.endsWith("\n") || next.startsWith("\n") ? "" : "\n";
-  return `${previous}${separator}${next}`;
+  return `${previous}${next}`;
 }
 
 function mergeTextOutputChunk(
@@ -1038,6 +1040,10 @@ function mergeTextOutputChunk(
     return previous;
   }
   return `${previous}${next}`;
+}
+
+function shouldKeepLongerOutputSnapshot(next: string, nextEntry: DerivedWorkLogEntry): boolean {
+  return nextEntry.activityKind === "tool.completed" || next.endsWith("\n");
 }
 
 function mergeChangedFiles(
@@ -1306,7 +1312,12 @@ function firstIntegerFromRecord(
   return value !== null && Number.isInteger(value) ? value : null;
 }
 
-function extractCommandResult(payload: Record<string, unknown> | null): {
+function extractCommandResult(
+  payload: Record<string, unknown> | null,
+  options: {
+    readonly preserveBlankRawOutputStreams?: boolean;
+  } = {},
+): {
   output: string | null;
   stdout: string | null;
   stderr: string | null;
@@ -1317,22 +1328,29 @@ function extractCommandResult(payload: Record<string, unknown> | null): {
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const rawOutput = asRecord(data?.rawOutput);
-  const rawOutputStdout = firstRawStringFromRecord(rawOutput, ["stdout"]);
+  const rawOutputStdout = options.preserveBlankRawOutputStreams
+    ? firstRawStringFromRecord(rawOutput, ["stdout"])
+    : firstCommandOutputStringFromRecord(rawOutput, ["stdout"]);
   const stdout =
     rawOutputStdout ??
-    firstRawStringFromRecord(itemResult, ["stdout"]) ??
-    firstRawStringFromRecord(data, ["stdout"]) ??
-    firstRawStringFromRecord(payload, ["stdout"]);
+    firstCommandOutputStringFromRecord(itemResult, ["stdout"]) ??
+    firstCommandOutputStringFromRecord(data, ["stdout"]) ??
+    firstCommandOutputStringFromRecord(payload, ["stdout"]);
   const stderr =
-    firstRawStringFromRecord(rawOutput, ["stderr"]) ??
-    firstRawStringFromRecord(itemResult, ["stderr"]) ??
-    firstRawStringFromRecord(data, ["stderr"]) ??
-    firstRawStringFromRecord(payload, ["stderr"]);
+    (options.preserveBlankRawOutputStreams
+      ? firstRawStringFromRecord(rawOutput, ["stderr"])
+      : firstCommandOutputStringFromRecord(rawOutput, ["stderr"])) ??
+    firstCommandOutputStringFromRecord(itemResult, ["stderr"]) ??
+    firstCommandOutputStringFromRecord(data, ["stderr"]) ??
+    firstCommandOutputStringFromRecord(payload, ["stderr"]);
+  const rawOutputContent = options.preserveBlankRawOutputStreams
+    ? firstRawStringFromRecord(rawOutput, ["content", "output", "text", "result"])
+    : firstCommandOutputStringFromRecord(rawOutput, ["content", "output", "text", "result"]);
   const content =
     stdout ??
-    firstRawStringFromRecord(rawOutput, ["content", "output", "text", "result"]) ??
-    firstRawStringFromRecord(itemResult, ["content", "output", "text", "result"]) ??
-    firstRawStringFromRecord(item, ["aggregatedOutput", "output", "text", "result"]);
+    rawOutputContent ??
+    firstCommandOutputStringFromRecord(itemResult, ["content", "output", "text", "result"]) ??
+    firstCommandOutputStringFromRecord(item, ["aggregatedOutput", "output", "text", "result"]);
   const strippedContent = content ? stripTrailingExitCode(content) : null;
   const detailExit =
     typeof payload?.detail === "string" ? stripTrailingExitCode(payload.detail) : null;
@@ -1542,6 +1560,14 @@ function firstRawStringFromRecord(
     }
   }
   return null;
+}
+
+function firstCommandOutputStringFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): string | null {
+  const value = firstRawStringFromRecord(record, keys);
+  return value !== null && /\S/u.test(value) ? value : null;
 }
 
 function looksLikeUnifiedDiff(value: string): boolean {

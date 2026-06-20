@@ -275,6 +275,55 @@ describe("SourceControlPanelService", () => {
     );
   });
 
+  it.effect("fails unstaged discard when tracked restore fails", () => {
+    const calls: ExecuteGitInput[] = [];
+    return Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const error = yield* service
+        .discardFiles({
+          cwd: "/repo",
+          paths: ["tracked.ts", "new-file.ts"],
+          staged: false,
+        })
+        .pipe(Effect.flip);
+
+      assert.equal(error.operation, "vcs.panel.discardUnstagedFiles");
+      const relevantCalls = calls.filter((call) =>
+        [
+          "vcs.panel.discardUnstagedFiles.listIndexPaths",
+          "vcs.panel.discardUnstagedFiles",
+          "vcs.panel.cleanUntrackedFiles",
+        ].includes(call.operation),
+      );
+      assert.deepStrictEqual(
+        relevantCalls.map((call) => [call.operation, call.args]),
+        [
+          [
+            "vcs.panel.discardUnstagedFiles.listIndexPaths",
+            ["ls-files", "--cached", "--", "tracked.ts", "new-file.ts"],
+          ],
+          ["vcs.panel.discardUnstagedFiles", ["restore", "--worktree", "--", "tracked.ts"]],
+        ],
+      );
+    }).pipe(
+      Effect.provide(
+        makeTestLayer((input) =>
+          Effect.sync(() => {
+            calls.push(input);
+            if (input.operation === "vcs.panel.discardUnstagedFiles.listIndexPaths") {
+              return success("tracked.ts\n");
+            }
+            if (input.operation === "vcs.panel.discardUnstagedFiles") {
+              return failure("restore failed");
+            }
+            return success("");
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("preserves multiline commit message formatting in one git argument", () => {
     const calls: ExecuteGitInput[] = [];
     return Effect.gen(function* () {
@@ -636,6 +685,100 @@ describe("SourceControlPanelService", () => {
     );
   });
 
+  it.effect("infers line-based numstat renames when name-status is missing", () =>
+    Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const result = yield* service.branchCommits({
+        cwd: "/repo",
+        branch: branchRef,
+        baseRef: "main",
+        kind: "history",
+        skip: 0,
+        limit: 10,
+      });
+
+      assert.deepStrictEqual(result.commits[0]?.files, [
+        {
+          path: "new-name.ts",
+          originalPath: "old-name.ts",
+          status: "renamed",
+          insertions: 3,
+          deletions: 1,
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        makeTestLayer((input) =>
+          Effect.sync(() => {
+            switch (input.operation) {
+              case "vcs.panel.branchCommitCount":
+                return success("1");
+              case "vcs.panel.branchCommits":
+                return success(
+                  "abc123\tabc123\tAda\tada@example.test\t2026-06-20T12:00:00.000Z\tRename file",
+                );
+              case "vcs.panel.commitRefs":
+              case "vcs.panel.commitNameStatus":
+                return success("");
+              case "vcs.panel.commitNumstat":
+                return success("3\t1\told-name.ts\tnew-name.ts\n");
+              default:
+                return success("");
+            }
+          }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("infers nul-delimited binary numstat renames when name-status is missing", () =>
+    Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const result = yield* service.branchCommits({
+        cwd: "/repo",
+        branch: branchRef,
+        baseRef: "main",
+        kind: "history",
+        skip: 0,
+        limit: 10,
+      });
+
+      assert.deepStrictEqual(result.commits[0]?.files, [
+        {
+          path: "new\tname.bin",
+          originalPath: "old\tname.bin",
+          status: "renamed",
+          insertions: 0,
+          deletions: 0,
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        makeTestLayer((input) =>
+          Effect.sync(() => {
+            switch (input.operation) {
+              case "vcs.panel.branchCommitCount":
+                return success("1");
+              case "vcs.panel.branchCommits":
+                return success(
+                  "abc123\tabc123\tAda\tada@example.test\t2026-06-20T12:00:00.000Z\tRename binary",
+                );
+              case "vcs.panel.commitRefs":
+              case "vcs.panel.commitNameStatus":
+                return success("");
+              case "vcs.panel.commitNumstat":
+                return success("-\t-\t\0old\tname.bin\0new\tname.bin\0");
+              default:
+                return success("");
+            }
+          }),
+        ),
+      ),
+    ),
+  );
+
   it.effect("defers untracked detail loading from the initial snapshot", () =>
     Effect.gen(function* () {
       const service = yield* SourceControlPanelService;
@@ -693,6 +836,51 @@ describe("SourceControlPanelService", () => {
             }),
           {
             localStatus: () => Effect.succeed(localStatus),
+          },
+        ),
+      ),
+    ),
+  );
+
+  it.effect("uses the repository default branch as the default compare ref even when current", () =>
+    Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const snapshot = yield* service.snapshot({ cwd: "/repo" });
+
+      assert.equal(snapshot.defaultCompareRef, "main");
+    }).pipe(
+      Effect.provide(
+        makeTestLayer(
+          (input) =>
+            Effect.sync(() => {
+              switch (input.operation) {
+                case "vcs.panel.localBranches":
+                  return success(
+                    [
+                      "main\t*\t/repo\t2026-06-20T12:00:00.000Z\torigin/main\t",
+                      "feature/source-control\t\t\t2026-06-19T12:00:00.000Z\t\t",
+                    ].join("\n"),
+                  );
+                case "vcs.panel.statusPorcelain":
+                  return success("# branch.oid abc\n# branch.head main");
+                case "vcs.panel.remotes":
+                case "vcs.panel.stashes":
+                case "vcs.panel.stagedNumstat":
+                case "vcs.panel.unstagedNumstat":
+                  return success("");
+                default:
+                  return success("");
+              }
+            }),
+          {
+            localStatus: () =>
+              Effect.succeed({
+                ...localStatus,
+                refName: "main",
+                isDefaultRef: true,
+                hasWorkingTreeChanges: false,
+              }),
           },
         ),
       ),

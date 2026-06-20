@@ -82,7 +82,7 @@ Items are sorted by operational urgency, then recency. An unclean working tree i
 
 The `Working tree` row expands to a compact changed-file list. There is no staged-versus-unstaged grouping in the panel UI. Each changed file has a selector, and newly appearing changed files are selected by default.
 
-The working-tree subsection header shows a tri-state checkbox before the selection summary. Checked means all files are selected, unchecked means none are selected, and partial means some files are selected; clicking a partial or unchecked checkbox selects all files, while clicking a checked checkbox unselects all files. The summary reads `x of y files selected` and shows selected-file `+x`/`-y` line stats immediately after the label when non-zero.
+The working-tree subsection header shows a tri-state checkbox before the selection summary. Checked means all files are selected, unchecked means none are selected, and partial means some files are selected; clicking a partial or unchecked checkbox selects all files, while clicking a checked checkbox unselects all files. The summary reads `x of y files selected` and shows selected-file `+x`/`-y` line stats immediately after the label when non-zero. When staged and unstaged entries for the same file are merged into one displayed row, the displayed stats sum both sides instead of taking only the larger staged or unstaged count. These numbers are aggregate staged-plus-unstaged churn, not a de-duplicated net diff against `HEAD`; for example, a selected file with `+2/-1` staged and `+3/-4` unstaged is shown as `+5/-5`.
 
 The working-tree header actions are:
 
@@ -121,7 +121,7 @@ Branch action buttons appear only on row hover/focus and are absolutely position
 - Merge branch into the current branch.
 - Rebase current branch onto branch, using the `git-pull-request-arrow` icon.
 
-Smart sync handles diverged branches by prompting for one of three choices: force pull, normal merge sync, or force push. Modifier-key tooltips stay terse; for example pull can note `Shift: reset` and `Option: fetch`.
+Smart sync handles diverged branches by prompting for force pull, normal merge sync, or force push. Normal merge sync is available only when the diverged row is the currently checked-out branch, matching Git's working-tree merge semantics; the merge button is disabled for non-current diverged branch rows. Non-current diverged branch rows keep force pull and force push available without implicitly changing the user's checkout. Modifier-key tooltips stay terse; for example pull can note `Shift: reset` and `Option: fetch`.
 
 ## Branch Details
 
@@ -133,7 +133,7 @@ Expanding a branch reveals branch details:
 - `History`
 - `Changes`
 
-Every expanded branch shows the `vs. ...` row first. Its default base is the branch's configured upstream/base when available, otherwise the repository default comparison ref. This base can be a different-name ref such as `upstream/main`; in that case it is a comparison base only, not proof that the branch has been published. Actionable same-name fork rows default this base to the other remote branch they are tracking for updates. Actionable PR/MR-derived rows default this base to the found change request's remote base branch. Clicking the row opens a searchable ref picker so the user can choose another compare base. Compare rows do not show count prefixes or extra choose labels. Empty ahead and behind subsections are hidden. Ahead and behind labels include the count directly in the title and use the same colored upload/download icons as branch sync indicators. `History` is collapsed by default and loads commits in pages of 10. When more commits are available, a load-more row appends the next page inline until no more history remains.
+Every expanded branch shows the `vs. ...` row first. Its default base is the branch's configured upstream/base when available, otherwise the repository default comparison ref. The repository default comparison ref remains available even when it is the currently checked-out branch, so current-default-branch rows still have a stable compare target. This base can be a different-name ref such as `upstream/main`; in that case it is a comparison base only, not proof that the branch has been published. Actionable same-name fork rows default this base to the other remote branch they are tracking for updates. Actionable PR/MR-derived rows default this base to the found change request's remote base branch. Clicking the row opens a searchable ref picker so the user can choose another compare base. Compare rows do not show count prefixes or extra choose labels. Empty ahead and behind subsections are hidden. Ahead and behind labels include the count directly in the title and use the same colored upload/download icons as branch sync indicators. `History` is collapsed by default and loads commits in pages of 10. When more commits are available, a load-more row appends the next page inline until no more history remains.
 
 The branch-level `Changes` row summarizes the selected comparison as file count and line stats before expanding to the changed-file list.
 
@@ -199,7 +199,7 @@ The panel routes all repository mutations through server-side RPC methods and re
 
 Non-current branch fetches are scoped to the selected branch. Operation busy state is keyed per action target so fetching one branch does not disable equivalent actions on other branches or remote entries. Publish/push handling on the server only reuses a configured upstream when that upstream resolves to the same branch name; otherwise it pushes `<local-branch>:refs/heads/<local-branch>` on the selected/default remote so a base ref such as `upstream/main` cannot become the push target.
 
-Selected-file commit, stash, and discard operations preserve rename source paths when needed, so selecting an `R` row sends both the destination path and the original path to the Git operation. Discard operations also split staged and unstaged portions explicitly. Server-side discard handling partitions tracked, untracked, HEAD-backed, and newly added paths before running Git restore/reset/clean commands, so mixed selections such as tracked edits plus untracked files do not cause one path class to prevent the rest of the selected discard from applying.
+Selected-file commit, stash, and discard operations preserve rename source paths when needed, so selecting an `R` row sends both the destination path and the original path to the Git operation. Rename source paths are preserved for normal porcelain status entries and for fallback numstat parsing, including line-based fallback output. Discard operations also split staged and unstaged portions explicitly. Server-side discard handling partitions tracked, untracked, HEAD-backed, and newly added paths before running Git restore/reset/clean commands, so mixed selections such as tracked edits plus untracked files do not cause one path class to prevent the rest of the selected discard from applying. If the tracked unstaged restore step fails, the failure is reported to the panel instead of being swallowed after staged cleanup succeeds.
 
 ## Error Handling
 
@@ -211,7 +211,7 @@ The panel keeps version-control actions server-authoritative across browser, des
 
 The current implementation has been exercised against the throwaway repository at `~/Sites/throwaway` with Playwright for the main panel flows: section resizing/collapse behavior, Actionable selection, selected-file commit and stash dialogs, branch sync indicators, remotes tree expansion, stash expansion, hover-only actions, failure reporting, and live filesystem updates including internal `.git/` event filtering and gitignored-file suppression. Rename coverage includes committing an unstaged `R` row and undoing that commit, verifying that the panel returns to a single `R` row rather than separate `A` and `D` rows.
 
-Focused unit coverage now also covers the sync-vs-compare split: a local branch configured against `upstream/main` is treated as unpublished/publishable instead of diverged, a same-name remote tracking branch remains a normal sync upstream, and server-side publishing targets the local branch name even when Git reports a different configured upstream/base ref.
+Focused unit coverage now also covers the sync-vs-compare split: a local branch configured against `upstream/main` is treated as unpublished/publishable instead of diverged, a same-name remote tracking branch remains a normal sync upstream, server-side publishing targets the local branch name even when Git reports a different configured upstream/base ref, the current default branch remains the default compare ref, tracked discard restore failures are surfaced, fallback line-based rename parsing preserves source paths, merged working-tree row stats are summed, and late-month relative dates do not fall through to `0 years ago`.
 
 Before considering source-control changes complete, run:
 

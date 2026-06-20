@@ -887,6 +887,27 @@ const make = Effect.gen(function* () {
     const childTurnId = subagentRelation
       ? (event.payload.turnId ?? thread.latestTurn?.turnId)
       : undefined;
+    if (subagentRelation && !childTurnId) {
+      yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.turn.interrupt.failed",
+        summary: "Provider turn interrupt failed",
+        detail: "No active subagent turn is available to interrupt.",
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+      yield* orchestrationEngine.dispatch({
+        type: "thread.meta.update",
+        commandId: yield* serverCommandId("subagent-interrupt-missing-turn-status"),
+        threadId: event.payload.threadId,
+        parentRelation: {
+          ...subagentRelation,
+          completedAt: event.payload.createdAt,
+          status: "stopped",
+        },
+      });
+      return;
+    }
     yield* providerService.interruptTurn({
       threadId: providerThread.id,
       ...(childTurnId ? { turnId: childTurnId } : {}),

@@ -14,6 +14,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
 const ACTION_TERMINAL_ID_PREFIX = "action-";
+const ACTION_TERMINAL_FALLBACK_SEPARATOR = ":";
 const ACTION_TERMINAL_READY_TIMEOUT_MS = 4_000;
 const MAX_TERMINAL_BUFFER_TAIL = 2_000;
 const PROMPT_LINE_MAX_LENGTH = 180;
@@ -30,7 +31,14 @@ const BELL_CHARACTER = String.fromCharCode(7);
 const SHELL_LABELS = new Set(["bash", "zsh", "sh", "fish", "csh", "tcsh", "pwsh", "powershell"]);
 
 function projectActionTerminalIdBase(scriptId: ProjectScript["id"]): string {
-  return `${ACTION_TERMINAL_ID_PREFIX}${scriptId}`;
+  return `${ACTION_TERMINAL_ID_PREFIX}${encodeURIComponent(scriptId)}`;
+}
+
+function isProjectActionTerminalFallbackId(terminalId: string, baseTerminalId: string): boolean {
+  const suffix = terminalId.startsWith(`${baseTerminalId}${ACTION_TERMINAL_FALLBACK_SEPARATOR}`)
+    ? terminalId.slice(baseTerminalId.length + ACTION_TERMINAL_FALLBACK_SEPARATOR.length)
+    : "";
+  return /^[1-9][0-9]*$/.test(suffix);
 }
 
 export function isProjectActionTerminalId(terminalId: string): boolean {
@@ -39,7 +47,7 @@ export function isProjectActionTerminalId(terminalId: string): boolean {
 
 export function projectActionTerminalId(scriptId: ProjectScript["id"], suffix?: number): string {
   const base = projectActionTerminalIdBase(scriptId);
-  return suffix === undefined ? base : `${base}-${suffix}`;
+  return suffix === undefined ? base : `${base}${ACTION_TERMINAL_FALLBACK_SEPARATOR}${suffix}`;
 }
 
 export function resolveProjectActionTerminalId(input: {
@@ -53,10 +61,10 @@ export function resolveProjectActionTerminalId(input: {
     return baseTerminalId;
   }
 
-  const basePrefix = `${baseTerminalId}-`;
   const idleActionTerminal = input.terminalIds.find(
     (terminalId) =>
-      (terminalId === baseTerminalId || terminalId.startsWith(basePrefix)) &&
+      (terminalId === baseTerminalId ||
+        isProjectActionTerminalFallbackId(terminalId, baseTerminalId)) &&
       !busyTerminalIds.has(terminalId),
   );
   if (idleActionTerminal) {

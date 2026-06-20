@@ -346,6 +346,31 @@ export function isContextualSubagentSidebarThread<T extends SidebarThreadVisibil
   return thread.parentRelation.status === "running" || thread.session?.status === "running";
 }
 
+function activeSubagentPathThreadIds<T extends SidebarThreadVisibilityInput>(
+  threads: readonly T[],
+  activeThreadId: string | null | undefined,
+): Set<string> {
+  const path = new Set<string>();
+  if (activeThreadId === null || activeThreadId === undefined) {
+    return path;
+  }
+
+  const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
+  let current = threadById.get(activeThreadId) ?? null;
+  while (current) {
+    if (path.has(current.id)) {
+      break;
+    }
+    path.add(current.id);
+    const relation = current.parentRelation;
+    current =
+      relation?.kind === "subagent" && relation.parentThreadId
+        ? (threadById.get(relation.parentThreadId) ?? null)
+        : null;
+  }
+  return path;
+}
+
 export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
   threads: readonly T[],
   activeThreadId: string | null | undefined,
@@ -353,13 +378,17 @@ export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
   const rootRows: SidebarThreadRowModel<T>[] = [];
   const childRowsByParentId = new Map<string, SidebarThreadRowModel<T>[]>();
   const orphanChildRows: SidebarThreadRowModel<T>[] = [];
+  const activePathThreadIds = activeSubagentPathThreadIds(threads, activeThreadId);
 
   for (const thread of threads) {
     if (isRootSidebarThread(thread)) {
       rootRows.push({ thread, indentLevel: 0 });
       continue;
     }
-    if (!isContextualSubagentSidebarThread(thread, activeThreadId)) {
+    if (
+      !activePathThreadIds.has(thread.id) &&
+      !isContextualSubagentSidebarThread(thread, activeThreadId)
+    ) {
       continue;
     }
 
@@ -380,17 +409,20 @@ export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
 
   const rows: SidebarThreadRowModel<T>[] = [];
   const renderedChildThreadIds = new Set<string>();
-  for (const row of rootRows) {
+  const appendRow = (row: SidebarThreadRowModel<T>) => {
     rows.push(row);
     const childRows = childRowsByParentId.get(row.thread.id) ?? [];
-    rows.push(...childRows);
     for (const childRow of childRows) {
       renderedChildThreadIds.add(childRow.thread.id);
+      appendRow(childRow);
     }
+  };
+  for (const row of rootRows) {
+    appendRow(row);
   }
   for (const row of [...childRowsByParentId.values()].flat()) {
     if (!renderedChildThreadIds.has(row.thread.id)) {
-      rows.push(row);
+      appendRow(row);
     }
   }
   rows.push(...orphanChildRows);

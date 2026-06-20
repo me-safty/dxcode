@@ -690,10 +690,11 @@ function parseFileChangesFromNumstat(input: {
       const path = pathField.value;
       if (!path) continue;
       const status = input.statuses?.get(path);
+      const resolvedOriginalPath = status?.originalPath ?? originalPath;
       files.push({
         path,
-        originalPath: status?.originalPath ?? originalPath,
-        status: status?.status ?? "modified",
+        originalPath: resolvedOriginalPath,
+        status: status?.status ?? (resolvedOriginalPath ? "renamed" : "modified"),
         insertions: parseCount(insertionsRaw),
         deletions: parseCount(deletionsRaw),
       });
@@ -701,14 +702,15 @@ function parseFileChangesFromNumstat(input: {
     return files.toSorted((left, right) => left.path.localeCompare(right.path));
   }
   for (const line of input.numstat.split("\n")) {
-    const [insertionsRaw, deletionsRaw, pathRaw, renamedPathRaw] = line.split("\t");
-    const path = renamedPathRaw ?? pathRaw;
+    const [insertionsRaw, deletionsRaw, oldPathRaw, newPathRaw] = line.split("\t");
+    const path = newPathRaw ?? oldPathRaw;
     if (!path) continue;
     const status = input.statuses?.get(path);
+    const originalPath = status?.originalPath ?? (newPathRaw ? (oldPathRaw ?? null) : null);
     files.push({
       path,
-      originalPath: status?.originalPath ?? null,
-      status: status?.status ?? "modified",
+      originalPath,
+      status: status?.status ?? (originalPath ? "renamed" : "modified"),
       insertions: parseCount(insertionsRaw),
       deletions: parseCount(deletionsRaw),
     });
@@ -1596,7 +1598,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         { concurrency: "unbounded" },
       );
       const defaultCompareRef =
-        localBranches.find((ref) => ref.isDefault && !ref.current)?.name ??
+        localBranches.find((ref) => ref.isDefault)?.name ??
         localBranches.find((ref) => !ref.current)?.name ??
         null;
       const forkBranches = yield* actionableForkBranches(
@@ -1683,10 +1685,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
           "--worktree",
           "--",
           ...trackedPaths,
-        ]).pipe(
-          Effect.asVoid,
-          Effect.catch(() => Effect.void),
-        );
+        ]).pipe(Effect.asVoid);
       }
       yield* run("vcs.panel.cleanUntrackedFiles", input.cwd, ["clean", "-fd", "--", ...paths]).pipe(
         Effect.asVoid,

@@ -1199,6 +1199,132 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.stderr).toBe("warning 1\nwarning 2\n");
   });
 
+  it("uses later longer cumulative command output from updated snapshots", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "line 1\n",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "line 1\nline 2\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.stdout).toBe("line 1\nline 2\n");
+  });
+
+  it("keeps previously merged command output when completed output is a shorter snapshot", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output-update",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "line 1\nline 2\n",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "line 1\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.stdout).toBe("line 1\nline 2\n");
+  });
+
+  it("keeps previously merged command output when updated output is a shorter line snapshot", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "line 1\nline 2\n",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "line 1\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.stdout).toBe("line 1\nline 2\n");
+  });
+
   it("concatenates non-matching incremental command output chunks", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1213,7 +1339,7 @@ describe("deriveWorkLogEntries", () => {
             toolCallId: "command-1",
             command: "vp test",
             rawOutput: {
-              stdout: "Error",
+              stdout: "Error\n",
             },
           },
         },
@@ -1241,7 +1367,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.stdout).toBe("Error\nretrying");
   });
 
-  it("keeps accumulated command output when a later chunk repeats its prefix", () => {
+  it("keeps previously merged command output when completed output is a shorter snapshot", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "command-tool-output-update",
@@ -1255,7 +1381,7 @@ describe("deriveWorkLogEntries", () => {
             toolCallId: "command-1",
             command: "vp test",
             rawOutput: {
-              stdout: "line 1\nline 2",
+              stdout: "line 1\nline 2\n",
             },
           },
         },
@@ -1272,7 +1398,7 @@ describe("deriveWorkLogEntries", () => {
             toolCallId: "command-1",
             command: "vp test",
             rawOutput: {
-              stdout: "line 1",
+              stdout: "line 1\n",
             },
           },
         },
@@ -1280,13 +1406,13 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.stdout).toBe("line 1\nline 2");
+    expect(entry?.stdout).toBe("line 1\nline 2\n");
   });
 
-  it("keeps distinct suffix-overlapping command output chunks", () => {
+  it("keeps previously merged command output when updated output is a shorter line snapshot", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
-        id: "command-tool-output-update",
+        id: "command-tool-output-update-1",
         createdAt: "2026-02-23T00:00:01.000Z",
         kind: "tool.updated",
         summary: "Ran command",
@@ -1297,15 +1423,15 @@ describe("deriveWorkLogEntries", () => {
             toolCallId: "command-1",
             command: "vp test",
             rawOutput: {
-              stdout: "foo",
+              stdout: "line 1\nline 2\n",
             },
           },
         },
       }),
       makeActivity({
-        id: "command-tool-output-complete",
+        id: "command-tool-output-update-2",
         createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "tool.completed",
+        kind: "tool.updated",
         summary: "Ran command",
         payload: {
           itemType: "command_execution",
@@ -1314,7 +1440,7 @@ describe("deriveWorkLogEntries", () => {
             toolCallId: "command-1",
             command: "vp test",
             rawOutput: {
-              stdout: "oobar",
+              stdout: "line 1\n",
             },
           },
         },
@@ -1322,13 +1448,13 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.stdout).toBe("foo\noobar");
+    expect(entry?.stdout).toBe("line 1\nline 2\n");
   });
 
-  it("preserves existing newlines between incremental command output chunks", () => {
+  it("concatenates split incremental command output without adding separators", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
-        id: "command-tool-output-update",
+        id: "command-tool-output-update-1",
         createdAt: "2026-02-23T00:00:01.000Z",
         kind: "tool.updated",
         summary: "Ran command",
@@ -1337,28 +1463,26 @@ describe("deriveWorkLogEntries", () => {
           title: "Ran command",
           data: {
             toolCallId: "command-1",
-            command: "vp test",
+            command: "printf Downloading",
             rawOutput: {
-              stdout: "Error",
-              stderr: "warning\n",
+              stdout: "Down",
             },
           },
         },
       }),
       makeActivity({
-        id: "command-tool-output-complete",
+        id: "command-tool-output-update-2",
         createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "tool.completed",
+        kind: "tool.updated",
         summary: "Ran command",
         payload: {
           itemType: "command_execution",
           title: "Ran command",
           data: {
             toolCallId: "command-1",
-            command: "vp test",
+            command: "printf Downloading",
             rawOutput: {
-              stdout: "\nretrying",
-              stderr: "done",
+              stdout: "loading",
             },
           },
         },
@@ -1366,8 +1490,167 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.stdout).toBe("Error\nretrying");
-    expect(entry?.stderr).toBe("warning\ndone");
+    expect(entry?.stdout).toBe("Downloading");
+  });
+
+  it("keeps incremental command chunks that match the accumulated prefix", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf aba",
+            rawOutput: {
+              stdout: "a\nb",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf aba",
+            rawOutput: {
+              stdout: "a",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.stdout).toBe("a\nba");
+  });
+
+  it("preserves whitespace-only incremental command output chunks", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf hello",
+            rawOutput: {
+              stdout: "hello",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf hello",
+            rawOutput: {
+              stdout: " ",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-3",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf hello",
+            rawOutput: {
+              stdout: "world",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.stdout).toBe("hello world");
+  });
+
+  it("preserves whitespace-only incremental raw output content chunks", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf hello",
+            rawOutput: {
+              content: "hello",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf hello",
+            rawOutput: {
+              content: " ",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-3",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "printf hello",
+            rawOutput: {
+              content: "world",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.output).toBe("hello world");
   });
 
   it("strips fallback stdout exit-code metadata", () => {
@@ -1453,6 +1736,36 @@ describe("deriveWorkLogEntries", () => {
 
     const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.output).toBe("Subagent result");
+  });
+
+  it("falls back to aggregated command output when stdout is blank-only", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "codex-command-tool-blank-stdout",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            command: "vp test",
+            rawOutput: {
+              stdout: " \n\t ",
+            },
+            item: {
+              aggregatedOutput: "tests passed\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry).toMatchObject({
+      command: "vp test",
+      output: "tests passed\n",
+      itemType: "command_execution",
+    });
+    expect(entry?.stdout).toBeUndefined();
   });
 
   it("extracts changed file paths for file-change tool activities", () => {
@@ -2223,7 +2536,7 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
-  it("drops duplicate resumed subagent child blocks within the same parent turn", () => {
+  it("keeps separate resumed subagent child blocks within the same parent turn", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "subagent-resume",
@@ -2280,12 +2593,20 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries).toHaveLength(1);
+    expect(entries).toHaveLength(2);
     expect(entries[0]?.id).toBe("subagent-resume");
     expect(entries[0]?.subagentChildren).toEqual([
       {
         threadId: "subagent-child-1",
         parentItemId: "call-resume",
+        titleSeed: "Say hi in German",
+      },
+    ]);
+    expect(entries[1]?.id).toBe("subagent-send-input");
+    expect(entries[1]?.subagentChildren).toEqual([
+      {
+        threadId: "subagent-child-1",
+        parentItemId: "call-send-input",
         titleSeed: "Say hi in German",
       },
     ]);

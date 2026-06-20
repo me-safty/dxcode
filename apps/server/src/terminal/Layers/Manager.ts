@@ -786,9 +786,6 @@ const posixInspectSubprocess = Effect.fn("terminal.posixInspectSubprocess")(func
       processTable,
     });
   }
-  if (isInteractiveShellCommand(normalized)) {
-    return { hasRunningSubprocess: false, childCommand: null, processIds: [] };
-  }
   return {
     hasRunningSubprocess: true,
     childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
@@ -2564,4 +2561,5 @@ export const TerminalManagerLive = Layer.effect(TerminalManager, makeTerminalMan
 
 export const __testing = {
   inspectPosixProcessTree,
+  posixInspectSubprocess,
 };

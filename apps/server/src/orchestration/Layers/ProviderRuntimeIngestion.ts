@@ -54,6 +54,15 @@ interface RuntimeSubagentChild {
   readonly titleSeed: string | null;
 }
 
+interface RuntimeSubagentParentCollab {
+  readonly parentThreadId: ThreadId;
+  readonly childThreadId: ThreadId;
+  readonly providerThreadId: string;
+  readonly parentTurnId: TurnId | null;
+  readonly parentItemId: ProviderItemId;
+  readonly titleSeed: string | null;
+}
+
 type SubagentThreadParentRelation = Extract<
   OrchestrationThreadParentRelation,
   { kind: "subagent" }
@@ -150,6 +159,53 @@ function readRuntimeSubagentChildren(
       },
     ];
   });
+}
+
+function readRuntimeSubagentParentCollab(
+  event: ProviderRuntimeEvent,
+): RuntimeSubagentParentCollab | null {
+  const payload = asRecord(event.payload);
+  const data = asRecord(payload?.data);
+  const parentCollab = asRecord(payload?.parentCollab) ?? asRecord(data?.parentCollab);
+  if (!parentCollab) {
+    return null;
+  }
+  const parentThreadId =
+    typeof parentCollab.parentThreadId === "string" && parentCollab.parentThreadId.trim().length > 0
+      ? ThreadId.make(parentCollab.parentThreadId)
+      : null;
+  const childThreadId =
+    typeof parentCollab.childThreadId === "string" && parentCollab.childThreadId.trim().length > 0
+      ? ThreadId.make(parentCollab.childThreadId)
+      : event.threadId;
+  const providerThreadId =
+    typeof parentCollab.providerThreadId === "string" &&
+    parentCollab.providerThreadId.trim().length > 0
+      ? parentCollab.providerThreadId
+      : null;
+  const parentItemId =
+    typeof parentCollab.itemId === "string" && parentCollab.itemId.trim().length > 0
+      ? ProviderItemId.make(parentCollab.itemId)
+      : null;
+  if (!parentThreadId || !childThreadId || !providerThreadId || !parentItemId) {
+    return null;
+  }
+  const parentTurnId =
+    typeof parentCollab.parentTurnId === "string" && parentCollab.parentTurnId.trim().length > 0
+      ? TurnId.make(parentCollab.parentTurnId)
+      : null;
+  const titleSeed =
+    typeof parentCollab.detail === "string" && parentCollab.detail.trim().length > 0
+      ? parentCollab.detail.trim()
+      : null;
+  return {
+    parentThreadId,
+    childThreadId,
+    providerThreadId,
+    parentTurnId,
+    parentItemId,
+    titleSeed,
+  };
 }
 
 function runtimeEventSequence(event: ProviderRuntimeEvent): number | undefined {
@@ -1391,8 +1447,91 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
-      const thread = yield* resolveThreadShell(event.threadId);
-      if (!thread) return;
+      let thread = yield* resolveThreadShell(event.threadId);
+      if (!thread) {
+        const parentCollab = readRuntimeSubagentParentCollab(event);
+        const parentThread = parentCollab
+          ? yield* resolveThreadShell(parentCollab.parentThreadId)
+          : null;
+        if (parentCollab && !parentThread) {
+          yield* Effect.logWarning("provider runtime ingestion could not resolve subagent parent", {
+            eventId: event.eventId,
+            eventType: event.type,
+            childThreadId: parentCollab.childThreadId,
+            parentThreadId: parentCollab.parentThreadId,
+          });
+        }
+        if (!parentCollab || !parentThread) {
+          return;
+        }
+        const rootThreadId =
+          parentThread.parentRelation?.kind === "subagent"
+            ? parentThread.parentRelation.rootThreadId
+            : parentThread.id;
+        const parentDepth =
+          parentThread.parentRelation?.kind === "subagent" ? parentThread.parentRelation.depth : 0;
+        const parentRelation: SubagentThreadParentRelation = {
+          kind: "subagent",
+          rootThreadId,
+          parentThreadId: parentThread.id,
+          parentTurnId: parentCollab.parentTurnId,
+          parentItemId: parentCollab.parentItemId,
+          parentActivitySequence: runtimeEventSequence(event) ?? 0,
+          providerThreadId: parentCollab.providerThreadId,
+          titleSeed: parentCollab.titleSeed,
+          depth: parentDepth + 1,
+          startedAt: event.createdAt,
+          completedAt: null,
+          status: "running",
+        };
+        thread = {
+          id: parentCollab.childThreadId,
+          projectId: parentThread.projectId,
+          title: "Subagent",
+          modelSelection: parentThread.modelSelection,
+          runtimeMode: parentThread.runtimeMode,
+          interactionMode: parentThread.interactionMode,
+          branch: parentThread.branch,
+          worktreePath: parentThread.worktreePath,
+          latestTurn: null,
+          createdAt: event.createdAt,
+          updatedAt: event.createdAt,
+          archivedAt: null,
+          parentRelation,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        };
+        yield* Ref.update(syntheticChildShellById, (current) => {
+          const next = new Map(current);
+          next.set(parentCollab.childThreadId, thread!);
+          return next;
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(
+            `provider:subagent-thread-create:${parentCollab.childThreadId}`,
+          ),
+          threadId: parentCollab.childThreadId,
+          projectId: parentThread.projectId,
+          title: "Subagent",
+          modelSelection: parentThread.modelSelection,
+          runtimeMode: parentThread.runtimeMode,
+          interactionMode: parentThread.interactionMode,
+          branch: parentThread.branch,
+          worktreePath: parentThread.worktreePath,
+          parentRelation,
+          createdAt: event.createdAt,
+        });
+        yield* maybeGenerateSubagentThreadTitle({
+          childThreadId: parentCollab.childThreadId,
+          titleSeed: parentRelation.titleSeed,
+          cwd: parentThread.worktreePath ?? process.cwd(),
+          createdAt: event.createdAt,
+        }).pipe(Effect.forkScoped);
+      }
 
       let loadedThreadDetail: OrchestrationThread | null | undefined;
       const getLoadedThreadDetail = () =>
