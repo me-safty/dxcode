@@ -143,12 +143,44 @@ describe("mobile DPoP", () => {
       expect(error).toMatchObject({
         operation: "normalize-url",
         method: "POST",
-        url: "http://",
+        requestTarget: "<invalid-url>",
+        urlLength: "http://".length,
         thumbprint: proofKey.thumbprint,
       });
       expect(error.cause).toBeInstanceOf(Error);
       expect(error.message).not.toContain((error.cause as Error).message);
       expect(isCloudDpopError(error)).toBe(true);
+    }).pipe(Effect.provide(cryptoLayer)),
+  );
+
+  it.effect("redacts credentials and non-HTU URL components from proof failures", () =>
+    Effect.gen(function* () {
+      const proofKey = yield* generateDpopProofKeyPair();
+      const url = "https://user:password@example.com/oauth/token?access_token=secret#fragment";
+      const error = yield* createDpopProof({
+        method: "POST",
+        url,
+        proofKey: {
+          ...proofKey,
+          privateJwk: { ...proofKey.privateJwk, d: "%" },
+        },
+      }).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(CloudDpopProofError);
+      expect(error).toMatchObject({
+        operation: "import-private-key",
+        method: "POST",
+        requestTarget: "https://example.com/oauth/token",
+        urlLength: url.length,
+        thumbprint: proofKey.thumbprint,
+      });
+      expect(error.cause).toMatchObject({ _tag: "EncodingError" });
+      expect(error).not.toHaveProperty("url");
+      expect(error.message).not.toContain("user");
+      expect(error.message).not.toContain("password");
+      expect(error.message).not.toContain("access_token");
+      expect(error.message).not.toContain("secret");
+      expect(error.message).not.toContain("fragment");
     }).pipe(Effect.provide(cryptoLayer)),
   );
 

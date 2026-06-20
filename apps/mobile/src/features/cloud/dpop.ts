@@ -52,14 +52,14 @@ export class CloudDpopProofError extends Schema.TaggedErrorClass<CloudDpopProofE
       "sign",
     ]),
     method: Schema.String,
-    url: Schema.String,
-    normalizedUrl: Schema.optionalKey(Schema.String),
+    requestTarget: Schema.String,
+    urlLength: Schema.Number,
     thumbprint: Schema.String,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Mobile DPoP proof operation "${this.operation}" failed for ${this.method.toUpperCase()} ${this.url}.`;
+    return `Mobile DPoP proof operation "${this.operation}" failed for ${this.method.toUpperCase()} ${this.requestTarget}.`;
   }
 }
 
@@ -166,6 +166,15 @@ const DPOP_PROOF_KEY_STORAGE_KEY = "t3code.cloud.dpop-proof-key";
 
 function base64UrlToBytes(value: string): Uint8Array {
   return Result.getOrThrow(Encoding.decodeBase64Url(value));
+}
+
+function redactDpopRequestTarget(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return "<invalid-url>";
+  }
 }
 
 function publicJwkFromUncompressedPublicKey(publicKey: Uint8Array): DpopPublicJwk {
@@ -303,13 +312,16 @@ export function createDpopProof(input: {
 > {
   return Effect.gen(function* () {
     const keyPair = input.proofKey ?? (yield* generateDpopProofKeyPair());
+    const requestTarget = redactDpopRequestTarget(input.url);
+    const urlLength = input.url.length;
     const privateKey = yield* Effect.try({
       try: () => base64UrlToBytes(keyPair.privateJwk.d),
       catch: (cause) =>
         new CloudDpopProofError({
           operation: "import-private-key",
           method: input.method,
-          url: input.url,
+          requestTarget,
+          urlLength,
           thumbprint: keyPair.thumbprint,
           cause,
         }),
@@ -322,7 +334,8 @@ export function createDpopProof(input: {
           new CloudDpopProofError({
             operation: "generate-id",
             method: input.method,
-            url: input.url,
+            requestTarget,
+            urlLength,
             thumbprint: keyPair.thumbprint,
             cause,
           }),
@@ -339,7 +352,8 @@ export function createDpopProof(input: {
         new CloudDpopProofError({
           operation: "normalize-url",
           method: input.method,
-          url: input.url,
+          requestTarget,
+          urlLength,
           thumbprint: keyPair.thumbprint,
           cause,
         }),
@@ -355,8 +369,8 @@ export function createDpopProof(input: {
           new CloudDpopProofError({
             operation: "encode-header",
             method: input.method,
-            url: input.url,
-            normalizedUrl: htu,
+            requestTarget,
+            urlLength,
             thumbprint: keyPair.thumbprint,
             cause,
           }),
@@ -376,8 +390,8 @@ export function createDpopProof(input: {
           new CloudDpopProofError({
             operation: "encode-payload",
             method: input.method,
-            url: input.url,
-            normalizedUrl: htu,
+            requestTarget,
+            urlLength,
             thumbprint: keyPair.thumbprint,
             cause,
           }),
@@ -392,8 +406,8 @@ export function createDpopProof(input: {
           new CloudDpopProofError({
             operation: "hash-signing-input",
             method: input.method,
-            url: input.url,
-            normalizedUrl: htu,
+            requestTarget,
+            urlLength,
             thumbprint: keyPair.thumbprint,
             cause,
           }),
@@ -405,8 +419,8 @@ export function createDpopProof(input: {
         new CloudDpopProofError({
           operation: "sign",
           method: input.method,
-          url: input.url,
-          normalizedUrl: htu,
+          requestTarget,
+          urlLength,
           thumbprint: keyPair.thumbprint,
           cause,
         }),
