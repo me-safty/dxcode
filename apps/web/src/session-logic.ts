@@ -926,7 +926,7 @@ function shouldKeepLongerOutputSnapshot(
 }
 
 function isLikelyShorterOutputSnapshot(previous: string, next: string): boolean {
-  if (next.length <= 1) {
+  if (next.length <= 1 || previous.endsWith("\n")) {
     return false;
   }
   const following = previous.slice(next.length, next.length + 1);
