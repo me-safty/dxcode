@@ -791,10 +791,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
       {hasOverflow && (
         <button
           type="button"
-          className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+          className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 text-muted-foreground/65 transition-colors duration-150 hover:bg-accent/20 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
           onClick={toggleExpanded}
         >
-          <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
+          <span className="flex size-5 shrink-0 items-center justify-center">
             {isExpanded ? (
               <ChevronUpIcon className="size-3.5 shrink-0 opacity-70" />
             ) : (
@@ -802,7 +802,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
             )}
           </span>
           {isExpanded ? (
-            <span className="font-medium text-foreground/82">Show fewer tool calls</span>
+            <span>Show fewer tool calls</span>
           ) : (
             <span className="font-medium text-foreground/82">
               +{hiddenCount} previous tool {hiddenCount === 1 ? "call" : "calls"}
