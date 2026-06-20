@@ -2,6 +2,8 @@ import type { ComponentType } from "react";
 import type { NativeSyntheticEvent, ViewProps } from "react-native";
 import { requireNativeView } from "expo";
 
+import { NativeViewResolutionError } from "../../native/nativeViewResolutionError";
+
 const NATIVE_REVIEW_DIFF_MODULE_NAME = "T3ReviewDiffSurface";
 
 interface ExpoGlobalWithViewConfig {
@@ -148,7 +150,13 @@ export function resolveNativeReviewDiffView(): ComponentType<NativeReviewDiffVie
     cachedNativeReviewDiffView = requireNativeView<NativeReviewDiffViewProps>(
       NATIVE_REVIEW_DIFF_MODULE_NAME,
     );
-  } catch {
+  } catch (cause) {
+    console.error(
+      new NativeViewResolutionError({
+        nativeModuleName: NATIVE_REVIEW_DIFF_MODULE_NAME,
+        cause,
+      }),
+    );
     return null;
   }
 
