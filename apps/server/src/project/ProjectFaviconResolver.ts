@@ -134,30 +134,31 @@ export const make = Effect.gen(function* () {
           relativePath,
         })
         .pipe(
-          Effect.mapError(
-            (cause) =>
-              new ProjectFaviconResolutionError({
-                operation: "resolve-path",
-                workspaceRoot: projectCwd,
-                relativePath,
-                cause,
-              }),
-          ),
+          Effect.map(Option.some),
+          Effect.catchTags({
+            WorkspacePathOutsideRootError: () =>
+              Effect.succeed(
+                Option.none<{ readonly absolutePath: string; readonly relativePath: string }>(),
+              ),
+          }),
         );
-      const stats = yield* optionOnNotFound(fileSystem.stat(candidate.absolutePath)).pipe(
+      if (Option.isNone(candidate)) {
+        continue;
+      }
+      const stats = yield* optionOnNotFound(fileSystem.stat(candidate.value.absolutePath)).pipe(
         Effect.mapError(
           (cause) =>
             new ProjectFaviconResolutionError({
               operation: "stat-candidate",
               workspaceRoot: projectCwd,
               relativePath,
-              absolutePath: candidate.absolutePath,
+              absolutePath: candidate.value.absolutePath,
               cause,
             }),
         ),
       );
       if (Option.isSome(stats) && stats.value.type === "File") {
-        return candidate.absolutePath;
+        return candidate.value.absolutePath;
       }
     }
     return null;

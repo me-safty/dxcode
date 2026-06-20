@@ -167,21 +167,30 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }),
     );
 
-    it.effect("rejects icon metadata paths outside the workspace", () =>
+    it.effect("skips icon metadata paths outside the workspace", () =>
       Effect.gen(function* () {
         const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
         const cwd = yield* makeTempDir;
         yield* writeTextFile(cwd, "index.html", '<link rel="icon" href="../../secret.svg">');
 
-        const error = yield* resolver.resolvePath(cwd).pipe(Effect.flip);
+        const resolved = yield* resolver.resolvePath(cwd);
 
-        expect(error).toMatchObject({
-          _tag: "ProjectFaviconResolutionError",
-          operation: "resolve-path",
-          workspaceRoot: cwd,
-          relativePath: "../secret.svg",
-        });
-        expect(error.cause).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
+        expect(resolved).toBeNull();
+      }),
+    );
+
+    it.effect("continues to later sources after an outside-root icon href", () =>
+      Effect.gen(function* () {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "index.html", '<link rel="icon" href="../../secret.svg">');
+        yield* writeTextFile(cwd, "public/index.html", '<link rel="icon" href="/brand/logo.svg">');
+        yield* writeTextFile(cwd, "public/brand/logo.svg", "<svg>brand</svg>");
+
+        const resolved = yield* resolver.resolvePath(cwd);
+
+        expect(resolved).not.toBeNull();
+        expect(resolved).toContain("public/brand/logo.svg");
       }),
     );
   });
