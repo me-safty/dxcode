@@ -12,6 +12,7 @@ import {
   cloudEnvironmentsPendingStatus,
   linkEnvironmentToCloud,
   connectCloudEnvironment,
+  isCloudEnvironmentLinkError,
   listCloudEnvironments,
   listCloudEnvironmentsWithStatus,
   normalizeRelayBaseUrl,
@@ -235,9 +236,15 @@ describe("mobile cloud link environment client", () => {
         listCloudEnvironments({ clerkToken: "clerk-token" }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({
-        _tag: "CloudEnvironmentLinkError",
-        message: "https://relay.example.test/v1/environments failed",
+        _tag: "CloudEnvironmentLinkOperationError",
+        action: "list cloud environments",
+        relayUrl: "https://relay.example.test",
+        cause: {
+          _tag: "ManagedRelayRequestFailedError",
+        },
       });
+      expect(error.message).toBe("Could not list cloud environments.");
+      expect(isCloudEnvironmentLinkError(error)).toBe(true);
     }),
   );
 
@@ -498,7 +505,7 @@ describe("mobile cloud link environment client", () => {
             label: "Desktop",
           },
           status: null,
-          statusError: "https://relay.example.test/v1/environments/env-1/status failed",
+          statusError: 'Could not read cloud environment status for environment "env-1".',
         },
       ]);
     }),
@@ -562,7 +569,8 @@ describe("mobile cloud link environment client", () => {
             label: "Desktop",
           },
           status: null,
-          statusError: "Relay returned status for a different environment.",
+          statusError:
+            'The environment status response identified environment "env-other" instead of "env-1".',
         },
       ]);
     }),
@@ -590,11 +598,40 @@ describe("mobile cloud link environment client", () => {
           }),
         ).pipe(Effect.flip);
         expect(error).toMatchObject({
-          _tag: "CloudEnvironmentLinkError",
-          message: "Relay returned credentials for a different environment.",
+          _tag: "CloudEnvironmentIdMismatchError",
+          source: "environment link response",
+          expectedEnvironmentId: "env-1",
+          actualEnvironmentId: "env-other",
         });
         expect(fetchMock).toHaveBeenCalledTimes(3);
       }),
+  );
+
+  it.effect("preserves invalid endpoint URL parser causes", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => Promise.resolve(Response.json(validLinkChallengeResponse()))),
+      );
+
+      const error = yield* withCloudServices(
+        linkEnvironmentToCloud({
+          clerkToken: "clerk-token",
+          connection: {
+            ...savedConnection,
+            httpBaseUrl: "not a URL",
+          },
+        }),
+      ).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkOperationError",
+        action: "derive the environment endpoint origin",
+        environmentId: "env-1",
+        httpBaseUrl: "not a URL",
+      });
+      expect(error.cause).toBeInstanceOf(TypeError);
+    }),
   );
 
   it.effect("preserves typed local environment failures while obtaining a link proof", () =>
@@ -622,9 +659,19 @@ describe("mobile cloud link environment client", () => {
           connection: savedConnection,
         }),
       ).pipe(Effect.flip);
-      expect(error._tag).toBe("CloudEnvironmentLinkError");
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkOperationError",
+        action: "obtain an environment link proof",
+        environmentId: "env-1",
+        httpBaseUrl: "https://desktop.example.test/",
+        environmentError: {
+          _tag: "EnvironmentHttpUnauthorizedError",
+          message: "Invalid environment bearer session.",
+        },
+      });
+      expect(error.cause).toBeDefined();
       expect(error.message).toBe(
-        "Could not obtain environment link proof: Run `t3 connect link` to authorize this environment.",
+        'Could not obtain an environment link proof for environment "env-1": Invalid environment bearer session.',
       );
       expect(fetchMock).toHaveBeenCalledTimes(2);
     }),
@@ -660,11 +707,22 @@ describe("mobile cloud link environment client", () => {
         }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({
-        _tag: "CloudEnvironmentLinkError",
-        message:
-          "https://relay.example.test/v1/client/environment-links failed: Relay rejected the environment link proof (origin_not_allowed).",
+        _tag: "CloudEnvironmentLinkOperationError",
+        action: "link the environment",
+        environmentId: "env-1",
+        relayUrl: "https://relay.example.test",
         traceId: "trace-test",
+        relayError: {
+          _tag: "RelayEnvironmentLinkProofInvalidError",
+          reason: "origin_not_allowed",
+        },
+        cause: {
+          _tag: "ManagedRelayRequestFailedError",
+        },
       });
+      expect(error.message).toBe(
+        'Could not link the environment for environment "env-1": Relay environment link proof is invalid: origin_not_allowed',
+      );
       expect(fetchMock).toHaveBeenCalledTimes(3);
     }),
   );
@@ -697,8 +755,10 @@ describe("mobile cloud link environment client", () => {
         }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({
-        _tag: "CloudEnvironmentLinkError",
-        message: "Relay returned credentials for a different endpoint provider.",
+        _tag: "CloudEnvironmentEndpointProviderMismatchError",
+        environmentId: "env-1",
+        expectedProviderKind: "cloudflare_tunnel",
+        actualProviderKind: "manual",
       });
       expect(fetchMock).toHaveBeenCalledTimes(3);
     }),
@@ -963,8 +1023,10 @@ describe("mobile cloud link environment client", () => {
         }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({
-        _tag: "CloudEnvironmentLinkError",
-        message: "Relay returned credentials for a different environment.",
+        _tag: "CloudEnvironmentIdMismatchError",
+        source: "environment connect response",
+        expectedEnvironmentId: "env-1",
+        actualEnvironmentId: "env-other",
       });
     }),
   );
@@ -1006,11 +1068,22 @@ describe("mobile cloud link environment client", () => {
         }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({
-        _tag: "CloudEnvironmentLinkError",
-        message:
-          "https://relay.example.test/v1/environments/env-1/connect failed: Relay rejected the DPoP proof.",
+        _tag: "CloudEnvironmentLinkOperationError",
+        action: "connect to the cloud environment",
+        environmentId: "env-1",
+        relayUrl: "https://relay.example.test",
         traceId: "trace-connect",
+        relayError: {
+          _tag: "RelayAuthInvalidError",
+          reason: "invalid_dpop",
+        },
+        cause: {
+          _tag: "ManagedRelayRequestFailedError",
+        },
       });
+      expect(error.message).toBe(
+        'Could not connect to the cloud environment for environment "env-1": Relay authentication failed: invalid_dpop',
+      );
     }),
   );
 
@@ -1052,8 +1125,17 @@ describe("mobile cloud link environment client", () => {
         }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({
-        _tag: "CloudEnvironmentLinkError",
-        message: "Relay returned credentials for a different endpoint.",
+        _tag: "CloudEnvironmentEndpointMismatchError",
+        source: "environment connect response",
+        environmentId: "env-1",
+        expectedEndpoint: {
+          httpBaseUrl: "https://desktop.example.test/",
+          wsBaseUrl: "wss://desktop.example.test/ws",
+        },
+        actualEndpoint: {
+          httpBaseUrl: "https://other-desktop.example.test/",
+          wsBaseUrl: "wss://other-desktop.example.test/ws",
+        },
       });
     }),
   );
@@ -1106,8 +1188,10 @@ describe("mobile cloud link environment client", () => {
           }),
         ).pipe(Effect.flip);
         expect(error).toMatchObject({
-          _tag: "CloudEnvironmentLinkError",
-          message: "Connected endpoint descriptor does not match the selected environment.",
+          _tag: "CloudEnvironmentIdMismatchError",
+          source: "connected environment descriptor",
+          expectedEnvironmentId: "env-1",
+          actualEnvironmentId: "env-other",
         });
       }),
   );
