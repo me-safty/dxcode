@@ -217,21 +217,6 @@ describe("CloudRelayRequestError", () => {
   });
 });
 
-it("preserves internal causes without encoding them into HTTP error bodies", () => {
-  const cause = new Error("private upstream detail");
-  const error = new EnvironmentHttpInternalServerError({
-    message: "Stable public failure.",
-    cause,
-  });
-  const encodeError = Schema.encodeUnknownSync(EnvironmentHttpInternalServerError);
-
-  expect(error.cause).toBe(cause);
-  expect(encodeError(error)).toEqual({
-    _tag: "EnvironmentHttpInternalServerError",
-    message: "Stable public failure.",
-  });
-});
-
 it("keeps internal causes out of encoded HTTP error bodies", () => {
   const cause = new Error("private upstream detail");
   const error = new EnvironmentHttpInternalServerError({
@@ -382,7 +367,12 @@ describe("reconcileDesiredCloudLink", () => {
       const logFields = capturedLogs[0]?.find(
         (value): value is Record<string, unknown> => typeof value === "object" && value !== null,
       );
-      expect(logFields).toMatchObject({ causeTag: "CloudRelayRequestError" });
+      expect(logFields).toMatchObject({
+        operation: "relay_request",
+        relayOperation: "create-link-challenge",
+        relayPhase: "send-request",
+        causeTag: "CloudRelayRequestError",
+      });
       expect(logFields).not.toHaveProperty("cause");
       expect(capturedLogs[0]?.filter((value) => typeof value === "string").join(" ")).not.toContain(
         transportCause.message,
