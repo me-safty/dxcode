@@ -115,6 +115,55 @@ describe("ElectronProtocol", () => {
     }),
   );
 
+  it.effect("returns proxied response bodies without buffering them first", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      const chunk = new TextEncoder().encode("streamed");
+      const httpClientLayer = makeHttpClientLayer((request) =>
+        Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(chunk);
+                },
+              }),
+            ),
+          ),
+        ),
+      );
+
+      const response = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "t3code-dev",
+            targetOrigin: new URL("http://127.0.0.1:3773/"),
+            backendOrigin: new URL("http://127.0.0.1:3774/"),
+            clerkFrontendApiHostname: undefined,
+          });
+          assert.isDefined(handler);
+          return yield* Effect.raceFirst(
+            Effect.promise(() => handler!(new Request("t3code-dev://app/large-asset"))),
+            Effect.sleep("250 millis").pipe(
+              Effect.andThen(Effect.die(new Error("proxy response was buffered"))),
+            ),
+          );
+        }),
+      ).pipe(Effect.provide(ElectronProtocol.layer.pipe(Layer.provide(httpClientLayer))));
+
+      const reader = response.body?.getReader();
+      assert.isDefined(reader);
+      const firstChunk = yield* Effect.promise(() => reader!.read());
+      assert.deepEqual(firstChunk.value, chunk);
+      yield* Effect.promise(() => reader!.cancel());
+    }),
+  );
+
   it.effect("rejects custom protocol requests for another host", () =>
     Effect.gen(function* () {
       let handler: ((request: Request) => Promise<Response>) | undefined;

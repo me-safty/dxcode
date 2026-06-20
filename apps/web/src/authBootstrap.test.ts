@@ -343,7 +343,7 @@ describe("resolveInitialServerAuthGateState", () => {
       status: "authenticated",
     });
     expect(testApi.calls.browserSession).toEqual([{ credential: "retry-token" }]);
-    expect(testApi.calls.session).toBe(1);
+    expect(testApi.calls.session).toBe(2);
   });
 
   it("rejects a blank pairing token with a structured validation error", async () => {

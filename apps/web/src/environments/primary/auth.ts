@@ -381,6 +381,7 @@ async function submitServerAuthCredentialOnce(trimmedCredential: string): Promis
   resolvedAuthenticatedGateState = null;
   try {
     await exchangeBootstrapCredential(trimmedCredential);
+    await waitForAuthenticatedSessionAfterBootstrap();
   } catch (error) {
     if (isBootstrapHttpError(error) && error.status === 401) {
       const currentSession = await fetchSessionState().catch(() => null);
