@@ -9,7 +9,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
-import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -59,7 +58,6 @@ export interface DesktopBackendStartConfig extends BackendProcessContext {
 interface BackendProcessExit {
   readonly code: Option.Option<number>;
   readonly reason: string;
-  readonly result: Result.Result<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>;
 }
 
 const backendProcessContextSchema = {
@@ -107,6 +105,19 @@ export class BackendProcessSpawnError extends Schema.TaggedErrorClass<BackendPro
   }
 }
 
+export class BackendProcessExitStatusError extends Schema.TaggedErrorClass<BackendProcessExitStatusError>()(
+  "BackendProcessExitStatusError",
+  {
+    ...backendProcessContextSchema,
+    pid: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to read the exit status of desktop backend process ${this.pid}.`;
+  }
+}
+
 export class DesktopBackendRestartError extends Schema.TaggedErrorClass<DesktopBackendRestartError>()(
   "DesktopBackendRestartError",
   {
@@ -123,6 +134,7 @@ export class DesktopBackendRestartError extends Schema.TaggedErrorClass<DesktopB
 export const BackendProcessError = Schema.Union([
   BackendProcessBootstrapEncodeError,
   BackendProcessSpawnError,
+  BackendProcessExitStatusError,
 ]);
 export type BackendProcessError = typeof BackendProcessError.Type;
 
@@ -241,24 +253,6 @@ export const waitForHttpReady = Effect.fn("desktop.backendManager.waitForHttpRea
   );
 });
 
-function describeProcessExit(
-  result: Result.Result<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>,
-): BackendProcessExit {
-  if (Result.isSuccess(result)) {
-    return {
-      code: Option.some(result.success),
-      reason: `code=${result.success}`,
-      result,
-    };
-  }
-
-  return {
-    code: Option.none(),
-    reason: result.failure.message,
-    result,
-  };
-}
-
 function drainBackendOutput(
   streamName: BackendProcessOutputStream,
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
@@ -344,7 +338,23 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     Effect.forkScoped,
   );
 
-  return describeProcessExit(yield* Effect.result(handle.exitCode));
+  const exitCode = yield* handle.exitCode.pipe(
+    Effect.mapError(
+      (cause) =>
+        new BackendProcessExitStatusError({
+          executablePath: options.executablePath,
+          entryPath: options.entryPath,
+          cwd: options.cwd,
+          httpBaseUrl: options.httpBaseUrl,
+          pid: Number(handle.pid),
+          cause,
+        }),
+    ),
+  );
+  return {
+    code: Option.some(exitCode),
+    reason: `code=${exitCode}`,
+  } satisfies BackendProcessExit;
 });
 
 export const make = Effect.gen(function* () {
@@ -540,14 +550,14 @@ export const make = Effect.gen(function* () {
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {
-                  message: error.message,
+                  cause: error,
                 }),
               ),
             );
           }),
           onReadinessFailure: (error) =>
             logBackendManagerWarning("backend readiness check failed during bootstrap", {
-              error: error.message,
+              error,
             }),
           onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
         }).pipe(
@@ -555,7 +565,10 @@ export const make = Effect.gen(function* () {
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Scope.provide(runScope),
           Effect.matchEffect({
-            onFailure: (error) => finalizeRun(error.message),
+            onFailure: (error) =>
+              logBackendManagerError(error.message, { error }).pipe(
+                Effect.andThen(finalizeRun(error.message)),
+              ),
             onSuccess: (exit) => finalizeRun(exit.reason),
           }),
           Effect.ensuring(Scope.close(runScope, Exit.void).pipe(Effect.ignore)),

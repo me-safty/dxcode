@@ -61,7 +61,7 @@ const configWithObservability: DesktopBackendBootstrapValue = {
 function makeProcess(options?: {
   readonly stdout?: Stream.Stream<Uint8Array>;
   readonly stderr?: Stream.Stream<Uint8Array>;
-  readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode>;
+  readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>;
   readonly kill?: ChildProcessSpawner.ChildProcessHandle["kill"];
 }): ChildProcessSpawner.ChildProcessHandle {
   return ChildProcessSpawner.makeHandle({
@@ -346,6 +346,45 @@ describe("DesktopBackendManager", () => {
         "Failed to spawn desktop backend entry /server/bin.mjs with /electron.",
       );
       assert.notInclude(error.message, spawnCause.message);
+      assert.isTrue(isBackendProcessError(error));
+    }),
+  );
+
+  it.effect("preserves exit-status failures without copying their detail into the message", () =>
+    Effect.gen(function* () {
+      const exitCause = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "ChildProcess",
+        method: "exitCode",
+        description: "exit-status-secret-sentinel",
+      });
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            makeProcess({
+              exitCode: Effect.fail(exitCause),
+            }),
+          ),
+        ),
+      );
+      const error = yield* DesktopBackendManager.runBackendProcess(baseConfig).pipe(
+        Effect.flip,
+        Effect.scoped,
+        Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)),
+      );
+
+      if (error._tag !== "BackendProcessExitStatusError") {
+        return assert.fail(`Expected backend exit-status error, received ${error._tag}`);
+      }
+      assert.equal(error.pid, 123);
+      assert.equal(error.executablePath, "/electron");
+      assert.equal(error.entryPath, "/server/bin.mjs");
+      assert.equal(error.cwd, "/server");
+      assert.equal(error.httpBaseUrl.href, "http://127.0.0.1:3773/");
+      assert.strictEqual(error.cause, exitCause);
+      assert.equal(error.message, "Failed to read the exit status of desktop backend process 123.");
+      assert.notInclude(error.message, "exit-status-secret-sentinel");
       assert.isTrue(isBackendProcessError(error));
     }),
   );
