@@ -14,11 +14,13 @@ export const TAILSCALE_PROBE_TIMEOUT = Duration.millis(2_500);
 
 // tailscale is a real executable everywhere (`tailscale.exe` on Windows), so
 // it is always spawned directly rather than through cmd.exe shell mode.
-const tailscaleCommandForPlatform = (platform: NodeJS.Platform): string =>
+const tailscaleCommandForPlatform = (platform: NodeJS.Platform): "tailscale" | "tailscale.exe" =>
   platform === "win32" ? "tailscale.exe" : "tailscale";
 
 const TailscaleCommandContext = {
-  command: Schema.Array(Schema.String),
+  executable: Schema.Literals(["tailscale", "tailscale.exe"]),
+  subcommand: Schema.Literals(["status", "serve"]),
+  argumentCount: Schema.Number,
 };
 
 export class TailscaleCommandSpawnError extends Schema.TaggedErrorClass<TailscaleCommandSpawnError>()(
@@ -29,7 +31,7 @@ export class TailscaleCommandSpawnError extends Schema.TaggedErrorClass<Tailscal
   },
 ) {
   override get message(): string {
-    return `Failed to spawn ${this.command.join(" ")}.`;
+    return `Failed to spawn tailscale ${this.subcommand}.`;
   }
 }
 
@@ -41,7 +43,7 @@ export class TailscaleCommandOutputError extends Schema.TaggedErrorClass<Tailsca
   },
 ) {
   override get message(): string {
-    return `Failed to read output from ${this.command.join(" ")}.`;
+    return `Failed to read output from tailscale ${this.subcommand}.`;
   }
 }
 
@@ -50,11 +52,12 @@ export class TailscaleCommandExitError extends Schema.TaggedErrorClass<Tailscale
   {
     ...TailscaleCommandContext,
     exitCode: Schema.Number,
-    stderr: Schema.String,
+    stdoutLength: Schema.optional(Schema.Number),
+    stderrLength: Schema.Number,
   },
 ) {
   override get message(): string {
-    return `${this.command.join(" ")} exited with code ${this.exitCode}.`;
+    return `tailscale ${this.subcommand} exited with code ${this.exitCode}.`;
   }
 }
 
@@ -67,7 +70,7 @@ export class TailscaleCommandTimeoutError extends Schema.TaggedErrorClass<Tailsc
   },
 ) {
   override get message(): string {
-    return `${this.command.join(" ")} timed out after ${this.timeoutMs}ms.`;
+    return `tailscale ${this.subcommand} timed out after ${this.timeoutMs}ms.`;
   }
 }
 
@@ -181,11 +184,18 @@ export const readTailscaleStatus = Effect.gen(function* () {
   const args = ["status", "--json"];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const hostPlatform = yield* HostProcessPlatform;
-  const command = [tailscaleCommandForPlatform(hostPlatform), ...args];
+  const executable = tailscaleCommandForPlatform(hostPlatform);
+  const commandContext = {
+    executable,
+    subcommand: "status" as const,
+    argumentCount: args.length,
+  };
   return yield* Effect.gen(function* () {
     const child = yield* spawner
-      .spawn(ChildProcess.make(command[0]!, args))
-      .pipe(Effect.mapError((cause) => new TailscaleCommandSpawnError({ command, cause })));
+      .spawn(ChildProcess.make(executable, args))
+      .pipe(
+        Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
+      );
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         collectStdout(child.stdout),
@@ -193,9 +203,16 @@ export const readTailscaleStatus = Effect.gen(function* () {
         child.exitCode.pipe(Effect.map(Number)),
       ],
       { concurrency: "unbounded" },
-    ).pipe(Effect.mapError((cause) => new TailscaleCommandOutputError({ command, cause })));
+    ).pipe(
+      Effect.mapError((cause) => new TailscaleCommandOutputError({ ...commandContext, cause })),
+    );
     if (exitCode !== 0) {
-      return yield* new TailscaleCommandExitError({ command, exitCode, stderr });
+      return yield* new TailscaleCommandExitError({
+        ...commandContext,
+        exitCode,
+        stdoutLength: stdout.length,
+        stderrLength: stderr.length,
+      });
     }
     return yield* parseTailscaleStatus(stdout);
   }).pipe(
@@ -205,7 +222,7 @@ export const readTailscaleStatus = Effect.gen(function* () {
       TimeoutError: (cause) =>
         Effect.fail(
           new TailscaleCommandTimeoutError({
-            command,
+            ...commandContext,
             timeoutMs: Duration.toMillis(TAILSCALE_STATUS_TIMEOUT),
             cause,
           }),
@@ -234,18 +251,31 @@ const runTailscaleCommand = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const hostPlatform = yield* HostProcessPlatform;
-    const command = [tailscaleCommandForPlatform(hostPlatform), ...args];
+    const executable = tailscaleCommandForPlatform(hostPlatform);
+    const commandContext = {
+      executable,
+      subcommand: "serve" as const,
+      argumentCount: args.length,
+    };
     const timeout = Duration.fromInputUnsafe(timeoutInput);
     return yield* Effect.gen(function* () {
       const child = yield* spawner
-        .spawn(ChildProcess.make(command[0]!, args))
-        .pipe(Effect.mapError((cause) => new TailscaleCommandSpawnError({ command, cause })));
+        .spawn(ChildProcess.make(executable, args))
+        .pipe(
+          Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
+        );
       const [stderr, exitCode] = yield* Effect.all(
         [collectStderr(child.stderr), child.exitCode.pipe(Effect.map(Number))],
         { concurrency: "unbounded" },
-      ).pipe(Effect.mapError((cause) => new TailscaleCommandOutputError({ command, cause })));
+      ).pipe(
+        Effect.mapError((cause) => new TailscaleCommandOutputError({ ...commandContext, cause })),
+      );
       if (exitCode !== 0) {
-        return yield* new TailscaleCommandExitError({ command, exitCode, stderr });
+        return yield* new TailscaleCommandExitError({
+          ...commandContext,
+          exitCode,
+          stderrLength: stderr.length,
+        });
       }
     }).pipe(
       Effect.scoped,
@@ -254,7 +284,7 @@ const runTailscaleCommand = (
         TimeoutError: (cause) =>
           Effect.fail(
             new TailscaleCommandTimeoutError({
-              command,
+              ...commandContext,
               timeoutMs: Duration.toMillis(timeout),
               cause,
             }),

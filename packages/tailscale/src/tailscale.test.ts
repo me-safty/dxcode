@@ -165,24 +165,35 @@ describe("tailscale", () => {
       const error = yield* readTailscaleStatus.pipe(Effect.flip, Effect.provide(layer));
 
       assert.instanceOf(error, TailscaleCommandSpawnError);
-      assert.deepEqual(error.command, ["tailscale", "status", "--json"]);
+      assert.equal(error.executable, "tailscale");
+      assert.equal(error.subcommand, "status");
+      assert.equal(error.argumentCount, 2);
       assert.strictEqual(error.cause, cause);
-      assert.equal(error.message, "Failed to spawn tailscale status --json.");
+      assert.equal(error.message, "Failed to spawn tailscale status.");
       assert.notInclude(error.message, systemCause.message);
     });
   });
 
   it.effect("keeps nonzero exit diagnostics structured", () => {
-    const layer = mockSpawnerLayer(() => ({ code: 7, stderr: "not logged in" }));
+    const layer = mockSpawnerLayer(() => ({
+      code: 7,
+      stderr: "not logged in tskey-auth-secret-token-value",
+    }));
 
     return Effect.gen(function* () {
       const error = yield* readTailscaleStatus.pipe(Effect.flip, Effect.provide(layer));
 
       assert.instanceOf(error, TailscaleCommandExitError);
-      assert.deepEqual(error.command, ["tailscale", "status", "--json"]);
+      assert.equal(error.executable, "tailscale");
+      assert.equal(error.subcommand, "status");
+      assert.equal(error.argumentCount, 2);
       assert.equal(error.exitCode, 7);
-      assert.equal(error.stderr, "not logged in");
-      assert.equal(error.message, "tailscale status --json exited with code 7.");
+      assert.equal(error.stdoutLength, 0);
+      assert.equal(error.stderrLength, 43);
+      assert.notProperty(error, "command");
+      assert.notProperty(error, "stderr");
+      assert.notInclude(error.message, "tskey-auth-secret-token-value");
+      assert.equal(error.message, "tailscale status exited with code 7.");
     });
   });
 
@@ -202,10 +213,12 @@ describe("tailscale", () => {
       const error = yield* Fiber.join(fiber);
 
       assert.instanceOf(error, TailscaleCommandTimeoutError);
-      assert.deepEqual(error.command, ["tailscale", "status", "--json"]);
+      assert.equal(error.executable, "tailscale");
+      assert.equal(error.subcommand, "status");
+      assert.equal(error.argumentCount, 2);
       assert.equal(error.timeoutMs, 1_500);
       assert.isTrue(Cause.isTimeoutError(error.cause));
-      assert.equal(error.message, "tailscale status --json timed out after 1500ms.");
+      assert.equal(error.message, "tailscale status timed out after 1500ms.");
     }).pipe(Effect.provide(layer));
   });
 
@@ -220,7 +233,10 @@ describe("tailscale", () => {
   });
 
   it.effect("retains tailscale serve exit diagnostics", () => {
-    const layer = mockSpawnerLayer(() => ({ code: 1, stderr: "serve permission denied" }));
+    const layer = mockSpawnerLayer(() => ({
+      code: 1,
+      stderr: "serve permission denied tskey-auth-secret-token-value",
+    }));
 
     return Effect.gen(function* () {
       const error = yield* ensureTailscaleServe({ localPort: 13773, servePort: 8443 }).pipe(
@@ -229,15 +245,14 @@ describe("tailscale", () => {
       );
 
       assert.instanceOf(error, TailscaleCommandExitError);
-      assert.deepEqual(error.command, [
-        "tailscale",
-        "serve",
-        "--bg",
-        "--https=8443",
-        "http://127.0.0.1:13773",
-      ]);
+      assert.equal(error.executable, "tailscale");
+      assert.equal(error.subcommand, "serve");
+      assert.equal(error.argumentCount, 4);
       assert.equal(error.exitCode, 1);
-      assert.equal(error.stderr, "serve permission denied");
+      assert.equal(error.stderrLength, 53);
+      assert.notProperty(error, "command");
+      assert.notProperty(error, "stderr");
+      assert.notInclude(error.message, "tskey-auth-secret-token-value");
     });
   });
 
