@@ -20,6 +20,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { cloudCliOAuthConfig, type CloudCliOAuthConfig } from "./publicConfig.ts";
@@ -63,6 +64,7 @@ const CloudCliCredentialRefreshStage = Schema.Literals([
   "encode-credential",
   "persist-credential",
 ]);
+type CloudCliCredentialRefreshStage = typeof CloudCliCredentialRefreshStage.Type;
 
 const CloudCliAuthorizationStage = Schema.Literals([
   "load-oauth-config",
@@ -72,6 +74,27 @@ const CloudCliAuthorizationStage = Schema.Literals([
   "encode-credential",
   "persist-credential",
 ]);
+type CloudCliAuthorizationStage = typeof CloudCliAuthorizationStage.Type;
+
+function tokenEndpointDiagnosticFields(tokenEndpoint: string | undefined) {
+  if (tokenEndpoint === undefined) return {};
+  const diagnostics = getUrlDiagnostics(tokenEndpoint);
+  return {
+    tokenEndpointInputLength: diagnostics.inputLength,
+    ...(diagnostics.protocol === undefined ? {} : { tokenEndpointProtocol: diagnostics.protocol }),
+    ...(diagnostics.hostname === undefined ? {} : { tokenEndpointHostname: diagnostics.hostname }),
+  };
+}
+
+function redirectUriDiagnosticFields(redirectUri: string | undefined) {
+  if (redirectUri === undefined) return {};
+  const diagnostics = getUrlDiagnostics(redirectUri);
+  return {
+    redirectUriInputLength: diagnostics.inputLength,
+    ...(diagnostics.protocol === undefined ? {} : { redirectUriProtocol: diagnostics.protocol }),
+    ...(diagnostics.hostname === undefined ? {} : { redirectUriHostname: diagnostics.hostname }),
+  };
+}
 
 export class CloudCliCredentialRemovalError extends Schema.TaggedErrorClass<CloudCliCredentialRemovalError>()(
   "CloudCliCredentialRemovalError",
@@ -90,10 +113,25 @@ export class CloudCliCredentialRefreshError extends Schema.TaggedErrorClass<Clou
   {
     stage: CloudCliCredentialRefreshStage,
     secretName: Schema.Literal(CLOUD_CLI_OAUTH_TOKEN_SECRET),
-    tokenEndpoint: Schema.optional(Schema.String),
+    tokenEndpointInputLength: Schema.optionalKey(Schema.Number),
+    tokenEndpointProtocol: Schema.optionalKey(Schema.String),
+    tokenEndpointHostname: Schema.optionalKey(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
+  static fromStage(input: {
+    readonly stage: CloudCliCredentialRefreshStage;
+    readonly cause: unknown;
+    readonly tokenEndpoint?: string;
+  }): CloudCliCredentialRefreshError {
+    return new CloudCliCredentialRefreshError({
+      stage: input.stage,
+      secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
+      ...tokenEndpointDiagnosticFields(input.tokenEndpoint),
+      cause: input.cause,
+    });
+  }
+
   static fromCredentialRead(cause: CredentialReadFailure): CloudCliCredentialRefreshError {
     return new CloudCliCredentialRefreshError({
       stage: cause._tag === "SecretStoreReadError" ? "read-credential" : "decode-credential",
@@ -111,7 +149,10 @@ export class CloudCliCredentialRefreshError extends Schema.TaggedErrorClass<Clou
   }
 
   override get message(): string {
-    const tokenEndpoint = this.tokenEndpoint ? ` using ${this.tokenEndpoint}` : "";
+    const tokenEndpoint =
+      this.tokenEndpointInputLength === undefined
+        ? ""
+        : ` using the token endpoint${this.tokenEndpointHostname ? ` at ${this.tokenEndpointHostname}` : ""} (input length ${this.tokenEndpointInputLength})`;
     return `Could not refresh the T3 Connect CLI credential ${this.secretName} during ${this.stage}${tokenEndpoint}.`;
   }
 }
@@ -142,13 +183,36 @@ export class CloudCliAuthorizationError extends Schema.TaggedErrorClass<CloudCli
   {
     stage: CloudCliAuthorizationStage,
     secretName: Schema.Literal(CLOUD_CLI_OAUTH_TOKEN_SECRET),
-    tokenEndpoint: Schema.optional(Schema.String),
-    redirectUri: Schema.optional(Schema.String),
+    tokenEndpointInputLength: Schema.optionalKey(Schema.Number),
+    tokenEndpointProtocol: Schema.optionalKey(Schema.String),
+    tokenEndpointHostname: Schema.optionalKey(Schema.String),
+    redirectUriInputLength: Schema.optionalKey(Schema.Number),
+    redirectUriProtocol: Schema.optionalKey(Schema.String),
+    redirectUriHostname: Schema.optionalKey(Schema.String),
     callbackHost: Schema.optional(Schema.String),
     callbackPort: Schema.optional(Schema.Number),
     cause: Schema.Defect(),
   },
 ) {
+  static fromStage(input: {
+    readonly stage: CloudCliAuthorizationStage;
+    readonly cause: unknown;
+    readonly tokenEndpoint?: string;
+    readonly redirectUri?: string;
+    readonly callbackHost?: string;
+    readonly callbackPort?: number;
+  }): CloudCliAuthorizationError {
+    return new CloudCliAuthorizationError({
+      stage: input.stage,
+      secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
+      ...tokenEndpointDiagnosticFields(input.tokenEndpoint),
+      ...redirectUriDiagnosticFields(input.redirectUri),
+      ...(input.callbackHost === undefined ? {} : { callbackHost: input.callbackHost }),
+      ...(input.callbackPort === undefined ? {} : { callbackPort: input.callbackPort }),
+      cause: input.cause,
+    });
+  }
+
   static fromCredentialPersist(cause: CredentialPersistFailure): CloudCliAuthorizationError {
     return new CloudCliAuthorizationError({
       stage: cause._tag === "SchemaError" ? "encode-credential" : "persist-credential",
@@ -158,8 +222,14 @@ export class CloudCliAuthorizationError extends Schema.TaggedErrorClass<CloudCli
   }
 
   override get message(): string {
-    const tokenEndpoint = this.tokenEndpoint ? ` using ${this.tokenEndpoint}` : "";
-    const redirectUri = this.redirectUri ? ` with callback ${this.redirectUri}` : "";
+    const tokenEndpoint =
+      this.tokenEndpointInputLength === undefined
+        ? ""
+        : ` using the token endpoint${this.tokenEndpointHostname ? ` at ${this.tokenEndpointHostname}` : ""} (input length ${this.tokenEndpointInputLength})`;
+    const redirectUri =
+      this.redirectUriInputLength === undefined
+        ? ""
+        : ` with a callback URI input of length ${this.redirectUriInputLength}`;
     const callbackAddress =
       this.callbackHost && this.callbackPort !== undefined
         ? ` on ${this.callbackHost}:${this.callbackPort}`
@@ -171,13 +241,31 @@ export class CloudCliAuthorizationError extends Schema.TaggedErrorClass<CloudCli
 export class CloudCliAuthorizationTimeoutError extends Schema.TaggedErrorClass<CloudCliAuthorizationTimeoutError>()(
   "CloudCliAuthorizationTimeoutError",
   {
-    redirectUri: Schema.String,
+    redirectUriInputLength: Schema.Number,
+    redirectUriProtocol: Schema.optionalKey(Schema.String),
+    redirectUriHostname: Schema.optionalKey(Schema.String),
     timeoutMillis: Schema.Number,
     cause: Schema.Defect(),
   },
 ) {
+  static fromRedirectUri(input: {
+    readonly redirectUri: string;
+    readonly timeoutMillis: number;
+    readonly cause: unknown;
+  }): CloudCliAuthorizationTimeoutError {
+    const diagnostics = getUrlDiagnostics(input.redirectUri);
+    return new CloudCliAuthorizationTimeoutError({
+      redirectUriInputLength: diagnostics.inputLength,
+      ...(diagnostics.protocol === undefined ? {} : { redirectUriProtocol: diagnostics.protocol }),
+      ...(diagnostics.hostname === undefined ? {} : { redirectUriHostname: diagnostics.hostname }),
+      timeoutMillis: input.timeoutMillis,
+      cause: input.cause,
+    });
+  }
+
   override get message(): string {
-    return `Timed out after ${this.timeoutMillis}ms waiting for T3 Connect authorization at ${this.redirectUri}.`;
+    const callback = this.redirectUriHostname ? ` for ${this.redirectUriHostname}` : "";
+    return `Timed out after ${this.timeoutMillis}ms waiting for T3 Connect authorization${callback} (callback URI input length ${this.redirectUriInputLength}).`;
   }
 }
 
@@ -262,13 +350,11 @@ export const make = Effect.gen(function* () {
 
   const refresh = Effect.fn("cloud.cli_token.refresh")(function* (token: PersistedToken) {
     const metadata = yield* cloudCliOAuthConfig.pipe(
-      Effect.mapError(
-        (cause) =>
-          new CloudCliCredentialRefreshError({
-            stage: "load-oauth-config",
-            secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        CloudCliCredentialRefreshError.fromStage({
+          stage: "load-oauth-config",
+          cause,
+        }),
       ),
     );
     return yield* exchangeToken(metadata, {
@@ -276,27 +362,23 @@ export const make = Effect.gen(function* () {
       refresh_token: token.refreshToken,
       client_id: metadata.clientId,
     }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new CloudCliCredentialRefreshError({
-            stage: "exchange-token",
-            secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
-            tokenEndpoint: metadata.tokenEndpoint,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        CloudCliCredentialRefreshError.fromStage({
+          stage: "exchange-token",
+          tokenEndpoint: metadata.tokenEndpoint,
+          cause,
+        }),
       ),
     );
   });
 
   const login = Effect.fn("cloud.cli_token.login")(function* () {
     const metadata = yield* cloudCliOAuthConfig.pipe(
-      Effect.mapError(
-        (cause) =>
-          new CloudCliAuthorizationError({
-            stage: "load-oauth-config",
-            secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        CloudCliAuthorizationError.fromStage({
+          stage: "load-oauth-config",
+          cause,
+        }),
       ),
     );
     const { challenge, state, verifier } = yield* Effect.gen(function* () {
@@ -307,14 +389,12 @@ export const make = Effect.gen(function* () {
       const state = yield* crypto.randomUUIDv4;
       return { challenge, state, verifier };
     }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new CloudCliAuthorizationError({
-            stage: "prepare-pkce",
-            secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
-            redirectUri: metadata.redirectUri,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        CloudCliAuthorizationError.fromStage({
+          stage: "prepare-pkce",
+          redirectUri: metadata.redirectUri,
+          cause,
+        }),
       ),
     );
     const callback = yield* Deferred.make<string>();
@@ -353,16 +433,14 @@ export const make = Effect.gen(function* () {
         }),
       ),
       Layer.build,
-      Effect.mapError(
-        (cause) =>
-          new CloudCliAuthorizationError({
-            stage: "start-callback-server",
-            secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
-            redirectUri: metadata.redirectUri,
-            callbackHost: CLOUD_CLI_OAUTH_CALLBACK_HOST,
-            callbackPort: CLOUD_CLI_OAUTH_CALLBACK_PORT,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        CloudCliAuthorizationError.fromStage({
+          stage: "start-callback-server",
+          redirectUri: metadata.redirectUri,
+          callbackHost: CLOUD_CLI_OAUTH_CALLBACK_HOST,
+          callbackPort: CLOUD_CLI_OAUTH_CALLBACK_PORT,
+          cause,
+        }),
       ),
     );
     const authorizationUrl = new URL(metadata.authorizationEndpoint);
@@ -379,7 +457,7 @@ export const make = Effect.gen(function* () {
       Effect.catchTags({
         TimeoutError: (cause) =>
           Effect.fail(
-            new CloudCliAuthorizationTimeoutError({
+            CloudCliAuthorizationTimeoutError.fromRedirectUri({
               redirectUri: metadata.redirectUri,
               timeoutMillis: Duration.toMillis(CLOUD_CLI_OAUTH_CALLBACK_TIMEOUT),
               cause,
@@ -394,15 +472,13 @@ export const make = Effect.gen(function* () {
       client_id: metadata.clientId,
       code_verifier: verifier,
     }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new CloudCliAuthorizationError({
-            stage: "exchange-token",
-            secretName: CLOUD_CLI_OAUTH_TOKEN_SECRET,
-            tokenEndpoint: metadata.tokenEndpoint,
-            redirectUri: metadata.redirectUri,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        CloudCliAuthorizationError.fromStage({
+          stage: "exchange-token",
+          tokenEndpoint: metadata.tokenEndpoint,
+          redirectUri: metadata.redirectUri,
+          cause,
+        }),
       ),
     );
   });
