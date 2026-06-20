@@ -551,18 +551,26 @@ const resolveCommandPathForPlatform = Effect.fn("shell.resolveCommandPathForPlat
     windowsPathExtensions,
     path.extname,
   );
+  let firstProbeFailure: PlatformError.PlatformError | undefined;
+  const probeCandidate = (candidatePath: string) =>
+    isExecutableFile(candidatePath, platform, windowsPathExtensions).pipe(
+      Effect.catch((cause) => {
+        firstProbeFailure ??= cause;
+        return Effect.succeed(false);
+      }),
+    );
 
   if (command.includes("/") || command.includes("\\")) {
     for (const candidate of commandCandidates) {
-      if (
-        yield* isExecutableFile(candidate, platform, windowsPathExtensions).pipe(
-          Effect.mapError((cause) => new CommandResolutionError({ command, platform, cause })),
-        )
-      ) {
+      if (yield* probeCandidate(candidate)) {
         return candidate;
       }
     }
-    return yield* new CommandResolutionError({ command, platform });
+    return yield* new CommandResolutionError({
+      command,
+      platform,
+      ...(firstProbeFailure === undefined ? {} : { cause: firstProbeFailure }),
+    });
   }
 
   const pathValue = resolvePathEnvironmentVariable(env);
@@ -580,16 +588,16 @@ const resolveCommandPathForPlatform = Effect.fn("shell.resolveCommandPathForPlat
   for (const pathEntry of pathEntries) {
     for (const candidate of commandCandidates) {
       const candidatePath = path.join(pathEntry, candidate);
-      if (
-        yield* isExecutableFile(candidatePath, platform, windowsPathExtensions).pipe(
-          Effect.mapError((cause) => new CommandResolutionError({ command, platform, cause })),
-        )
-      ) {
+      if (yield* probeCandidate(candidatePath)) {
         return candidatePath;
       }
     }
   }
-  return yield* new CommandResolutionError({ command, platform });
+  return yield* new CommandResolutionError({
+    command,
+    platform,
+    ...(firstProbeFailure === undefined ? {} : { cause: firstProbeFailure }),
+  });
 });
 
 export const resolveCommandPath = Effect.fn("shell.resolveCommandPath")(function* (
