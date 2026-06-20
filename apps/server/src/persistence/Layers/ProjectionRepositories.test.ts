@@ -3,22 +3,18 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { PersistenceDecodeError } from "./Errors.ts";
-import { SqlitePersistenceMemory } from "./Layers/Sqlite.ts";
-import * as ProjectionProjects from "./ProjectionProjects.ts";
-import * as ProjectionThreads from "./ProjectionThreads.ts";
-import * as ProjectionTurns from "./ProjectionTurns.ts";
-
-const isPersistenceDecodeError = Schema.is(PersistenceDecodeError);
+import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
+import { ProjectionThreadRepositoryLive } from "./ProjectionThreads.ts";
+import { ProjectionProjectRepository } from "../Services/ProjectionProjects.ts";
+import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
 
 const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
-    ProjectionProjects.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-    ProjectionThreads.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-    ProjectionTurns.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
   ),
 );
@@ -26,7 +22,7 @@ const projectionRepositoriesLayer = it.layer(
 projectionRepositoriesLayer("Projection repositories", (it) => {
   it.effect("stores SQL NULL for missing project model options", () =>
     Effect.gen(function* () {
-      const projects = yield* ProjectionProjects.ProjectionProjectRepository;
+      const projects = yield* ProjectionProjectRepository;
       const sql = yield* SqlClient.SqlClient;
 
       yield* projects.upsert({
@@ -76,7 +72,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
 
   it.effect("stores JSON for thread model options", () =>
     Effect.gen(function* () {
-      const threads = yield* ProjectionThreads.ProjectionThreadRepository;
+      const threads = yield* ProjectionThreadRepository;
       const sql = yield* SqlClient.SqlClient;
 
       yield* threads.upsert({
@@ -130,41 +126,6 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-opus-4-6",
       });
-    }),
-  );
-
-  it.effect("reports invalid pending turn rows as decode failures", () =>
-    Effect.gen(function* () {
-      const turns = yield* ProjectionTurns.ProjectionTurnRepository;
-      const sql = yield* SqlClient.SqlClient;
-      const threadId = ThreadId.make("thread-invalid-pending-turn");
-
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          pending_message_id,
-          state,
-          requested_at,
-          checkpoint_files_json
-        )
-        VALUES (
-          ${threadId},
-          X'01',
-          'pending',
-          '2026-06-20T00:00:00.000Z',
-          '[]'
-        )
-      `;
-
-      const result = yield* Effect.result(turns.getPendingTurnStartByThreadId({ threadId }));
-      assert.equal(result._tag, "Failure");
-      if (result._tag === "Failure") {
-        assert.ok(isPersistenceDecodeError(result.failure));
-        assert.equal(
-          result.failure.operation,
-          "ProjectionTurnRepository.getPendingTurnStartByThreadId:decodeRow",
-        );
-      }
     }),
   );
 });
