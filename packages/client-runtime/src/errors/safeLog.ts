@@ -1,5 +1,3 @@
-import { findErrorTraceId } from "./errorTrace.ts";
-
 const SAFE_ERROR_LABEL =
   /^(?:Error|EvalError|RangeError|ReferenceError|SyntaxError|TypeError|URIError|AggregateError|DOMException|[A-Za-z][A-Za-z0-9]*(?:Error|Failure))$/;
 const SAFE_TRACE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -60,8 +58,19 @@ function readErrorTag(error: unknown): string | undefined {
 
 function readTraceId(error: unknown): string | undefined {
   try {
-    const traceId = findErrorTraceId(error);
-    return traceId !== null && SAFE_TRACE_ID.test(traceId) ? traceId : undefined;
+    const seen = new Set<object>();
+    let current: unknown = error;
+
+    while (typeof current === "object" && current !== null && !seen.has(current)) {
+      seen.add(current);
+      const record = current as { readonly cause?: unknown; readonly traceId?: unknown };
+      if (typeof record.traceId === "string" && SAFE_TRACE_ID.test(record.traceId)) {
+        return record.traceId;
+      }
+      current = record.cause;
+    }
+
+    return undefined;
   } catch {
     return undefined;
   }
