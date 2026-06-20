@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import * as NetService from "./Net.ts";
 
 const isLoopbackPortListenError = Schema.is(NetService.LoopbackPortListenError);
+const isLoopbackPortReleaseError = Schema.is(NetService.LoopbackPortReleaseError);
 
 const closeServer = (server: NodeNet.Server) =>
   Effect.sync(() => {
@@ -68,6 +69,35 @@ it.layer(NetService.layer)("NetService", (it) => {
         assert.equal((error.cause as NodeJS.ErrnoException).code, "ENOTFOUND");
       }),
     );
+
+    it.effect("classifies server errors during close as release failures", () => {
+      const probe = NodeNet.createServer();
+      const cause = new Error("close failed");
+      probe.unref = (() => probe) as typeof probe.unref;
+      probe.address = (() => ({
+        address: "127.0.0.1",
+        family: "IPv4",
+        port: 43123,
+      })) as typeof probe.address;
+      probe.listen = ((_port: number, _host: string, listeningListener: () => void) => {
+        listeningListener();
+        return probe;
+      }) as typeof probe.listen;
+      probe.close = (() => {
+        probe.emit("error", cause);
+        return probe;
+      }) as typeof probe.close;
+      const net = NetService.make({ createServer: () => probe });
+
+      return Effect.gen(function* () {
+        const error = yield* net.reserveLoopbackPort().pipe(Effect.flip);
+
+        assert(isLoopbackPortReleaseError(error));
+        assert.equal(error.host, "127.0.0.1");
+        assert.equal(error.port, 43123);
+        assert.strictEqual(error.cause, cause);
+      });
+    });
 
     it.effect("isPortAvailableOnLoopback reports false for an occupied port", () =>
       Effect.acquireUseRelease(

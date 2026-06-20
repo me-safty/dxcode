@@ -97,7 +97,13 @@ export class NetService extends Context.Service<
   }
 >()("@t3tools/shared/Net/NetService") {}
 
-export const make = () => {
+export const make = (
+  options: {
+    readonly createServer?: () => NodeNet.Server;
+  } = {},
+) => {
+  const createServer = options.createServer ?? NodeNet.createServer;
+
   /**
    * Returns true when a TCP server can bind to {host, port}.
    * `EADDRNOTAVAIL` is treated as available so IPv6-absent hosts don't fail
@@ -105,7 +111,7 @@ export const make = () => {
    */
   const canListenOnHost = (port: number, host: string): Effect.Effect<boolean> =>
     Effect.callback<boolean>((resume) => {
-      const server = NodeNet.createServer();
+      const server = createServer();
       let settled = false;
 
       const settle = (value: boolean) => {
@@ -190,8 +196,9 @@ export const make = () => {
    */
   const reserveLoopbackPort = (host = "127.0.0.1"): Effect.Effect<number, NetError> =>
     Effect.callback<number, NetError>((resume) => {
-      const probe = NodeNet.createServer();
+      const probe = createServer();
       let settled = false;
+      let releasePort: number | undefined;
 
       const settle = (effect: Effect.Effect<number, NetError>) => {
         if (settled) return;
@@ -200,7 +207,13 @@ export const make = () => {
       };
 
       probe.once("error", (cause) => {
-        settle(Effect.fail(new LoopbackPortListenError({ host, cause })));
+        settle(
+          Effect.fail(
+            releasePort === undefined
+              ? new LoopbackPortListenError({ host, cause })
+              : new LoopbackPortReleaseError({ host, port: releasePort, cause }),
+          ),
+        );
       });
 
       try {
@@ -218,6 +231,8 @@ export const make = () => {
                   family: null,
                   port: null,
                 };
+          const port = addressDetails.port ?? 0;
+          releasePort = port;
 
           probe.close((cause) => {
             if (cause) {
@@ -225,7 +240,7 @@ export const make = () => {
                 Effect.fail(
                   new LoopbackPortReleaseError({
                     host,
-                    port: addressDetails.port ?? 0,
+                    port,
                     cause,
                   }),
                 ),
