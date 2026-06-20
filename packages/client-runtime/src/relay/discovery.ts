@@ -63,6 +63,8 @@ function validateStatus(
       new ConnectionBlockedError({
         reason: "configuration",
         detail: "Relay returned status for a different environment.",
+        expectedEnvironmentId: environment.environmentId,
+        actualEnvironmentId: status.environmentId,
       }),
     );
   }
@@ -86,6 +88,8 @@ function validateStatus(
       new ConnectionBlockedError({
         reason: "configuration",
         detail: "Relay returned a descriptor for a different environment.",
+        expectedEnvironmentId: environment.environmentId,
+        actualEnvironmentId: status.descriptor.environmentId,
       }),
     );
   }
