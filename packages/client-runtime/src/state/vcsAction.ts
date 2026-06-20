@@ -123,6 +123,18 @@ export class VcsActionMissingTerminalEventError extends Schema.TaggedErrorClass<
   }
 }
 
+export class VcsActionTargetKeyParseError extends Schema.TaggedErrorClass<VcsActionTargetKeyParseError>()(
+  "VcsActionTargetKeyParseError",
+  {
+    key: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Invalid source control action target key: ${JSON.stringify(this.key)}.`;
+  }
+}
+
 export const VcsActionExecutionError = Schema.Union([
   VcsActionRemoteFailureError,
   VcsActionMissingTerminalEventError,
@@ -145,6 +157,9 @@ export const EMPTY_VCS_ACTION_STATE = Object.freeze<VcsActionState>({
 
 const nowMs = (): number => DateTime.toEpochMillis(DateTime.nowUnsafe());
 let nextLocalActionId = 0;
+const decodeVcsActionTargetKey = Schema.decodeUnknownSync(
+  Schema.Tuple([EnvironmentId, Schema.String]),
+);
 
 export const vcsActionStateAtom = Atom.family((key: string) => {
   return Atom.make(EMPTY_VCS_ACTION_STATE).pipe(
@@ -165,12 +180,13 @@ export function getVcsActionTargetKey(target: VcsActionTarget): string | null {
   return JSON.stringify([target.environmentId, target.cwd]);
 }
 
-function parseVcsActionTargetKey(key: string): ResolvedVcsActionTarget {
-  const [environmentId, cwd] = JSON.parse(key) as [string, string];
-  return {
-    environmentId: EnvironmentId.make(environmentId),
-    cwd,
-  };
+export function parseVcsActionTargetKey(key: string): ResolvedVcsActionTarget {
+  try {
+    const [environmentId, cwd] = decodeVcsActionTargetKey(JSON.parse(key));
+    return { environmentId, cwd };
+  } catch (cause) {
+    throw new VcsActionTargetKeyParseError({ key, cause });
+  }
 }
 
 export function getVcsActionStateAtom(target: VcsActionTarget) {

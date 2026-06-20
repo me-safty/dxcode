@@ -22,8 +22,10 @@ import {
   EMPTY_VCS_ACTION_STATE,
   getVcsActionTargetKey,
   normalizeVcsActionProgressEvent,
+  parseVcsActionTargetKey,
   VcsActionMissingTerminalEventError,
   VcsActionRemoteFailureError,
+  VcsActionTargetKeyParseError,
   VcsActionUnavailableError,
 } from "./vcsAction.ts";
 
@@ -62,6 +64,26 @@ function progress<T extends GitActionProgressEvent>(event: T): T {
 }
 
 describe("vcsActionState", () => {
+  it("preserves malformed target keys and their native cause", () => {
+    const key = "not-json";
+    let error: unknown;
+
+    try {
+      parseVcsActionTargetKey(key);
+    } catch (cause) {
+      error = cause;
+    }
+
+    expect(error).toBeInstanceOf(VcsActionTargetKeyParseError);
+    expect(error).toMatchObject({ key, cause: expect.any(SyntaxError) });
+  });
+
+  it("rejects invalid target key shapes", () => {
+    const key = JSON.stringify([environmentId]);
+
+    expect(() => parseVcsActionTargetKey(key)).toThrowError(VcsActionTargetKeyParseError);
+  });
+
   it("projects phase and hook progress without owning the async operation", () => {
     const initial = beginVcsActionState({
       operation: "run_change_request",
