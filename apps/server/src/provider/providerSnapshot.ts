@@ -32,8 +32,8 @@ export class ProviderCommandNotFoundError extends Schema.TaggedErrorClass<Provid
   {
     binaryPath: Schema.String,
     exitCode: Schema.Number,
-    stdout: Schema.String,
-    stderr: Schema.String,
+    stdoutLength: Schema.Number,
+    stderrLength: Schema.Number,
   },
 ) {
   override get message(): string {
@@ -90,8 +90,8 @@ export const spawnAndCollect = (binaryPath: string, command: ChildProcess.Comman
       return yield* new ProviderCommandNotFoundError({
         binaryPath,
         exitCode,
-        stdout,
-        stderr,
+        stdoutLength: stdout.length,
+        stderrLength: stderr.length,
       });
     }
     return result;
