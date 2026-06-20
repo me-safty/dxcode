@@ -4,6 +4,8 @@
  * on what counts as "loopback" and how to normalise a free-form URL string.
  */
 
+import * as Schema from "effect/Schema";
+
 const TAB_ID_PREFIX = "tab_";
 let nextPreviewTabSequence = 0;
 
@@ -45,16 +47,22 @@ export function isPreviewableUrl(rawUrl: string): boolean {
   }
 }
 
-export class PreviewUrlNormalizationError extends Error {
-  readonly rawUrl: string;
-  readonly detail: string;
-  constructor(rawUrl: string, detail: string) {
-    super(`Invalid preview URL: ${rawUrl} (${detail})`);
-    this.name = "PreviewUrlNormalizationError";
-    this.rawUrl = rawUrl;
-    this.detail = detail;
+export class PreviewUrlNormalizationError extends Schema.TaggedErrorClass<PreviewUrlNormalizationError>()(
+  "PreviewUrlNormalizationError",
+  {
+    rawUrl: Schema.String,
+    reason: Schema.Literals(["empty", "parse", "unsupported-protocol"]),
+    protocol: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    const protocol = this.protocol === undefined ? "" : `: ${this.protocol}`;
+    return `Invalid preview URL "${this.rawUrl}" (${this.reason}${protocol}).`;
   }
 }
+
+export const isPreviewUrlNormalizationError = Schema.is(PreviewUrlNormalizationError);
 
 /**
  * Normalise a free-form URL string into a fully-qualified `http(s)://` URL.
@@ -69,7 +77,7 @@ export class PreviewUrlNormalizationError extends Error {
 export function normalizePreviewUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
   if (trimmed.length === 0) {
-    throw new PreviewUrlNormalizationError(rawUrl, "empty");
+    throw new PreviewUrlNormalizationError({ rawUrl, reason: "empty" });
   }
   const useHttp = LOOPBACK_PREFIX_PATTERN.test(trimmed);
   const candidate = trimmed.includes("://")
@@ -79,13 +87,14 @@ export function normalizePreviewUrl(rawUrl: string): string {
   try {
     parsed = new URL(candidate);
   } catch (cause) {
-    throw new PreviewUrlNormalizationError(
-      rawUrl,
-      cause instanceof Error ? cause.message : "unparseable",
-    );
+    throw new PreviewUrlNormalizationError({ rawUrl, reason: "parse", cause });
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new PreviewUrlNormalizationError(rawUrl, `unsupported protocol ${parsed.protocol}`);
+    throw new PreviewUrlNormalizationError({
+      rawUrl,
+      reason: "unsupported-protocol",
+      protocol: parsed.protocol,
+    });
   }
   return parsed.href;
 }

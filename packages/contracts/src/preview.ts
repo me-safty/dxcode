@@ -173,13 +173,14 @@ export class PreviewInvalidUrlError extends Schema.TaggedErrorClass<PreviewInval
   "PreviewInvalidUrlError",
   {
     rawUrl: Schema.String,
-    detail: Schema.optional(Schema.String),
+    reason: Schema.Literals(["empty", "parse", "unsupported-protocol", "unexpected"]),
+    protocol: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
-    return this.detail
-      ? `Invalid preview URL: ${this.rawUrl} (${this.detail})`
-      : `Invalid preview URL: ${this.rawUrl}`;
+    const protocol = this.protocol === undefined ? "" : `: ${this.protocol}`;
+    return `Invalid preview URL "${this.rawUrl}" (${this.reason}${protocol}).`;
   }
 }
 
