@@ -73,7 +73,6 @@ describe("copyTextWithHaptic", () => {
     );
     expect(clipboardError).toBeInstanceOf(CopyTextClipboardWriteError);
     expect(clipboardError).toMatchObject({
-      operation: "write-clipboard",
       target: "connection-trace-id",
       cause: clipboardCause,
     });
@@ -82,7 +81,6 @@ describe("copyTextWithHaptic", () => {
     const hapticError = failures.find((failure) => failure instanceof CopyTextHapticFeedbackError);
     expect(hapticError).toBeInstanceOf(CopyTextHapticFeedbackError);
     expect(hapticError).toMatchObject({
-      operation: "trigger-haptic-feedback",
       target: "connection-trace-id",
       feedback: "light-impact",
       cause: hapticCause,

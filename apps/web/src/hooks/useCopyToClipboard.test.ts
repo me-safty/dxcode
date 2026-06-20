@@ -22,7 +22,6 @@ describe("writeTextToClipboard", () => {
 
     expect(error).toBeInstanceOf(ClipboardApiUnavailableError);
     expect(error).toMatchObject({
-      operation: "resolve-clipboard-api",
       target: "plan",
     });
     expect((error as Error).message).not.toContain("plan contents");
@@ -42,7 +41,6 @@ describe("writeTextToClipboard", () => {
     expect(writeText).toHaveBeenCalledWith("secret clipboard contents");
     expect(error).toBeInstanceOf(ClipboardWriteError);
     expect(error).toMatchObject({
-      operation: "write-clipboard",
       target: "error-message",
       cause,
     });

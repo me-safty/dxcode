@@ -4,7 +4,6 @@ import * as Schema from "effect/Schema";
 export class ClipboardApiUnavailableError extends Schema.TaggedErrorClass<ClipboardApiUnavailableError>()(
   "ClipboardApiUnavailableError",
   {
-    operation: Schema.Literal("resolve-clipboard-api"),
     target: Schema.String,
   },
 ) {
@@ -16,7 +15,6 @@ export class ClipboardApiUnavailableError extends Schema.TaggedErrorClass<Clipbo
 export class ClipboardWriteError extends Schema.TaggedErrorClass<ClipboardWriteError>()(
   "ClipboardWriteError",
   {
-    operation: Schema.Literal("write-clipboard"),
     target: Schema.String,
     cause: Schema.Defect(),
   },
@@ -33,7 +31,6 @@ export async function writeTextToClipboard(value: string, target = "text") {
     !navigator.clipboard?.writeText
   ) {
     throw new ClipboardApiUnavailableError({
-      operation: "resolve-clipboard-api",
       target,
     });
   }
@@ -45,7 +42,6 @@ export async function writeTextToClipboard(value: string, target = "text") {
     return true;
   } catch (cause) {
     throw new ClipboardWriteError({
-      operation: "write-clipboard",
       target,
       cause,
     });

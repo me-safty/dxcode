@@ -5,7 +5,6 @@ import * as Haptics from "expo-haptics";
 export class CopyTextClipboardWriteError extends Schema.TaggedErrorClass<CopyTextClipboardWriteError>()(
   "CopyTextClipboardWriteError",
   {
-    operation: Schema.Literal("write-clipboard"),
     target: Schema.String,
     cause: Schema.Defect(),
   },
@@ -18,7 +17,6 @@ export class CopyTextClipboardWriteError extends Schema.TaggedErrorClass<CopyTex
 export class CopyTextHapticFeedbackError extends Schema.TaggedErrorClass<CopyTextHapticFeedbackError>()(
   "CopyTextHapticFeedbackError",
   {
-    operation: Schema.Literal("trigger-haptic-feedback"),
     target: Schema.String,
     feedback: Schema.Literals(["light-impact", "selection"]),
     cause: Schema.Defect(),
@@ -45,7 +43,6 @@ export function copyTextWithHaptic(
     } catch (cause) {
       console.error(
         new CopyTextClipboardWriteError({
-          operation: "write-clipboard",
           target,
           cause,
         }),
@@ -63,7 +60,6 @@ export function copyTextWithHaptic(
     } catch (cause) {
       console.error(
         new CopyTextHapticFeedbackError({
-          operation: "trigger-haptic-feedback",
           target,
           feedback,
           cause,
