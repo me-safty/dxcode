@@ -6,6 +6,31 @@ import type {
   AdvertisedEndpointSource,
   AdvertisedEndpointStatus,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+
+export class AdvertisedEndpointUrlParseError extends Schema.TaggedErrorClass<AdvertisedEndpointUrlParseError>()(
+  "AdvertisedEndpointUrlParseError",
+  {
+    input: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Invalid advertised endpoint URL: ${this.input}`;
+  }
+}
+
+export class AdvertisedEndpointProtocolError extends Schema.TaggedErrorClass<AdvertisedEndpointProtocolError>()(
+  "AdvertisedEndpointProtocolError",
+  {
+    input: Schema.String,
+    protocol: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Endpoint must use HTTP or HTTPS. Received ${this.protocol}`;
+  }
+}
 
 export interface CreateAdvertisedEndpointInput {
   readonly id: string;
@@ -22,7 +47,12 @@ export interface CreateAdvertisedEndpointInput {
 }
 
 export function normalizeHttpBaseUrl(rawValue: string): string {
-  const url = new URL(rawValue);
+  let url: URL;
+  try {
+    url = new URL(rawValue);
+  } catch (cause) {
+    throw new AdvertisedEndpointUrlParseError({ input: rawValue, cause });
+  }
   if (url.protocol === "ws:") {
     url.protocol = "http:";
   } else if (url.protocol === "wss:") {
@@ -30,7 +60,7 @@ export function normalizeHttpBaseUrl(rawValue: string): string {
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`Endpoint must use HTTP or HTTPS. Received ${url.protocol}`);
+    throw new AdvertisedEndpointProtocolError({ input: rawValue, protocol: url.protocol });
   }
 
   url.pathname = "/";
