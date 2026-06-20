@@ -375,6 +375,10 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         timeoutMs,
       });
       if (!offered) {
+        const completion = yield* Deferred.poll(deferred);
+        if (Option.isSome(completion)) {
+          return (yield* completion.value) as A;
+        }
         return yield* new PreviewAutomationRequestQueueClosedError(requestContext);
       }
       const result = yield* Deferred.await(deferred).pipe(Effect.timeoutOption(timeoutMs));
