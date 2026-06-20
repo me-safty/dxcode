@@ -7,6 +7,7 @@
  * @module AnalyticsService
  */
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -47,14 +48,32 @@ const TelemetryEnvConfig = Config.all({
 export class AnalyticsBatchDeliveryError extends Schema.TaggedErrorClass<AnalyticsBatchDeliveryError>()(
   "AnalyticsBatchDeliveryError",
   {
-    endpoint: Schema.String,
+    endpointInputLength: Schema.Number,
+    endpointProtocol: Schema.optionalKey(Schema.String),
+    endpointHostname: Schema.optionalKey(Schema.String),
     eventCount: Schema.Int.check(Schema.isGreaterThan(0)),
     cause: Schema.Defect(),
   },
 ) {
+  static fromEndpoint(input: {
+    readonly endpoint: string;
+    readonly eventCount: number;
+    readonly cause: unknown;
+  }): AnalyticsBatchDeliveryError {
+    const diagnostics = getUrlDiagnostics(input.endpoint);
+    return new AnalyticsBatchDeliveryError({
+      endpointInputLength: diagnostics.inputLength,
+      ...(diagnostics.protocol === undefined ? {} : { endpointProtocol: diagnostics.protocol }),
+      ...(diagnostics.hostname === undefined ? {} : { endpointHostname: diagnostics.hostname }),
+      eventCount: input.eventCount,
+      cause: input.cause,
+    });
+  }
+
   override get message(): string {
     const eventLabel = this.eventCount === 1 ? "event" : "events";
-    return `Failed to deliver ${this.eventCount} analytics ${eventLabel} to PostHog at '${this.endpoint}'.`;
+    const destination = this.endpointHostname ? ` at ${this.endpointHostname}` : "";
+    return `Failed to deliver ${this.eventCount} analytics ${eventLabel} to PostHog${destination} (endpoint input length ${this.endpointInputLength}).`;
   }
 }
 
@@ -146,13 +165,12 @@ export const make = Effect.gen(function* () {
       HttpClientRequest.bodyJson(payload),
       Effect.flatMap(httpClient.execute),
       Effect.flatMap(HttpClientResponse.filterStatusOk),
-      Effect.mapError(
-        (cause) =>
-          new AnalyticsBatchDeliveryError({
-            endpoint: batchEndpoint,
-            eventCount: events.length,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        AnalyticsBatchDeliveryError.fromEndpoint({
+          endpoint: batchEndpoint,
+          eventCount: events.length,
+          cause,
+        }),
       ),
     );
   });
@@ -186,7 +204,13 @@ export const make = Effect.gen(function* () {
       AnalyticsBatchDeliveryError: (error) =>
         Effect.logError(error.message).pipe(
           Effect.annotateLogs({
-            endpoint: error.endpoint,
+            endpointInputLength: error.endpointInputLength,
+            ...(error.endpointProtocol === undefined
+              ? {}
+              : { endpointProtocol: error.endpointProtocol }),
+            ...(error.endpointHostname === undefined
+              ? {}
+              : { endpointHostname: error.endpointHostname }),
             eventCount: error.eventCount,
             cause: error,
           }),

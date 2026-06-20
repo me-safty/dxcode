@@ -158,13 +158,17 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       assert.isDefined(deliveryLog);
       assert.equal(
         deliveryLog?.message,
-        "Failed to deliver 1 analytics event to PostHog at '/batch/'.",
+        "Failed to deliver 1 analytics event to PostHog (endpoint input length 7).",
       );
+      assert.equal("endpoint" in deliveryLog.annotations, false);
+      assert.equal(deliveryLog.annotations.endpointInputLength, 7);
 
       const error = deliveryLog?.annotations.cause;
       assert.instanceOf(error, AnalyticsService.AnalyticsBatchDeliveryError);
       if (isAnalyticsBatchDeliveryError(error)) {
-        assert.equal(error.endpoint, "/batch/");
+        assert.equal(error.endpointInputLength, 7);
+        assert.equal(error.endpointProtocol, undefined);
+        assert.equal(error.endpointHostname, undefined);
         assert.equal(error.eventCount, 1);
         assert.instanceOf(error.cause, HttpClientError.HttpClientError);
         if (error.cause instanceof HttpClientError.HttpClientError) {
@@ -174,4 +178,22 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       }
     }),
   );
+});
+
+it("keeps configured PostHog endpoint secrets out of direct error and log context", () => {
+  const endpoint =
+    "https://user:password@posthog.example.test/private/project?api_key=secret#fragment";
+  const cause = new Error("delivery failed");
+  const error = AnalyticsService.AnalyticsBatchDeliveryError.fromEndpoint({
+    endpoint,
+    eventCount: 2,
+    cause,
+  });
+
+  assert.equal(error.endpointInputLength, endpoint.length);
+  assert.equal(error.endpointProtocol, "https:");
+  assert.equal(error.endpointHostname, "posthog.example.test");
+  assert.equal(error.cause, cause);
+  assert.equal("endpoint" in error, false);
+  assert.equal(/user|password|private|project|api_key|secret|fragment/.test(error.message), false);
 });
