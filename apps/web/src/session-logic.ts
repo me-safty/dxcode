@@ -926,7 +926,11 @@ function shouldKeepLongerOutputSnapshot(
 }
 
 function isLikelyShorterOutputSnapshot(previous: string, next: string): boolean {
-  if (next.length <= 1 || previous.endsWith("\n") || previous.indexOf("\n", next.length) !== -1) {
+  if (next.length <= 1) {
+    return false;
+  }
+  // Multiline prefix matches are ambiguous; favor preserving incremental chunks over dropping output.
+  if (previous.includes("\n")) {
     return false;
   }
   const following = previous[next.length];
