@@ -1791,6 +1791,29 @@ const SubagentWorkEntryRows = memo(function SubagentWorkEntryRows({
   );
 });
 
+export function subagentRelationMatchesBlock(input: {
+  parentItemId?: string | null;
+  parentTurnId?: TurnId | null;
+  relationParentItemId?: string | null;
+  relationParentTurnId?: TurnId | null;
+}): boolean {
+  const parentItemId = input.parentItemId ?? null;
+  const relationParentItemId = input.relationParentItemId ?? null;
+  const parentTurnId = input.parentTurnId ?? null;
+  const relationParentTurnId = input.relationParentTurnId ?? null;
+
+  if (parentItemId && relationParentItemId) {
+    if (parentItemId !== relationParentItemId) {
+      return false;
+    }
+    // Provider item ids can repeat across turns, so a known turn mismatch must
+    // keep a stale relation from claiming a newer work-log block.
+    return parentTurnId || relationParentTurnId ? parentTurnId === relationParentTurnId : true;
+  }
+
+  return parentTurnId || relationParentTurnId ? parentTurnId === relationParentTurnId : true;
+}
+
 const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
   parentCreatedAt: string;
   parentItemId?: string;
@@ -1813,12 +1836,12 @@ const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
   } | null>(null);
   const relationParentItemId = relation?.parentItemId ?? null;
   const relationParentTurnId = relation?.parentTurnId ?? null;
-  const relationMatchesThisBlock =
-    props.parentItemId && relationParentItemId
-      ? props.parentItemId === relationParentItemId
-      : props.parentTurnId || relationParentTurnId
-        ? props.parentTurnId === relationParentTurnId
-        : true;
+  const relationMatchesThisBlock = subagentRelationMatchesBlock({
+    parentItemId: props.parentItemId ?? null,
+    parentTurnId: props.parentTurnId ?? null,
+    relationParentItemId,
+    relationParentTurnId,
+  });
   if (relation && relationMatchesThisBlock && relation.status !== "running") {
     terminalSnapshotRef.current = {
       status: relation.status,

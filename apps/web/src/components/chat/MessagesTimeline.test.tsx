@@ -117,6 +117,33 @@ beforeEach(() => {
   };
 });
 
+describe("subagentRelationMatchesBlock", () => {
+  it("requires matching turn ids when matching reusable parent item ids", async () => {
+    const { subagentRelationMatchesBlock } = await import("./MessagesTimeline");
+
+    expect(
+      subagentRelationMatchesBlock({
+        parentItemId: "call-send-input",
+        parentTurnId: TurnId.make("turn-newer"),
+        relationParentItemId: "call-send-input",
+        relationParentTurnId: TurnId.make("turn-older"),
+      }),
+    ).toBe(false);
+  });
+
+  it("falls back to turn matching when either parent item id is absent", async () => {
+    const { subagentRelationMatchesBlock } = await import("./MessagesTimeline");
+
+    expect(
+      subagentRelationMatchesBlock({
+        parentTurnId: TurnId.make("turn-followup"),
+        relationParentItemId: "call-send-input",
+        relationParentTurnId: TurnId.make("turn-followup"),
+      }),
+    ).toBe(true);
+  });
+});
+
 function buildProps() {
   return {
     isWorking: false,
@@ -513,6 +540,72 @@ describe("MessagesTimeline", () => {
                 {
                   threadId: childThreadId,
                   parentItemId: "call-resume",
+                  titleSeed: "Say hi in German",
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Subagent - Say hi briefly");
+    expect(markup).not.toContain("Working");
+    expect(markup).toContain("duration unknown");
+  });
+
+  it("does not reuse running subagent status for a reused item id from another turn", async () => {
+    const childThreadId = ThreadId.make("subagent-child-1");
+    storeMock.state = {
+      threadShellByKey: {
+        [`${ACTIVE_THREAD_ENVIRONMENT_ID}\0${childThreadId}`]: {
+          id: childThreadId,
+          title: "Say hi briefly",
+          parentRelation: {
+            kind: "subagent",
+            rootThreadId: ThreadId.make("thread-1"),
+            parentThreadId: ThreadId.make("thread-1"),
+            parentTurnId: TurnId.make("turn-older"),
+            parentItemId: "call-send-input",
+            parentActivitySequence: 2,
+            providerThreadId: "provider-child-1",
+            titleSeed: "Say hi in German",
+            depth: 1,
+            startedAt: "2026-03-17T19:12:35.000Z",
+            completedAt: null,
+            status: "running",
+          },
+        },
+      },
+    };
+
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        activeTurnInProgress={true}
+        latestTurn={{
+          turnId: TurnId.make("turn-newer"),
+          state: "running",
+          startedAt: "2026-03-17T19:12:30.000Z",
+          completedAt: null,
+        }}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:30.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:30.000Z",
+              turnId: TurnId.make("turn-newer"),
+              label: "Subagent",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              subagentChildren: [
+                {
+                  threadId: childThreadId,
+                  parentItemId: "call-send-input",
                   titleSeed: "Say hi in German",
                 },
               ],

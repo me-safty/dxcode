@@ -320,7 +320,7 @@ export function resolveSidebarRootThread(
 
 export function rootSidebarThreads(
   threads: readonly SidebarThreadSummary[],
-  allThreads: readonly SidebarThreadSummary[] = threads,
+  allThreads: readonly SidebarThreadSummary[],
 ): SidebarThreadSummary[] {
   const keys = new Set(allThreads.map(sidebarThreadKey));
   return threads.filter((thread) => {

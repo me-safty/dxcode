@@ -30,6 +30,7 @@ import {
   EnvironmentId,
   OrchestrationLatestTurn,
   ProjectId,
+  ProviderItemId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -97,8 +98,10 @@ function makeLatestTurn(overrides?: {
 
 function makeSidebarThread(input: {
   id: string;
+  createdAt?: string;
   parentThreadId?: string;
   parentActivitySequence?: number;
+  startedAt?: string;
   status?: "running" | "completed" | "errored" | "interrupted" | "stopped";
 }): SidebarThreadSummary {
   return {
@@ -106,7 +109,16 @@ function makeSidebarThread(input: {
     environmentId: localEnvironmentId,
     projectId: ProjectId.make("project-1"),
     title: input.id,
-    createdAt: "2026-03-09T10:00:00.000Z",
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.4",
+    },
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+    interactionMode: DEFAULT_INTERACTION_MODE,
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: input.createdAt ?? "2026-03-09T10:00:00.000Z",
     updatedAt: "2026-03-09T10:00:00.000Z",
     archivedAt: null,
     parentRelation: input.parentThreadId
@@ -115,12 +127,12 @@ function makeSidebarThread(input: {
           rootThreadId: ThreadId.make("root-thread"),
           parentThreadId: ThreadId.make(input.parentThreadId),
           parentTurnId: null,
-          parentItemId: null,
+          parentItemId: ProviderItemId.make(`item-${input.id}`),
           parentActivitySequence: input.parentActivitySequence ?? 1,
           providerThreadId: `provider-${input.id}`,
           titleSeed: input.id,
           depth: 1,
-          startedAt: "2026-03-09T10:00:00.000Z",
+          startedAt: input.startedAt ?? "2026-03-09T10:00:00.000Z",
           completedAt: input.status === "running" ? null : "2026-03-09T10:01:00.000Z",
           status: input.status ?? "running",
         }
@@ -128,7 +140,12 @@ function makeSidebarThread(input: {
           kind: "root",
           rootThreadId: ThreadId.make(input.id),
         },
-  } as SidebarThreadSummary;
+    session: null,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+  };
 }
 
 describe("subagent sidebar tree helpers", () => {
@@ -185,6 +202,53 @@ describe("subagent sidebar tree helpers", () => {
       ThreadId.make("terminal-child"),
     ]);
     expect([...activePathKeys]).toEqual([sidebarThreadKey(terminalChild), sidebarThreadKey(root)]);
+  });
+
+  it("orders sibling subagents by parent sequence, start time, and thread key", () => {
+    const root = makeSidebarThread({ id: "root-thread" });
+    const laterSequence = makeSidebarThread({
+      id: "child-d",
+      parentThreadId: "root-thread",
+      parentActivitySequence: 2,
+      startedAt: "2026-03-09T10:03:00.000Z",
+    });
+    const earlierSequence = makeSidebarThread({
+      id: "child-a",
+      parentThreadId: "root-thread",
+      parentActivitySequence: 1,
+      startedAt: "2026-03-09T10:05:00.000Z",
+    });
+    const sameSequenceLaterKey = makeSidebarThread({
+      id: "child-c",
+      parentThreadId: "root-thread",
+      parentActivitySequence: 2,
+      startedAt: "2026-03-09T10:02:00.000Z",
+    });
+    const sameSequenceEarlierKey = makeSidebarThread({
+      id: "child-b",
+      parentThreadId: "root-thread",
+      parentActivitySequence: 2,
+      startedAt: "2026-03-09T10:02:00.000Z",
+    });
+
+    const rendered = flattenSidebarThreadTree({
+      allThreads: [
+        root,
+        laterSequence,
+        earlierSequence,
+        sameSequenceLaterKey,
+        sameSequenceEarlierKey,
+      ],
+      roots: [root],
+    });
+
+    expect(rendered.map(({ thread }) => thread.id)).toEqual([
+      ThreadId.make("root-thread"),
+      ThreadId.make("child-a"),
+      ThreadId.make("child-b"),
+      ThreadId.make("child-c"),
+      ThreadId.make("child-d"),
+    ]);
   });
 });
 
