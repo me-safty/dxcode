@@ -7,6 +7,9 @@ import * as Schema from "effect/Schema";
 import * as NetService from "./Net.ts";
 
 const isLoopbackPortListenError = Schema.is(NetService.LoopbackPortListenError);
+const isLoopbackPortAddressUnavailableError = Schema.is(
+  NetService.LoopbackPortAddressUnavailableError,
+);
 const isLoopbackPortReleaseError = Schema.is(NetService.LoopbackPortReleaseError);
 
 const closeServer = (server: NodeNet.Server) =>
@@ -95,6 +98,33 @@ it.layer(NetService.layer)("NetService", (it) => {
         assert(isLoopbackPortReleaseError(error));
         assert.equal(error.host, "127.0.0.1");
         assert.equal(error.port, 43123);
+        assert.strictEqual(error.cause, cause);
+      });
+    });
+
+    it.effect("preserves address-read context when closing an unusable reservation", () => {
+      const probe = NodeNet.createServer();
+      const cause = new Error("close failed");
+      probe.unref = (() => probe) as typeof probe.unref;
+      probe.address = (() => null) as typeof probe.address;
+      probe.listen = ((_port: number, _host: string, listeningListener: () => void) => {
+        listeningListener();
+        return probe;
+      }) as typeof probe.listen;
+      probe.close = (() => {
+        probe.emit("error", cause);
+        return probe;
+      }) as typeof probe.close;
+      const net = NetService.make({ createServer: () => probe });
+
+      return Effect.gen(function* () {
+        const error = yield* net.reserveLoopbackPort().pipe(Effect.flip);
+
+        assert(isLoopbackPortAddressUnavailableError(error));
+        assert.equal(error.host, "127.0.0.1");
+        assert.equal(error.address, null);
+        assert.equal(error.family, null);
+        assert.equal(error.port, null);
         assert.strictEqual(error.cause, cause);
       });
     });

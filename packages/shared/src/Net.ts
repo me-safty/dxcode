@@ -25,6 +25,7 @@ export class LoopbackPortAddressUnavailableError extends Schema.TaggedErrorClass
     address: Schema.NullOr(Schema.String),
     family: Schema.NullOr(Schema.String),
     port: Schema.NullOr(Schema.Number),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -198,7 +199,13 @@ export const make = (
     Effect.callback<number, NetError>((resume) => {
       const probe = createServer();
       let settled = false;
-      let releasePort: number | undefined;
+      let addressDetails:
+        | {
+            readonly address: string | null;
+            readonly family: string | null;
+            readonly port: number | null;
+          }
+        | undefined;
 
       const settle = (effect: Effect.Effect<number, NetError>) => {
         if (settled) return;
@@ -209,9 +216,15 @@ export const make = (
       probe.once("error", (cause) => {
         settle(
           Effect.fail(
-            releasePort === undefined
+            addressDetails === undefined
               ? new LoopbackPortListenError({ host, cause })
-              : new LoopbackPortReleaseError({ host, port: releasePort, cause }),
+              : addressDetails.port !== null && addressDetails.port > 0
+                ? new LoopbackPortReleaseError({ host, port: addressDetails.port, cause })
+                : new LoopbackPortAddressUnavailableError({
+                    host,
+                    ...addressDetails,
+                    cause,
+                  }),
           ),
         );
       });
@@ -219,7 +232,7 @@ export const make = (
       try {
         probe.listen(0, host, () => {
           const address = probe.address();
-          const addressDetails =
+          const resolvedAddressDetails =
             typeof address === "object" && address !== null
               ? {
                   address: address.address,
@@ -231,34 +244,34 @@ export const make = (
                   family: null,
                   port: null,
                 };
-          const port = addressDetails.port ?? 0;
-          releasePort = port;
+          addressDetails = resolvedAddressDetails;
 
           probe.close((cause) => {
+            if (resolvedAddressDetails.port === null || resolvedAddressDetails.port <= 0) {
+              settle(
+                Effect.fail(
+                  new LoopbackPortAddressUnavailableError({
+                    host,
+                    ...resolvedAddressDetails,
+                    ...(cause === undefined ? {} : { cause }),
+                  }),
+                ),
+              );
+              return;
+            }
             if (cause) {
               settle(
                 Effect.fail(
                   new LoopbackPortReleaseError({
                     host,
-                    port,
+                    port: resolvedAddressDetails.port,
                     cause,
                   }),
                 ),
               );
               return;
             }
-            if (addressDetails.port !== null && addressDetails.port > 0) {
-              settle(Effect.succeed(addressDetails.port));
-              return;
-            }
-            settle(
-              Effect.fail(
-                new LoopbackPortAddressUnavailableError({
-                  host,
-                  ...addressDetails,
-                }),
-              ),
-            );
+            settle(Effect.succeed(resolvedAddressDetails.port));
           });
         });
       } catch (cause) {
