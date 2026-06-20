@@ -1,3 +1,4 @@
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Hash from "effect/Hash";
@@ -49,16 +50,11 @@ async function prefetchWithNativeImage(uri: string): Promise<boolean> {
 }
 
 function describeWorkspaceImageUri(uri: string) {
-  let uriProtocol: string | null = null;
-  try {
-    uriProtocol = new URL(uri).protocol || null;
-  } catch {
-    // Relative and malformed URIs still retain safe length/hash diagnostics.
-  }
+  const diagnostics = getUrlDiagnostics(uri);
   return {
     uriHash: Hash.hash(uri),
-    uriLength: uri.length,
-    uriProtocol,
+    uriLength: diagnostics.inputLength,
+    uriProtocol: diagnostics.protocol ?? null,
   };
 }
 
