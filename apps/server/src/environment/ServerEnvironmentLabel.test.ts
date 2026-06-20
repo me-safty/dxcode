@@ -171,13 +171,17 @@ describe("resolveServerEnvironmentLabel", () => {
 
       expect(result).toBe("macbook-pro");
       expect(logs[0]?.message).toEqual([
-        "Failed to run environment-label command 'scutil --get ComputerName'.",
+        "Failed to run environment-label probe 'macos-computer-name' with scutil.",
       ]);
       const error = logs[0]?.annotations.cause;
       expect(isServerEnvironmentLabelCommandError(error)).toBe(true);
       if (isServerEnvironmentLabelCommandError(error)) {
-        expect(error.command).toBe("scutil");
-        expect(error.args).toEqual(["--get", "ComputerName"]);
+        expect(error.probe).toBe("macos-computer-name");
+        expect(error.executable).toBe("scutil");
+        expect(error.argumentCount).toBe(2);
+        expect(error).not.toHaveProperty("args");
+        expect(error.message).not.toContain("--get");
+        expect(error.message).not.toContain("ComputerName");
         expect(error.cause).toBe(processError);
         expect(processError.cause).toBe(spawnCause);
       }
