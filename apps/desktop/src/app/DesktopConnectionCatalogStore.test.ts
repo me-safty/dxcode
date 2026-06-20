@@ -32,7 +32,7 @@ function makeSafeStorageLayer(available: boolean, failDecrypt: Ref.Ref<boolean> 
           !decoded.startsWith("encrypted:") ||
           (failDecrypt !== null && (yield* Ref.get(failDecrypt)))
         ) {
-          return yield* new ElectronSafeStorage.ElectronSafeStorageDecryptError({
+          return yield* new ElectronSafeStorage.ElectronSafeStorageError({
             operation: "decrypt a string",
             cause: new Error("invalid encrypted catalog"),
           });
@@ -397,7 +397,8 @@ describe("DesktopConnectionCatalogStore", () => {
       assert.isTrue(yield* store.set('{"schemaVersion":1,"targets":[]}'));
       yield* Ref.set(failDecrypt, true);
       const error = yield* store.get.pipe(Effect.flip);
-      assert.instanceOf(error, ElectronSafeStorage.ElectronSafeStorageDecryptError);
+      assert.instanceOf(error, ElectronSafeStorage.ElectronSafeStorageError);
+      assert.equal(error.operation, "decrypt a string");
       yield* Ref.set(failDecrypt, false);
       assert.deepStrictEqual(yield* store.get, Option.some('{"schemaVersion":1,"targets":[]}'));
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),

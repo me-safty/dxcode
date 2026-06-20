@@ -167,16 +167,13 @@ export class DesktopConnectionCatalogStore extends Context.Service<
       | DesktopConnectionCatalogStoreDocumentDecodeError
       | DesktopConnectionCatalogStoreDecodeError
       | DesktopConnectionCatalogStoreMigrationError
-      | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
-      | ElectronSafeStorage.ElectronSafeStorageDecryptError
+      | ElectronSafeStorage.ElectronSafeStorageError
     >;
     readonly set: (
       catalog: string,
     ) => Effect.Effect<
       boolean,
-      | DesktopConnectionCatalogStoreWriteError
-      | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
-      | ElectronSafeStorage.ElectronSafeStorageEncryptError
+      DesktopConnectionCatalogStoreWriteError | ElectronSafeStorage.ElectronSafeStorageError
     >;
     readonly clear: Effect.Effect<void>;
   }

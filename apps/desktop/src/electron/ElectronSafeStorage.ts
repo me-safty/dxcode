@@ -5,34 +5,16 @@ import * as Schema from "effect/Schema";
 
 import { safeStorage } from "electron";
 
-export class ElectronSafeStorageAvailabilityError extends Schema.TaggedErrorClass<ElectronSafeStorageAvailabilityError>()(
-  "ElectronSafeStorageAvailabilityError",
-  {
-    operation: Schema.Literal("check encryption availability"),
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Electron safe storage failed to ${this.operation}.`;
-  }
-}
+const ElectronSafeStorageOperation = Schema.Literals([
+  "check encryption availability",
+  "encrypt a string",
+  "decrypt a string",
+]);
 
-export class ElectronSafeStorageEncryptError extends Schema.TaggedErrorClass<ElectronSafeStorageEncryptError>()(
-  "ElectronSafeStorageEncryptError",
+export class ElectronSafeStorageError extends Schema.TaggedErrorClass<ElectronSafeStorageError>()(
+  "ElectronSafeStorageError",
   {
-    operation: Schema.Literal("encrypt a string"),
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Electron safe storage failed to ${this.operation}.`;
-  }
-}
-
-export class ElectronSafeStorageDecryptError extends Schema.TaggedErrorClass<ElectronSafeStorageDecryptError>()(
-  "ElectronSafeStorageDecryptError",
-  {
-    operation: Schema.Literal("decrypt a string"),
+    operation: ElectronSafeStorageOperation,
     cause: Schema.Defect(),
   },
 ) {
@@ -44,13 +26,9 @@ export class ElectronSafeStorageDecryptError extends Schema.TaggedErrorClass<Ele
 export class ElectronSafeStorage extends Context.Service<
   ElectronSafeStorage,
   {
-    readonly isEncryptionAvailable: Effect.Effect<boolean, ElectronSafeStorageAvailabilityError>;
-    readonly encryptString: (
-      value: string,
-    ) => Effect.Effect<Uint8Array, ElectronSafeStorageEncryptError>;
-    readonly decryptString: (
-      value: Uint8Array,
-    ) => Effect.Effect<string, ElectronSafeStorageDecryptError>;
+    readonly isEncryptionAvailable: Effect.Effect<boolean, ElectronSafeStorageError>;
+    readonly encryptString: (value: string) => Effect.Effect<Uint8Array, ElectronSafeStorageError>;
+    readonly decryptString: (value: Uint8Array) => Effect.Effect<string, ElectronSafeStorageError>;
   }
 >()("@t3tools/desktop/electron/ElectronSafeStorage") {}
 
@@ -58,22 +36,17 @@ export const make = ElectronSafeStorage.of({
   isEncryptionAvailable: Effect.try({
     try: () => safeStorage.isEncryptionAvailable(),
     catch: (cause) =>
-      new ElectronSafeStorageAvailabilityError({
-        operation: "check encryption availability",
-        cause,
-      }),
+      new ElectronSafeStorageError({ operation: "check encryption availability", cause }),
   }),
   encryptString: (value) =>
     Effect.try({
       try: () => safeStorage.encryptString(value),
-      catch: (cause) =>
-        new ElectronSafeStorageEncryptError({ operation: "encrypt a string", cause }),
+      catch: (cause) => new ElectronSafeStorageError({ operation: "encrypt a string", cause }),
     }),
   decryptString: (value) =>
     Effect.try({
       try: () => safeStorage.decryptString(Buffer.from(value)),
-      catch: (cause) =>
-        new ElectronSafeStorageDecryptError({ operation: "decrypt a string", cause }),
+      catch: (cause) => new ElectronSafeStorageError({ operation: "decrypt a string", cause }),
     }),
 });
 

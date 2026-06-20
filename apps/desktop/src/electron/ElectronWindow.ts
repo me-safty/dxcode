@@ -11,7 +11,7 @@ import { app, BrowserWindow, type BrowserWindowConstructorOptions } from "electr
 export class ElectronWindowCreateError extends Schema.TaggedErrorClass<ElectronWindowCreateError>()(
   "ElectronWindowCreateError",
   {
-    resource: Schema.Literal("Electron BrowserWindow"),
+    resource: Schema.String,
     cause: Schema.Defect(),
   },
 ) {

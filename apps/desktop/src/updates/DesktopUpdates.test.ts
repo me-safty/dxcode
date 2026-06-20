@@ -20,10 +20,7 @@ import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 
 interface UpdatesHarnessOptions {
-  readonly checkForUpdates?: Effect.Effect<
-    void,
-    ElectronUpdater.ElectronUpdaterCheckForUpdatesError
-  >;
+  readonly checkForUpdates?: Effect.Effect<void, ElectronUpdater.ElectronUpdaterError>;
   readonly env?: Record<string, string | undefined>;
 }
 

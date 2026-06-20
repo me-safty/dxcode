@@ -155,13 +155,11 @@ export type DesktopSavedEnvironmentsMutationError =
 export type DesktopSavedEnvironmentsGetSecretError =
   | DesktopSavedEnvironmentsReadRegistryError
   | DesktopSavedEnvironmentSecretDecodeError
-  | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
-  | ElectronSafeStorage.ElectronSafeStorageDecryptError;
+  | ElectronSafeStorage.ElectronSafeStorageError;
 
 export type DesktopSavedEnvironmentsSetSecretError =
   | DesktopSavedEnvironmentsMutationError
-  | ElectronSafeStorage.ElectronSafeStorageAvailabilityError
-  | ElectronSafeStorage.ElectronSafeStorageEncryptError;
+  | ElectronSafeStorage.ElectronSafeStorageError;
 
 export class DesktopSavedEnvironments extends Context.Service<
   DesktopSavedEnvironments,

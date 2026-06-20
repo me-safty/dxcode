@@ -55,7 +55,7 @@ function makeSafeStorageLayer(input: {
       input.availabilityError === undefined
         ? Effect.succeed(input.available)
         : Effect.fail(
-            new ElectronSafeStorage.ElectronSafeStorageAvailabilityError({
+            new ElectronSafeStorage.ElectronSafeStorageError({
               operation: "check encryption availability",
               cause: input.availabilityError,
             }),
@@ -64,7 +64,7 @@ function makeSafeStorageLayer(input: {
       input.encryptError === undefined
         ? Effect.succeed(textEncoder.encode(`enc:${value}`))
         : Effect.fail(
-            new ElectronSafeStorage.ElectronSafeStorageEncryptError({
+            new ElectronSafeStorage.ElectronSafeStorageError({
               operation: "encrypt a string",
               cause: input.encryptError,
             }),
@@ -72,7 +72,7 @@ function makeSafeStorageLayer(input: {
     decryptString: (value) => {
       if (input.decryptError !== undefined) {
         return Effect.fail(
-          new ElectronSafeStorage.ElectronSafeStorageDecryptError({
+          new ElectronSafeStorage.ElectronSafeStorageError({
             operation: "decrypt a string",
             cause: input.decryptError,
           }),
@@ -82,7 +82,7 @@ function makeSafeStorageLayer(input: {
       const decoded = textDecoder.decode(value);
       if (!decoded.startsWith("enc:")) {
         return Effect.fail(
-          new ElectronSafeStorage.ElectronSafeStorageDecryptError({
+          new ElectronSafeStorage.ElectronSafeStorageError({
             operation: "decrypt a string",
             cause: new Error("invalid secret"),
           }),
@@ -290,7 +290,8 @@ describe("DesktopSavedEnvironments", () => {
           })
           .pipe(Effect.flip);
 
-        assert.instanceOf(error, ElectronSafeStorage.ElectronSafeStorageAvailabilityError);
+        assert.instanceOf(error, ElectronSafeStorage.ElectronSafeStorageError);
+        assert.equal(error.operation, "check encryption availability");
         assert.equal(error.cause, cause);
       }),
       { availabilityError: cause },
