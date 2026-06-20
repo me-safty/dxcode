@@ -41,6 +41,7 @@ import {
   verifyRelayJwt,
 } from "@t3tools/shared/relayJwt";
 import { isSecureRelayUrl } from "@t3tools/shared/relayUrl";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
@@ -120,7 +121,9 @@ export class CloudRelayRequestError extends Schema.TaggedErrorClass<CloudRelayRe
     operation: CloudRelayRequestOperation,
     phase: CloudRelayRequestPhase,
     method: Schema.Literal("POST"),
-    url: Schema.String,
+    requestUrlInputLength: Schema.Number,
+    requestUrlProtocol: Schema.optionalKey(Schema.String),
+    requestUrlHostname: Schema.optionalKey(Schema.String),
     responseStatus: Schema.optional(Schema.Number),
     cause: Schema.Defect(),
   },
@@ -131,12 +134,18 @@ export class CloudRelayRequestError extends Schema.TaggedErrorClass<CloudRelayRe
     readonly cause: HttpBody.HttpBodyError | HttpClientError.HttpClientError | Schema.SchemaError;
     readonly responseStatus?: number;
   }): CloudRelayRequestError {
+    const diagnostics = getUrlDiagnostics(input.url);
+    const context = {
+      operation: input.operation,
+      method: "POST" as const,
+      requestUrlInputLength: diagnostics.inputLength,
+      ...(diagnostics.protocol === undefined ? {} : { requestUrlProtocol: diagnostics.protocol }),
+      ...(diagnostics.hostname === undefined ? {} : { requestUrlHostname: diagnostics.hostname }),
+    };
     if (input.cause._tag === "SchemaError") {
       return new CloudRelayRequestError({
-        operation: input.operation,
+        ...context,
         phase: "decode-response",
-        method: "POST",
-        url: input.url,
         ...(input.responseStatus === undefined ? {} : { responseStatus: input.responseStatus }),
         cause: input.cause,
       });
@@ -144,10 +153,8 @@ export class CloudRelayRequestError extends Schema.TaggedErrorClass<CloudRelayRe
 
     if (!HttpClientError.isHttpClientError(input.cause)) {
       return new CloudRelayRequestError({
-        operation: input.operation,
+        ...context,
         phase: "encode-request",
-        method: "POST",
-        url: input.url,
         cause: input.cause,
       });
     }
@@ -168,10 +175,8 @@ export class CloudRelayRequestError extends Schema.TaggedErrorClass<CloudRelayRe
     })();
 
     return new CloudRelayRequestError({
-      operation: input.operation,
+      ...context,
       phase,
-      method: "POST",
-      url: input.url,
       ...(input.cause.response === undefined
         ? input.responseStatus === undefined
           ? {}
@@ -196,8 +201,8 @@ const appendCloudCredentialResponseHeaders = HttpEffect.appendPreResponseHandler
 const failEnvironmentCloudInternalError =
   (message: string) =>
   (cause: unknown): Effect.Effect<never, EnvironmentHttpInternalServerError> =>
-    Effect.logError(message, { cause }).pipe(
-      Effect.flatMap(() => Effect.fail(new EnvironmentHttpInternalServerError({ message }))),
+    Effect.logError(message).pipe(
+      Effect.flatMap(() => Effect.fail(new EnvironmentHttpInternalServerError({ message, cause }))),
     );
 
 const requireRelayUrl = relayUrlConfig.pipe(

@@ -5,12 +5,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import { EnvironmentHttpInternalServerError } from "@t3tools/contracts";
 
 import { RelayClientTracer } from "@t3tools/shared/relayTracing";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
@@ -156,9 +158,9 @@ describe("consumeCloudReplayGuards", () => {
 
 describe("CloudRelayRequestError", () => {
   it("classifies response failures without deriving its message from the cause", () => {
-    const request = HttpClientRequest.post(
-      "https://relay.example.test/v1/client/environment-links",
-    );
+    const requestUrl =
+      "https://relay-user:relay-password@relay.example.test/private/environment-links?token=relay-secret#relay-fragment";
+    const request = HttpClientRequest.post(requestUrl);
     const response = HttpClientResponse.fromWeb(
       request,
       new Response("sensitive upstream response", { status: 502 }),
@@ -182,14 +184,43 @@ describe("CloudRelayRequestError", () => {
       operation: "create-environment-link",
       phase: "check-response-status",
       method: "POST",
-      url: request.url,
+      requestUrlInputLength: requestUrl.length,
+      requestUrlProtocol: "https:",
+      requestUrlHostname: "relay.example.test",
       responseStatus: 502,
       cause,
     });
+    expect(error.cause).toBe(cause);
+    expect(error).not.toHaveProperty("url");
     expect(error.message).toBe(
       "T3 Connect relay create-environment-link failed during check-response-status with response status 502.",
     );
     expect(error.message).not.toContain(upstreamCause.message);
+    for (const secret of [
+      "relay-user",
+      "relay-password",
+      "/private/environment-links",
+      "relay-secret",
+      "relay-fragment",
+    ]) {
+      expect(error.message).not.toContain(secret);
+      expect(Object.values(error).join(" ")).not.toContain(secret);
+    }
+  });
+});
+
+it("preserves internal causes without encoding them into HTTP error bodies", () => {
+  const cause = new Error("private upstream detail");
+  const error = new EnvironmentHttpInternalServerError({
+    message: "Stable public failure.",
+    cause,
+  });
+  const encodeError = Schema.encodeUnknownSync(EnvironmentHttpInternalServerError);
+
+  expect(error.cause).toBe(cause);
+  expect(encodeError(error)).toEqual({
+    _tag: "EnvironmentHttpInternalServerError",
+    message: "Stable public failure.",
   });
 });
 
@@ -299,6 +330,11 @@ describe("reconcileDesiredCloudLink", () => {
       expect(error).toMatchObject({
         _tag: "EnvironmentHttpInternalServerError",
         message: "T3 Connect relay create-link-challenge failed during send-request.",
+        cause: {
+          _tag: "CloudRelayRequestError",
+          operation: "create-link-challenge",
+          phase: "send-request",
+        },
       });
       expect(error.message).not.toContain(transportCause.message);
     });

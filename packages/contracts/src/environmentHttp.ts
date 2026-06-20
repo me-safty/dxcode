@@ -212,6 +212,11 @@ export class EnvironmentHttpInternalServerError extends Schema.TaggedErrorClass<
   },
   { httpApiStatus: 500 },
 ) {
+  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
+  constructor(props: { readonly message: string; readonly cause?: unknown }) {
+    super(props as any);
+  }
+
   [HttpServerRespondable.symbol]() {
     return HttpServerResponse.schemaJson(EnvironmentHttpInternalServerError)(this, { status: 500 });
   }
