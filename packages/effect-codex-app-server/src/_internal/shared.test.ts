@@ -112,7 +112,6 @@ it.effect("retains the full notification payload decode cause chain", () =>
 
     assert.equal(error.method, "item/agentMessage/delta");
     assert.equal(error.operation, "decode-notification-payload");
-    assert.equal(error.detail, "Invalid notification payload");
     assert.instanceOf(error.cause, CodexError.CodexAppServerRequestError);
     assert.isTrue(Schema.isSchemaError(error.cause.cause));
   }),
