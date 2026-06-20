@@ -243,7 +243,7 @@ describe("DesktopShellEnvironment", () => {
     }),
   );
 
-  it.effect("logs command failures with the invocation and exact cause", () => {
+  it.effect("logs command failures with safe probe context and the exact cause", () => {
     const env: NodeJS.ProcessEnv = {
       SHELL: "/bin/bash",
       PATH: "/usr/bin",
@@ -271,9 +271,10 @@ describe("DesktopShellEnvironment", () => {
             .flatMap((message) => (Array.isArray(message) ? message : [message]))
             .filter(isDesktopShellEnvironmentCommandError);
           assert.lengthOf(errors, 1);
-          assert.equal(errors[0]?.command, "/bin/bash");
-          assert.equal(errors[0]?.args[0], "-ilc");
-          assert.include(errors[0]?.args[1] ?? "", "__T3CODE_ENV_PATH");
+          assert.equal(errors[0]?.probe, "login-shell");
+          assert.equal(errors[0]?.executable, "bash");
+          assert.equal(errors[0]?.argumentCount, 2);
+          assert.notProperty(errors[0] ?? {}, "args");
           assert.equal(errors[0]?.cause, cause);
           assert.notInclude(errors[0]?.message ?? "", cause.message);
         }),

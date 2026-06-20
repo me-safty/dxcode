@@ -21,9 +21,18 @@ interface WindowsProbeOptions {
   readonly loadProfile: boolean;
 }
 
+const DesktopShellEnvironmentProbe = Schema.Literals([
+  "login-shell",
+  "launchctl-path",
+  "powershell-profile",
+  "powershell-no-profile",
+]);
+type DesktopShellEnvironmentProbe = typeof DesktopShellEnvironmentProbe.Type;
+
 const desktopShellEnvironmentCommandFields = {
-  command: Schema.String,
-  args: Schema.Array(Schema.String),
+  probe: DesktopShellEnvironmentProbe,
+  executable: Schema.String,
+  argumentCount: Schema.Number,
 };
 
 export class DesktopShellEnvironmentCommandError extends Schema.TaggedErrorClass<DesktopShellEnvironmentCommandError>()(
@@ -34,7 +43,7 @@ export class DesktopShellEnvironmentCommandError extends Schema.TaggedErrorClass
   },
 ) {
   override get message(): string {
-    return `Desktop shell environment command ${this.command} failed.`;
+    return `Desktop shell environment ${this.probe} probe (${this.executable}) failed.`;
   }
 }
 
@@ -46,7 +55,7 @@ export class DesktopShellEnvironmentCommandTimeoutError extends Schema.TaggedErr
   },
 ) {
   override get message(): string {
-    return `Desktop shell environment command ${this.command} timed out after ${this.timeoutMs}ms.`;
+    return `Desktop shell environment ${this.probe} probe (${this.executable}) timed out after ${this.timeoutMs}ms.`;
   }
 }
 
@@ -157,6 +166,8 @@ const knownWindowsCliDirs = (env: NodeJS.ProcessEnv): ReadonlyArray<string> => [
 const startMarker = (name: string) => `__T3CODE_ENV_${name}_START__`;
 const endMarker = (name: string) => `__T3CODE_ENV_${name}_END__`;
 
+const executableName = (command: string): string => command.split(/[\\/]/u).at(-1) ?? command;
+
 const logShellEnvironmentCommandError = (
   error: DesktopShellEnvironmentCommandError | DesktopShellEnvironmentCommandTimeoutError,
 ) =>
@@ -215,6 +226,7 @@ const extractEnvironment = (output: string, names: ReadonlyArray<string>): Envir
 };
 
 const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(function* (input: {
+  readonly probe: DesktopShellEnvironmentProbe;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly timeout: Duration.Duration;
@@ -236,8 +248,9 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
       Effect.mapError(
         (cause) =>
           new DesktopShellEnvironmentCommandError({
-            command: input.command,
-            args: input.args,
+            probe: input.probe,
+            executable: executableName(input.command),
+            argumentCount: input.args.length,
             cause,
           }),
       ),
@@ -252,8 +265,9 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
   }
 
   const error = new DesktopShellEnvironmentCommandTimeoutError({
-    command: input.command,
-    args: input.args,
+    probe: input.probe,
+    executable: executableName(input.command),
+    argumentCount: input.args.length,
     timeoutMs: Duration.toMillis(input.timeout),
   });
   yield* logShellEnvironmentCommandError(error);
@@ -267,12 +281,14 @@ const readLoginShellEnvironment = (
   names.length === 0
     ? Effect.succeed({})
     : runCommandOutput({
+        probe: "login-shell",
         command: shell,
         args: ["-ilc", capturePosixEnvironmentCommand(names)],
         timeout: LOGIN_SHELL_TIMEOUT,
       }).pipe(Effect.map((output) => extractEnvironment(output, names)));
 
 const readLaunchctlPath = runCommandOutput({
+  probe: "launchctl-path",
   command: "/bin/launchctl",
   args: ["getenv", "PATH"],
   timeout: LAUNCHCTL_TIMEOUT,
@@ -295,6 +311,7 @@ const readWindowsEnvironment = Effect.fn("desktop.shellEnvironment.readWindowsEn
 
     for (const command of WINDOWS_SHELL_CANDIDATES) {
       const output = yield* runCommandOutput({
+        probe: options.loadProfile ? "powershell-profile" : "powershell-no-profile",
         command,
         args,
         timeout: LOGIN_SHELL_TIMEOUT,
