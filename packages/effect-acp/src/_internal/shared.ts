@@ -74,7 +74,9 @@ export function decodeExtNotificationRegistration<A, I>(
       Effect.mapError(
         (error) =>
           new AcpError.AcpProtocolParseError({
-            detail: `Invalid ${method} notification payload: ${formatSchemaIssue(error.issue)}`,
+            operation: "decode-notification-payload",
+            method,
+            detail: formatSchemaIssue(error.issue),
             cause: error,
           }),
       ),

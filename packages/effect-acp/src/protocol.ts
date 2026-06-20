@@ -113,7 +113,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       try: () => parser.encode(message),
       catch: (cause) =>
         new AcpError.AcpProtocolParseError({
-          detail: "Failed to encode ACP message",
+          operation: "encode-message",
           cause,
         }),
     });
@@ -267,7 +267,8 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           Effect.mapError(
             (cause) =>
               new AcpError.AcpProtocolParseError({
-                detail: `Invalid ${CLIENT_METHODS.session_update} notification payload`,
+                operation: "decode-notification-payload",
+                method: CLIENT_METHODS.session_update,
                 cause,
               }),
           ),
@@ -287,7 +288,8 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           Effect.mapError(
             (cause) =>
               new AcpError.AcpProtocolParseError({
-                detail: `Invalid ${CLIENT_METHODS.session_elicitation_complete} notification payload`,
+                operation: "decode-notification-payload",
+                method: CLIENT_METHODS.session_elicitation_complete,
                 cause,
               }),
           ),
@@ -382,7 +384,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
               >,
             catch: (cause) =>
               new AcpError.AcpProtocolParseError({
-                detail: "Failed to decode ACP wire message",
+                operation: "decode-wire-message",
                 cause,
               }),
           }),
@@ -399,6 +401,8 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
             direction: "incoming",
             stage: "decode_failed",
             payload: {
+              operation: error.operation,
+              ...(error.method === undefined ? {} : { method: error.method }),
               detail: error.detail,
               cause: error.cause,
             },

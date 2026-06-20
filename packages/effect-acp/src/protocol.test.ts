@@ -182,13 +182,16 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
 
       const bigintError = yield* transport.notify("x/test", 1n).pipe(Effect.flip);
       assert.instanceOf(bigintError, AcpError.AcpProtocolParseError);
-      assert.equal(bigintError.detail, "Failed to encode ACP message");
+      assert.equal(bigintError.operation, "encode-message");
+      assert.instanceOf(bigintError.cause, TypeError);
+      assert.equal(bigintError.message, "ACP protocol operation 'encode-message' failed.");
 
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       const circularError = yield* transport.notify("x/test", circular).pipe(Effect.flip);
       assert.instanceOf(circularError, AcpError.AcpProtocolParseError);
-      assert.equal(circularError.detail, "Failed to encode ACP message");
+      assert.equal(circularError.operation, "encode-message");
+      assert.instanceOf(circularError.cause, TypeError);
     }),
   );
 

@@ -36,15 +36,25 @@ export class AcpProcessExitedError extends Schema.TaggedErrorClass<AcpProcessExi
   }
 }
 
+export const AcpProtocolParseOperation = Schema.Literals([
+  "encode-message",
+  "decode-wire-message",
+  "decode-notification-payload",
+]);
+export type AcpProtocolParseOperation = typeof AcpProtocolParseOperation.Type;
+
 export class AcpProtocolParseError extends Schema.TaggedErrorClass<AcpProtocolParseError>()(
   "AcpProtocolParseError",
   {
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    operation: AcpProtocolParseOperation,
+    method: Schema.optionalKey(Schema.String),
+    detail: Schema.optionalKey(Schema.String),
+    cause: Schema.Defect(),
   },
 ) {
   override get message() {
-    return `Failed to parse ACP protocol message: ${this.detail}`;
+    const method = this.method === undefined ? "" : ` for method '${this.method}'`;
+    return `ACP protocol operation '${this.operation}' failed${method}.`;
   }
 }
 

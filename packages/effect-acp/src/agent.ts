@@ -291,7 +291,8 @@ export const make = Effect.fn("effect-acp/AcpAgent.make")(function* (
           Effect.mapError(
             (error) =>
               new AcpError.AcpProtocolParseError({
-                detail: `Invalid ${AGENT_METHODS.session_cancel} notification payload`,
+                operation: "decode-notification-payload",
+                method: AGENT_METHODS.session_cancel,
                 cause: error,
               }),
           ),
