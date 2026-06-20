@@ -10,23 +10,50 @@ type AutoUpdater = typeof autoUpdater;
 
 export type ElectronUpdaterFeedUrl = Parameters<AutoUpdater["setFeedURL"]>[0];
 
-const ElectronUpdaterOperation = Schema.Literals([
-  "check for updates",
-  "download the update",
-  "quit and install the update",
-]);
+const electronUpdaterErrorFields = {
+  cause: Schema.Defect(),
+};
 
-export class ElectronUpdaterError extends Schema.TaggedErrorClass<ElectronUpdaterError>()(
-  "ElectronUpdaterError",
+export class ElectronUpdaterCheckForUpdatesError extends Schema.TaggedErrorClass<ElectronUpdaterCheckForUpdatesError>()(
+  "ElectronUpdaterCheckForUpdatesError",
   {
-    operation: ElectronUpdaterOperation,
-    cause: Schema.Defect(),
+    ...electronUpdaterErrorFields,
   },
 ) {
   override get message(): string {
-    return `Electron updater failed to ${this.operation}.`;
+    return "Electron updater failed to check for updates.";
   }
 }
+
+export class ElectronUpdaterDownloadUpdateError extends Schema.TaggedErrorClass<ElectronUpdaterDownloadUpdateError>()(
+  "ElectronUpdaterDownloadUpdateError",
+  {
+    ...electronUpdaterErrorFields,
+  },
+) {
+  override get message(): string {
+    return "Electron updater failed to download the update.";
+  }
+}
+
+export class ElectronUpdaterQuitAndInstallError extends Schema.TaggedErrorClass<ElectronUpdaterQuitAndInstallError>()(
+  "ElectronUpdaterQuitAndInstallError",
+  {
+    ...electronUpdaterErrorFields,
+  },
+) {
+  override get message(): string {
+    return "Electron updater failed to quit and install the update.";
+  }
+}
+
+export const ElectronUpdaterError = Schema.Union([
+  ElectronUpdaterCheckForUpdatesError,
+  ElectronUpdaterDownloadUpdateError,
+  ElectronUpdaterQuitAndInstallError,
+]);
+export type ElectronUpdaterError = typeof ElectronUpdaterError.Type;
+export const isElectronUpdaterError = Schema.is(ElectronUpdaterError);
 
 export class ElectronUpdater extends Context.Service<
   ElectronUpdater,
@@ -39,12 +66,12 @@ export class ElectronUpdater extends Context.Service<
     readonly allowDowngrade: Effect.Effect<boolean>;
     readonly setAllowDowngrade: (value: boolean) => Effect.Effect<void>;
     readonly setDisableDifferentialDownload: (value: boolean) => Effect.Effect<void>;
-    readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterError>;
-    readonly downloadUpdate: Effect.Effect<void, ElectronUpdaterError>;
+    readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterCheckForUpdatesError>;
+    readonly downloadUpdate: Effect.Effect<void, ElectronUpdaterDownloadUpdateError>;
     readonly quitAndInstall: (options: {
       readonly isSilent: boolean;
       readonly isForceRunAfter: boolean;
-    }) => Effect.Effect<void, ElectronUpdaterError>;
+    }) => Effect.Effect<void, ElectronUpdaterQuitAndInstallError>;
     readonly on: <Args extends ReadonlyArray<unknown>>(
       eventName: string,
       listener: (...args: Args) => void,
@@ -91,17 +118,16 @@ export const make = ElectronUpdater.of({
     }),
   checkForUpdates: Effect.tryPromise({
     try: () => autoUpdater.checkForUpdates(),
-    catch: (cause) => new ElectronUpdaterError({ operation: "check for updates", cause }),
+    catch: (cause) => new ElectronUpdaterCheckForUpdatesError({ cause }),
   }).pipe(Effect.asVoid),
   downloadUpdate: Effect.tryPromise({
     try: () => autoUpdater.downloadUpdate(),
-    catch: (cause) => new ElectronUpdaterError({ operation: "download the update", cause }),
+    catch: (cause) => new ElectronUpdaterDownloadUpdateError({ cause }),
   }).pipe(Effect.asVoid),
   quitAndInstall: ({ isSilent, isForceRunAfter }) =>
     Effect.try({
       try: () => autoUpdater.quitAndInstall(isSilent, isForceRunAfter),
-      catch: (cause) =>
-        new ElectronUpdaterError({ operation: "quit and install the update", cause }),
+      catch: (cause) => new ElectronUpdaterQuitAndInstallError({ cause }),
     }),
   on: (eventName, listener) => {
     const eventTarget = autoUpdater as unknown as {
