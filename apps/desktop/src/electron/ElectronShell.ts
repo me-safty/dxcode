@@ -1,3 +1,4 @@
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -55,11 +56,11 @@ export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string> {
 }
 
 function describeExternalUrl(externalUrl: string) {
-  const url = new URL(externalUrl);
+  const diagnostics = getUrlDiagnostics(externalUrl);
   return {
-    urlHostname: url.hostname,
-    urlLength: externalUrl.length,
-    urlProtocol: url.protocol,
+    urlHostname: diagnostics.hostname ?? "",
+    urlLength: diagnostics.inputLength,
+    urlProtocol: diagnostics.protocol ?? "",
   };
 }
 
