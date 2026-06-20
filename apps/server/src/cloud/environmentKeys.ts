@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -92,7 +92,7 @@ export const getOrCreateEnvironmentKeyPairFromSecretStore = Effect.fn(function* 
     });
   }
 
-  const keyPair = generateKeyPairSync("ed25519", {
+  const keyPair = NodeCrypto.generateKeyPairSync("ed25519", {
     privateKeyEncoding: { format: "pem", type: "pkcs8" },
     publicKeyEncoding: { format: "pem", type: "spki" },
   });
