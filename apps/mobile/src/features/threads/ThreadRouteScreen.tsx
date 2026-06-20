@@ -8,7 +8,7 @@ import {
   type ProviderInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
+import { projectScriptCwd } from "@t3tools/shared/projectScripts";
 import { Pressable, ScrollView, Text as RNText, View } from "react-native";
 import { useWorkspaceState } from "../../state/workspace";
 import { useThemeColor } from "../../lib/useThemeColor";
@@ -286,10 +286,6 @@ export function ThreadRouteScreen() {
         project: { cwd: selectedThreadProject.workspaceRoot },
         worktreePath: preferredWorktreePath,
       });
-      const env = projectScriptRuntimeEnv({
-        project: { cwd: selectedThreadProject.workspaceRoot },
-        worktreePath: preferredWorktreePath,
-      });
       stagePendingTerminalLaunch({
         target: {
           environmentId: selectedThread.environmentId,
@@ -299,7 +295,6 @@ export function ThreadRouteScreen() {
         launch: {
           cwd,
           worktreePath: preferredWorktreePath,
-          env,
           initialInput: `${script.command}\r`,
         },
       });

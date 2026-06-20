@@ -71,6 +71,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { mergeProviderSessionEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
@@ -1344,9 +1345,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
   const crypto = yield* Crypto.Crypto;
-  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
-    Effect.provideService(Path.Path, path),
-  );
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -3088,6 +3086,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const startedAt = yield* nowIso;
+      const providerSessionEnvironment = mergeProviderSessionEnvironment(
+        options?.environment,
+        input.env,
+      );
+      const claudeEnvironment = yield* makeClaudeEnvironment(
+        claudeSettings,
+        providerSessionEnvironment,
+      ).pipe(Effect.provideService(Path.Path, path));
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
