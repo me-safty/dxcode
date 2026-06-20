@@ -29,6 +29,26 @@ it.effect("preserves unexpected FileFinder creation failures", () =>
   }),
 );
 
+it.effect("keeps returned FileFinder creation diagnostics out of the cause chain", () =>
+  Effect.gen(function* () {
+    vi.spyOn(FileFinder, "create").mockReturnValueOnce({
+      ok: false,
+      error: "native index rejected the directory",
+    });
+
+    const error = yield* Effect.flip(
+      Effect.scoped(WorkspaceSearchIndex.make("/workspace/project")),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "WorkspaceSearchIndexCreateFailed",
+      cwd: "/workspace/project",
+      reason: "native index rejected the directory",
+    });
+    expect(error.cause).toBeUndefined();
+  }),
+);
+
 it.effect("preserves search and refresh failures with operation context", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -64,6 +84,39 @@ it.effect("preserves search and refresh failures with operation context", () =>
         reason: "FileFinder.scanFiles threw unexpectedly.",
         cause: refreshCause,
       });
+    }),
+  ),
+);
+
+it.effect("keeps returned search diagnostics out of the cause chain", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const finder = {
+        destroy: vi.fn(),
+        isScanning: vi.fn(() => false),
+        mixedSearch: vi.fn(() => ({ ok: false, error: "native query rejected" })),
+        scanFiles: vi.fn(() => ({ ok: false, error: "native refresh rejected" })),
+      } as unknown as FileFinder;
+      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+
+      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
+      const searchError = yield* Effect.flip(searchIndex.search("needle", 3));
+      const refreshError = yield* Effect.flip(searchIndex.refresh());
+
+      expect(searchError).toMatchObject({
+        _tag: "WorkspaceSearchIndexSearchFailed",
+        cwd: "/workspace/project",
+        query: "needle",
+        pageSize: 4,
+        reason: "native query rejected",
+      });
+      expect(searchError.cause).toBeUndefined();
+      expect(refreshError).toMatchObject({
+        _tag: "WorkspaceSearchIndexRefreshFailed",
+        cwd: "/workspace/project",
+        reason: "native refresh rejected",
+      });
+      expect(refreshError.cause).toBeUndefined();
     }),
   ),
 );

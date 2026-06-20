@@ -23,7 +23,7 @@ export class WorkspaceSearchIndexCreateFailed extends Schema.TaggedErrorClass<Wo
   {
     cwd: Schema.String,
     reason: Schema.String,
-    cause: Schema.Defect(),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -50,7 +50,7 @@ export class WorkspaceSearchIndexSearchFailed extends Schema.TaggedErrorClass<Wo
     query: Schema.String,
     pageSize: Schema.Number,
     reason: Schema.String,
-    cause: Schema.Defect(),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -63,7 +63,7 @@ export class WorkspaceSearchIndexRefreshFailed extends Schema.TaggedErrorClass<W
   {
     cwd: Schema.String,
     reason: Schema.String,
-    cause: Schema.Defect(),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -179,7 +179,6 @@ const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (c
   return yield* new WorkspaceSearchIndexCreateFailed({
     cwd,
     reason: result.error,
-    cause: result.error,
   });
 });
 
@@ -236,7 +235,6 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (cwd: strin
         query,
         pageSize,
         reason: result.error,
-        cause: result.error,
       });
     }
     return result.value;
@@ -258,7 +256,6 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (cwd: strin
       return yield* new WorkspaceSearchIndexRefreshFailed({
         cwd,
         reason: result.error,
-        cause: result.error,
       });
     }
     yield* waitForScan(
