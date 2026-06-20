@@ -59,7 +59,8 @@ const logVcsProjectConfigError = (error: VcsProjectConfigError) =>
     operation: error.operation,
     cwd: error.cwd,
     configPath: error.configPath,
-    cause: error,
+    errorTag: error._tag,
+    stack: error.stack,
   });
 
 export const make = Effect.gen(function* () {

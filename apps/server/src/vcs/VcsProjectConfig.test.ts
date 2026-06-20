@@ -103,8 +103,9 @@ describe("VcsProjectConfig", () => {
           operation: "inspect",
           cwd,
           configPath: failedCandidate,
+          errorTag: "VcsProjectConfigError",
         });
-        assert.instanceOf(context.cause, VcsProjectConfig.VcsProjectConfigError);
+        assert.equal("cause" in context, false);
       }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
     });
   });
@@ -154,8 +155,9 @@ describe("VcsProjectConfig", () => {
           operation: "decode",
           cwd: root,
           configPath: path.join(configDir, "vcs.json"),
+          errorTag: "VcsProjectConfigError",
         });
-        assert.instanceOf(context.cause, VcsProjectConfig.VcsProjectConfigError);
+        assert.equal("cause" in context, false);
       }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
     });
   });
@@ -186,8 +188,9 @@ describe("VcsProjectConfig", () => {
           operation: "read",
           cwd: root,
           configPath,
+          errorTag: "VcsProjectConfigError",
         });
-        assert.instanceOf(context.cause, VcsProjectConfig.VcsProjectConfigError);
+        assert.equal("cause" in context, false);
       }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
     });
   });
