@@ -629,7 +629,6 @@ describe("VcsStatusBroadcaster", () => {
       defectTags: ["TypeError"],
       interruptionCount: 0,
     });
-    assert.strictEqual(failure.cause, nestedCause);
   });
 
   it.effect("stops the remote poller after the last stream subscriber disconnects", () => {

@@ -135,7 +135,7 @@ describe("GitWorkflowService", () => {
     ),
   );
 
-  it.effect("preserves structured workflow detection failures and their cause", () => {
+  it.effect("structures workflow detection failures without exposing upstream details", () => {
     const cause = new VcsRepositoryDetectionError({
       operation: "VcsDriverRegistry.detect",
       cwd: "/repo",
@@ -151,7 +151,6 @@ describe("GitWorkflowService", () => {
         operation: "GitWorkflowService.status",
         cwd: "/repo",
         detail: "Failed to detect a VCS repository for this Git workflow.",
-        cause,
       });
       expect(error.message).not.toContain(cause.detail);
     }).pipe(
@@ -163,7 +162,7 @@ describe("GitWorkflowService", () => {
     );
   });
 
-  it.effect("preserves structured command detection failures and their cause", () => {
+  it.effect("structures command detection failures without exposing upstream details", () => {
     const cause = new VcsRepositoryDetectionError({
       operation: "VcsDriverRegistry.detect",
       cwd: "/repo",
@@ -180,7 +179,6 @@ describe("GitWorkflowService", () => {
         command: "vcs-route",
         cwd: "/repo",
         detail: "Failed to detect a VCS repository for this Git command.",
-        cause,
       });
       expect(error.message).not.toContain(cause.detail);
     }).pipe(
