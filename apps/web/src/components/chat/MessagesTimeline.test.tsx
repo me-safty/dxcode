@@ -394,6 +394,72 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("Completed in");
   });
 
+  it("falls back to parent turn matching when the child item id is absent", async () => {
+    const childThreadId = ThreadId.make("subagent-child-1");
+    const parentTurnId = TurnId.make("turn-followup");
+    storeMock.state = {
+      threadShellByKey: {
+        [`${ACTIVE_THREAD_ENVIRONMENT_ID}\0${childThreadId}`]: {
+          id: childThreadId,
+          title: "Say hi briefly",
+          parentRelation: {
+            kind: "subagent",
+            rootThreadId: ThreadId.make("thread-1"),
+            parentThreadId: ThreadId.make("thread-1"),
+            parentTurnId,
+            parentItemId: "call-send-input",
+            parentActivitySequence: 2,
+            providerThreadId: "provider-child-1",
+            titleSeed: "Say hi in German",
+            depth: 1,
+            startedAt: "2026-03-17T19:12:35.000Z",
+            completedAt: null,
+            status: "running",
+          },
+        },
+      },
+    };
+
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        activeTurnInProgress={true}
+        latestTurn={{
+          turnId: parentTurnId,
+          state: "running",
+          startedAt: "2026-03-17T19:12:30.000Z",
+          completedAt: null,
+        }}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:30.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:30.000Z",
+              turnId: parentTurnId,
+              label: "Subagent",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              subagentChildren: [
+                {
+                  threadId: childThreadId,
+                  titleSeed: "Say hi in German",
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Subagent - Say hi briefly");
+    expect(markup).toContain("Working");
+    expect(markup).not.toContain("Completed in");
+  });
+
   it("does not reuse running subagent status for a different same-turn parent item", async () => {
     const childThreadId = ThreadId.make("subagent-child-1");
     const parentTurnId = TurnId.make("turn-followup");

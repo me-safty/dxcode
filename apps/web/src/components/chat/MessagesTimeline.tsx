@@ -1814,7 +1814,7 @@ const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
   const relationParentItemId = relation?.parentItemId ?? null;
   const relationParentTurnId = relation?.parentTurnId ?? null;
   const relationMatchesThisBlock =
-    props.parentItemId || relationParentItemId
+    props.parentItemId && relationParentItemId
       ? props.parentItemId === relationParentItemId
       : props.parentTurnId || relationParentTurnId
         ? props.parentTurnId === relationParentTurnId
