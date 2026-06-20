@@ -100,6 +100,41 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.deepStrictEqual(paths, ["complete.txt", "final.txt"]);
       }),
     );
+
+    it.effect("honors whitespace filtering for worktree and branch previews", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/whitespace"]);
+        yield* writeTextFile(cwd, "README.md", "#  test\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "change whitespace"]);
+        yield* writeTextFile(cwd, "README.md", "#   test\n");
+
+        const included = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          ignoreWhitespace: false,
+        });
+        const ignored = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          ignoreWhitespace: true,
+        });
+
+        assert.isNotEmpty(included.sources.find((source) => source.kind === "working-tree")?.diff);
+        assert.isNotEmpty(included.sources.find((source) => source.kind === "branch-range")?.diff);
+        assert.strictEqual(
+          ignored.sources.find((source) => source.kind === "working-tree")?.diff,
+          "",
+        );
+        assert.strictEqual(
+          ignored.sources.find((source) => source.kind === "branch-range")?.diff,
+          "",
+        );
+      }),
+    );
   });
 
   describe("repository status", () => {

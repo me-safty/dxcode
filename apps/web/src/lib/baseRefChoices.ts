@@ -45,3 +45,17 @@ export function buildBaseRefChoices(
 
   return [...pairedChoices, ...remoteOnlyChoices];
 }
+
+export function filterBaseRefChoices(
+  choices: ReadonlyArray<BaseRefChoice>,
+  query: string,
+): ReadonlyArray<BaseRefChoice> {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (normalizedQuery.length === 0) return choices;
+  return choices.filter(
+    (choice) =>
+      choice.label.toLocaleLowerCase().includes(normalizedQuery) ||
+      choice.local?.name.toLocaleLowerCase().includes(normalizedQuery) === true ||
+      choice.remote?.name.toLocaleLowerCase().includes(normalizedQuery) === true,
+  );
+}

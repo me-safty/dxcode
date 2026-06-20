@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { VcsRef } from "@t3tools/contracts";
-import { buildBaseRefChoices } from "./baseRefChoices";
+import { buildBaseRefChoices, filterBaseRefChoices } from "./baseRefChoices";
 
 function ref(name: string, remoteName?: string): VcsRef {
   return {
@@ -31,6 +31,22 @@ describe("buildBaseRefChoices", () => {
         local: null,
         remote: expect.objectContaining({ name: "upstream/main" }),
       }),
+    ]);
+  });
+});
+
+describe("filterBaseRefChoices", () => {
+  it("filters stale server results against the current query", () => {
+    const choices = buildBaseRefChoices(
+      [ref("main"), ref("feature/search")],
+      [ref("origin/main", "origin"), ref("origin/feature/search", "origin")],
+    );
+
+    expect(filterBaseRefChoices(choices, "SEARCH").map((choice) => choice.label)).toEqual([
+      "feature/search",
+    ]);
+    expect(filterBaseRefChoices(choices, "origin/main").map((choice) => choice.label)).toEqual([
+      "main",
     ]);
   });
 });

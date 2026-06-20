@@ -63,7 +63,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
-import { buildBaseRefChoices } from "../lib/baseRefChoices";
+import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
@@ -245,6 +245,14 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
   );
 
+  useEffect(() => {
+    if (!routeThreadRef || diffSelection.kind !== "turn") return;
+    useDiffPanelStore.getState().reconcileTurnSelection(
+      routeThreadRef,
+      orderedTurnDiffSummaries.map((summary) => summary.turnId),
+    );
+  }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef]);
+
   const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
@@ -309,6 +317,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
           input: {
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+            ignoreWhitespace: diffIgnoreWhitespace,
           },
         })
       : null,
@@ -325,6 +334,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
           input: {
             cwd: serverConfig.cwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+            ignoreWhitespace: diffIgnoreWhitespace,
           },
         })
       : null,
@@ -373,6 +383,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     localBranchRefs.data?.refs.filter((ref) => ref.name !== selectedGitSource?.headRef) ?? [],
     remoteBranchRefs.data?.refs ?? [],
   );
+  const matchingBaseRefChoices = filterBaseRefChoices(baseRefChoices, baseRefQuery);
   const valueForBaseRefChoice = (choice: (typeof baseRefChoices)[number]) =>
     selectedBaseRef && selectedBaseRef === choice.remote?.name
       ? selectedBaseRef
@@ -380,11 +391,12 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const baseRefItems = [AUTOMATIC_BASE_REF, ...baseRefChoices.map(valueForBaseRefChoice)];
   const filteredBaseRefItems = [
     ...(baseRefQuery.trim().length === 0 ? [AUTOMATIC_BASE_REF] : []),
-    ...baseRefChoices.map(valueForBaseRefChoice),
+    ...matchingBaseRefChoices.map(valueForBaseRefChoice),
   ];
   const gitDiff = selectedGitSource?.diff;
 
   const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff;
+  const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true;
   const isLoadingSelectedPatch = selectedTurn
     ? activeCheckpointDiff.isPending
     : branchDiffPreview.isPending;
@@ -733,7 +745,13 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         </div>
       ) : (
         <>
-          <div className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {isSelectedPatchTruncated && (
+              <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+                This diff was truncated because it exceeded the preview limit. The changes shown are
+                incomplete.
+              </p>
+            )}
             {selectedPatchError && !renderablePatch && (
               <div className="px-3">
                 <p className="mb-2 text-[11px] text-red-500/80">{selectedPatchError}</p>
@@ -761,7 +779,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
               )
             ) : renderablePatch.kind === "files" ? (
               <div
-                className="h-full min-h-0"
+                className="min-h-0 flex-1"
                 onClickCapture={(event) => {
                   const composedPath = event.nativeEvent.composedPath?.() ?? [];
                   const title = composedPath.find(
@@ -826,7 +844,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                 />
               </div>
             ) : (
-              <div className="h-full overflow-auto p-2">
+              <div className="min-h-0 flex-1 overflow-auto p-2">
                 <div className="space-y-2">
                   <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
                   <pre
