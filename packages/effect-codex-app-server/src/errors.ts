@@ -155,12 +155,41 @@ export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<Co
     operation: CodexAppServerProtocolParseOperation,
     method: Schema.optionalKey(Schema.String),
     detail: Schema.optionalKey(Schema.String),
+    issueCount: Schema.optionalKey(Schema.Number),
+    issueKinds: Schema.optionalKey(Schema.Array(CodexAppServerSchemaIssueKind)),
+    maximumPathDepth: Schema.optionalKey(Schema.Number),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
     const method = this.method === undefined ? "" : ` for method '${this.method}'`;
     return `Codex App Server protocol operation '${this.operation}' failed${method}.`;
+  }
+
+  static fromSchemaError(
+    operation: CodexAppServerProtocolParseOperation,
+    cause: Schema.SchemaError,
+  ) {
+    return new CodexAppServerProtocolParseError({
+      operation,
+      ...schemaIssueDiagnostics(cause.issue),
+      cause,
+    });
+  }
+
+  static fromRequestError(
+    operation: CodexAppServerProtocolParseOperation,
+    method: string,
+    cause: CodexAppServerRequestError,
+  ) {
+    return new CodexAppServerProtocolParseError({
+      operation,
+      method,
+      ...(cause.issueCount === undefined ? {} : { issueCount: cause.issueCount }),
+      ...(cause.issueKinds === undefined ? {} : { issueKinds: cause.issueKinds }),
+      ...(cause.maximumPathDepth === undefined ? {} : { maximumPathDepth: cause.maximumPathDepth }),
+      cause,
+    });
   }
 }
 

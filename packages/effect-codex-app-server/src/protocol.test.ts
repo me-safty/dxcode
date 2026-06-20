@@ -227,6 +227,39 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
     }),
   );
 
+  it.effect("logs decode failures without copying the cause or wire payload", () =>
+    Effect.gen(function* () {
+      const secret = "codex-wire-secret-sentinel";
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const events: Array<CodexProtocol.CodexAppServerProtocolLogEvent> = [];
+      const termination = yield* Deferred.make<CodexError.CodexAppServerError>();
+      yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio,
+        logIncoming: true,
+        logger: (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        onTermination: (error) => Deferred.succeed(termination, error).pipe(Effect.asVoid),
+      });
+
+      yield* Queue.offer(input, encoder.encode(`{"secret":"${secret}"\n`));
+      yield* Deferred.await(termination);
+
+      const event = events.find(({ stage }) => stage === "decode_failed");
+      assert.exists(event);
+      assert.equal(event.direction, "incoming");
+      const payload = event.payload as Record<string, unknown>;
+      assert.equal(payload.operation, "decode-wire-message");
+      assert.isNumber(payload.issueCount);
+      assert.isArray(payload.issueKinds);
+      assert.isNumber(payload.maximumPathDepth);
+      assert.equal("cause" in payload, false);
+      assert.equal("detail" in payload, false);
+      assert.notInclude(encodeUnknownJsonString(event), secret);
+    }),
+  );
+
   it.effect("classifies an input stream ending without inventing a cause", () =>
     Effect.gen(function* () {
       const { stdio, input } = yield* makeInMemoryStdio();

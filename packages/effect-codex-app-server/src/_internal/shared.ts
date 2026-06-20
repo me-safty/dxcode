@@ -65,13 +65,12 @@ export const decodeNotificationPayload = <A, I>(
   raw: unknown,
 ): Effect.Effect<A, CodexError.CodexAppServerProtocolParseError> =>
   decodeOptionalPayload(method, schema, raw).pipe(
-    Effect.mapError(
-      (error) =>
-        new CodexError.CodexAppServerProtocolParseError({
-          method,
-          operation: "decode-notification-payload",
-          cause: error,
-        }),
+    Effect.mapError((error) =>
+      CodexError.CodexAppServerProtocolParseError.fromRequestError(
+        "decode-notification-payload",
+        method,
+        error,
+      ),
     ),
   );
 

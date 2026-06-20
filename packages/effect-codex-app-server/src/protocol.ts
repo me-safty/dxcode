@@ -94,12 +94,8 @@ const encodeWireMessage = (
 ): Effect.Effect<string, CodexError.CodexAppServerProtocolParseError> =>
   encodeJsonString(message).pipe(
     Effect.map((encoded) => `${encoded}\n`),
-    Effect.mapError(
-      (cause) =>
-        new CodexError.CodexAppServerProtocolParseError({
-          operation: "encode-wire-message",
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      CodexError.CodexAppServerProtocolParseError.fromSchemaError("encode-wire-message", cause),
     ),
   );
 
@@ -107,12 +103,8 @@ const decodeWireMessage = (
   line: string,
 ): Effect.Effect<unknown, CodexError.CodexAppServerProtocolParseError> =>
   decodeJsonString(line).pipe(
-    Effect.mapError(
-      (cause) =>
-        new CodexError.CodexAppServerProtocolParseError({
-          operation: "decode-wire-message",
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      CodexError.CodexAppServerProtocolParseError.fromSchemaError("decode-wire-message", cause),
     ),
   );
 
@@ -330,8 +322,11 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             payload: {
               operation: error.operation,
               ...(error.method === undefined ? {} : { method: error.method }),
-              detail: error.detail,
-              cause: error.cause,
+              ...(error.issueCount === undefined ? {} : { issueCount: error.issueCount }),
+              ...(error.issueKinds === undefined ? {} : { issueKinds: error.issueKinds }),
+              ...(error.maximumPathDepth === undefined
+                ? {}
+                : { maximumPathDepth: error.maximumPathDepth }),
             },
           }),
         ),
