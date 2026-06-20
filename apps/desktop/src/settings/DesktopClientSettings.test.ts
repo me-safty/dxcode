@@ -105,6 +105,27 @@ describe("DesktopClientSettings", () => {
     ),
   );
 
+  it.effect("reports the failed client settings write operation and path", () =>
+    withClientSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopClientSettings.DesktopClientSettings;
+        yield* fileSystem.makeDirectory(environment.clientSettingsPath, { recursive: true });
+
+        const error = yield* settings.set(clientSettings).pipe(Effect.flip);
+        assert.instanceOf(error, DesktopClientSettings.DesktopClientSettingsWriteError);
+        assert.equal(error.operation, "replace-settings-file");
+        assert.equal(error.path, environment.clientSettingsPath);
+        assert.exists(error.cause);
+        assert.equal(
+          error.message,
+          `Desktop client settings write failed during replace-settings-file at ${environment.clientSettingsPath}.`,
+        );
+      }),
+    ),
+  );
+
   it.effect("loads lenient direct client settings documents", () =>
     withClientSettings(
       Effect.gen(function* () {

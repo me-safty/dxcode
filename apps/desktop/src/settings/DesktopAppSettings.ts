@@ -12,7 +12,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
@@ -62,15 +61,33 @@ const settingsChange = (settings: DesktopSettings, changed: boolean): DesktopSet
   changed,
 });
 
+const DesktopSettingsWriteOperation = Schema.Literals([
+  "create-temporary-file-name",
+  "encode-document",
+  "create-directory",
+  "write-temporary-file",
+  "replace-settings-file",
+]);
+type DesktopSettingsWriteOperation = typeof DesktopSettingsWriteOperation.Type;
+
 export class DesktopSettingsWriteError extends Schema.TaggedErrorClass<DesktopSettingsWriteError>()(
   "DesktopSettingsWriteError",
-  { cause: Schema.Defect() },
+  {
+    operation: DesktopSettingsWriteOperation,
+    path: Schema.String,
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
-    const detail = this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `Failed to write desktop settings: ${detail}`;
+    return `Desktop settings write failed during ${this.operation} at ${this.path}.`;
   }
 }
+
+const writeError = (
+  operation: DesktopSettingsWriteOperation,
+  path: string,
+  cause: unknown,
+): DesktopSettingsWriteError => new DesktopSettingsWriteError({ operation, path, cause });
 
 export class DesktopAppSettings extends Context.Service<
   DesktopAppSettings,
@@ -222,15 +239,23 @@ const writeSettings = Effect.fn("desktop.settings.writeSettings")(function* (inp
   readonly settings: DesktopSettings;
   readonly defaultSettings: DesktopSettings;
   readonly suffix: string;
-}): Effect.fn.Return<void, PlatformError.PlatformError | Schema.SchemaError> {
+}): Effect.fn.Return<void, DesktopSettingsWriteError> {
   const directory = input.path.dirname(input.settingsPath);
   const tempPath = `${input.settingsPath}.${process.pid}.${input.suffix}.tmp`;
   const encoded = yield* encodeDesktopSettingsJson(
     toDesktopSettingsDocument(input.settings, input.defaultSettings),
-  );
-  yield* input.fileSystem.makeDirectory(directory, { recursive: true });
-  yield* input.fileSystem.writeFileString(tempPath, `${encoded}\n`);
-  yield* input.fileSystem.rename(tempPath, input.settingsPath);
+  ).pipe(Effect.mapError((cause) => writeError("encode-document", input.settingsPath, cause)));
+  yield* input.fileSystem
+    .makeDirectory(directory, { recursive: true })
+    .pipe(Effect.mapError((cause) => writeError("create-directory", directory, cause)));
+  yield* input.fileSystem
+    .writeFileString(tempPath, `${encoded}\n`)
+    .pipe(Effect.mapError((cause) => writeError("write-temporary-file", tempPath, cause)));
+  yield* input.fileSystem
+    .rename(tempPath, input.settingsPath)
+    .pipe(
+      Effect.mapError((cause) => writeError("replace-settings-file", input.settingsPath, cause)),
+    );
 });
 
 export const make = Effect.gen(function* () {
@@ -251,6 +276,9 @@ export const make = Effect.gen(function* () {
 
       return crypto.randomUUIDv4.pipe(
         Effect.map((uuid) => uuid.replace(/-/g, "")),
+        Effect.mapError((cause) =>
+          writeError("create-temporary-file-name", environment.desktopSettingsPath, cause),
+        ),
         Effect.flatMap((suffix) =>
           writeSettings({
             fileSystem,
@@ -261,7 +289,6 @@ export const make = Effect.gen(function* () {
             suffix,
           }),
         ),
-        Effect.mapError((cause) => new DesktopSettingsWriteError({ cause })),
         Effect.as([settingsChange(nextSettings, true), nextSettings] as const),
       );
     });
