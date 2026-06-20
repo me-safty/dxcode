@@ -254,7 +254,8 @@ describe("LiveActivities", () => {
         userId: "user-1",
         deviceId: "device-1",
         cause,
-        message: "Failed to persist Live Activity registration for device device-1.",
+        message:
+          "Failed to persist Live Activity registration for user user-1 and device device-1.",
       });
       expect(targetListError).toMatchObject({
         userId: "user-1",
@@ -275,7 +276,7 @@ describe("LiveActivities", () => {
           deviceId: "device-1",
           kind,
           cause,
-          message: `Failed to persist Live Activity state during ${operation} for device device-1.`,
+          message: `Failed to persist Live Activity state during ${operation} for user user-1 and device device-1.`,
         });
       }
     }).pipe(

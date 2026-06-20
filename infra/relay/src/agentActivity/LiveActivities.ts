@@ -27,7 +27,7 @@ export class LiveActivityRegistrationPersistenceError extends Schema.TaggedError
   },
 ) {
   override get message(): string {
-    return `Failed to persist Live Activity registration for device ${this.deviceId}.`;
+    return `Failed to persist Live Activity registration for user ${this.userId} and device ${this.deviceId}.`;
   }
 }
 
@@ -59,7 +59,7 @@ export class LiveActivityDeliveryMarkPersistenceError extends Schema.TaggedError
   },
 ) {
   override get message(): string {
-    return `Failed to persist Live Activity state during ${this.operation} for device ${this.deviceId}.`;
+    return `Failed to persist Live Activity state during ${this.operation} for user ${this.userId} and device ${this.deviceId}.`;
   }
 }
 
