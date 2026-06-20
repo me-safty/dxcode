@@ -129,6 +129,35 @@ it.layer(NetService.layer)("NetService", (it) => {
       });
     });
 
+    it.effect("rejects missing and non-finite ports returned by the server", () =>
+      Effect.gen(function* () {
+        for (const invalidPort of [undefined, Number.NaN]) {
+          const probe = NodeNet.createServer();
+          probe.unref = (() => probe) as typeof probe.unref;
+          probe.address = (() => ({
+            address: "127.0.0.1",
+            family: "IPv4",
+            port: invalidPort,
+          })) as unknown as typeof probe.address;
+          probe.listen = ((_port: number, _host: string, listeningListener: () => void) => {
+            listeningListener();
+            return probe;
+          }) as typeof probe.listen;
+          probe.close = ((callback?: (cause?: Error) => void) => {
+            callback?.();
+            return probe;
+          }) as typeof probe.close;
+          const net = NetService.make({ createServer: () => probe });
+
+          const error = yield* net.reserveLoopbackPort().pipe(Effect.flip);
+
+          assert(isLoopbackPortAddressUnavailableError(error));
+          assert.equal(error.port, null);
+          assert.equal("cause" in error, false);
+        }
+      }),
+    );
+
     it.effect("isPortAvailableOnLoopback reports false for an occupied port", () =>
       Effect.acquireUseRelease(
         openServer("127.0.0.1"),

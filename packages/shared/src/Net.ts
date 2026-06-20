@@ -237,7 +237,10 @@ export const make = (
               ? {
                   address: address.address,
                   family: address.family,
-                  port: address.port,
+                  port:
+                    typeof address.port === "number" && Number.isFinite(address.port)
+                      ? address.port
+                      : null,
                 }
               : {
                   address,
@@ -247,7 +250,8 @@ export const make = (
           addressDetails = resolvedAddressDetails;
 
           probe.close((cause) => {
-            if (resolvedAddressDetails.port === null || resolvedAddressDetails.port <= 0) {
+            const port = resolvedAddressDetails.port;
+            if (port === null || !Number.isInteger(port) || port <= 0 || port > 65_535) {
               settle(
                 Effect.fail(
                   new LoopbackPortAddressUnavailableError({
@@ -264,14 +268,14 @@ export const make = (
                 Effect.fail(
                   new LoopbackPortReleaseError({
                     host,
-                    port: resolvedAddressDetails.port,
+                    port,
                     cause,
                   }),
                 ),
               );
               return;
             }
-            settle(Effect.succeed(resolvedAddressDetails.port));
+            settle(Effect.succeed(port));
           });
         });
       } catch (cause) {
