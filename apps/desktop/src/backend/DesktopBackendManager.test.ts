@@ -149,6 +149,23 @@ function makeManagerLayer(input: {
 }
 
 describe("DesktopBackendManager", () => {
+  it("preserves the complete restart cause and schedule context", () => {
+    const cause = Cause.combine(
+      Cause.fail(new Error("start failed")),
+      Cause.die(new Error("restart defect")),
+    );
+    const error = new DesktopBackendManager.DesktopBackendRestartError({
+      reason: "backend exited with code 1",
+      delayMs: 500,
+      cause,
+    });
+
+    assert.strictEqual(error.cause, cause);
+    assert.equal(error.reason, "backend exited with code 1");
+    assert.equal(error.delayMs, 500);
+    assert.equal(error.message, "Desktop backend restart failed after a scheduled 500ms delay.");
+  });
+
   it.effect("spawns the backend with fd3 bootstrap JSON and reports HTTP readiness", () =>
     Effect.gen(function* () {
       let spawnedCommand: ChildProcess.Command | undefined;

@@ -107,6 +107,19 @@ export class BackendProcessSpawnError extends Schema.TaggedErrorClass<BackendPro
   }
 }
 
+export class DesktopBackendRestartError extends Schema.TaggedErrorClass<DesktopBackendRestartError>()(
+  "DesktopBackendRestartError",
+  {
+    reason: Schema.String,
+    delayMs: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Desktop backend restart failed after a scheduled ${this.delayMs}ms delay.`;
+  }
+}
+
 export const BackendProcessError = Schema.Union([
   BackendProcessBootstrapEncodeError,
   BackendProcessSpawnError,
@@ -597,11 +610,17 @@ export const make = Effect.gen(function* () {
               }),
             ),
             Effect.flatMap((shouldRestart) => (shouldRestart ? start : Effect.void)),
-            Effect.catchCause((cause) =>
-              logBackendManagerError("desktop backend restart fiber failed", {
-                cause: Cause.pretty(cause),
-              }),
-            ),
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterruptsOnly(cause)) {
+                return Effect.void;
+              }
+              const error = new DesktopBackendRestartError({
+                reason,
+                delayMs: Duration.toMillis(delay),
+                cause,
+              });
+              return logBackendManagerError(error.message, { error });
+            }),
           ),
           parentScope,
         );
