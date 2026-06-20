@@ -86,7 +86,8 @@ describe("LocalApi", () => {
       _tag: "LocalExternalUrlOpenError",
       url: "https://example.com/pull/42",
       cause,
-      message: "Unable to open external URL https://example.com/pull/42 through the desktop bridge.",
+      message:
+        "Unable to open external URL https://example.com/pull/42 through the desktop bridge.",
     });
   });
 
