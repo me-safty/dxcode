@@ -6,9 +6,15 @@ import type {
   FileDiffMetadata,
   SelectedLineRange,
 } from "@pierre/diffs";
-import { CodeView, type CodeViewProps, FileDiff, type FileDiffProps } from "@pierre/diffs/react";
+import {
+  CodeView,
+  type CodeViewHandle,
+  type CodeViewProps,
+  FileDiff,
+  type FileDiffProps,
+} from "@pierre/diffs/react";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode, type Ref } from "react";
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { fnv1a32 } from "~/lib/diffRendering";
@@ -34,6 +40,7 @@ interface DiffCommentAnnotationGroup {
 }
 
 type DiffCommentLineAnnotation = DiffLineAnnotation<DiffCommentAnnotationGroup>;
+export type AnnotatableCodeViewHandle = CodeViewHandle<DiffCommentAnnotationGroup>;
 const EMPTY_REVIEW_COMMENTS: ReadonlyArray<ReviewCommentContext> = [];
 
 function annotationSide(range: SelectedLineRange): AnnotationSide {
@@ -252,6 +259,7 @@ interface AnnotatableCodeViewProps {
   sectionTitle: string;
   composerDraftTarget: ScopedThreadRef | DraftId;
   options: NonNullable<CodeViewProps<DiffCommentAnnotationGroup>["options"]>;
+  viewerRef?: Ref<AnnotatableCodeViewHandle>;
   className?: string;
   renderHeaderPrefix: (
     fileDiff: FileDiffMetadata,
@@ -270,6 +278,7 @@ export function AnnotatableCodeView({
   sectionTitle,
   composerDraftTarget,
   options,
+  viewerRef,
   className,
   renderHeaderPrefix,
 }: AnnotatableCodeViewProps) {
@@ -401,6 +410,7 @@ export function AnnotatableCodeView({
   const hasOpenComment = draft !== null;
   return (
     <CodeView<DiffCommentAnnotationGroup>
+      {...(viewerRef ? { ref: viewerRef } : {})}
       {...(className ? { className } : {})}
       items={items}
       selectedLines={selectedLines}

@@ -1,6 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useParams } from "@tanstack/react-router";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -23,7 +22,7 @@ import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { cn } from "~/lib/utils";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
 import { useTheme } from "../hooks/useTheme";
 import {
   buildFileDiffRenderKey,
@@ -34,11 +33,11 @@ import {
 } from "../lib/diffRendering";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject, useThread } from "../state/entities";
-import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
+import { resolveThreadRouteRef } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
-import { AnnotatableCodeView } from "./diffs/AnnotatableFileDiff";
+import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableFileDiff";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
 import {
@@ -183,7 +182,6 @@ interface DiffPanelProps {
 export { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 
 export default function DiffPanel({ mode = "inline", composerDraftTarget }: DiffPanelProps) {
-  const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
   const settings = useSettings();
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
@@ -194,14 +192,14 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     scopeKey: null,
     fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
   }));
-  const patchViewportRef = useRef<HTMLDivElement>(null);
-  const previousDiffOpenRef = useRef(false);
+  const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
   });
-  const diffSearch = useSearch({ strict: false, select: (search) => parseDiffRouteSearch(search) });
-  const diffOpen = diffSearch.diff === "1";
+  const diffSelection = useDiffPanelStore((state) =>
+    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
+  );
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const activeThread = useThread(routeThreadRef);
   const activeProjectId = activeThread?.projectId ?? null;
@@ -247,10 +245,12 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
   );
 
-  const selectedTurnId = diffSearch.diffTurnId ?? null;
-  const selectedGitScope = diffSearch.diffScope === "unstaged" ? "unstaged" : "branch";
-  const selectedBaseRef = diffSearch.diffBaseRef;
-  const selectedFilePath = selectedTurnId !== null ? (diffSearch.diffFilePath ?? null) : null;
+  const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
+  const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
+  const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
+  const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
+  const selectedFileRevealRequestId =
+    diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
   const selectedTurn =
     selectedTurnId === null
       ? undefined
@@ -424,22 +424,11 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   );
 
   useEffect(() => {
-    if (diffOpen && !previousDiffOpenRef.current) {
-      setDiffWordWrap(settings.diffWordWrap);
-      setDiffIgnoreWhitespace(settings.diffIgnoreWhitespace);
-    }
-    previousDiffOpenRef.current = diffOpen;
-  }, [diffOpen, settings.diffIgnoreWhitespace, settings.diffWordWrap]);
-
-  useEffect(() => {
-    if (!selectedFilePath || !patchViewportRef.current) {
-      return;
-    }
-    const target = Array.from(
-      patchViewportRef.current.querySelectorAll<HTMLElement>("[data-diff-file-path]"),
-    ).find((element) => element.dataset.diffFilePath === selectedFilePath);
-    target?.scrollIntoView({ block: "nearest" });
-  }, [selectedFilePath, renderableFiles]);
+    if (!selectedFilePath) return;
+    const file = codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath);
+    if (!file) return;
+    codeViewRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
+  }, [codeViewFiles, selectedFilePath, selectedFileRevealRequestId]);
 
   const openDiffFile = useCallback(
     (filePath: string) => {
@@ -475,37 +464,16 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   );
 
   const selectTurn = (turnId: TurnId) => {
-    if (!activeThread) return;
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1", diffTurnId: turnId };
-      },
-    });
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectTurn(routeThreadRef, turnId);
   };
   const selectGitScope = (scope: "branch" | "unstaged") => {
-    if (!activeThread) return;
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1", ...(scope === "unstaged" ? { diffScope: scope } : {}) };
-      },
-    });
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectGitScope(routeThreadRef, scope);
   };
   const selectBranchBaseRef = (baseRef: string | null) => {
-    if (!activeThread) return;
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1", ...(baseRef ? { diffBaseRef: baseRef } : {}) };
-      },
-    });
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
 
   const headerRow = (
@@ -765,10 +733,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         </div>
       ) : (
         <>
-          <div
-            ref={patchViewportRef}
-            className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden"
-          >
+          <div className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden">
             {selectedPatchError && !renderablePatch && (
               <div className="px-3">
                 <p className="mb-2 text-[11px] text-red-500/80">{selectedPatchError}</p>
@@ -808,6 +773,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                 }}
               >
                 <AnnotatableCodeView
+                  viewerRef={codeViewRef}
                   key={collapseScopeKey ?? reviewSectionId}
                   className="diff-render-surface h-full min-h-0 overflow-auto"
                   files={codeViewFiles}
