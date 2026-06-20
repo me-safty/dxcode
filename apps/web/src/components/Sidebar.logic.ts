@@ -40,6 +40,7 @@ type SidebarThreadVisibilityInput = {
     | {
         readonly kind: string;
         readonly parentThreadId?: string | undefined;
+        readonly parentActivitySequence?: number | undefined;
         readonly depth?: number | undefined;
         readonly status?: string | undefined;
       }
@@ -371,12 +372,31 @@ function activeSubagentPathThreadIds<T extends SidebarThreadVisibilityInput>(
   return path;
 }
 
+function compareSubagentSidebarRows<T extends SidebarThreadVisibilityInput>(
+  left: SidebarThreadRowModel<T>,
+  right: SidebarThreadRowModel<T>,
+): number {
+  const leftRelation =
+    left.thread.parentRelation?.kind === "subagent" ? left.thread.parentRelation : null;
+  const rightRelation =
+    right.thread.parentRelation?.kind === "subagent" ? right.thread.parentRelation : null;
+  const sequence =
+    (leftRelation?.parentActivitySequence ?? 0) - (rightRelation?.parentActivitySequence ?? 0);
+  if (sequence !== 0) {
+    return sequence;
+  }
+  return left.thread.id.localeCompare(right.thread.id);
+}
+
 export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
   threads: readonly T[],
   activeThreadId: string | null | undefined,
 ): SidebarThreadRowModel<T>[] {
   const rootRows: SidebarThreadRowModel<T>[] = [];
-  const childRowsByParentId = new Map<string, SidebarThreadRowModel<T>[]>();
+  const childRowsByParentId = new Map<
+    string,
+    { row: SidebarThreadRowModel<T>; visible: boolean }[]
+  >();
   const orphanChildRows: SidebarThreadRowModel<T>[] = [];
   const activePathThreadIds = activeSubagentPathThreadIds(threads, activeThreadId);
 
@@ -385,44 +405,53 @@ export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
       rootRows.push({ thread, indentLevel: 0 });
       continue;
     }
-    if (
-      !activePathThreadIds.has(thread.id) &&
-      !isContextualSubagentSidebarThread(thread, activeThreadId)
-    ) {
-      continue;
-    }
+    const visible =
+      activePathThreadIds.has(thread.id) ||
+      isContextualSubagentSidebarThread(thread, activeThreadId);
 
     const indentLevel = Math.max(1, thread.parentRelation?.depth ?? 1);
     const row = { thread, indentLevel };
     const parentThreadId = thread.parentRelation?.parentThreadId;
     if (!parentThreadId) {
-      orphanChildRows.push(row);
+      if (visible) {
+        orphanChildRows.push(row);
+      }
       continue;
     }
     const existing = childRowsByParentId.get(parentThreadId);
     if (existing) {
-      existing.push(row);
+      existing.push({ row, visible });
     } else {
-      childRowsByParentId.set(parentThreadId, [row]);
+      childRowsByParentId.set(parentThreadId, [{ row, visible }]);
     }
+  }
+  for (const children of childRowsByParentId.values()) {
+    children.sort((left, right) => compareSubagentSidebarRows(left.row, right.row));
   }
 
   const rows: SidebarThreadRowModel<T>[] = [];
   const renderedChildThreadIds = new Set<string>();
   const appendRow = (row: SidebarThreadRowModel<T>) => {
     rows.push(row);
+    appendChildren(row);
+  };
+  const appendChildren = (row: SidebarThreadRowModel<T>) => {
     const childRows = childRowsByParentId.get(row.thread.id) ?? [];
-    for (const childRow of childRows) {
-      renderedChildThreadIds.add(childRow.thread.id);
-      appendRow(childRow);
+    for (const child of childRows) {
+      renderedChildThreadIds.add(child.row.thread.id);
+      if (child.visible) {
+        appendRow(child.row);
+      } else {
+        appendChildren(child.row);
+      }
     }
   };
   for (const row of rootRows) {
     appendRow(row);
   }
-  for (const row of [...childRowsByParentId.values()].flat()) {
-    if (!renderedChildThreadIds.has(row.thread.id)) {
-      appendRow(row);
+  for (const child of [...childRowsByParentId.values()].flat()) {
+    if (child.visible && !renderedChildThreadIds.has(child.row.thread.id)) {
+      appendRow(child.row);
     }
   }
   rows.push(...orphanChildRows);

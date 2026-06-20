@@ -120,6 +120,46 @@ beforeEach(() => {
   };
 });
 
+describe("subagentRelationMatchesBlock", () => {
+  it("requires matching turn ids when matching reusable parent item ids", async () => {
+    const { subagentRelationMatchesBlock } = await import("./MessagesTimeline");
+
+    expect(
+      subagentRelationMatchesBlock({
+        parentItemId: "call-send-input",
+        parentTurnId: TurnId.make("turn-newer"),
+        relationParentItemId: "call-send-input",
+        relationParentTurnId: TurnId.make("turn-older"),
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps matching parent item ids when the work-log turn id is missing", async () => {
+    const { subagentRelationMatchesBlock } = await import("./MessagesTimeline");
+
+    expect(
+      subagentRelationMatchesBlock({
+        parentItemId: "call-send-input",
+        parentTurnId: null,
+        relationParentItemId: "call-send-input",
+        relationParentTurnId: TurnId.make("turn-followup"),
+      }),
+    ).toBe(true);
+  });
+
+  it("falls back to turn matching when either parent item id is absent", async () => {
+    const { subagentRelationMatchesBlock } = await import("./MessagesTimeline");
+
+    expect(
+      subagentRelationMatchesBlock({
+        parentTurnId: TurnId.make("turn-followup"),
+        relationParentItemId: "call-send-input",
+        relationParentTurnId: TurnId.make("turn-followup"),
+      }),
+    ).toBe(true);
+  });
+});
+
 function buildProps() {
   return {
     isWorking: false,
@@ -647,7 +687,7 @@ describe("MessagesTimeline", () => {
     );
   });
 
-  it("renders a deduped resumed subagent block as working when the parent turn matches", async () => {
+  it("does not reuse running subagent status for a different same-turn parent item", async () => {
     const childThreadId = ThreadId.make("subagent-child-1");
     const parentTurnId = TurnId.make("turn-followup");
     storeMock.state = {
@@ -714,8 +754,8 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Subagent - Say hi briefly");
-    expect(markup).toContain("Working");
-    expect(markup).not.toContain("Completed in");
+    expect(markup).not.toContain("Working");
+    expect(markup).toContain("duration unknown");
   });
 
   it("renders file review comments as source code instead of diffs", async () => {

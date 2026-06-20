@@ -13,9 +13,9 @@ Concrete conflict notes from this merge:
 
 ## Latest Worktree Port
 
-Generated from local `main` at `3782fa712` after a PR-comment pass and follow-up port inspection across active worktrees `fix/codex-skills`, `split/file-command-activity-boxes`, `split/subagent-threading-work`, `split/terminal-backed-project-actions`, `fix/thread-detail-subscription-race`, `split/version-control-panel-work`, and `split/vscode-extension-work`.
+Generated from local `main` at `29d667b96` after a PR-comment pass and follow-up port inspection across active worktrees `fix/codex-skills`, `split/file-command-activity-boxes`, `split/subagent-threading-work`, `split/terminal-backed-project-actions`, `fix/thread-detail-subscription-race`, `split/version-control-panel-work`, and `split/vscode-extension-work`.
 
-The port retained only targeted branch-local fixes that were absent from `main`: command output extraction and merge hardening for blank-only streams, whitespace-only incremental chunks, split chunks, and shorter completed/updated snapshots; terminal-backed project action terminal id collision fixes and conservative busy detection when POSIX process-tree inspection is incomplete; subagent parent metadata propagation, parent-collab child-shell synthesis, child-stop no-root-fallback behavior, resumed-child parent block de-duplication, and active terminal subagent sidebar path visibility; Version Control panel fixes for default compare refs, non-current diverged merge sync, discard failure surfacing, fallback rename parsing, merged staged-plus-unstaged row stats, and late-month relative dates; and related `SOURCE_CONTROL.md` and `SUBAGENTS.md` documentation refreshes. The workspace-scoped skill-loading, thread-detail subscription race, and VS Code extension worktrees had no additional production code to port because their useful behavior was already represented on `main`. Do not replay split worktrees wholesale: several remaining diffs are stale branch shape or would regress newer `main` behavior.
+The port retained only targeted branch-local fixes that were absent from `main`: command output extraction and merge hardening for blank-only streams, whitespace-only incremental chunks, split chunks, shorter completed/updated snapshots, and shorter single-line repeated-prefix snapshots; terminal-backed project action terminal id collision fixes, fallback action terminal labels such as `Action: build (2)`, and conservative busy detection when POSIX process-tree inspection is incomplete; subagent parent metadata propagation, parent-collab child-shell synthesis, child-stop no-root-fallback behavior, resumed-child parent block de-duplication, item/turn-aware live-status matching, hidden terminal ancestor traversal, and active route subagent sidebar path visibility; Version Control panel fixes for default compare refs, non-current diverged merge sync, discard failure surfacing, fallback rename parsing, merged staged-plus-unstaged row stats, and late-month relative dates; and related `SOURCE_CONTROL.md` and `SUBAGENTS.md` documentation refreshes. The workspace-scoped skill-loading, thread-detail subscription race, and VS Code extension worktrees had no additional production code to port because their useful behavior was already represented on `main`. Do not replay split worktrees wholesale: several remaining diffs are stale branch shape or would regress newer `main` behavior.
 
 ## Debug Browser Launch
 
@@ -104,7 +104,7 @@ Expected behavior:
 - Differing raw command text is rendered inline as a normal detail block in the expanded row, not hidden behind a second nested disclosure.
 - Stdout and stderr show only the last 40 lines by default when longer than 40 lines; clicking either output block toggles the full stream.
 - Command output extraction ignores blank-only completed stdout/stderr fallbacks so aggregated command output is still shown, but preserves whitespace-only incremental `tool.updated` chunks, including raw output `content`, so streamed output is not collapsed away.
-- Incremental command output chunks concatenate without injected separators, while shorter completed snapshots and newline-terminated shorter updated snapshots do not overwrite a previously merged longer output snapshot.
+- Incremental command output chunks concatenate without injected separators, while shorter completed snapshots, newline-terminated shorter updated snapshots, and shorter single-line repeated-prefix snapshots do not overwrite a previously merged longer output snapshot.
 
 Primary files:
 
@@ -166,6 +166,7 @@ Expected behavior:
 - If the selected reusable terminal is busy running a subprocess, the action may choose another action terminal rather than injecting input into a live process.
 - The readiness wait uses the current terminal session summary when available, and otherwise attaches to the terminal stream and waits briefly for prompt-like output before writing. If the prompt is never observed, the wait times out and the action still writes rather than hanging indefinitely.
 - Action terminal ids encode script ids and reserve numeric `:<suffix>` ids for fallback terminals, so script ids such as `build-2` or legacy colon ids such as `build:dev` cannot be mistaken for fallback terminals of another action.
+- Fallback action terminal tabs include their instance suffix in parentheses, such as `Action: build (2)`, while script ids that naturally end in digits, such as `build-2`, keep readable labels such as `Action: build 2`.
 - POSIX subprocess detection is conservative when full process-tree inspection fails: a shell child is treated as busy rather than idle so commands are not injected into a terminal that may still have a hidden descendant process.
 
 Primary files:

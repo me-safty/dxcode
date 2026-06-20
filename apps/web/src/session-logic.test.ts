@@ -1325,6 +1325,48 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.stdout).toBe("line 1\nline 2\n");
   });
 
+  it("keeps previously merged command output when updated output is a shorter repeated prefix", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "Hello World",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-tool-output-update-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "command-1",
+            command: "vp test",
+            rawOutput: {
+              stdout: "Hello",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.stdout).toBe("Hello World");
+  });
+
   it("concatenates non-matching incremental command output chunks", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
