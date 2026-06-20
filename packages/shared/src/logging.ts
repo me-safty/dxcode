@@ -98,15 +98,15 @@ export class RotatingFileSink {
         this.rotate();
       }
     } catch (cause) {
+      if (isRotatingFileSinkError(cause)) {
+        throw cause;
+      }
       if (this.throwOnError) {
         throw new RotatingFileSinkError({
           operation: "write",
           filePath: this.filePath,
           cause,
         });
-      }
-      if (isRotatingFileSinkError(cause)) {
-        throw cause;
       }
       this.currentSize = this.readCurrentSize();
     }

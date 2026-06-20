@@ -108,7 +108,7 @@ describe("RotatingFileSink", () => {
     expect((thrown as RotatingFileSinkError).cause).toMatchObject({ code: "EISDIR" });
   });
 
-  it("retains the complete write and rotation failure chain", () => {
+  it("preserves rotation failures without an artificial write wrapper", () => {
     const directory = makeTempDirectory();
     const filePath = NodePath.join(directory, "log.ndjson");
     NodeFS.writeFileSync(filePath, "a");
@@ -123,11 +123,8 @@ describe("RotatingFileSink", () => {
     const thrown = captureError(() => sink.write("b"));
 
     expect(thrown).toBeInstanceOf(RotatingFileSinkError);
-    expect(thrown).toMatchObject({ operation: "write", filePath });
-    const rotationError = (thrown as RotatingFileSinkError).cause;
-    expect(rotationError).toBeInstanceOf(RotatingFileSinkError);
-    expect(rotationError).toMatchObject({ operation: "rotate", filePath });
-    expect((rotationError as RotatingFileSinkError).cause).toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({ operation: "rotate", filePath });
+    expect((thrown as RotatingFileSinkError).cause).toBeInstanceOf(Error);
   });
 
   it("preserves backup pruning failures", () => {
