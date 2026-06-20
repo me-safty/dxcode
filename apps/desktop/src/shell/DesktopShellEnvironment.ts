@@ -3,6 +3,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
@@ -18,6 +19,35 @@ interface ShellEnvironmentConfig {
 
 interface WindowsProbeOptions {
   readonly loadProfile: boolean;
+}
+
+const desktopShellEnvironmentCommandFields = {
+  command: Schema.String,
+  args: Schema.Array(Schema.String),
+};
+
+export class DesktopShellEnvironmentCommandError extends Schema.TaggedErrorClass<DesktopShellEnvironmentCommandError>()(
+  "DesktopShellEnvironmentCommandError",
+  {
+    ...desktopShellEnvironmentCommandFields,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Desktop shell environment command ${this.command} failed.`;
+  }
+}
+
+export class DesktopShellEnvironmentCommandTimeoutError extends Schema.TaggedErrorClass<DesktopShellEnvironmentCommandTimeoutError>()(
+  "DesktopShellEnvironmentCommandTimeoutError",
+  {
+    ...desktopShellEnvironmentCommandFields,
+    timeoutMs: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Desktop shell environment command ${this.command} timed out after ${this.timeoutMs}ms.`;
+  }
 }
 
 export class DesktopShellEnvironment extends Context.Service<
@@ -127,6 +157,16 @@ const knownWindowsCliDirs = (env: NodeJS.ProcessEnv): ReadonlyArray<string> => [
 const startMarker = (name: string) => `__T3CODE_ENV_${name}_START__`;
 const endMarker = (name: string) => `__T3CODE_ENV_${name}_END__`;
 
+const logShellEnvironmentCommandError = (
+  error: DesktopShellEnvironmentCommandError | DesktopShellEnvironmentCommandTimeoutError,
+) =>
+  Effect.logWarning(error).pipe(
+    Effect.annotateLogs({
+      component: "desktop-shell-environment",
+      error,
+    }),
+  );
+
 const capturePosixEnvironmentCommand = (names: ReadonlyArray<string>) =>
   names
     .map((name) => {
@@ -181,7 +221,7 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
   readonly shell?: boolean;
 }): Effect.fn.Return<string, never, ChildProcessSpawner.ChildProcessSpawner> {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  return yield* spawner
+  const output = yield* spawner
     .string(
       ChildProcess.make(input.command, input.args, {
         shell: input.shell ?? false,
@@ -193,10 +233,31 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
       }),
     )
     .pipe(
+      Effect.mapError(
+        (cause) =>
+          new DesktopShellEnvironmentCommandError({
+            command: input.command,
+            args: input.args,
+            cause,
+          }),
+      ),
+      Effect.catchTags({
+        DesktopShellEnvironmentCommandError: (error) =>
+          logShellEnvironmentCommandError(error).pipe(Effect.as("")),
+      }),
       Effect.timeoutOption(input.timeout),
-      Effect.map(Option.getOrElse(() => "")),
-      Effect.orElseSucceed(() => ""),
     );
+  if (Option.isSome(output)) {
+    return output.value;
+  }
+
+  const error = new DesktopShellEnvironmentCommandTimeoutError({
+    command: input.command,
+    args: input.args,
+    timeoutMs: Duration.toMillis(input.timeout),
+  });
+  yield* logShellEnvironmentCommandError(error);
+  return "";
 });
 
 const readLoginShellEnvironment = (
