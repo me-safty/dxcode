@@ -88,15 +88,6 @@ export class TailscaleStatusParseError extends Schema.TaggedErrorClass<Tailscale
   }
 }
 
-export class TailscaleUnavailableError extends Schema.TaggedErrorClass<TailscaleUnavailableError>()(
-  "TailscaleUnavailableError",
-  { reason: Schema.String },
-) {
-  override get message(): string {
-    return this.reason;
-  }
-}
-
 const TailscaleStatusSelf = Schema.Struct({
   DNSName: Schema.optional(Schema.Unknown),
   TailscaleIPs: Schema.optional(Schema.Unknown),
