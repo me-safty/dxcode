@@ -2,16 +2,18 @@ import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
 } from "@t3tools/contracts/relay";
+import { EnvironmentId } from "@t3tools/contracts";
 import {
   RelayEnvironmentConnectScope,
   RelayEnvironmentStatusScope,
+  RelayManagedEndpoint,
 } from "@t3tools/contracts/relay";
 import { decodeRelayJwt } from "@t3tools/shared/relayJwt";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 
@@ -55,14 +57,86 @@ export interface ManagedRelayQueryEvent {
   readonly traceId?: string | null;
 }
 
-export class ManagedRelaySessionError extends Data.TaggedError("ManagedRelaySessionError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class ManagedRelayTokenReadError extends Schema.TaggedErrorClass<ManagedRelayTokenReadError>()(
+  "ManagedRelayTokenReadError",
+  {
+    accountId: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Could not obtain the T3 Cloud session token for account ${this.accountId}.`;
+  }
+}
 
-export class ManagedRelaySnapshotError extends Data.TaggedError("ManagedRelaySnapshotError")<{
-  readonly message: string;
-}> {}
+export class ManagedRelayTokenUnavailableError extends Schema.TaggedErrorClass<ManagedRelayTokenUnavailableError>()(
+  "ManagedRelayTokenUnavailableError",
+  { accountId: Schema.String },
+) {
+  override get message(): string {
+    return `The T3 Cloud session token is unavailable for account ${this.accountId}.`;
+  }
+}
+
+export class ManagedRelaySessionUnavailableError extends Schema.TaggedErrorClass<ManagedRelaySessionUnavailableError>()(
+  "ManagedRelaySessionUnavailableError",
+  { requestedAccountId: Schema.String },
+) {
+  override get message(): string {
+    return `Sign in to T3 Cloud as account ${this.requestedAccountId} before loading relay data.`;
+  }
+}
+
+export const ManagedRelaySessionError = Schema.Union([
+  ManagedRelayTokenReadError,
+  ManagedRelayTokenUnavailableError,
+  ManagedRelaySessionUnavailableError,
+]);
+export type ManagedRelaySessionError = typeof ManagedRelaySessionError.Type;
+
+export class ManagedRelayStatusEnvironmentMismatchError extends Schema.TaggedErrorClass<ManagedRelayStatusEnvironmentMismatchError>()(
+  "ManagedRelayStatusEnvironmentMismatchError",
+  {
+    expectedEnvironmentId: EnvironmentId,
+    actualEnvironmentId: EnvironmentId,
+  },
+) {
+  override get message(): string {
+    return `Relay returned status for environment ${this.actualEnvironmentId} instead of ${this.expectedEnvironmentId}.`;
+  }
+}
+
+export class ManagedRelayStatusEndpointMismatchError extends Schema.TaggedErrorClass<ManagedRelayStatusEndpointMismatchError>()(
+  "ManagedRelayStatusEndpointMismatchError",
+  {
+    environmentId: EnvironmentId,
+    expectedEndpoint: RelayManagedEndpoint,
+    actualEndpoint: RelayManagedEndpoint,
+  },
+) {
+  override get message(): string {
+    return `Relay returned a different endpoint for environment ${this.environmentId}.`;
+  }
+}
+
+export class ManagedRelayStatusDescriptorEnvironmentMismatchError extends Schema.TaggedErrorClass<ManagedRelayStatusDescriptorEnvironmentMismatchError>()(
+  "ManagedRelayStatusDescriptorEnvironmentMismatchError",
+  {
+    expectedEnvironmentId: EnvironmentId,
+    actualEnvironmentId: EnvironmentId,
+  },
+) {
+  override get message(): string {
+    return `Relay returned a descriptor for environment ${this.actualEnvironmentId} instead of ${this.expectedEnvironmentId}.`;
+  }
+}
+
+export const ManagedRelaySnapshotError = Schema.Union([
+  ManagedRelayStatusEnvironmentMismatchError,
+  ManagedRelayStatusEndpointMismatchError,
+  ManagedRelayStatusDescriptorEnvironmentMismatchError,
+]);
+export type ManagedRelaySnapshotError = typeof ManagedRelaySnapshotError.Type;
 
 export const managedRelaySessionAtom = Atom.make<ManagedRelaySession | null>(null).pipe(
   Atom.keepAlive,
@@ -122,8 +196,8 @@ export function createManagedRelaySession(input: ManagedRelaySessionInput): Mana
       return yield* Effect.tryPromise({
         try: () => readCachedClerkToken(nowMillis),
         catch: (cause) =>
-          new ManagedRelaySessionError({
-            message: "Could not obtain the T3 Cloud session token.",
+          new ManagedRelayTokenReadError({
+            accountId: input.accountId,
             cause,
           }),
       });
@@ -180,8 +254,8 @@ function readSessionClerkToken(
       token
         ? Effect.succeed(token)
         : Effect.fail(
-            new ManagedRelaySessionError({
-              message: "The T3 Cloud session token is unavailable.",
+            new ManagedRelayTokenUnavailableError({
+              accountId: session.accountId,
             }),
           ),
     ),
@@ -225,8 +299,8 @@ function requireClerkToken(
   const session = get(managedRelaySessionAtom);
   if (!session || session.accountId !== accountId) {
     return Effect.fail(
-      new ManagedRelaySessionError({
-        message: "Sign in to T3 Cloud before loading relay data.",
+      new ManagedRelaySessionUnavailableError({
+        requestedAccountId: accountId,
       }),
     );
   }
@@ -267,22 +341,26 @@ function validateEnvironmentStatus(
 ): Effect.Effect<RelayEnvironmentStatusResponse, ManagedRelaySnapshotError> {
   if (status.environmentId !== environment.environmentId) {
     return Effect.fail(
-      new ManagedRelaySnapshotError({
-        message: "Relay returned status for a different environment.",
+      new ManagedRelayStatusEnvironmentMismatchError({
+        expectedEnvironmentId: environment.environmentId,
+        actualEnvironmentId: status.environmentId,
       }),
     );
   }
   if (!endpointMatches(status.endpoint, environment.endpoint)) {
     return Effect.fail(
-      new ManagedRelaySnapshotError({
-        message: "Relay returned status for a different endpoint.",
+      new ManagedRelayStatusEndpointMismatchError({
+        environmentId: environment.environmentId,
+        expectedEndpoint: environment.endpoint,
+        actualEndpoint: status.endpoint,
       }),
     );
   }
   if (status.descriptor && status.descriptor.environmentId !== environment.environmentId) {
     return Effect.fail(
-      new ManagedRelaySnapshotError({
-        message: "Relay returned status descriptor for a different environment.",
+      new ManagedRelayStatusDescriptorEnvironmentMismatchError({
+        expectedEnvironmentId: environment.environmentId,
+        actualEnvironmentId: status.descriptor.environmentId,
       }),
     );
   }
