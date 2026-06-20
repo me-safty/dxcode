@@ -36,7 +36,7 @@ export const runHandler = Effect.fnUntraced(function* <A, B>(
   }
   return yield* handler(payload).pipe(
     Effect.mapError((error) =>
-      AcpError.AcpRequestError.fromHandlerError(error, method).toProtocolError(),
+      AcpError.AcpRequestError.fromCoreHandlerError(error, method).toProtocolError(),
     ),
   );
 });

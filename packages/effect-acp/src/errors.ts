@@ -5,6 +5,7 @@ import * as AcpSchema from "./_generated/schema.gen.ts";
 
 export const AcpRequestOperation = Schema.Literals([
   "decode-extension-request-payload",
+  "handle-request",
   "handle-extension-request",
 ]);
 export type AcpRequestOperation = typeof AcpRequestOperation.Type;
@@ -184,7 +185,22 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
     });
   }
 
-  static fromHandlerError(error: AcpError, method: string) {
+  static fromCoreHandlerError(error: AcpError, method: string) {
+    if (error._tag === "AcpRequestError") {
+      return error;
+    }
+    return AcpRequestError.internalError(
+      `ACP request handler failed for method '${method}'`,
+      undefined,
+      {
+        method,
+        operation: "handle-request",
+        cause: error,
+      },
+    );
+  }
+
+  static fromExtensionHandlerError(error: AcpError, method: string) {
     if (error._tag === "AcpRequestError") {
       return error;
     }

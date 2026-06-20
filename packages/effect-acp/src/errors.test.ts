@@ -71,7 +71,7 @@ describe("effect-acp errors", () => {
       operation: "read-input-stream",
       cause: new Error("private transport diagnostics"),
     });
-    const error = AcpError.AcpRequestError.fromHandlerError(cause, "x/test");
+    const error = AcpError.AcpRequestError.fromExtensionHandlerError(cause, "x/test");
 
     expect(error).toMatchObject({
       code: -32603,
@@ -96,7 +96,7 @@ describe("effect-acp errors", () => {
 
       expect(error).toMatchObject({
         code: -32603,
-        message: "ACP extension request handler failed for method 'fs/read_text_file'",
+        message: "ACP request handler failed for method 'fs/read_text_file'",
       });
       expect(error.message).not.toContain(cause.message);
     });

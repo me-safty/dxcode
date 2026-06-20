@@ -245,7 +245,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
         onFailure: (error) =>
           respondWithError(
             message.id,
-            AcpError.AcpRequestError.fromHandlerError(error, message.tag),
+            AcpError.AcpRequestError.fromExtensionHandlerError(error, message.tag),
           ),
         onSuccess: (value) => respondWithSuccess(message.id, value),
       }),
