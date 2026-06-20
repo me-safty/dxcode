@@ -2,12 +2,15 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as PlatformError from "effect/PlatformError";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   extractPathFromShellOutput,
   CommandAvailability,
   type CommandAvailabilityChecker,
+  CommandResolutionError,
   isCommandAvailable,
   listLoginShellCandidates,
   mergePathEntries,
@@ -355,13 +358,45 @@ effectIt.layer(NodeServices.layer)("isCommandAvailable", (it) => {
 });
 
 effectIt.layer(NodeServices.layer)("resolveCommandPath", (it) => {
-  it.effect("fails when PATH is empty", () =>
+  it.effect("reports the unresolved command and platform when PATH is empty", () =>
     Effect.gen(function* () {
-      const result = yield* resolveCommandPath("definitely-not-installed", {
+      const error = yield* resolveCommandPath("definitely-not-installed", {
         env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
-      }).pipe(Effect.provideService(HostProcessPlatform, "win32"), Effect.result);
+      }).pipe(Effect.provideService(HostProcessPlatform, "win32"), Effect.flip);
 
-      expect(result._tag).toBe("Failure");
+      expect(error).toBeInstanceOf(CommandResolutionError);
+      expect(error.command).toBe("definitely-not-installed");
+      expect(error.platform).toBe("win32");
+      expect(error.message).toBe('Could not resolve command "definitely-not-installed" on win32.');
+    }),
+  );
+
+  it.effect("preserves filesystem failures while probing PATH candidates", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cause = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "FileSystem",
+        method: "stat",
+        pathOrDescriptor: "/bin/blocked-command",
+      });
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fileSystem,
+        stat: () => Effect.fail(cause),
+      });
+
+      const error = yield* resolveCommandPath("blocked-command", {
+        env: { PATH: "/bin" },
+      }).pipe(
+        Effect.provideService(HostProcessPlatform, "linux"),
+        Effect.provideService(FileSystem.FileSystem, failingFileSystem),
+        Effect.flip,
+      );
+
+      expect(error).toBeInstanceOf(CommandResolutionError);
+      expect(error.command).toBe("blocked-command");
+      expect(error.platform).toBe("linux");
+      expect(error.cause).toBe(cause);
     }),
   );
 });
