@@ -11,7 +11,6 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as References from "effect/References";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
@@ -22,10 +21,6 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
-
-const isElectronUpdaterCheckForUpdatesError = Schema.is(
-  ElectronUpdater.ElectronUpdaterCheckForUpdatesError,
-);
 
 interface UpdatesHarnessOptions {
   readonly checkForUpdates?: Effect.Effect<
@@ -305,7 +300,7 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("logs updater action failures with the exact structured error", () => {
+  it.effect("logs bounded updater failure context without exposing the cause", () => {
     const cause = new Error(
       "request failed for https://user:secret@example.com/update?token=secret",
     );
@@ -314,11 +309,11 @@ describe("DesktopUpdates", () => {
       cause,
     });
     const harness = makeHarness({ checkForUpdates: Effect.fail(updaterError) });
-    const loggedErrors: Array<unknown> = [];
+    const loggedAnnotations: Array<Record<string, unknown>> = [];
     const logger = Logger.make(({ fiber }) => {
-      const error = fiber.getRef(References.CurrentLogAnnotations).error;
-      if (error !== undefined) {
-        loggedErrors.push(error);
+      const annotations = fiber.getRef(References.CurrentLogAnnotations);
+      if (annotations.errorTag === "ElectronUpdaterCheckForUpdatesError") {
+        loggedAnnotations.push(annotations);
       }
     });
 
@@ -330,10 +325,12 @@ describe("DesktopUpdates", () => {
         yield* updates.check("manual");
 
         const state = yield* updates.getState;
-        const loggedError = loggedErrors.find(isElectronUpdaterCheckForUpdatesError);
-        assert.isDefined(loggedError);
-        assert.strictEqual(loggedError, updaterError);
-        assert.strictEqual(loggedError.cause, cause);
+        const loggedAnnotation = loggedAnnotations.at(-1);
+        assert.isDefined(loggedAnnotation);
+        assert.equal(loggedAnnotation.errorTag, "ElectronUpdaterCheckForUpdatesError");
+        assert.isNull(loggedAnnotation.channel);
+        assert.notProperty(loggedAnnotation, "error");
+        assert.notInclude(Object.values(loggedAnnotation).map(String).join(" "), "secret");
         assert.equal(
           state.message,
           "Electron updater failed to check for updates on channel default.",

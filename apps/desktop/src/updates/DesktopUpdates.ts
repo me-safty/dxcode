@@ -369,7 +369,10 @@ export const make = Effect.gen(function* () {
           yield* updateState((current) =>
             reduceDesktopUpdateStateOnCheckFailure(current, error.message, failedAt),
           );
-          yield* logUpdaterError(error.message, { error });
+          yield* logUpdaterError(error.message, {
+            errorTag: error._tag,
+            channel: error.channel,
+          });
           return true;
         }),
       }),
@@ -403,7 +406,10 @@ export const make = Effect.gen(function* () {
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnDownloadFailure(current, error.message),
             );
-            yield* logUpdaterError(error.message, { error });
+            yield* logUpdaterError(error.message, {
+              errorTag: error._tag,
+              channel: error.channel,
+            });
             return { accepted: true, completed: false };
           },
         ),
@@ -422,7 +428,10 @@ export const make = Effect.gen(function* () {
           yield* updateState((current) =>
             reduceDesktopUpdateStateOnDownloadFailure(current, error.message),
           );
-          yield* logUpdaterError(error.message, { error });
+          yield* logUpdaterError(error.message, {
+            errorTag: error._tag,
+            action: error.action,
+          });
           return { accepted: true, completed: false };
         });
       }),
@@ -464,7 +473,12 @@ export const make = Effect.gen(function* () {
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnInstallFailure(current, error.message),
             );
-            yield* logUpdaterError(error.message, { error });
+            yield* logUpdaterError(error.message, {
+              errorTag: error._tag,
+              channel: error.channel,
+              isSilent: error.isSilent,
+              isForceRunAfter: error.isForceRunAfter,
+            });
             return { accepted: true, completed: false };
           },
         ),
@@ -480,7 +494,10 @@ export const make = Effect.gen(function* () {
           yield* updateState((current) =>
             reduceDesktopUpdateStateOnInstallFailure(current, error.message),
           );
-          yield* logUpdaterError(error.message, { error });
+          yield* logUpdaterError(error.message, {
+            errorTag: error._tag,
+            action: error.action,
+          });
           return { accepted: true, completed: false };
         }),
       ),
@@ -495,7 +512,10 @@ export const make = Effect.gen(function* () {
           return Effect.void;
         }
         const error = new DesktopUpdatePollerError({ poller: "startup", cause });
-        return logUpdaterError(error.message, { error });
+        return logUpdaterError(error.message, {
+          errorTag: error._tag,
+          poller: error.poller,
+        });
       }),
       Effect.forkScoped,
     );
@@ -507,7 +527,10 @@ export const make = Effect.gen(function* () {
           return Effect.void;
         }
         const error = new DesktopUpdatePollerError({ poller: "poll", cause });
-        return logUpdaterError(error.message, { error });
+        return logUpdaterError(error.message, {
+          errorTag: error._tag,
+          poller: error.poller,
+        });
       }),
       Effect.forkScoped,
     );
@@ -544,7 +567,10 @@ export const make = Effect.gen(function* () {
           return Effect.void;
         }
         const error = new DesktopUpdateEventHandlingError({ event: "update-available", cause });
-        return logUpdaterWarning(error.message, { error });
+        return logUpdaterWarning(error.message, {
+          errorTag: error._tag,
+          event: error.event,
+        });
       }),
     );
   });
@@ -571,7 +597,10 @@ export const make = Effect.gen(function* () {
       yield* updateState((current) =>
         reduceDesktopUpdateStateOnInstallFailure(current, error.message),
       );
-      yield* logUpdaterError(error.message, { error });
+      yield* logUpdaterError(error.message, {
+        errorTag: error._tag,
+        operation: error.operation,
+      });
       return;
     }
 
@@ -589,7 +618,10 @@ export const make = Effect.gen(function* () {
       }));
     }
 
-    yield* logUpdaterError(error.message, { error });
+    yield* logUpdaterError(error.message, {
+      errorTag: error._tag,
+      operation: error.operation,
+    });
   });
 
   const handleDownloadProgress = Effect.fn("desktop.updates.handleDownloadProgress")(function* (
@@ -616,7 +648,10 @@ export const make = Effect.gen(function* () {
           return Effect.void;
         }
         const error = new DesktopUpdateEventHandlingError({ event: "download-progress", cause });
-        return logUpdaterWarning(error.message, { error });
+        return logUpdaterWarning(error.message, {
+          errorTag: error._tag,
+          event: error.event,
+        });
       }),
     );
   });
@@ -637,7 +672,10 @@ export const make = Effect.gen(function* () {
           return Effect.void;
         }
         const error = new DesktopUpdateEventHandlingError({ event: "update-downloaded", cause });
-        return logUpdaterWarning(error.message, { error });
+        return logUpdaterWarning(error.message, {
+          errorTag: error._tag,
+          event: error.event,
+        });
       }),
     );
   });
