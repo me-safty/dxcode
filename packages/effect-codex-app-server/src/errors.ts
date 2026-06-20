@@ -169,9 +169,11 @@ export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<Co
   static fromSchemaError(
     operation: CodexAppServerProtocolParseOperation,
     cause: Schema.SchemaError,
+    context: { readonly method?: string } = {},
   ) {
     return new CodexAppServerProtocolParseError({
       operation,
+      ...context,
       ...schemaIssueDiagnostics(cause.issue),
       cause,
     });

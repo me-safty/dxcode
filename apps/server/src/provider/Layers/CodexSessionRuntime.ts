@@ -26,10 +26,9 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
-import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as SchemaIssue from "effect/SchemaIssue";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -89,7 +88,6 @@ const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffe
 
 export type CodexTurnStartParamsWithCollaborationMode =
   typeof CodexTurnStartParamsWithCollaborationMode.Type;
-const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
 type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["serviceTier"]>;
@@ -390,14 +388,12 @@ export function buildTurnStartParams(input: {
     ...(input.effort ? { effort: input.effort } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),
   }).pipe(
-    Effect.mapError(
-      (cause) =>
-        new CodexErrors.CodexAppServerProtocolParseError({
-          operation: "decode-request-payload",
-          method: "turn/start",
-          detail: formatSchemaIssue(cause.issue),
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+        "decode-request-payload",
+        cause,
+        { method: "turn/start" },
+      ),
     ),
   );
 }
@@ -1293,14 +1289,12 @@ export const makeCodexSessionRuntime = (
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
-            Effect.mapError(
-              (error) =>
-                new CodexErrors.CodexAppServerProtocolParseError({
-                  operation: "decode-response-payload",
-                  method: "turn/start",
-                  detail: formatSchemaIssue(error.issue),
-                  cause: error,
-                }),
+            Effect.mapError((error) =>
+              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+                "decode-response-payload",
+                error,
+                { method: "turn/start" },
+              ),
             ),
           );
           const turnId = TurnId.make(response.turn.id);
