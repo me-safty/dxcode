@@ -26,7 +26,9 @@ import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import { __resetDesktopPrimaryAuthForTests } from "../environments/primary/desktopAuth";
 
 import {
+  CloudEnvironmentLinkOperationError,
   collectCloudLinkTargets,
+  isCloudEnvironmentLinkError,
   linkPrimaryEnvironmentToCloud,
   listManagedCloudEnvironments,
   normalizeRelayBaseUrl,
@@ -195,6 +197,45 @@ describe("web cloud link environment client", () => {
     }),
   );
 
+  it.effect("preserves structured relay failures and trace IDs", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          Response.json(
+            {
+              _tag: "RelayAuthInvalidError",
+              code: "auth_invalid",
+              reason: "invalid_bearer",
+              traceId: "trace-web-cloud-link",
+            },
+            { status: 401 },
+          ),
+        ),
+      );
+
+      const error = yield* withServices(
+        listManagedCloudEnvironments({ clerkToken: "clerk-token" }),
+      ).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(CloudEnvironmentLinkOperationError);
+      expect(error).toMatchObject({
+        action: "list relay-managed environments",
+        relayUrl: "https://relay.example.test",
+        traceId: "trace-web-cloud-link",
+        relayError: {
+          _tag: "RelayAuthInvalidError",
+          reason: "invalid_bearer",
+        },
+        cause: {
+          _tag: "ManagedRelayRequestFailedError",
+        },
+      });
+      expect(error.message).toContain("Relay authentication failed: invalid_bearer");
+      expect(isCloudEnvironmentLinkError(error)).toBe(true);
+    }),
+  );
+
   it.effect("reads primary cloud link state from the explicit target", () =>
     Effect.gen(function* () {
       const fetchMock = vi.fn().mockResolvedValue(
@@ -222,6 +263,62 @@ describe("web cloud link environment client", () => {
       expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
         "http://127.0.0.1:3000/api/connect/link-state",
       );
+    }),
+  );
+
+  it.effect("preserves structured environment API failures and their cause chain", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          Response.json(
+            {
+              _tag: "EnvironmentHttpUnauthorizedError",
+              message: "Environment bearer token is invalid.",
+            },
+            { status: 401 },
+          ),
+        ),
+      );
+
+      const error = yield* withServices(readPrimaryCloudLinkState({ target: TARGET })).pipe(
+        Effect.flip,
+      );
+
+      expect(error).toBeInstanceOf(CloudEnvironmentLinkOperationError);
+      expect(error).toMatchObject({
+        action: "read environment cloud link state",
+        environmentId: TARGET.environmentId,
+        httpBaseUrl: TARGET.httpBaseUrl,
+        environmentError: {
+          _tag: "EnvironmentHttpUnauthorizedError",
+          message: "Environment bearer token is invalid.",
+        },
+      });
+      expect(error.cause).toBeDefined();
+      expect(error.message).toContain("Environment bearer token is invalid.");
+      expect(isCloudEnvironmentLinkError(error)).toBe(true);
+    }),
+  );
+
+  it.effect("preserves invalid environment HTTP URL parser causes", () =>
+    Effect.gen(function* () {
+      const error = yield* withServices(
+        readPrimaryCloudLinkState({
+          target: {
+            ...TARGET,
+            httpBaseUrl: "not a URL",
+          },
+        }),
+      ).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkOperationError",
+        action: "initialize the environment HTTP client",
+        environmentId: TARGET.environmentId,
+        httpBaseUrl: "not a URL",
+      });
+      expect(error.cause).toBeInstanceOf(TypeError);
     }),
   );
 
