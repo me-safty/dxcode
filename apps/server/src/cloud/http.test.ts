@@ -65,12 +65,13 @@ function makeSecretStore(
 function reconcileWith(input: {
   readonly getExisting: CliTokenManager.CloudCliTokenManager["Service"]["getExisting"];
   readonly httpClient?: HttpClient.HttpClient;
+  readonly secretStore?: ServerSecretStore.ServerSecretStore["Service"];
   readonly env?: Readonly<Record<string, string>>;
 }) {
   return reconcileDesiredCloudLink("http://127.0.0.1:3774").pipe(
     Effect.provideService(
       ServerSecretStore.ServerSecretStore,
-      makeSecretStore(unusedSecretStoreOperation),
+      input.secretStore ?? makeSecretStore(unusedSecretStoreOperation),
     ),
     Effect.provideService(
       ServerEnvironment.ServerEnvironment,
@@ -320,6 +321,59 @@ describe("reconcileDesiredCloudLink", () => {
       });
     }),
   );
+
+  it.effect("attributes link-proof secret failures to proof generation", () => {
+    const cause = new Error("private secret-store detail");
+    const secretFailure = new ServerSecretStore.SecretStoreReadError({
+      secretName: "environment-key-pair",
+      secretPath: "environment-key-pair.json",
+      cause,
+    });
+    const httpClient = HttpClient.make((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            JSON.stringify({
+              challenge: "relay-link-challenge",
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+    const secretStore = makeSecretStore(unusedSecretStoreOperation);
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        reconcileWith({
+          getExisting: Effect.succeed(
+            Option.some({
+              accessToken: "access-token",
+              refreshToken: "refresh-token",
+              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+            }),
+          ),
+          httpClient,
+          secretStore: {
+            ...secretStore,
+            get: () => Effect.fail(secretFailure),
+          },
+          env: { T3CODE_RELAY_URL: "https://relay.example.test" },
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "EnvironmentHttpInternalServerError",
+        operation: "generate_link_proof",
+        cause: secretFailure,
+      });
+      expect(error.message).toBe("Could not generate environment link proof.");
+      expect(error.cause).toBe(secretFailure);
+      expect(error.message).not.toContain(cause.message);
+    });
+  });
 
   it.effect("redacts relay transport failures behind a stable structural message", () => {
     const transportCause = new Error("upstream included a sensitive database password");

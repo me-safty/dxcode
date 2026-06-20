@@ -723,6 +723,17 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
         },
       },
       localOrigin,
+    ).pipe(
+      Effect.catchTags({
+        ServerAuthCloudLinkJwtSigningError: (error) =>
+          failEnvironmentCloudInternalError("sign_cloud_link_jwt")(error),
+        SecretStoreReadError: failEnvironmentCloudInternalError("generate_link_proof"),
+        SecretStoreDecodeError: failEnvironmentCloudInternalError("generate_link_proof"),
+        SecretStoreEncodeError: failEnvironmentCloudInternalError("generate_link_proof"),
+        SecretStorePersistError: failEnvironmentCloudInternalError("generate_link_proof"),
+        SecretStoreConcurrentReadError: failEnvironmentCloudInternalError("generate_link_proof"),
+        PlatformError: failEnvironmentCloudInternalError("generate_link_proof"),
+      }),
     );
     const link = yield* relayClientRequest(dependencies, {
       operation: "create-environment-link",
@@ -736,7 +747,15 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       },
       schema: RelayEnvironmentLinkResponse,
     });
-    yield* setCliDesiredCloudLink(true);
+    yield* setCliDesiredCloudLink(true).pipe(
+      Effect.catchTags({
+        SecretStoreTemporaryPathGenerationError: failEnvironmentCloudInternalError(
+          "persist_desired_link_state",
+        ),
+        SecretStorePersistError: failEnvironmentCloudInternalError("persist_desired_link_state"),
+        SecretStoreRemoveError: failEnvironmentCloudInternalError("persist_desired_link_state"),
+      }),
+    );
     return yield* applyCloudRelayConfig(dependencies, {
       relayUrl,
       relayIssuer: link.relayIssuer,
@@ -744,24 +763,20 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       environmentCredential: link.environmentCredential,
       cloudMintPublicKey: link.cloudMintPublicKey,
       endpointRuntime: link.endpointRuntime,
-    });
+    }).pipe(
+      Effect.catchTags({
+        ServerAuthLinkedCloudAccountVerificationError: (error) =>
+          failEnvironmentCloudInternalError("verify_linked_cloud_account")(error),
+        SecretStoreTemporaryPathGenerationError: failEnvironmentCloudInternalError(
+          "persist_relay_configuration",
+        ),
+        SecretStorePersistError: failEnvironmentCloudInternalError("persist_relay_configuration"),
+        SecretStoreRemoveError: failEnvironmentCloudInternalError("persist_relay_configuration"),
+        SchemaError: failEnvironmentCloudInternalError("persist_relay_configuration"),
+      }),
+    );
   },
   Effect.catchTags({
-    ServerAuthLinkedCloudAccountVerificationError: (error) =>
-      failEnvironmentCloudInternalError("verify_linked_cloud_account")(error),
-    ServerAuthCloudLinkJwtSigningError: (error) =>
-      failEnvironmentCloudInternalError("sign_cloud_link_jwt")(error),
-    SecretStoreReadError: failEnvironmentCloudInternalError("persist_desired_link_state"),
-    SecretStoreTemporaryPathGenerationError: failEnvironmentCloudInternalError(
-      "persist_desired_link_state",
-    ),
-    SecretStorePersistError: failEnvironmentCloudInternalError("persist_desired_link_state"),
-    SecretStoreRemoveError: failEnvironmentCloudInternalError("persist_desired_link_state"),
-    SecretStoreDecodeError: failEnvironmentCloudInternalError("persist_desired_link_state"),
-    SecretStoreEncodeError: failEnvironmentCloudInternalError("persist_desired_link_state"),
-    SecretStoreConcurrentReadError: failEnvironmentCloudInternalError("persist_desired_link_state"),
-    SchemaError: failEnvironmentCloudInternalError("persist_desired_link_state"),
-    PlatformError: failEnvironmentCloudInternalError("persist_desired_link_state"),
     CloudRelayConfigurationError: (error) =>
       failEnvironmentCloudInternalError("read_relay_url_configuration")(error),
     CloudRelayRequestError: (error) =>
