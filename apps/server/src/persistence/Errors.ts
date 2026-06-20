@@ -1,6 +1,8 @@
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
+const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
+
 // ===============================
 // Core Persistence Errors
 // ===============================
@@ -9,12 +11,14 @@ export class PersistenceSqlError extends Schema.TaggedErrorClass<PersistenceSqlE
   "PersistenceSqlError",
   {
     operation: Schema.String,
-    detail: Schema.String,
+    detail: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `SQL error in ${this.operation}: ${this.detail}`;
+    return this.detail === undefined
+      ? `SQL error in ${this.operation}`
+      : `SQL error in ${this.operation}: ${this.detail}`;
   }
 }
 
@@ -26,6 +30,14 @@ export class PersistenceDecodeError extends Schema.TaggedErrorClass<PersistenceD
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
+  static fromSchemaError(operation: string, cause: Schema.SchemaError): PersistenceDecodeError {
+    return new PersistenceDecodeError({
+      operation,
+      issue: formatSchemaIssue(cause.issue),
+      cause,
+    });
+  }
+
   override get message(): string {
     return `Decode error in ${this.operation}: ${this.issue}`;
   }
@@ -33,6 +45,7 @@ export class PersistenceDecodeError extends Schema.TaggedErrorClass<PersistenceD
 const isPersistenceSqlError = Schema.is(PersistenceSqlError);
 const isPersistenceDecodeError = Schema.is(PersistenceDecodeError);
 
+// Kept for orchestration/projection call sites, which are being revamped separately.
 export function toPersistenceSqlError(operation: string) {
   return (cause: unknown): PersistenceSqlError =>
     new PersistenceSqlError({
@@ -42,22 +55,10 @@ export function toPersistenceSqlError(operation: string) {
     });
 }
 
+// Kept for orchestration/projection call sites, which are being revamped separately.
 export function toPersistenceDecodeError(operation: string) {
-  return (error: Schema.SchemaError): PersistenceDecodeError =>
-    new PersistenceDecodeError({
-      operation,
-      issue: SchemaIssue.makeFormatterDefault()(error.issue),
-      cause: error,
-    });
-}
-
-export function toPersistenceDecodeCauseError(operation: string) {
-  return (cause: unknown): PersistenceDecodeError =>
-    new PersistenceDecodeError({
-      operation,
-      issue: `Failed to execute ${operation}`,
-      cause,
-    });
+  return (cause: Schema.SchemaError): PersistenceDecodeError =>
+    PersistenceDecodeError.fromSchemaError(operation, cause);
 }
 
 export const isPersistenceError = (u: unknown) =>
