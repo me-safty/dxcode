@@ -2,6 +2,7 @@ import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
   DpopPublicJwk,
+  redactDpopRequestTarget,
 } from "@t3tools/shared/dpop";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -77,15 +78,6 @@ const DPOP_DATABASE_VERSION = 1;
 const DPOP_KEY_STORE_NAME = "keys";
 const DPOP_KEY_ID = "relay-dpop-proof-key";
 const decodeDpopPublicJwk = Schema.decodeUnknownEffect(DpopPublicJwk);
-
-function redactDpopRequestTarget(url: string): string {
-  try {
-    const parsedUrl = new URL(url);
-    return `${parsedUrl.protocol}//${parsedUrl.host}${parsedUrl.pathname}`;
-  } catch {
-    return "<invalid-url>";
-  }
-}
 
 export const browserCryptoLayer = Layer.succeed(
   Crypto.Crypto,
