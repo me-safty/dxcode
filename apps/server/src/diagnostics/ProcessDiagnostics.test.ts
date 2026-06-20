@@ -220,7 +220,7 @@ describe("ProcessDiagnostics", () => {
     }),
   );
 
-  it.effect("keeps command diagnostics when the process query exits unsuccessfully", () =>
+  it.effect("keeps bounded command diagnostics when the process query exits unsuccessfully", () =>
     Effect.gen(function* () {
       const spawnerLayer = Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
@@ -244,14 +244,16 @@ describe("ProcessDiagnostics", () => {
       expect(error).toMatchObject({
         _tag: "ProcessDiagnosticsQueryFailedError",
         command: "ps",
-        args: ["-axo", "pid=,ppid=,pgid=,stat=,pcpu=,rss=,etime=,command="],
+        argCount: 2,
         cwd: process.cwd(),
         exitCode: 17,
-        stdout: "partial process output",
-        stderr: "process access denied",
+        stdoutBytes: 22,
+        stderrBytes: 21,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       });
       expect(error.message).toBe(
-        `Process diagnostics query 'ps' failed with exit code 17 in '${process.cwd()}': process access denied`,
+        `Process diagnostics query 'ps' failed with exit code 17 in '${process.cwd()}'.`,
       );
     }),
   );

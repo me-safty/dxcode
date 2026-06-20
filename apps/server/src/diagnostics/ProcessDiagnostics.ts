@@ -47,7 +47,7 @@ class ProcessDiagnosticsQueryTimeoutError extends Schema.TaggedErrorClass<Proces
   "ProcessDiagnosticsQueryTimeoutError",
   {
     command: Schema.String,
-    args: Schema.Array(Schema.String),
+    argCount: Schema.Number,
     cwd: Schema.String,
     timeoutMillis: Schema.Number,
   },
@@ -61,19 +61,19 @@ class ProcessDiagnosticsQueryFailedError extends Schema.TaggedErrorClass<Process
   "ProcessDiagnosticsQueryFailedError",
   {
     command: Schema.String,
-    args: Schema.Array(Schema.String),
+    argCount: Schema.Number,
     cwd: Schema.String,
     exitCode: Schema.optional(Schema.Number),
-    stdout: Schema.optional(Schema.String),
-    stderr: Schema.optional(Schema.String),
+    stdoutBytes: Schema.optional(Schema.Number),
+    stderrBytes: Schema.optional(Schema.Number),
+    stdoutTruncated: Schema.optional(Schema.Boolean),
+    stderrTruncated: Schema.optional(Schema.Boolean),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     const exitCode = this.exitCode === undefined ? "" : ` with exit code ${this.exitCode}`;
-    const stderr = this.stderr?.trim();
-    const detail = stderr === undefined || stderr.length === 0 ? "" : `: ${stderr}`;
-    return `Process diagnostics query '${this.command}' failed${exitCode} in '${this.cwd}'${detail}`;
+    return `Process diagnostics query '${this.command}' failed${exitCode} in '${this.cwd}'.`;
   }
 }
 
@@ -330,7 +330,11 @@ interface ProcessOutput {
   readonly cwd: string;
   readonly exitCode: number;
   readonly stdout: string;
+  readonly stdoutBytes: number;
+  readonly stdoutTruncated: boolean;
   readonly stderr: string;
+  readonly stderrBytes: number;
+  readonly stderrTruncated: boolean;
 }
 
 const runProcess = Effect.fn("runProcess")(function* (input: {
@@ -369,7 +373,11 @@ const runProcess = Effect.fn("runProcess")(function* (input: {
       cwd,
       exitCode,
       stdout: stdout.text,
+      stdoutBytes: stdout.bytes,
+      stdoutTruncated: stdout.truncated,
       stderr: stderr.text,
+      stderrBytes: stderr.bytes,
+      stderrTruncated: stderr.truncated,
     } satisfies ProcessOutput;
   }).pipe(
     Effect.scoped,
@@ -380,7 +388,7 @@ const runProcess = Effect.fn("runProcess")(function* (input: {
           Effect.fail(
             new ProcessDiagnosticsQueryTimeoutError({
               command: input.command,
-              args: [...input.args],
+              argCount: input.args.length,
               cwd,
               timeoutMillis: PROCESS_QUERY_TIMEOUT_MS,
             }),
@@ -393,7 +401,7 @@ const runProcess = Effect.fn("runProcess")(function* (input: {
         ? cause
         : new ProcessDiagnosticsQueryFailedError({
             command: input.command,
-            args: [...input.args],
+            argCount: input.args.length,
             cwd,
             cause,
           }),
@@ -415,11 +423,13 @@ function readPosixProcessRows(): Effect.Effect<
         ? Effect.fail(
             new ProcessDiagnosticsQueryFailedError({
               command: "ps",
-              args: ["-axo", POSIX_PROCESS_QUERY_COMMAND],
+              argCount: 2,
               cwd: result.cwd,
               exitCode: result.exitCode,
-              stdout: result.stdout,
-              stderr: result.stderr.trim() || "ps failed.",
+              stdoutBytes: result.stdoutBytes,
+              stderrBytes: result.stderrBytes,
+              stdoutTruncated: result.stdoutTruncated,
+              stderrTruncated: result.stderrTruncated,
             }),
           )
         : Effect.succeed(parsePosixProcessRows(result.stdout)),
@@ -449,11 +459,13 @@ function readWindowsProcessRows(): Effect.Effect<
         ? Effect.fail(
             new ProcessDiagnosticsQueryFailedError({
               command: "powershell.exe",
-              args: ["-NoProfile", "-NonInteractive", "-Command", command],
+              argCount: 4,
               cwd: result.cwd,
               exitCode: result.exitCode,
-              stdout: result.stdout,
-              stderr: result.stderr.trim() || "PowerShell process query failed.",
+              stdoutBytes: result.stdoutBytes,
+              stderrBytes: result.stderrBytes,
+              stdoutTruncated: result.stdoutTruncated,
+              stderrTruncated: result.stderrTruncated,
             }),
           )
         : Effect.succeed(parseWindowsProcessRows(result.stdout)),
