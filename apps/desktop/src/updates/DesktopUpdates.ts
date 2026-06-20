@@ -120,6 +120,18 @@ export class DesktopUpdaterReportedError extends Schema.TaggedErrorClass<Desktop
   }
 }
 
+export class DesktopUpdateUnexpectedActionError extends Schema.TaggedErrorClass<DesktopUpdateUnexpectedActionError>()(
+  "DesktopUpdateUnexpectedActionError",
+  {
+    action: Schema.Literals(["download", "install"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Desktop update ${this.action} action failed unexpectedly.`;
+  }
+}
+
 export type DesktopUpdateConfigureError = never;
 
 export const DesktopUpdateSetChannelError = Schema.Union([
@@ -396,6 +408,18 @@ export const make = Effect.gen(function* () {
           },
         ),
       }),
+      Effect.onError((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.void;
+        }
+        const error = new DesktopUpdateUnexpectedActionError({ action: "download", cause });
+        return Effect.gen(function* () {
+          yield* updateState((current) =>
+            reduceDesktopUpdateStateOnDownloadFailure(current, error.message),
+          );
+          yield* logUpdaterError(error.message, { error });
+        });
+      }),
       Effect.ensuring(Ref.set(updateDownloadInFlightRef, false)),
     );
   }).pipe(Effect.withSpan("desktop.updates.downloadAvailableUpdate"));
@@ -435,6 +459,20 @@ export const make = Effect.gen(function* () {
           },
         ),
       }),
+      Effect.onError((cause) =>
+        Effect.gen(function* () {
+          yield* Ref.set(updateInstallInFlightRef, false);
+          yield* Ref.set(desktopState.quitting, false);
+          if (Cause.hasInterruptsOnly(cause)) {
+            return;
+          }
+          const error = new DesktopUpdateUnexpectedActionError({ action: "install", cause });
+          yield* updateState((current) =>
+            reduceDesktopUpdateStateOnInstallFailure(current, error.message),
+          );
+          yield* logUpdaterError(error.message, { error });
+        }),
+      ),
     );
   }).pipe(Effect.withSpan("desktop.updates.installDownloadedUpdate"));
 
