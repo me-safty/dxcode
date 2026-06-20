@@ -7,10 +7,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import { httpHeaderRedactionLayer } from "@t3tools/shared/httpObservability";
 import { makeRelayClientTracingLayer } from "@t3tools/shared/relayTracing";
-import {
-  PrimaryEnvironmentHttpClient,
-  primaryEnvironmentHttpClientLive,
-} from "../environments/primary/httpClient";
+import * as PrimaryEnvironmentHttpClient from "../environments/primary/httpClient";
 import { primaryEnvironmentRequestInit } from "../environments/primary/requestInit";
 
 import { browserCryptoLayer } from "../cloud/dpop";
@@ -39,7 +36,7 @@ type RuntimeLayerSource =
 export const remoteHttpRuntime = ManagedRuntime.make(httpClientLayer);
 
 const primaryHttpRuntime = ManagedRuntime.make(
-  primaryEnvironmentHttpClientLive.pipe(
+  PrimaryEnvironmentHttpClient.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         remoteHttpClientLayer((input, init) => globalThis.fetch(input, init)),
@@ -51,7 +48,7 @@ const primaryHttpRuntime = ManagedRuntime.make(
 );
 
 export type PrimaryHttpEffectRunner = <A, E>(
-  effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient>,
+  effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient>,
 ) => Promise<A>;
 
 const livePrimaryHttpRunner: PrimaryHttpEffectRunner = (effect) =>
@@ -59,8 +56,9 @@ const livePrimaryHttpRunner: PrimaryHttpEffectRunner = (effect) =>
 
 let primaryHttpRunner = livePrimaryHttpRunner;
 
-export const runPrimaryHttp = <A, E>(effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient>) =>
-  primaryHttpRunner(effect);
+export const runPrimaryHttp = <A, E>(
+  effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient>,
+) => primaryHttpRunner(effect);
 
 export function __setPrimaryHttpRunnerForTests(runner?: PrimaryHttpEffectRunner): void {
   primaryHttpRunner = runner ?? livePrimaryHttpRunner;
