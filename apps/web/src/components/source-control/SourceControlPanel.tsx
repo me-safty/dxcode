@@ -1,7 +1,6 @@
 import type {
   ContextMenuItem,
   EnvironmentId,
-  VcsPanelBranchCommitsInput,
   ThreadId,
   VcsPanelBranchDetails,
   VcsPanelChangeGroup,
@@ -97,12 +96,14 @@ import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   type AttentionKind,
+  type BranchCommitListKind,
   type BranchSyncState,
   branchAttention,
   branchHasUpstream,
   branchSyncCounts,
   branchSyncState,
   formatRelativeDate,
+  mergeBranchCommitPage,
   mergeChangeGroups,
   type PanelChangedFile,
 } from "./SourceControlPanel.logic";
@@ -119,7 +120,6 @@ interface SourceControlPanelProps {
 }
 
 type FileDiffSource = NonNullable<VcsPanelFileDiffInput["source"]>;
-type BranchCommitListKind = NonNullable<VcsPanelBranchCommitsInput["kind"]>;
 
 type FileDiffLoadState =
   | { readonly status: "loading" }
@@ -1986,7 +1986,12 @@ export function SourceControlPanel({
   );
 
   const loadMoreBranchCommits = useCallback(
-    async (branch: VcsRef, details: VcsPanelBranchDetails, kind: BranchCommitListKind) => {
+    async (
+      branch: VcsRef,
+      details: VcsPanelBranchDetails,
+      detailsKey: string,
+      kind: BranchCommitListKind,
+    ) => {
       const loadedCount =
         kind === "ahead"
           ? details.aheadCommits.length
@@ -2006,7 +2011,7 @@ export function SourceControlPanel({
       if (!api || remaining <= 0) return;
       setLoadingBranchDetails((current) => {
         const next = new Set(current);
-        next.add(branch.name);
+        next.add(detailsKey);
         return next;
       });
       try {
@@ -2018,43 +2023,15 @@ export function SourceControlPanel({
           skip: loadedCount,
           limit: COMMIT_PAGE_SIZE,
         });
-        setBranchDetailsByRef((current) => {
-          const nextDetails = current.get(details.fullRefName) ?? details;
-          const merged =
-            kind === "ahead"
-              ? {
-                  ...nextDetails,
-                  aheadCommits: [...nextDetails.aheadCommits, ...result.commits],
-                  aheadCommitsRemaining: result.remaining,
-                }
-              : kind === "behind"
-                ? {
-                    ...nextDetails,
-                    behindCommits: [...nextDetails.behindCommits, ...result.commits],
-                    behindCommitsRemaining: result.remaining,
-                  }
-                : kind === "compare-history"
-                  ? {
-                      ...nextDetails,
-                      compareCommits: [...nextDetails.compareCommits, ...result.commits],
-                      compareCommitsRemaining: result.remaining,
-                    }
-                  : {
-                      ...nextDetails,
-                      commits: [...nextDetails.commits, ...result.commits],
-                      commitsRemaining: result.remaining,
-                    };
-          const next = new Map(current);
-          next.set(merged.fullRefName, merged);
-          next.set(merged.name, merged);
-          return next;
-        });
+        setBranchDetailsByRef((current) =>
+          mergeBranchCommitPage(current, { detailsKey, details, kind, page: result }),
+        );
       } catch (nextError) {
         setError(errorMessage(nextError));
       } finally {
         setLoadingBranchDetails((current) => {
           const next = new Set(current);
-          next.delete(branch.name);
+          next.delete(detailsKey);
           return next;
         });
       }
@@ -2513,7 +2490,7 @@ export function SourceControlPanel({
 
   const renderBranchTree = (branch: VcsRef, details: VcsPanelBranchDetails, detailsKey: string) => {
     const unsyncedCommitShas = new Set(details.unsyncedCommitShas);
-    const loadingDetails = loadingBranchDetails.has(branch.name);
+    const loadingDetails = loadingBranchDetails.has(detailsKey);
     const aheadTotal = details.aheadCommits.length + details.aheadCommitsRemaining;
     const behindTotal = details.behindCommits.length + details.behindCommitsRemaining;
     const historyTotal = details.commits.length + details.commitsRemaining;
@@ -2548,7 +2525,7 @@ export function SourceControlPanel({
                   <LoadMoreCommitsButton
                     remaining={details.aheadCommitsRemaining}
                     loading={loadingDetails}
-                    onClick={() => void loadMoreBranchCommits(branch, details, "ahead")}
+                    onClick={() => void loadMoreBranchCommits(branch, details, detailsKey, "ahead")}
                   />
                 </div>
               ),
@@ -2567,7 +2544,9 @@ export function SourceControlPanel({
                   <LoadMoreCommitsButton
                     remaining={details.behindCommitsRemaining}
                     loading={loadingDetails}
-                    onClick={() => void loadMoreBranchCommits(branch, details, "behind")}
+                    onClick={() =>
+                      void loadMoreBranchCommits(branch, details, detailsKey, "behind")
+                    }
                   />
                 </div>
               ),
@@ -2588,7 +2567,7 @@ export function SourceControlPanel({
               <LoadMoreCommitsButton
                 remaining={details.commitsRemaining}
                 loading={loadingDetails}
-                onClick={() => void loadMoreBranchCommits(branch, details, "history")}
+                onClick={() => void loadMoreBranchCommits(branch, details, detailsKey, "history")}
               />
             </div>
           ),

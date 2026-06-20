@@ -1,9 +1,14 @@
 import type {
+  VcsPanelBranchCommitsInput,
+  VcsPanelBranchCommitsResult,
+  VcsPanelBranchDetails,
   VcsPanelChangeGroup,
   VcsPanelFileChange,
   VcsPanelSnapshotResult,
   VcsRef,
 } from "@t3tools/contracts";
+
+export type BranchCommitListKind = NonNullable<VcsPanelBranchCommitsInput["kind"]>;
 
 export type BranchSyncState = "fetch" | "pull" | "push" | "publish" | "diverged";
 
@@ -77,6 +82,49 @@ export function mergeChangeGroups(groups: readonly VcsPanelChangeGroup[]): Panel
       hasConflicts: file.hasConflicts,
     }))
     .toSorted((left, right) => left.path.localeCompare(right.path));
+}
+
+export function mergeBranchCommitPage(
+  current: ReadonlyMap<string, VcsPanelBranchDetails>,
+  input: {
+    readonly detailsKey: string;
+    readonly details: VcsPanelBranchDetails;
+    readonly kind: BranchCommitListKind;
+    readonly page: VcsPanelBranchCommitsResult;
+  },
+): ReadonlyMap<string, VcsPanelBranchDetails> {
+  const nextDetails = current.get(input.detailsKey) ?? input.details;
+  const merged =
+    input.kind === "ahead"
+      ? {
+          ...nextDetails,
+          aheadCommits: [...nextDetails.aheadCommits, ...input.page.commits],
+          aheadCommitsRemaining: input.page.remaining,
+        }
+      : input.kind === "behind"
+        ? {
+            ...nextDetails,
+            behindCommits: [...nextDetails.behindCommits, ...input.page.commits],
+            behindCommitsRemaining: input.page.remaining,
+          }
+        : input.kind === "compare-history"
+          ? {
+              ...nextDetails,
+              compareCommits: [...nextDetails.compareCommits, ...input.page.commits],
+              compareCommitsRemaining: input.page.remaining,
+            }
+          : {
+              ...nextDetails,
+              commits: [...nextDetails.commits, ...input.page.commits],
+              commitsRemaining: input.page.remaining,
+            };
+  const next = new Map(current);
+  next.set(input.detailsKey, merged);
+  if (input.detailsKey === input.details.name || input.detailsKey === input.details.fullRefName) {
+    next.set(merged.fullRefName, merged);
+    next.set(merged.name, merged);
+  }
+  return next;
 }
 
 export function formatRelativeDate(
