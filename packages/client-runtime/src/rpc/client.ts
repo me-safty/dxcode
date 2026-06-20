@@ -204,7 +204,8 @@ export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
                             Effect.logWarning(
                               "Durable RPC subscription lost its transport; waiting for the next session.",
                               {
-                                cause: Cause.pretty(cause),
+                                errorTag: "RpcClientError",
+                                reasonCount: cause.reasons.length,
                                 method: tag,
                                 environmentId: supervisor.target.environmentId,
                               },
