@@ -3,6 +3,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { uuidv4 } from "./uuid";
 
 export interface DraftComposerImageAttachment extends UploadChatImageAttachment {
@@ -12,6 +13,30 @@ export interface DraftComposerImageAttachment extends UploadChatImageAttachment 
 
 const OWNED_PASTED_IMAGE_DIRECTORY = "t3-composer-paste";
 
+export class ComposerImageOperationError extends Schema.TaggedErrorClass<ComposerImageOperationError>()(
+  "ComposerImageOperationError",
+  {
+    operation: Schema.Literals([
+      "load-image-picker",
+      "request-media-library-permission",
+      "launch-image-library",
+      "load-clipboard",
+      "check-clipboard-image",
+      "read-clipboard-image",
+      "check-clipboard-text",
+      "read-clipboard-text",
+      "read-pasted-image",
+      "remove-pasted-image",
+    ]),
+    uri: Schema.NullOr(Schema.String),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Composer image operation ${this.operation} failed${this.uri === null ? "" : ` for ${this.uri}`}.`;
+  }
+}
+
 function estimateBase64ByteSize(base64: string): number {
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   return Math.floor((base64.length * 3) / 4) - padding;
@@ -20,16 +45,24 @@ function estimateBase64ByteSize(base64: string): number {
 async function loadImagePicker() {
   try {
     return await import("expo-image-picker");
-  } catch (error) {
-    throw new Error("Image attachments are unavailable right now.", { cause: error });
+  } catch (cause) {
+    throw new ComposerImageOperationError({
+      operation: "load-image-picker",
+      uri: null,
+      cause,
+    });
   }
 }
 
 async function loadClipboard() {
   try {
     return await import("expo-clipboard");
-  } catch (error) {
-    throw new Error("Clipboard paste is unavailable right now.", { cause: error });
+  } catch (cause) {
+    throw new ComposerImageOperationError({
+      operation: "load-clipboard",
+      uri: null,
+      cause,
+    });
   }
 }
 
@@ -49,14 +82,20 @@ export async function pickComposerImages(input: { readonly existingCount: number
   try {
     imagePicker = await loadImagePicker();
   } catch (error) {
+    console.warn("[composer-images] image picker unavailable", error);
     return {
       images: [],
-      error:
-        error instanceof Error ? error.message : "Image attachments are unavailable right now.",
+      error: "Image attachments are unavailable right now.",
     };
   }
 
-  const permission = await imagePicker.requestMediaLibraryPermissionsAsync();
+  const permission = await imagePicker.requestMediaLibraryPermissionsAsync().catch((cause) => {
+    throw new ComposerImageOperationError({
+      operation: "request-media-library-permission",
+      uri: null,
+      cause,
+    });
+  });
   if (!permission.granted) {
     return {
       images: [],
@@ -64,13 +103,21 @@ export async function pickComposerImages(input: { readonly existingCount: number
     };
   }
 
-  const result = await imagePicker.launchImageLibraryAsync({
-    mediaTypes: ["images"],
-    allowsMultipleSelection: true,
-    selectionLimit: remainingSlots,
-    base64: true,
-    quality: 1,
-  });
+  const result = await imagePicker
+    .launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      selectionLimit: remainingSlots,
+      base64: true,
+      quality: 1,
+    })
+    .catch((cause) => {
+      throw new ComposerImageOperationError({
+        operation: "launch-image-library",
+        uri: null,
+        cause,
+      });
+    });
 
   if (result.canceled) {
     return {
@@ -127,16 +174,24 @@ export async function pasteComposerClipboard(input: { readonly existingCount: nu
   try {
     clipboard = await loadClipboard();
   } catch (error) {
+    console.warn("[composer-images] clipboard unavailable", error);
     return {
       images: [],
       text: null,
-      error: error instanceof Error ? error.message : "Clipboard paste is unavailable right now.",
+      error: "Clipboard paste is unavailable right now.",
     };
   }
 
   const remainingSlots = PROVIDER_SEND_TURN_MAX_ATTACHMENTS - input.existingCount;
 
-  if (await clipboard.hasImageAsync()) {
+  const hasImage = await clipboard.hasImageAsync().catch((cause) => {
+    throw new ComposerImageOperationError({
+      operation: "check-clipboard-image",
+      uri: null,
+      cause,
+    });
+  });
+  if (hasImage) {
     if (remainingSlots <= 0) {
       return {
         images: [],
@@ -144,7 +199,13 @@ export async function pasteComposerClipboard(input: { readonly existingCount: nu
         error: `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`,
       };
     }
-    const image = await clipboard.getImageAsync({ format: "png" });
+    const image = await clipboard.getImageAsync({ format: "png" }).catch((cause) => {
+      throw new ComposerImageOperationError({
+        operation: "read-clipboard-image",
+        uri: null,
+        cause,
+      });
+    });
     if (!image) {
       return {
         images: [],
@@ -180,8 +241,21 @@ export async function pasteComposerClipboard(input: { readonly existingCount: nu
     };
   }
 
-  if (await clipboard.hasStringAsync()) {
-    const text = await clipboard.getStringAsync();
+  const hasText = await clipboard.hasStringAsync().catch((cause) => {
+    throw new ComposerImageOperationError({
+      operation: "check-clipboard-text",
+      uri: null,
+      cause,
+    });
+  });
+  if (hasText) {
+    const text = await clipboard.getStringAsync().catch((cause) => {
+      throw new ComposerImageOperationError({
+        operation: "read-clipboard-text",
+        uri: null,
+        cause,
+      });
+    });
     return {
       images: [],
       text: text.length > 0 ? text : null,
@@ -260,8 +334,15 @@ export async function convertPastedImagesToAttachments(input: {
         dataUrl: `data:${mimeType};base64,${base64}`,
         previewUri: ownedTemporaryFile ? `data:${mimeType};base64,${base64}` : uri,
       });
-    } catch (error) {
-      console.warn("Failed to read pasted image", uri, error);
+    } catch (cause) {
+      console.warn(
+        "[composer-images] failed to read pasted image",
+        new ComposerImageOperationError({
+          operation: "read-pasted-image",
+          uri,
+          cause,
+        }),
+      );
     } finally {
       if (ownedTemporaryFile) {
         try {
@@ -269,8 +350,15 @@ export async function convertPastedImagesToAttachments(input: {
           if (file.exists) {
             file.delete();
           }
-        } catch (error) {
-          console.warn("Failed to remove temporary pasted image", uri, error);
+        } catch (cause) {
+          console.warn(
+            "[composer-images] failed to remove temporary pasted image",
+            new ComposerImageOperationError({
+              operation: "remove-pasted-image",
+              uri,
+              cause,
+            }),
+          );
         }
       }
     }
