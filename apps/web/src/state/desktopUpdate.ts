@@ -58,7 +58,11 @@ export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridg
         Effect.retry({ times: INITIAL_STATE_READ_ATTEMPT_COUNT - 1 }),
         Effect.catchTags({
           DesktopUpdateStateReadError: (error) =>
-            Effect.logError(error.message, { error }).pipe(Effect.as(null)),
+            Effect.logError(error.message, {
+              errorTag: error._tag,
+              attemptCount: error.attemptCount,
+              stack: error.stack,
+            }).pipe(Effect.as(null)),
         }),
       );
       if (!receivedUpdate && initialState !== null) {

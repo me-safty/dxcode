@@ -114,12 +114,11 @@ describe("desktopUpdateStateAtom", () => {
     const [, errorMessage, errorContext] = reportError.mock.calls[0] ?? [];
     expect(errorMessage).toBe("Failed to read the initial desktop update state after 3 attempts.");
     expect(errorContext).toMatchObject({
-      error: {
-        _tag: "DesktopUpdateStateReadError",
-        attemptCount: 3,
-        cause,
-      },
+      errorTag: "DesktopUpdateStateReadError",
+      attemptCount: 3,
     });
+    expect(errorContext).not.toHaveProperty("error");
+    expect(errorContext).not.toHaveProperty("cause");
 
     listener?.(baseState);
     await vi.waitFor(() => {
