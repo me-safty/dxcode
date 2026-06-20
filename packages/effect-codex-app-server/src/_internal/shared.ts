@@ -1,10 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as SchemaIssue from "effect/SchemaIssue";
 
 import * as CodexError from "../errors.ts";
-
-const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
 export const JsonRpcId = Schema.Union([Schema.Number, Schema.String]);
 
@@ -30,15 +27,24 @@ export const decodeOptionalPayload = <A, I>(
       return Effect.sync(() => undefined as A);
     }
     return Effect.fail(
-      CodexError.CodexAppServerRequestError.invalidParams(`${method} does not accept params`, raw),
+      CodexError.CodexAppServerRequestError.invalidParams(
+        `Method '${method}' does not accept a payload during 'decode-payload'`,
+        raw,
+        { method, operation: "decode-payload" },
+      ),
     );
   }
 
   return Schema.decodeUnknownEffect(schema)(raw).pipe(
     Effect.mapError((error) =>
       CodexError.CodexAppServerRequestError.invalidParams(
-        `Invalid ${method} payload: ${formatSchemaIssue(error.issue)}`,
+        `Invalid payload for method '${method}' during 'decode-payload'`,
         { issue: error.issue },
+        {
+          method,
+          operation: "decode-payload",
+          cause: error,
+        },
       ),
     ),
   );
@@ -55,8 +61,9 @@ export const encodeOptionalPayload = <A, I>(
     }
     return Effect.fail(
       CodexError.CodexAppServerRequestError.invalidParams(
-        `${method} does not accept params`,
+        `Method '${method}' does not accept a payload during 'encode-payload'`,
         payload,
+        { method, operation: "encode-payload" },
       ),
     );
   }
@@ -64,8 +71,13 @@ export const encodeOptionalPayload = <A, I>(
   return Schema.encodeEffect(schema)(payload).pipe(
     Effect.mapError((error) =>
       CodexError.CodexAppServerRequestError.invalidParams(
-        `Invalid ${method} payload: ${formatSchemaIssue(error.issue)}`,
+        `Invalid payload for method '${method}' during 'encode-payload'`,
         { issue: error.issue },
+        {
+          method,
+          operation: "encode-payload",
+          cause: error,
+        },
       ),
     ),
   );
@@ -80,7 +92,9 @@ export const decodeNotificationPayload = <A, I>(
     Effect.mapError(
       (error) =>
         new CodexError.CodexAppServerProtocolParseError({
-          detail: error.message,
+          detail: "Invalid notification payload",
+          method,
+          operation: "decode-notification-payload",
           cause: error,
         }),
     ),
@@ -96,6 +110,8 @@ export const runHandler = Effect.fnUntraced(function* <A, B>(
   }
 
   return yield* handler(payload).pipe(
-    Effect.mapError((error) => CodexError.normalizeToRequestError(error)),
+    Effect.mapError((error) =>
+      CodexError.CodexAppServerRequestError.fromAppServerError(error, method),
+    ),
   );
 });

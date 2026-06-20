@@ -1,5 +1,22 @@
 import * as Schema from "effect/Schema";
 
+export const CodexAppServerRequestOperation = Schema.Literals([
+  "decode-payload",
+  "encode-payload",
+  "handle-request",
+]);
+export type CodexAppServerRequestOperation = typeof CodexAppServerRequestOperation.Type;
+
+export interface CodexAppServerRequestDiagnostics {
+  readonly method?: string;
+  readonly operation?: CodexAppServerRequestOperation;
+  readonly cause?: unknown;
+}
+
+export const CodexAppServerProtocolParseOperation = Schema.Literals([
+  "decode-notification-payload",
+]);
+
 export interface CodexAppServerProtocolErrorShape {
   readonly code: number;
   readonly message: string;
@@ -38,11 +55,15 @@ export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<Co
   "CodexAppServerProtocolParseError",
   {
     detail: Schema.String,
+    method: Schema.optionalKey(Schema.String),
+    operation: Schema.optionalKey(CodexAppServerProtocolParseOperation),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
-    return `Failed to parse Codex App Server protocol message: ${this.detail}`;
+    const operation = this.operation === undefined ? "" : ` during '${this.operation}'`;
+    const method = this.method === undefined ? "" : ` for method '${this.method}'`;
+    return `Failed to parse Codex App Server protocol message${operation}${method}: ${this.detail}`;
   }
 }
 
@@ -64,6 +85,9 @@ export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexApp
     code: Schema.Number,
     errorMessage: Schema.String,
     data: Schema.optional(Schema.Unknown),
+    method: Schema.optionalKey(Schema.String),
+    operation: Schema.optionalKey(CodexAppServerRequestOperation),
+    cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
   override get message() {
@@ -76,6 +100,21 @@ export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexApp
       errorMessage: error.message,
       ...(error.data !== undefined ? { data: error.data } : {}),
     });
+  }
+
+  static fromAppServerError(error: CodexAppServerError, method: string) {
+    if (error._tag === "CodexAppServerRequestError") {
+      return error;
+    }
+    return CodexAppServerRequestError.internalError(
+      `Codex App Server request handler failed for method '${method}'`,
+      undefined,
+      {
+        method,
+        operation: "handle-request",
+        cause: error,
+      },
+    );
   }
 
   static parseError(message = "Parse error", data?: unknown) {
@@ -101,19 +140,29 @@ export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexApp
     });
   }
 
-  static invalidParams(message = "Invalid params", data?: unknown) {
+  static invalidParams(
+    message = "Invalid params",
+    data?: unknown,
+    diagnostics: CodexAppServerRequestDiagnostics = {},
+  ) {
     return new CodexAppServerRequestError({
       code: -32602,
       errorMessage: message,
       ...(data !== undefined ? { data } : {}),
+      ...diagnostics,
     });
   }
 
-  static internalError(message = "Internal error", data?: unknown) {
+  static internalError(
+    message = "Internal error",
+    data?: unknown,
+    diagnostics: CodexAppServerRequestDiagnostics = {},
+  ) {
     return new CodexAppServerRequestError({
       code: -32603,
       errorMessage: message,
       ...(data !== undefined ? { data } : {}),
+      ...diagnostics,
     });
   }
 
@@ -143,10 +192,3 @@ export const CodexAppServerError = Schema.Union([
 ]);
 
 export type CodexAppServerError = typeof CodexAppServerError.Type;
-const isCodexAppServerRequestError = Schema.is(CodexAppServerRequestError);
-
-export function normalizeToRequestError(error: CodexAppServerError): CodexAppServerRequestError {
-  return isCodexAppServerRequestError(error)
-    ? error
-    : CodexAppServerRequestError.internalError(error.message);
-}

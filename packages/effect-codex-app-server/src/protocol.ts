@@ -262,7 +262,13 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             ? options.onRequest(request).pipe(
                 Effect.matchEffect({
                   onFailure: (error) =>
-                    respondError(request.id, CodexError.normalizeToRequestError(error)),
+                    respondError(
+                      request.id,
+                      CodexError.CodexAppServerRequestError.fromAppServerError(
+                        error,
+                        request.method,
+                      ),
+                    ),
                   onSuccess: (result) => respond(request.id, result),
                 }),
               )
