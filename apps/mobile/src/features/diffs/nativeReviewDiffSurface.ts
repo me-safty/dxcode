@@ -130,6 +130,7 @@ export interface NativeReviewDiffViewProps extends ViewProps {
 }
 
 let cachedNativeReviewDiffView: ComponentType<NativeReviewDiffViewProps> | undefined;
+let nativeReviewDiffViewResolutionFailed = false;
 
 function getExpoViewConfig(moduleName: string) {
   return (globalThis as typeof globalThis & ExpoGlobalWithViewConfig).expo?.getViewConfig?.(
@@ -142,6 +143,10 @@ export function resolveNativeReviewDiffView(): ComponentType<NativeReviewDiffVie
     return cachedNativeReviewDiffView;
   }
 
+  if (nativeReviewDiffViewResolutionFailed) {
+    return null;
+  }
+
   if (getExpoViewConfig(NATIVE_REVIEW_DIFF_MODULE_NAME) == null) {
     return null;
   }
@@ -151,6 +156,7 @@ export function resolveNativeReviewDiffView(): ComponentType<NativeReviewDiffVie
       NATIVE_REVIEW_DIFF_MODULE_NAME,
     );
   } catch (cause) {
+    nativeReviewDiffViewResolutionFailed = true;
     console.error(
       new NativeViewResolutionError({
         nativeModuleName: NATIVE_REVIEW_DIFF_MODULE_NAME,

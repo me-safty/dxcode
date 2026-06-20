@@ -35,6 +35,7 @@ export interface NativeTerminalSurfaceProps extends ViewProps {
 }
 
 let cachedNativeTerminalSurfaceView: ComponentType<NativeTerminalSurfaceProps> | undefined;
+let nativeTerminalSurfaceViewResolutionFailed = false;
 
 function getExpoViewConfig(moduleName: string) {
   return (globalThis as typeof globalThis & ExpoGlobalWithViewConfig).expo?.getViewConfig?.(
@@ -47,6 +48,10 @@ export function resolveNativeTerminalSurfaceView(): ComponentType<NativeTerminal
     return cachedNativeTerminalSurfaceView;
   }
 
+  if (nativeTerminalSurfaceViewResolutionFailed) {
+    return null;
+  }
+
   if (getExpoViewConfig(NATIVE_TERMINAL_MODULE_NAME) == null) {
     return null;
   }
@@ -56,6 +61,7 @@ export function resolveNativeTerminalSurfaceView(): ComponentType<NativeTerminal
       NATIVE_TERMINAL_MODULE_NAME,
     );
   } catch (cause) {
+    nativeTerminalSurfaceViewResolutionFailed = true;
     console.error(
       new NativeViewResolutionError({
         nativeModuleName: NATIVE_TERMINAL_MODULE_NAME,

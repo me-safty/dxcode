@@ -51,6 +51,8 @@ describe("resolveNativeTerminalSurfaceView", () => {
     const { resolveNativeTerminalSurfaceView } = await import("./nativeTerminalModule");
 
     expect(resolveNativeTerminalSurfaceView()).toBeNull();
+    expect(resolveNativeTerminalSurfaceView()).toBeNull();
+    expect(expoMocks.requireNativeView).toHaveBeenCalledTimes(1);
     expect(consoleError).toHaveBeenCalledWith(
       expect.objectContaining({
         _tag: "NativeViewResolutionError",
@@ -58,5 +60,6 @@ describe("resolveNativeTerminalSurfaceView", () => {
         cause,
       }),
     );
+    expect(consoleError).toHaveBeenCalledTimes(1);
   });
 });

@@ -66,6 +66,8 @@ describe("resolveNativeReviewDiffView", () => {
     const { resolveNativeReviewDiffView } = await import("./nativeReviewDiffSurface");
 
     expect(resolveNativeReviewDiffView()).toBeNull();
+    expect(resolveNativeReviewDiffView()).toBeNull();
+    expect(expoMocks.requireNativeView).toHaveBeenCalledTimes(1);
     expect(consoleError).toHaveBeenCalledWith(
       expect.objectContaining({
         _tag: "NativeViewResolutionError",
@@ -73,5 +75,6 @@ describe("resolveNativeReviewDiffView", () => {
         cause,
       }),
     );
+    expect(consoleError).toHaveBeenCalledTimes(1);
   });
 });
