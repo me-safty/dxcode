@@ -9,7 +9,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
-import { beforeEach, describe, expect, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as BrowserSession from "./BrowserSession.ts";
@@ -509,4 +509,19 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+});
+
+describe("PreviewOperationError", () => {
+  it("keeps timeline detail separate from its structured message", () => {
+    const cause = new Error("CDP command failed with an invalid node id");
+    const error = new PreviewManager.PreviewOperationError({
+      operation: "click.DOM.resolveNode",
+      tabId: "tab_1",
+      webContentsId: 42,
+      cause,
+    });
+
+    expect(error.message).not.toContain(cause.message);
+    expect(PreviewManager.PreviewOperationError.toTimelineMessage(error)).toBe(cause.message);
+  });
 });

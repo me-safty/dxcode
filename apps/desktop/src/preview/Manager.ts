@@ -851,11 +851,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       } else {
         const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
         const interrupted = isPreviewAutomationControlInterruptedError(error);
+        const errorMessage = isPreviewOperationError(error)
+          ? PreviewOperationError.toTimelineMessage(error)
+          : error instanceof Error
+            ? error.message
+            : String(error);
         yield* replaceAction(tabId, {
           ...actionEvent,
           status: interrupted ? "interrupted" : "failed",
           completedAt,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage,
         });
       }
       const tabs = yield* SynchronizedRef.get(tabsRef);
@@ -2336,6 +2341,10 @@ export class PreviewOperationError extends Schema.TaggedErrorClass<PreviewOperat
     cause: Schema.Defect(),
   },
 ) {
+  static toTimelineMessage(error: PreviewOperationError): string {
+    return error.cause instanceof Error ? error.cause.message : String(error.cause);
+  }
+
   override get message(): string {
     const context = [
       this.tabId === undefined ? undefined : `tab ${this.tabId}`,
@@ -2345,6 +2354,8 @@ export class PreviewOperationError extends Schema.TaggedErrorClass<PreviewOperat
     return `Desktop preview operation failed: ${this.operation}${context.length === 0 ? "" : ` (${context.join(", ")})`}`;
   }
 }
+
+export const isPreviewOperationError = Schema.is(PreviewOperationError);
 
 export class PreviewArtifactPathOutsideDirectoryError extends Schema.TaggedErrorClass<PreviewArtifactPathOutsideDirectoryError>()(
   "PreviewArtifactPathOutsideDirectoryError",
