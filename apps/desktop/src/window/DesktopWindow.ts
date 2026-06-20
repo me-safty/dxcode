@@ -12,10 +12,10 @@ import type {
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import * as DesktopObservability from "../app/DesktopObservability.ts";
+import { makeComponentLogger } from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
-import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -61,7 +61,7 @@ export class DesktopWindow extends Context.Service<
 >()("@t3tools/desktop/window/DesktopWindow") {}
 
 const { logInfo: logWindowInfo, logWarning: logWindowWarning } =
-  DesktopObservability.makeComponentLogger("desktop-window");
+  makeComponentLogger("desktop-window");
 
 function getIconOption(
   iconPaths: DesktopAssets.DesktopIconPaths,
@@ -163,7 +163,7 @@ export const make = Effect.gen(function* () {
     DesktopWindowError
   > {
     yield* previewManager.getBrowserSession();
-    const applicationUrl = ElectronProtocol.getDesktopUrl(environment.isDevelopment);
+    const applicationUrl = getDesktopUrl(environment.isDevelopment);
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
