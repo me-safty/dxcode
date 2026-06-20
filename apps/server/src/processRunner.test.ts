@@ -174,7 +174,7 @@ describe("runProcess", () => {
 
       const error = yield* runWith(spawner)({
         command: "fake",
-        args: ["--flag"],
+        args: ["--flag", "secret-token-value"],
         cwd: "/logical",
         spawnCwd: "/actual",
       }).pipe(Effect.flip);
@@ -185,15 +185,18 @@ describe("runProcess", () => {
       }
       expect(error).toMatchObject({
         command: "fake",
-        args: ["--flag"],
+        argumentCount: 2,
         cwd: "/logical",
         spawnCwd: "/actual",
         resolvedCommand: "fake",
-        resolvedArgs: ["--flag"],
+        resolvedArgumentCount: 2,
         shell: false,
       });
       expect(error.cause).toBe(cause);
-      expect(error.message).toBe("Failed to spawn process 'fake --flag' in '/actual'");
+      expect(error.message).toBe("Failed to spawn process 'fake' in '/actual'");
+      expect(error).not.toHaveProperty("args");
+      expect(error).not.toHaveProperty("resolvedArgs");
+      expect(error.message).not.toContain("secret-token-value");
     }),
   );
 
@@ -217,7 +220,7 @@ describe("runProcess", () => {
         observedBytes: 2048,
       });
       expect(error.message).toBe(
-        "Process 'fake stdout-bytes 2048' stdout produced 2048 bytes, exceeding the 128 byte limit",
+        "Process 'fake' stdout produced 2048 bytes, exceeding the 128 byte limit",
       );
     }),
   );
@@ -357,12 +360,12 @@ describe("runProcess", () => {
       }
       expect(error).toMatchObject({
         command: "fake",
-        args: ["sleep"],
+        argumentCount: 1,
         cwd: "/logical",
         spawnCwd: "/actual",
         timeoutMs: 50,
       });
-      expect(error.message).toBe("Process 'fake sleep' in '/actual' timed out after 50ms");
+      expect(error.message).toBe("Process 'fake' in '/actual' timed out after 50ms");
     }),
   );
 

@@ -45,20 +45,20 @@ export interface ProcessRunOutput {
 
 const ProcessInvocationFields = {
   command: Schema.String,
-  args: Schema.Array(Schema.String),
+  argumentCount: Schema.Number,
   cwd: Schema.optional(Schema.String),
   spawnCwd: Schema.optional(Schema.String),
 };
 
 const formatProcessInvocation = (input: {
   readonly command: string;
-  readonly args: ReadonlyArray<string>;
   readonly cwd?: string | undefined;
   readonly spawnCwd?: string | undefined;
 }): string => {
-  const command = [input.command, ...input.args].join(" ");
   const executionCwd = input.spawnCwd ?? input.cwd;
-  return executionCwd === undefined ? `'${command}'` : `'${command}' in '${executionCwd}'`;
+  return executionCwd === undefined
+    ? `'${input.command}'`
+    : `'${input.command}' in '${executionCwd}'`;
 };
 
 export class ProcessSpawnError extends Schema.TaggedErrorClass<ProcessSpawnError>()(
@@ -66,7 +66,7 @@ export class ProcessSpawnError extends Schema.TaggedErrorClass<ProcessSpawnError
   {
     ...ProcessInvocationFields,
     resolvedCommand: Schema.optional(Schema.String),
-    resolvedArgs: Schema.optional(Schema.Array(Schema.String)),
+    resolvedArgumentCount: Schema.optional(Schema.Number),
     shell: Schema.optional(Schema.Boolean),
     cause: Schema.Defect(),
   },
@@ -185,7 +185,7 @@ const collectText = Effect.fn("processRunner.collectText")(function* (input: {
       (cause) =>
         new ProcessReadError({
           command: input.command,
-          args: input.args,
+          argumentCount: input.args.length,
           cwd: input.cwd,
           spawnCwd: input.spawnCwd,
           stream: input.streamName,
@@ -219,7 +219,7 @@ const collectText = Effect.fn("processRunner.collectText")(function* (input: {
           return Effect.fail(
             new ProcessOutputLimitError({
               command: input.command,
-              args: input.args,
+              argumentCount: input.args.length,
               cwd: input.cwd,
               spawnCwd: input.spawnCwd,
               stream: input.streamName,
@@ -273,7 +273,7 @@ function finalizeRunProcess<R>(
       return Effect.fail(
         new ProcessTimeoutError({
           command: input.command,
-          args: input.args,
+          argumentCount: input.args.length,
           cwd: input.cwd,
           spawnCwd: input.spawnCwd,
           timeoutMs: Duration.toMillis(timeout),
@@ -315,11 +315,11 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
         (cause) =>
           new ProcessSpawnError({
             command: input.command,
-            args: input.args,
+            argumentCount: input.args.length,
             cwd: input.cwd,
             spawnCwd: input.spawnCwd,
             resolvedCommand: spawnCommand.command,
-            resolvedArgs: spawnCommand.args,
+            resolvedArgumentCount: spawnCommand.args.length,
             shell: spawnCommand.shell,
             cause,
           }),
@@ -335,7 +335,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
             (cause) =>
               new ProcessStdinError({
                 command: input.command,
-                args: input.args,
+                argumentCount: input.args.length,
                 cwd: input.cwd,
                 spawnCwd: input.spawnCwd,
                 stdinBytes: Buffer.byteLength(stdin),
@@ -378,7 +378,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
       (cause) =>
         new ProcessReadError({
           command: input.command,
-          args: input.args,
+          argumentCount: input.args.length,
           cwd: input.cwd,
           spawnCwd: input.spawnCwd,
           stream: "exitCode",
