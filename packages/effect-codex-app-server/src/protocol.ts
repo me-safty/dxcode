@@ -357,12 +357,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
                 handleTermination(
                   () =>
                     options.terminationError ??
-                    Effect.succeed(
-                      new CodexError.CodexAppServerTransportError({
-                        detail: "Codex App Server input stream ended",
-                        cause: new Error("Codex App Server input stream ended"),
-                      }),
-                    ),
+                    Effect.succeed(new CodexError.CodexAppServerInputStreamEndedError({})),
                 ),
             }),
           ),

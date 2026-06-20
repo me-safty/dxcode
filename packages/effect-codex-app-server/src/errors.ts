@@ -79,6 +79,15 @@ export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexA
   }
 }
 
+export class CodexAppServerInputStreamEndedError extends Schema.TaggedErrorClass<CodexAppServerInputStreamEndedError>()(
+  "CodexAppServerInputStreamEndedError",
+  {},
+) {
+  override get message() {
+    return "Codex App Server input stream ended.";
+  }
+}
+
 export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexAppServerRequestError>()(
   "CodexAppServerRequestError",
   {
@@ -189,6 +198,7 @@ export const CodexAppServerError = Schema.Union([
   CodexAppServerProcessExitedError,
   CodexAppServerProtocolParseError,
   CodexAppServerTransportError,
+  CodexAppServerInputStreamEndedError,
 ]);
 
 export type CodexAppServerError = typeof CodexAppServerError.Type;

@@ -220,4 +220,22 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
       assert.equal(circularError.detail, "Failed to encode Codex App Server message");
     }),
   );
+
+  it.effect("classifies an input stream ending without inventing a cause", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const termination = yield* Deferred.make<CodexError.CodexAppServerError>();
+      yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio,
+        onTermination: (error) => Deferred.succeed(termination, error).pipe(Effect.asVoid),
+      });
+
+      yield* Queue.end(input);
+
+      const error = yield* Deferred.await(termination);
+      assert.instanceOf(error, CodexError.CodexAppServerInputStreamEndedError);
+      assert.equal(error.message, "Codex App Server input stream ended.");
+      assert.equal("cause" in error, false);
+    }),
+  );
 });
