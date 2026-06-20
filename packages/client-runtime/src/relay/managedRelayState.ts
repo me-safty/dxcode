@@ -6,9 +6,10 @@ import { EnvironmentId } from "@t3tools/contracts";
 import {
   RelayEnvironmentConnectScope,
   RelayEnvironmentStatusScope,
-  RelayManagedEndpoint,
+  RelayManagedEndpointProviderKind,
 } from "@t3tools/contracts/relay";
 import { decodeRelayJwt } from "@t3tools/shared/relayJwt";
+import { getUrlDiagnostics } from "@t3tools/shared/urlDiagnostics";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -110,10 +111,62 @@ export class ManagedRelayStatusEndpointMismatchError extends Schema.TaggedErrorC
   "ManagedRelayStatusEndpointMismatchError",
   {
     environmentId: EnvironmentId,
-    expectedEndpoint: RelayManagedEndpoint,
-    actualEndpoint: RelayManagedEndpoint,
+    expectedProviderKind: RelayManagedEndpointProviderKind,
+    expectedHttpBaseUrlInputLength: Schema.Number,
+    expectedHttpBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    expectedHttpBaseUrlHostname: Schema.optionalKey(Schema.String),
+    expectedWsBaseUrlInputLength: Schema.Number,
+    expectedWsBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    expectedWsBaseUrlHostname: Schema.optionalKey(Schema.String),
+    actualProviderKind: RelayManagedEndpointProviderKind,
+    actualHttpBaseUrlInputLength: Schema.Number,
+    actualHttpBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    actualHttpBaseUrlHostname: Schema.optionalKey(Schema.String),
+    actualWsBaseUrlInputLength: Schema.Number,
+    actualWsBaseUrlProtocol: Schema.optionalKey(Schema.String),
+    actualWsBaseUrlHostname: Schema.optionalKey(Schema.String),
   },
 ) {
+  static fromEndpoints(input: {
+    readonly environmentId: EnvironmentId;
+    readonly expectedEndpoint: RelayClientEnvironmentRecord["endpoint"];
+    readonly actualEndpoint: RelayClientEnvironmentRecord["endpoint"];
+  }): ManagedRelayStatusEndpointMismatchError {
+    const expectedHttp = getUrlDiagnostics(input.expectedEndpoint.httpBaseUrl);
+    const expectedWs = getUrlDiagnostics(input.expectedEndpoint.wsBaseUrl);
+    const actualHttp = getUrlDiagnostics(input.actualEndpoint.httpBaseUrl);
+    const actualWs = getUrlDiagnostics(input.actualEndpoint.wsBaseUrl);
+    return new ManagedRelayStatusEndpointMismatchError({
+      environmentId: input.environmentId,
+      expectedProviderKind: input.expectedEndpoint.providerKind,
+      expectedHttpBaseUrlInputLength: expectedHttp.inputLength,
+      ...(expectedHttp.protocol === undefined
+        ? {}
+        : { expectedHttpBaseUrlProtocol: expectedHttp.protocol }),
+      ...(expectedHttp.hostname === undefined
+        ? {}
+        : { expectedHttpBaseUrlHostname: expectedHttp.hostname }),
+      expectedWsBaseUrlInputLength: expectedWs.inputLength,
+      ...(expectedWs.protocol === undefined
+        ? {}
+        : { expectedWsBaseUrlProtocol: expectedWs.protocol }),
+      ...(expectedWs.hostname === undefined
+        ? {}
+        : { expectedWsBaseUrlHostname: expectedWs.hostname }),
+      actualProviderKind: input.actualEndpoint.providerKind,
+      actualHttpBaseUrlInputLength: actualHttp.inputLength,
+      ...(actualHttp.protocol === undefined
+        ? {}
+        : { actualHttpBaseUrlProtocol: actualHttp.protocol }),
+      ...(actualHttp.hostname === undefined
+        ? {}
+        : { actualHttpBaseUrlHostname: actualHttp.hostname }),
+      actualWsBaseUrlInputLength: actualWs.inputLength,
+      ...(actualWs.protocol === undefined ? {} : { actualWsBaseUrlProtocol: actualWs.protocol }),
+      ...(actualWs.hostname === undefined ? {} : { actualWsBaseUrlHostname: actualWs.hostname }),
+    });
+  }
+
   override get message(): string {
     return `Relay returned a different endpoint for environment ${this.environmentId}.`;
   }
@@ -349,7 +402,7 @@ function validateEnvironmentStatus(
   }
   if (!endpointMatches(status.endpoint, environment.endpoint)) {
     return Effect.fail(
-      new ManagedRelayStatusEndpointMismatchError({
+      ManagedRelayStatusEndpointMismatchError.fromEndpoints({
         environmentId: environment.environmentId,
         expectedEndpoint: environment.endpoint,
         actualEndpoint: status.endpoint,

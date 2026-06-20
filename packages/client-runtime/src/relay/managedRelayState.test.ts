@@ -19,6 +19,7 @@ import {
   createManagedRelaySession,
   managedRelayAccountChanges,
   ManagedRelaySessionUnavailableError,
+  ManagedRelayStatusEndpointMismatchError,
   ManagedRelayStatusEnvironmentMismatchError,
   ManagedRelayTokenReadError,
   ManagedRelayTokenUnavailableError,
@@ -113,6 +114,65 @@ function clerkToken(expiresAtSeconds: number): string {
 
 describe("createManagedRelayQueryManager", () => {
   afterEach(resetRegistry);
+
+  it("redacts endpoint mismatch secrets while retaining correlation fields", () => {
+    const expectedHttpBaseUrl =
+      "https://expected-user:expected-password@expected.example.test/private/catalog?token=expected-secret#expected-fragment";
+    const expectedWsBaseUrl =
+      "wss://expected-user:expected-password@expected.example.test/private/socket?token=expected-secret#expected-fragment";
+    const actualHttpBaseUrl =
+      "https://actual-user:actual-password@actual.example.test/private/catalog?token=actual-secret#actual-fragment";
+    const actualWsBaseUrl =
+      "wss://actual-user:actual-password@actual.example.test/private/socket?token=actual-secret#actual-fragment";
+
+    const error = ManagedRelayStatusEndpointMismatchError.fromEndpoints({
+      environmentId: environment.environmentId,
+      expectedEndpoint: {
+        providerKind: "cloudflare_tunnel",
+        httpBaseUrl: expectedHttpBaseUrl,
+        wsBaseUrl: expectedWsBaseUrl,
+      },
+      actualEndpoint: {
+        providerKind: "cloudflare_tunnel",
+        httpBaseUrl: actualHttpBaseUrl,
+        wsBaseUrl: actualWsBaseUrl,
+      },
+    });
+
+    expect(error).toMatchObject({
+      expectedProviderKind: "cloudflare_tunnel",
+      expectedHttpBaseUrlInputLength: expectedHttpBaseUrl.length,
+      expectedHttpBaseUrlProtocol: "https:",
+      expectedHttpBaseUrlHostname: "expected.example.test",
+      expectedWsBaseUrlInputLength: expectedWsBaseUrl.length,
+      expectedWsBaseUrlProtocol: "wss:",
+      expectedWsBaseUrlHostname: "expected.example.test",
+      actualProviderKind: "cloudflare_tunnel",
+      actualHttpBaseUrlInputLength: actualHttpBaseUrl.length,
+      actualHttpBaseUrlProtocol: "https:",
+      actualHttpBaseUrlHostname: "actual.example.test",
+      actualWsBaseUrlInputLength: actualWsBaseUrl.length,
+      actualWsBaseUrlProtocol: "wss:",
+      actualWsBaseUrlHostname: "actual.example.test",
+    });
+    expect(error).not.toHaveProperty("expectedEndpoint");
+    expect(error).not.toHaveProperty("actualEndpoint");
+    const exposedText = `${Object.values(error).join(" ")} ${error.message}`;
+    for (const secret of [
+      "expected-user",
+      "expected-password",
+      "/private/catalog",
+      "/private/socket",
+      "expected-secret",
+      "expected-fragment",
+      "actual-user",
+      "actual-password",
+      "actual-secret",
+      "actual-fragment",
+    ]) {
+      expect(exposedText).not.toContain(secret);
+    }
+  });
 
   it.effect("waits for the current cloud session before reading its token", () =>
     Effect.gen(function* () {
