@@ -70,20 +70,43 @@ describe("project action terminal ids", () => {
     expect(
       resolveProjectActionTerminalId({
         scriptId: "build",
-        terminalIds: ["action-build", "action-build-2", "term-1"],
+        terminalIds: ["action-build", "action-build:2", "term-1"],
         runningTerminalIds: ["action-build"],
       }),
-    ).toBe("action-build-2");
+    ).toBe("action-build:2");
   });
 
   it("allocates a suffixed action terminal when all existing action terminals are busy", () => {
     expect(
       resolveProjectActionTerminalId({
         scriptId: "build",
-        terminalIds: ["action-build", "action-build-2"],
-        runningTerminalIds: ["action-build", "action-build-2"],
+        terminalIds: ["action-build", "action-build:2"],
+        runningTerminalIds: ["action-build", "action-build:2"],
       }),
-    ).toBe("action-build-3");
+    ).toBe("action-build:3");
+  });
+
+  it("does not reuse another script primary terminal as an action fallback", () => {
+    expect(projectActionTerminalId("build-2")).toBe("action-build-2");
+    expect(
+      resolveProjectActionTerminalId({
+        scriptId: "build",
+        terminalIds: ["action-build", "action-build-2"],
+        runningTerminalIds: ["action-build"],
+      }),
+    ).toBe("action-build:2");
+  });
+
+  it("encodes script ids before adding fallback suffixes", () => {
+    expect(projectActionTerminalId("build:2")).toBe("action-build%3A2");
+    expect(projectActionTerminalId("build:2", 2)).toBe("action-build%3A2:2");
+    expect(
+      resolveProjectActionTerminalId({
+        scriptId: "build:2",
+        terminalIds: ["action-build%3A2", "action-build:2"],
+        runningTerminalIds: ["action-build%3A2"],
+      }),
+    ).toBe("action-build%3A2:2");
   });
 });
 

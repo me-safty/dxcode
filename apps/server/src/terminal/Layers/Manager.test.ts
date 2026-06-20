@@ -24,6 +24,7 @@ import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { expect } from "vite-plus/test";
 
 import * as ProcessRunner from "../../processRunner.ts";
@@ -271,6 +272,17 @@ const createManager = (
 
 const withHostPlatform = (platform: NodeJS.Platform) =>
   Layer.succeed(HostProcessPlatform, platform);
+
+function processOutput(stdout: string, code = 0): ProcessRunner.ProcessRunOutput {
+  return {
+    stdout,
+    stderr: "",
+    code: ChildProcessSpawner.ExitCode(code),
+    timedOut: false,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+  };
+}
 
 it.layer(
   Layer.merge(NodeServices.layer, ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer))),
@@ -889,6 +901,36 @@ it.layer(
       processIds: [9000, 9001],
     });
   });
+
+  it.effect("keeps a POSIX shell child marked busy when process tree inspection fails", () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const processRunner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            calls.push(`${input.command} ${input.args.join(" ")}`);
+            if (input.command === "pgrep") {
+              return processOutput("9001\n");
+            }
+            if (input.command === "ps" && input.args.includes("comm=")) {
+              return processOutput("bash\n");
+            }
+            return processOutput("", 1);
+          }),
+      });
+
+      const result = yield* __testing
+        .posixInspectSubprocess(9000, "darwin")
+        .pipe(Effect.provide(Layer.succeed(ProcessRunner.ProcessRunner, processRunner)));
+
+      expect(calls).toEqual(["pgrep -P 9000", "ps -p 9001 -o comm=", "ps -eo pid=,ppid=,comm="]);
+      expect(result).toEqual({
+        hasRunningSubprocess: true,
+        childCommand: "bash",
+        processIds: [9000, 9001],
+      });
+    }),
+  );
 
   it.effect("does not invoke subprocess polling until a terminal session is running", () =>
     Effect.gen(function* () {

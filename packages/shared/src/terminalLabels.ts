@@ -1,6 +1,14 @@
 import type { TerminalSummary } from "@t3tools/contracts";
 
 /** Human-readable label for a terminal tab; matches mobile and web sidebars. */
+function decodeTerminalLabelPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export function getTerminalLabel(terminalId: string): string {
   const numericSuffix = /^term(?:inal)?-(\d+)$/i.exec(terminalId)?.[1];
   if (numericSuffix) {
@@ -9,7 +17,7 @@ export function getTerminalLabel(terminalId: string): string {
 
   const actionId = /^action-(.+)$/i.exec(terminalId)?.[1]?.trim();
   if (actionId) {
-    return `Action: ${actionId.replace(/-+/g, " ")}`;
+    return `Action: ${decodeTerminalLabelPart(actionId).replace(/[-:]+/g, " ")}`;
   }
 
   return terminalId;
