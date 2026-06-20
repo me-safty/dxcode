@@ -366,6 +366,10 @@ function isMissingGitCwdError(error: GitCommandError): boolean {
   );
 }
 
+function isNonRepositoryGitStderr(stderr: string): boolean {
+  return stderr.toLowerCase().includes("not a git repository");
+}
+
 interface Trace2Monitor {
   readonly env: NodeJS.ProcessEnv;
   readonly flush: Effect.Effect<void, never>;
@@ -1196,6 +1200,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
     }
     if (branchResult.exitCode !== 0) {
+      if (isNonRepositoryGitStderr(branchResult.stderr)) {
+        return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
+      }
       return yield* new GitCommandError({
         ...gitCommandContext({
           operation: "GitVcsDriver.statusDetailsRemote.branch",
@@ -1316,6 +1323,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     if (statusResult.exitCode !== 0) {
+      if (isNonRepositoryGitStderr(statusResult.stderr)) {
+        return NON_REPOSITORY_STATUS_DETAILS;
+      }
       return yield* new GitCommandError({
         ...gitCommandContext({
           operation: "GitVcsDriver.statusDetails.status",
@@ -2000,7 +2010,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       if (localBranchResult.exitCode !== 0) {
         const stderr = localBranchResult.stderr.trim();
-        if (stderr.toLowerCase().includes("not a git repository")) {
+        if (isNonRepositoryGitStderr(stderr)) {
           return {
             refs: [],
             isRepo: false,
