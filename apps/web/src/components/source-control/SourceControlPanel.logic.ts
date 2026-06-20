@@ -77,7 +77,10 @@ export function mergeChangeGroups(groups: readonly VcsPanelChangeGroup[]): Panel
     .toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
-export function formatRelativeDate(value: string | null | undefined, now = Date.now()): string | null {
+export function formatRelativeDate(
+  value: string | null | undefined,
+  now = Date.now(),
+): string | null {
   if (!value) return null;
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return null;

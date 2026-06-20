@@ -707,7 +707,7 @@ function parseFileChangesFromNumstat(input: {
     const status = input.statuses?.get(path);
     files.push({
       path,
-      originalPath: status?.originalPath ?? (renamedPathRaw ? pathRaw : null),
+      originalPath: status?.originalPath ?? (renamedPathRaw ? (pathRaw ?? null) : null),
       status: status?.status ?? "modified",
       insertions: parseCount(insertionsRaw),
       deletions: parseCount(deletionsRaw),

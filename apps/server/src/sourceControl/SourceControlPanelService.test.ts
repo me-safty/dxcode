@@ -719,7 +719,8 @@ describe("SourceControlPanelService", () => {
           }),
         ),
       ),
-    ));
+    ),
+  );
 
   it.effect("defers untracked detail loading from the initial snapshot", () =>
     Effect.gen(function* () {
@@ -826,7 +827,8 @@ describe("SourceControlPanelService", () => {
           },
         ),
       ),
-    ));
+    ),
+  );
 
   it.effect("surfaces same-name remote forks only when the local branch is behind", () =>
     Effect.gen(function* () {
