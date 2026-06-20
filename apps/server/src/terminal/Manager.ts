@@ -9,6 +9,9 @@
 import {
   DEFAULT_TERMINAL_ID,
   TerminalCwdError,
+  TerminalCwdNotDirectoryError,
+  TerminalCwdNotFoundError,
+  TerminalCwdStatError,
   TerminalError,
   TerminalHistoryError,
   TerminalNotRunningError,
@@ -60,6 +63,9 @@ import * as PtyAdapter from "./PtyAdapter.ts";
 
 export {
   TerminalCwdError,
+  TerminalCwdNotDirectoryError,
+  TerminalCwdNotFoundError,
+  TerminalCwdStatError,
   TerminalError,
   TerminalHistoryError,
   TerminalNotRunningError,
@@ -1495,20 +1501,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
   const assertValidCwd = Effect.fn("terminal.assertValidCwd")(function* (cwd: string) {
     const stats = yield* fileSystem.stat(cwd).pipe(
-      Effect.mapError(
-        (cause) =>
-          new TerminalCwdError({
-            cwd,
-            reason: cause.reason._tag === "NotFound" ? "notFound" : "statFailed",
-            cause,
-          }),
-      ),
+      Effect.catchTags({
+        PlatformError: (cause) =>
+          cause.reason._tag === "NotFound"
+            ? new TerminalCwdNotFoundError({ cwd })
+            : new TerminalCwdStatError({ cwd, cause }),
+      }),
     );
     if (stats.type !== "Directory") {
-      return yield* new TerminalCwdError({
-        cwd,
-        reason: "notDirectory",
-      });
+      return yield* new TerminalCwdNotDirectoryError({ cwd });
     }
   });
 

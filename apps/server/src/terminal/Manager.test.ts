@@ -443,6 +443,39 @@ it.layer(
       fs.writeFileString(filePath, contents),
     );
 
+  it.effect("reports a missing cwd without an artificial cause", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+
+      const { manager, baseDir } = yield* createManager();
+      const cwd = path.join(baseDir, "missing-cwd");
+      const error = yield* Effect.flip(manager.open(openInput({ cwd })));
+
+      expect(error).toMatchObject({
+        _tag: "TerminalCwdNotFoundError",
+        cwd,
+      });
+      expect("cause" in error).toBe(false);
+    }),
+  );
+
+  it.effect("reports a cwd that is not a directory", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+
+      const { manager, baseDir } = yield* createManager();
+      const cwd = path.join(baseDir, "cwd-file");
+      yield* writeFileString(cwd, "not a directory");
+      const error = yield* Effect.flip(manager.open(openInput({ cwd })));
+
+      expect(error).toMatchObject({
+        _tag: "TerminalCwdNotDirectoryError",
+        cwd,
+      });
+      expect("cause" in error).toBe(false);
+    }),
+  );
+
   it.effect("preserves non-notFound cwd stat failures", () =>
     Effect.gen(function* () {
       if ((yield* HostProcessPlatform) === "win32") return;
@@ -460,9 +493,11 @@ it.layer(
       );
 
       expect(error).toMatchObject({
-        _tag: "TerminalCwdError",
+        _tag: "TerminalCwdStatError",
         cwd: blockedCwd,
-        reason: "statFailed",
+        cause: {
+          _tag: "PlatformError",
+        },
       });
     }),
   );

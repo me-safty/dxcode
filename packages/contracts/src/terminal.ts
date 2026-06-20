@@ -232,33 +232,46 @@ export const TerminalAttachStreamEvent = Schema.Union([
 ]);
 export type TerminalAttachStreamEvent = typeof TerminalAttachStreamEvent.Type;
 
-export class TerminalCwdError extends Schema.TaggedErrorClass<TerminalCwdError>()(
-  "TerminalCwdError",
+export class TerminalCwdNotFoundError extends Schema.TaggedErrorClass<TerminalCwdNotFoundError>()(
+  "TerminalCwdNotFoundError",
   {
     cwd: Schema.String,
-    reason: Schema.Literals(["notFound", "notDirectory", "statFailed"]),
-    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
-    if (this.reason === "notDirectory") {
-      return `Terminal cwd is not a directory: ${this.cwd}`;
-    }
-    if (this.reason === "notFound") {
-      return `Terminal cwd does not exist: ${this.cwd}`;
-    }
-    const causeMessage =
-      this.cause !== undefined &&
-      this.cause !== null &&
-      typeof this.cause === "object" &&
-      "message" in this.cause
-        ? this.cause.message
-        : undefined;
-    return typeof causeMessage === "string" && causeMessage.length > 0
-      ? `Failed to access terminal cwd: ${this.cwd} (${causeMessage})`
-      : `Failed to access terminal cwd: ${this.cwd}`;
+    return `Terminal cwd does not exist: ${this.cwd}`;
   }
 }
+
+export class TerminalCwdNotDirectoryError extends Schema.TaggedErrorClass<TerminalCwdNotDirectoryError>()(
+  "TerminalCwdNotDirectoryError",
+  {
+    cwd: Schema.String,
+  },
+) {
+  override get message() {
+    return `Terminal cwd is not a directory: ${this.cwd}`;
+  }
+}
+
+export class TerminalCwdStatError extends Schema.TaggedErrorClass<TerminalCwdStatError>()(
+  "TerminalCwdStatError",
+  {
+    cwd: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Failed to access terminal cwd: ${this.cwd}`;
+  }
+}
+
+export const TerminalCwdError = Schema.Union([
+  TerminalCwdNotFoundError,
+  TerminalCwdNotDirectoryError,
+  TerminalCwdStatError,
+]);
+export type TerminalCwdError = typeof TerminalCwdError.Type;
 
 export class TerminalHistoryError extends Schema.TaggedErrorClass<TerminalHistoryError>()(
   "TerminalHistoryError",
