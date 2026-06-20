@@ -317,15 +317,29 @@ export interface MacPasskeySigningConfiguration {
   readonly provisioningProfilePath: string;
 }
 
+export const InvalidMacPasskeyRpDomainReason = Schema.Literals([
+  "empty",
+  "scheme-not-allowed",
+  "parse-failed",
+  "credentials-not-allowed",
+  "port-not-allowed",
+  "path-not-allowed",
+  "query-not-allowed",
+  "fragment-not-allowed",
+  "hostname-mismatch",
+]);
+export type InvalidMacPasskeyRpDomainReason = typeof InvalidMacPasskeyRpDomainReason.Type;
+
 export class InvalidMacPasskeyRpDomainError extends Schema.TaggedErrorClass<InvalidMacPasskeyRpDomainError>()(
   "InvalidMacPasskeyRpDomainError",
   {
-    domain: Schema.String,
+    reason: InvalidMacPasskeyRpDomainReason,
+    inputLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
   override get message(): string {
-    return `Invalid passkey RP domain: ${this.domain}`;
+    return `Invalid passkey RP domain (${this.reason}).`;
   }
 }
 
@@ -391,24 +405,40 @@ export const isMacPasskeySigningConfigurationError = Schema.is(MacPasskeySigning
 
 function normalizePasskeyRpDomain(value: string): string {
   const normalized = value.trim().toLowerCase();
+  const inputLength = value.length;
+  if (normalized.length === 0) {
+    throw new InvalidMacPasskeyRpDomainError({ reason: "empty", inputLength });
+  }
+  if (/^[a-z][a-z\d+.-]*:\/\//u.test(normalized)) {
+    throw new InvalidMacPasskeyRpDomainError({
+      reason: "scheme-not-allowed",
+      inputLength,
+    });
+  }
+
   let parsed: URL;
   try {
     parsed = new URL(`https://${normalized}`);
   } catch (cause) {
-    throw new InvalidMacPasskeyRpDomainError({ domain: value, cause });
+    throw new InvalidMacPasskeyRpDomainError({ reason: "parse-failed", inputLength, cause });
   }
 
-  if (
-    normalized.length === 0 ||
-    parsed.host !== normalized ||
-    parsed.username.length > 0 ||
-    parsed.password.length > 0 ||
-    parsed.port.length > 0 ||
-    parsed.pathname !== "/" ||
-    parsed.search.length > 0 ||
-    parsed.hash.length > 0
-  ) {
-    throw new InvalidMacPasskeyRpDomainError({ domain: value });
+  let reason: InvalidMacPasskeyRpDomainReason | undefined;
+  if (parsed.username.length > 0 || parsed.password.length > 0) {
+    reason = "credentials-not-allowed";
+  } else if (parsed.port.length > 0) {
+    reason = "port-not-allowed";
+  } else if (parsed.pathname !== "/") {
+    reason = "path-not-allowed";
+  } else if (parsed.search.length > 0) {
+    reason = "query-not-allowed";
+  } else if (parsed.hash.length > 0) {
+    reason = "fragment-not-allowed";
+  } else if (parsed.host !== normalized) {
+    reason = "hostname-mismatch";
+  }
+  if (reason) {
+    throw new InvalidMacPasskeyRpDomainError({ reason, inputLength });
   }
 
   return parsed.hostname;

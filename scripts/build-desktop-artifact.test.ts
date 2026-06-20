@@ -238,17 +238,24 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.",
     );
 
+    const unsafeDomain =
+      "https://domain-user:domain-secret@example.clerk.accounts.dev/path?token=query-secret";
     const invalidDomainError = captureError({
       T3CODE_APPLE_TEAM_ID: "ABC1234567",
       T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PASSKEY_RP_DOMAINS: "https://example.clerk.accounts.dev/path",
+      T3CODE_CLERK_PASSKEY_RP_DOMAINS: unsafeDomain,
     });
     assert.instanceOf(invalidDomainError, InvalidMacPasskeyRpDomainError);
-    assert.equal(invalidDomainError.domain, "https://example.clerk.accounts.dev/path");
-    assert.equal(
-      invalidDomainError.message,
-      "Invalid passkey RP domain: https://example.clerk.accounts.dev/path",
-    );
+    assert.equal(invalidDomainError.reason, "scheme-not-allowed");
+    assert.equal(invalidDomainError.inputLength, unsafeDomain.length);
+    assert.equal(invalidDomainError.message, "Invalid passkey RP domain (scheme-not-allowed).");
+    assert.notProperty(invalidDomainError, "domain");
+    assert.notProperty(invalidDomainError, "cause");
+    const serializedInvalidDomainError = JSON.stringify(invalidDomainError);
+    assert.notInclude(serializedInvalidDomainError, unsafeDomain);
+    assert.notInclude(serializedInvalidDomainError, "domain-user");
+    assert.notInclude(serializedInvalidDomainError, "domain-secret");
+    assert.notInclude(serializedInvalidDomainError, "query-secret");
     assert.throws(
       () =>
         resolveMacPasskeySigningConfiguration({
