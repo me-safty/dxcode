@@ -172,9 +172,10 @@ releaseDate: '2026-03-07T10:36:07.540Z'
     }
   });
 
-  it("reports manifest parse location and the unsupported input", () => {
+  it("reports manifest parse location without retaining the unsupported input", () => {
+    const unsupportedLine = "authorization Bearer secret-token without-separator";
     const error = captureUpdateManifestError(() =>
-      parsePlatformUpdateManifest("mac", "not yaml", "latest-mac.yml"),
+      parsePlatformUpdateManifest("mac", unsupportedLine, "latest-mac.yml"),
     );
     assert.equal(error._tag, "UpdateManifestParseError");
     if (error._tag === "UpdateManifestParseError") {
@@ -182,11 +183,14 @@ releaseDate: '2026-03-07T10:36:07.540Z'
       assert.equal(error.sourcePath, "latest-mac.yml");
       assert.equal(error.lineNumber, 1);
       assert.equal(error.reason, "unsupported line");
-      assert.equal(error.offendingLine, "not yaml");
+      assert.equal(error.lineLength, unsupportedLine.length);
+      assert.notProperty(error, "offendingLine");
       assert.equal(
         error.message,
-        "Invalid macOS update manifest at latest-mac.yml:1: unsupported line. Input: not yaml",
+        `Invalid macOS update manifest at latest-mac.yml:1: unsupported line. Input length: ${unsupportedLine.length}.`,
       );
+      assert.notInclude(error.message, "Bearer");
+      assert.notInclude(error.message, "secret-token");
     }
   });
 

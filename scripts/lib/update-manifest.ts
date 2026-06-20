@@ -30,13 +30,13 @@ export class UpdateManifestParseError extends Schema.TaggedErrorClass<UpdateMani
     sourcePath: Schema.String,
     lineNumber: Schema.optionalKey(Schema.Number),
     reason: UpdateManifestParseReason,
-    offendingLine: Schema.optionalKey(Schema.String),
+    lineLength: Schema.optionalKey(Schema.Number),
   },
 ) {
   override get message(): string {
     const location =
       this.lineNumber === undefined ? this.sourcePath : `${this.sourcePath}:${this.lineNumber}`;
-    const input = this.offendingLine === undefined ? "" : ` Input: ${this.offendingLine}`;
+    const input = this.lineLength === undefined ? "" : ` Input length: ${this.lineLength}.`;
     return `Invalid ${this.platformLabel} update manifest at ${location}: ${this.reason}.${input}`;
   }
 }
@@ -254,7 +254,7 @@ export function parseUpdateManifest(
         sourcePath,
         lineNumber,
         reason: "unsupported line",
-        offendingLine: line,
+        lineLength: line.length,
       });
     }
 
