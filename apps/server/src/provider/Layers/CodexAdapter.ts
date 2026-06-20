@@ -588,18 +588,14 @@ function bufferChildCollabAgentMessageDelta(
     : event.threadId;
   const key = subagentOutputBufferKey(parentThreadId, childDelta.parentCollab.itemId);
   const previous = buffers.get(key);
+  const bufferedParentThreadId =
+    childDelta.parentCollab.parentThreadId ?? previous?.parentCollab.parentThreadId;
+  const bufferedDetail = childDelta.parentCollab.detail ?? previous?.parentCollab.detail;
   buffers.set(key, {
     parentCollab: {
       itemId: childDelta.parentCollab.itemId,
-      ...((childDelta.parentCollab.parentThreadId ?? previous?.parentCollab.parentThreadId)
-        ? {
-            parentThreadId:
-              childDelta.parentCollab.parentThreadId ?? previous?.parentCollab.parentThreadId,
-          }
-        : {}),
-      ...((childDelta.parentCollab.detail ?? previous?.parentCollab.detail)
-        ? { detail: childDelta.parentCollab.detail ?? previous?.parentCollab.detail }
-        : {}),
+      parentThreadId: bufferedParentThreadId,
+      detail: bufferedDetail,
     },
     content: `${previous?.content ?? ""}${childDelta.delta}`,
   });

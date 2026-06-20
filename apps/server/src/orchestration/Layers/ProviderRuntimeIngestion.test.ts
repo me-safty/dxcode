@@ -2624,15 +2624,13 @@ describe("ProviderRuntimeIngestion", () => {
         status: "in_progress",
         title: "Ran command",
         detail: "echo child",
-        data: {
-          parentCollab: {
-            parentThreadId: "thread-1",
-            providerThreadId: "provider-child-early",
-            childThreadId,
-            parentTurnId: "turn-parent-early",
-            itemId: "parent-item-early",
-            detail: "Inspect early output",
-          },
+        parentCollab: {
+          parentThreadId: "thread-1",
+          providerThreadId: "provider-child-early",
+          childThreadId,
+          parentTurnId: "turn-parent-early",
+          itemId: "parent-item-early",
+          detail: "Inspect early output",
         },
       },
     });

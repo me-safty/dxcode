@@ -4073,7 +4073,7 @@ function ChatViewContent(props: ChatViewProps) {
   const onInterrupt = async () => {
     if (!activeThread) return;
     const activeSubagentIsRunning = activeThreadSubagentRelation?.status === "running";
-    if (activeThreadSubagentRelation?.status === "running") {
+    if (activeSubagentIsRunning) {
       setPendingSubagentStopThreadId(activeThread.id);
     }
     const result = await interruptThreadTurn({

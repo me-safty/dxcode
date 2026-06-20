@@ -296,9 +296,8 @@ function activeSidebarThreadPathKeys(
 
 function visibleSidebarThreads(
   threads: readonly SidebarThreadSummary[],
-  activeThreadKey: string | null | undefined,
+  activePathKeys: ReadonlySet<string>,
 ): SidebarThreadSummary[] {
-  const activePathKeys = activeSidebarThreadPathKeys(threads, activeThreadKey);
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
@@ -1418,8 +1417,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       });
     };
+    const activeProjectThreadPathKeys = activeSidebarThreadPathKeys(
+      projectThreads,
+      activeRouteThreadKey,
+    );
     const visibleProjectThreads = sortThreads(
-      visibleSidebarThreads(projectThreads, activeRouteThreadKey),
+      visibleSidebarThreads(projectThreads, activeProjectThreadPathKeys),
       threadSortOrder,
     );
     const visibleRootProjectThreads = rootSidebarThreads(visibleProjectThreads);
@@ -3454,9 +3457,13 @@ export default function Sidebar() {
     animatedThreadListsRef.current.add(node);
   }, []);
 
-  const visibleThreads = useMemo(
-    () => visibleSidebarThreads(sidebarThreads, routeThreadKey),
+  const activeSidebarPathKeys = useMemo(
+    () => activeSidebarThreadPathKeys(sidebarThreads, routeThreadKey),
     [routeThreadKey, sidebarThreads],
+  );
+  const visibleThreads = useMemo(
+    () => visibleSidebarThreads(sidebarThreads, activeSidebarPathKeys),
+    [activeSidebarPathKeys, sidebarThreads],
   );
   const visibleRootThreads = useMemo(() => rootSidebarThreads(visibleThreads), [visibleThreads]);
   const sortedProjects = useMemo(() => {
@@ -3494,8 +3501,9 @@ export default function Sidebar() {
   const visibleSidebarThreadKeys = useMemo(
     () =>
       sortedProjects.flatMap((project) => {
+        const allProjectThreads = threadsByProjectKey.get(project.projectKey) ?? [];
         const projectThreads = sortThreads(
-          visibleSidebarThreads(threadsByProjectKey.get(project.projectKey) ?? [], routeThreadKey),
+          visibleSidebarThreads(allProjectThreads, activeSidebarPathKeys),
           sidebarThreadSortOrder,
         );
         const rootProjectThreads = rootSidebarThreads(projectThreads);
@@ -3540,6 +3548,7 @@ export default function Sidebar() {
       sidebarThreadPreviewCount,
       expandedThreadListsByProject,
       projectExpandedById,
+      activeSidebarPathKeys,
       routeThreadKey,
       sortedProjects,
       threadsByProjectKey,

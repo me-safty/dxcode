@@ -164,8 +164,9 @@ function readRuntimeSubagentChildren(
 function readRuntimeSubagentParentCollab(
   event: ProviderRuntimeEvent,
 ): RuntimeSubagentParentCollab | null {
-  const data = asRecord(asRecord(event.payload)?.data);
-  const parentCollab = asRecord(data?.parentCollab);
+  const payload = asRecord(event.payload);
+  const data = asRecord(payload?.data);
+  const parentCollab = asRecord(payload?.parentCollab) ?? asRecord(data?.parentCollab);
   if (!parentCollab) {
     return null;
   }
@@ -1452,6 +1453,14 @@ const make = Effect.gen(function* () {
         const parentThread = parentCollab
           ? yield* resolveThreadShell(parentCollab.parentThreadId)
           : null;
+        if (parentCollab && !parentThread) {
+          yield* Effect.logWarning("provider runtime ingestion could not resolve subagent parent", {
+            eventId: event.eventId,
+            eventType: event.type,
+            childThreadId: parentCollab.childThreadId,
+            parentThreadId: parentCollab.parentThreadId,
+          });
+        }
         if (!parentCollab || !parentThread) {
           return;
         }
