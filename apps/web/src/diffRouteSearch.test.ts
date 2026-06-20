@@ -80,6 +80,22 @@ describe("parseDiffRouteSearch", () => {
     expect(parseDiffRouteSearch({ diff: "1", diffScope: "staged" })).toEqual({ diff: "1" });
   });
 
+  it("parses a branch comparison target", () => {
+    expect(parseDiffRouteSearch({ diff: "1", diffBaseRef: "origin/main" })).toEqual({
+      diff: "1",
+      diffBaseRef: "origin/main",
+    });
+  });
+
+  it("drops the branch target for unstaged and turn diffs", () => {
+    expect(
+      parseDiffRouteSearch({ diff: "1", diffScope: "unstaged", diffBaseRef: "origin/main" }),
+    ).toEqual({ diff: "1", diffScope: "unstaged" });
+    expect(
+      parseDiffRouteSearch({ diff: "1", diffTurnId: "turn-1", diffBaseRef: "origin/main" }),
+    ).toEqual({ diff: "1", diffTurnId: "turn-1" });
+  });
+
   it("normalizes whitespace-only values", () => {
     const parsed = parseDiffRouteSearch({
       diff: "1",

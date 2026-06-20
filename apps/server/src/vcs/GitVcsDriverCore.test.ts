@@ -342,6 +342,44 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("refName operations", () => {
+    it.effect("optionally includes remote refs that match local branches", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-vcs-driver-remote-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const deduplicated = yield* driver.listRefs({ cwd });
+        assert.equal(
+          deduplicated.refs.some((ref) => ref.name === `origin/${initialBranch}`),
+          false,
+        );
+
+        const complete = yield* driver.listRefs({ cwd, includeMatchingRemoteRefs: true });
+        assert.equal(
+          complete.refs.some((ref) => ref.name === initialBranch),
+          true,
+        );
+        assert.equal(
+          complete.refs.some((ref) => ref.name === `origin/${initialBranch}`),
+          true,
+        );
+
+        const remoteOnly = yield* driver.listRefs({
+          cwd,
+          includeMatchingRemoteRefs: true,
+          refKind: "remote",
+          limit: 1,
+        });
+        assert.equal(remoteOnly.refs.length, 1);
+        assert.equal(remoteOnly.refs[0]?.name, `origin/${initialBranch}`);
+        assert.equal(remoteOnly.refs[0]?.isRemote, true);
+      }),
+    );
+
     it.effect("creates, checks out, renames, and lists refs", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

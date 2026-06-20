@@ -2127,11 +2127,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             })
           : [];
 
+      const allBranches = input.includeMatchingRemoteRefs
+        ? [...localBranches, ...remoteBranches]
+        : dedupeRemoteBranchesWithLocalMatches([...localBranches, ...remoteBranches]);
+      const branchesForKind =
+        input.refKind === "local"
+          ? allBranches.filter((ref) => !ref.isRemote)
+          : input.refKind === "remote"
+            ? allBranches.filter((ref) => ref.isRemote)
+            : allBranches;
       const refs = paginateBranches({
-        refs: filterBranchesForListQuery(
-          dedupeRemoteBranchesWithLocalMatches([...localBranches, ...remoteBranches]),
-          input.query,
-        ),
+        refs: filterBranchesForListQuery(branchesForKind, input.query),
         cursor: input.cursor,
         limit: input.limit,
       });
