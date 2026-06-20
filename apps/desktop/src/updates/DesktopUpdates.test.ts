@@ -369,8 +369,9 @@ describe("DesktopUpdates", () => {
         harness.emit("update-available", { version: "1.2.4" });
         yield* flushCallbacks;
 
-        const exit = yield* Effect.exit(updates.download);
-        assert.equal(exit._tag, "Failure");
+        const result = yield* updates.download;
+        assert.isTrue(result.accepted);
+        assert.isFalse(result.completed);
 
         const failedState = yield* updates.getState;
         assert.equal(failedState.status, "available");
@@ -382,6 +383,46 @@ describe("DesktopUpdates", () => {
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
+
+  it.effect("restores download state and permits retry after interruption", () =>
+    Effect.gen(function* () {
+      const actionStarted = yield* Deferred.make<void>();
+      let disableDifferentialCalls = 0;
+      const harness = makeHarness({
+        setDisableDifferentialDownload: Effect.suspend(() => {
+          disableDifferentialCalls += 1;
+          if (disableDifferentialCalls === 1) {
+            return Effect.void;
+          }
+          if (disableDifferentialCalls === 2) {
+            return Deferred.succeed(actionStarted, undefined).pipe(Effect.andThen(Effect.never));
+          }
+          return Effect.void;
+        }),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-available", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const downloadFiber = yield* updates.download.pipe(Effect.forkScoped);
+          yield* Deferred.await(actionStarted);
+          yield* Fiber.interrupt(downloadFiber);
+
+          const interruptedState = yield* updates.getState;
+          assert.equal(interruptedState.status, "available");
+          assert.isNull(interruptedState.message);
+
+          const retry = yield* updates.download;
+          assert.isTrue(retry.accepted);
+          assert.isTrue(retry.completed);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
 
   it.effect("clears quitting state after an unexpected install setup failure", () => {
     const harness = makeHarness({
@@ -396,8 +437,9 @@ describe("DesktopUpdates", () => {
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
 
-        const exit = yield* Effect.exit(updates.install);
-        assert.equal(exit._tag, "Failure");
+        const result = yield* updates.install;
+        assert.isTrue(result.accepted);
+        assert.isFalse(result.completed);
         assert.isFalse(yield* Ref.get(desktopState.quitting));
 
         const failedState = yield* updates.getState;

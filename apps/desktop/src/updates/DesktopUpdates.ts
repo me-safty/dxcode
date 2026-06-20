@@ -408,9 +408,14 @@ export const make = Effect.gen(function* () {
           },
         ),
       }),
-      Effect.onError((cause) => {
+      Effect.onInterrupt(() =>
+        updateState((current) => (current.status === "downloading" ? state : current)).pipe(
+          Effect.asVoid,
+        ),
+      ),
+      Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.void;
+          return Effect.failCause(cause);
         }
         const error = new DesktopUpdateUnexpectedActionError({ action: "download", cause });
         return Effect.gen(function* () {
@@ -418,11 +423,17 @@ export const make = Effect.gen(function* () {
             reduceDesktopUpdateStateOnDownloadFailure(current, error.message),
           );
           yield* logUpdaterError(error.message, { error });
+          return { accepted: true, completed: false };
         });
       }),
       Effect.ensuring(Ref.set(updateDownloadInFlightRef, false)),
     );
   }).pipe(Effect.withSpan("desktop.updates.downloadAvailableUpdate"));
+
+  const resetInstallAction = Effect.all(
+    [Ref.set(updateInstallInFlightRef, false), Ref.set(desktopState.quitting, false)],
+    { discard: true },
+  );
 
   const installDownloadedUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
@@ -449,28 +460,28 @@ export const make = Effect.gen(function* () {
       Effect.catchTags({
         ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
           function* (error) {
-            yield* Ref.set(updateInstallInFlightRef, false);
+            yield* resetInstallAction;
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnInstallFailure(current, error.message),
             );
-            yield* Ref.set(desktopState.quitting, false);
             yield* logUpdaterError(error.message, { error });
             return { accepted: true, completed: false };
           },
         ),
       }),
-      Effect.onError((cause) =>
+      Effect.onInterrupt(() => resetInstallAction),
+      Effect.catchCause((cause) =>
         Effect.gen(function* () {
-          yield* Ref.set(updateInstallInFlightRef, false);
-          yield* Ref.set(desktopState.quitting, false);
           if (Cause.hasInterruptsOnly(cause)) {
-            return;
+            return yield* Effect.failCause(cause);
           }
+          yield* resetInstallAction;
           const error = new DesktopUpdateUnexpectedActionError({ action: "install", cause });
           yield* updateState((current) =>
             reduceDesktopUpdateStateOnInstallFailure(current, error.message),
           );
           yield* logUpdaterError(error.message, { error });
+          return { accepted: true, completed: false };
         }),
       ),
     );
