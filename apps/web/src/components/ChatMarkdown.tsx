@@ -719,7 +719,9 @@ interface MarkdownFileLinkProps {
   theme: "light" | "dark";
   threadRef?: ScopedThreadRef | undefined;
   onOpen: (targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>;
-  onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
+  onOpenInBrowser?:
+    | ((signal: AbortSignal) => Promise<AtomCommandResult<unknown, unknown>>)
+    | undefined;
   className?: string | undefined;
 }
 
@@ -1001,6 +1003,15 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onOpenInBrowser,
   className,
 }: MarkdownFileLinkProps) {
+  const browserPreviewAbortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      browserPreviewAbortControllerRef.current?.abort();
+    },
+    [],
+  );
+
   const handleOpenInEditor = useCallback(() => {
     void (async () => {
       try {
@@ -1048,10 +1059,20 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     if (!onOpenInBrowser) {
       return;
     }
+    browserPreviewAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    browserPreviewAbortControllerRef.current = abortController;
     void (async () => {
       try {
-        const result = await onOpenInBrowser();
-        if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
+        const result = await onOpenInBrowser(abortController.signal);
+        if (abortController.signal.aborted) {
+          return;
+        }
+        if (result._tag === "Success") {
+          return;
+        }
+        if (isAtomCommandInterrupted(result)) {
+          handleOpenInFilePreview();
           return;
         }
         reportMarkdownActionFailure(
@@ -1071,6 +1092,9 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         );
         handleOpenInFilePreview();
       } catch (cause) {
+        if (abortController.signal.aborted) {
+          return;
+        }
         reportMarkdownActionFailure(
           { operation: "open-file-in-browser", target: targetPath },
           cause,
@@ -1086,6 +1110,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           }),
         );
         handleOpenInFilePreview();
+      } finally {
+        if (browserPreviewAbortControllerRef.current === abortController) {
+          browserPreviewAbortControllerRef.current = null;
+        }
       }
     })();
   }, [handleOpenInFilePreview, onOpenInBrowser, targetPath]);
@@ -1303,7 +1331,7 @@ function ChatMarkdown({
     [openPreview, threadRef],
   );
   const openMarkdownFileInPreview = useCallback(
-    (path: string) => {
+    (path: string, signal: AbortSignal) => {
       if (!threadRef) {
         return Promise.resolve(
           AsyncResult.failure<void, BrowserPreviewThreadContextUnavailableError>(
@@ -1329,6 +1357,7 @@ function ChatMarkdown({
         httpBaseUrl: preparedConnection.value.httpBaseUrl,
         createAssetUrl,
         openPreview,
+        signal,
       });
     },
     [createAssetUrl, openPreview, preparedConnection, threadRef],
@@ -1485,7 +1514,7 @@ function ChatMarkdown({
               threadRef &&
               isPreviewSupportedInRuntime() &&
               isWorkspacePreviewFile(fileLinkMeta.filePath)
-                ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
+                ? (signal) => openMarkdownFileInPreview(fileLinkMeta.filePath, signal)
                 : undefined
             }
             className={props.className}
