@@ -13,6 +13,7 @@ import {
 } from "../CodexDeveloperInstructions.ts";
 import {
   buildTurnStartParams,
+  codexSessionAppServerArgs,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
@@ -172,6 +173,16 @@ describe("hasConfiguredMcpServer", () => {
       hasConfiguredMcpServer(["-c", 'mcp_servers.t3-code.url="http://127.0.0.1/mcp"']),
       true,
     );
+  });
+});
+
+describe("codexSessionAppServerArgs", () => {
+  it("keeps the app-server subcommand when explicit args are provided", () => {
+    assert.deepStrictEqual(codexSessionAppServerArgs(["-c", "model=gpt-5"], undefined), [
+      "app-server",
+      "-c",
+      "model=gpt-5",
+    ]);
   });
 });
 

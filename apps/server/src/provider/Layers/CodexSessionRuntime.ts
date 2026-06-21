@@ -67,6 +67,11 @@ export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | un
   return appServerArgs?.some((argument) => argument.includes("mcp_servers.")) === true;
 }
 
+export const codexSessionAppServerArgs = (
+  appServerArgs: ReadonlyArray<string> | undefined,
+  launchArgs: string | undefined,
+) => (appServerArgs ? ["app-server", ...appServerArgs] : codexAppServerArgs(launchArgs));
+
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
 });
@@ -726,13 +731,11 @@ export const makeCodexSessionRuntime = (
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
     const extendEnv = options.environment === undefined;
-    const appServerArgs =
-      options.appServerArgs ?? codexAppServerArgs(options.launchArgs);
-    const spawnCommand = yield* resolveSpawnCommand(
-      options.binaryPath,
-      appServerArgs,
-      { env, extendEnv },
-    );
+    const appServerArgs = codexSessionAppServerArgs(options.appServerArgs, options.launchArgs);
+    const spawnCommand = yield* resolveSpawnCommand(options.binaryPath, appServerArgs, {
+      env,
+      extendEnv,
+    });
     const child = yield* spawner
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
