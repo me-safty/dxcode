@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -19,7 +20,6 @@ import {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 const gitHubCliFailureFields = {
-  operation: Schema.Literal("execute"),
   command: Schema.Literal("gh"),
   cwd: Schema.String,
   cause: Schema.Defect(),
@@ -34,7 +34,7 @@ export class GitHubCliUnavailableError extends Schema.TaggedErrorClass<GitHubCli
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in execute: ${this.detail}`;
   }
 }
 
@@ -47,7 +47,7 @@ export class GitHubCliAuthenticationError extends Schema.TaggedErrorClass<GitHub
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in execute: ${this.detail}`;
   }
 }
 
@@ -60,7 +60,7 @@ export class GitHubPullRequestNotFoundError extends Schema.TaggedErrorClass<GitH
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in execute: ${this.detail}`;
   }
 }
 
@@ -73,7 +73,7 @@ export class GitHubCliCommandError extends Schema.TaggedErrorClass<GitHubCliComm
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in execute: ${this.detail}`;
   }
 }
 
@@ -85,65 +85,53 @@ const gitHubCliDecodeFields = {
 
 export class GitHubPullRequestListDecodeError extends Schema.TaggedErrorClass<GitHubPullRequestListDecodeError>()(
   "GitHubPullRequestListDecodeError",
-  {
-    ...gitHubCliDecodeFields,
-    operation: Schema.Literal("listOpenPullRequests"),
-  },
+  gitHubCliDecodeFields,
 ) {
   get detail(): string {
     return "GitHub CLI returned invalid PR list JSON.";
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in listOpenPullRequests: ${this.detail}`;
   }
 }
 
 export class GitHubChangeRequestListDecodeError extends Schema.TaggedErrorClass<GitHubChangeRequestListDecodeError>()(
   "GitHubChangeRequestListDecodeError",
-  {
-    ...gitHubCliDecodeFields,
-    operation: Schema.Literal("listChangeRequests"),
-  },
+  gitHubCliDecodeFields,
 ) {
   get detail(): string {
     return "GitHub CLI returned invalid change request JSON.";
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in listChangeRequests: ${this.detail}`;
   }
 }
 
 export class GitHubPullRequestDecodeError extends Schema.TaggedErrorClass<GitHubPullRequestDecodeError>()(
   "GitHubPullRequestDecodeError",
-  {
-    ...gitHubCliDecodeFields,
-    operation: Schema.Literal("getPullRequest"),
-  },
+  gitHubCliDecodeFields,
 ) {
   get detail(): string {
     return "GitHub CLI returned invalid pull request JSON.";
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in getPullRequest: ${this.detail}`;
   }
 }
 
 export class GitHubRepositoryDecodeError extends Schema.TaggedErrorClass<GitHubRepositoryDecodeError>()(
   "GitHubRepositoryDecodeError",
-  {
-    ...gitHubCliDecodeFields,
-    operation: Schema.Literal("getRepositoryCloneUrls"),
-  },
+  gitHubCliDecodeFields,
 ) {
   get detail(): string {
     return "GitHub CLI returned invalid repository JSON.";
   }
 
   override get message(): string {
-    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+    return `GitHub CLI failed in getRepositoryCloneUrls: ${this.detail}`;
   }
 }
 
@@ -163,13 +151,18 @@ export const isGitHubCliError = Schema.is(GitHubCliError);
 
 export function fromVcsError(
   context: {
-    readonly operation: "execute";
     readonly command: "gh";
     readonly cwd: string;
   },
   error: VcsError,
 ): GitHubCliError {
-  if (error._tag === "VcsProcessSpawnError") {
+  if (
+    error._tag === "VcsProcessSpawnError" &&
+    error.cause instanceof PlatformError.PlatformError &&
+    error.cause.reason._tag === "NotFound" &&
+    error.cause.reason.module === "ChildProcess" &&
+    error.cause.reason.method === "spawn"
+  ) {
     return new GitHubCliUnavailableError({ ...context, cause: error });
   }
 
@@ -322,11 +315,7 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       })
-      .pipe(
-        Effect.mapError((error) =>
-          fromVcsError({ operation: "execute", command: "gh", cwd: input.cwd }, error),
-        ),
-      );
+      .pipe(Effect.mapError((error) => fromVcsError({ command: "gh", cwd: input.cwd }, error)));
 
   return GitHubCli.of({
     execute,
@@ -355,7 +344,6 @@ export const make = Effect.gen(function* () {
                   if (!Result.isSuccess(decoded)) {
                     return Effect.fail(
                       new GitHubPullRequestListDecodeError({
-                        operation: "listOpenPullRequests",
                         command: "gh",
                         cwd: input.cwd,
                         cause: decoded.failure,
@@ -388,7 +376,6 @@ export const make = Effect.gen(function* () {
               if (!Result.isSuccess(decoded)) {
                 return Effect.fail(
                   new GitHubPullRequestDecodeError({
-                    operation: "getPullRequest",
                     command: "gh",
                     cwd: input.cwd,
                     cause: decoded.failure,
@@ -414,7 +401,6 @@ export const make = Effect.gen(function* () {
             Effect.mapError(
               (cause) =>
                 new GitHubRepositoryDecodeError({
-                  operation: "getRepositoryCloneUrls",
                   command: "gh",
                   cwd: input.cwd,
                   cause,

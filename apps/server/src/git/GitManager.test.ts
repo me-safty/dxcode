@@ -469,7 +469,6 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           GitHubCli.isGitHubCliError(error)
             ? error
             : new GitHubCli.GitHubCliCommandError({
-                operation: "execute",
                 command: "gh",
                 cwd: input.cwd,
                 cause: error,
@@ -484,7 +483,6 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         if (!cloneUrls) {
           return Effect.fail(
             new GitHubCli.GitHubCliCommandError({
-              operation: "execute",
               command: "gh",
               cwd: input.cwd,
               cause: new Error(`Unexpected repository lookup: ${repository}`),
@@ -506,7 +504,6 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
 
     return Effect.fail(
       new GitHubCli.GitHubCliCommandError({
-        operation: "execute",
         command: "gh",
         cwd: input.cwd,
         cause: new Error(`Unexpected gh command: ${args.join(" ")}`),
@@ -587,7 +584,6 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
       createRepository: (input) =>
         Effect.fail(
           new GitHubCli.GitHubCliCommandError({
-            operation: "execute",
             command: "gh",
             cwd: input.cwd,
             cause: new Error(`Unexpected repository create: ${input.repository}`),
@@ -1327,7 +1323,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const { manager } = yield* makeManager({
         ghScenario: {
           failWith: new GitHubCli.GitHubCliUnavailableError({
-            operation: "execute",
             command: "gh",
             cwd: repoDir,
             cause: new Error("gh is not available on PATH"),
@@ -2469,7 +2464,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const { manager } = yield* makeManager({
         ghScenario: {
           failWith: new GitHubCli.GitHubCliUnavailableError({
-            operation: "execute",
             command: "gh",
             cwd: repoDir,
             cause: new Error("gh is not available on PATH"),
@@ -2500,7 +2494,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const { manager } = yield* makeManager({
         ghScenario: {
           failWith: new GitHubCli.GitHubCliAuthenticationError({
-            operation: "execute",
             command: "gh",
             cwd: repoDir,
             cause: new Error("gh is not authenticated"),

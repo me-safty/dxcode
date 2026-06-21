@@ -159,7 +159,6 @@ export const make = Effect.gen(function* () {
                     )
                   : Effect.fail(
                       new GitHubCli.GitHubChangeRequestListDecodeError({
-                        operation: "listChangeRequests",
                         command: "gh",
                         cwd: input.cwd,
                         cause: decoded.failure,
