@@ -24,6 +24,7 @@ export interface SourceControlRefSelector {
 
 const MAX_ERROR_TRANSPORT_VALUE_LENGTH = 256;
 const EMBEDDED_HTTP_URL_PATTERN = /https?:\/\/[^\s"'<>`]+/giu;
+const EMBEDDED_HTTP_AUTHORITY_CREDENTIALS_PATTERN = /^(https?:\/\/)[^/?#@]*@/iu;
 
 /**
  * Sanitizes user-provided source-control identifiers before attaching them to
@@ -37,7 +38,7 @@ export function transportSafeSourceControlErrorValue(value: string): string {
     printable += codePoint !== undefined && (codePoint < 32 || codePoint === 127) ? " " : character;
   }
   const normalized = printable
-    .replace(EMBEDDED_HTTP_URL_PATTERN, (match) => transportSafeUrl(match) ?? match)
+    .replace(EMBEDDED_HTTP_URL_PATTERN, transportSafeEmbeddedUrl)
     .trim()
     .replace(/\s+/gu, " ");
 
@@ -46,6 +47,12 @@ export function transportSafeSourceControlErrorValue(value: string): string {
   safe = parsedUrl ?? normalized;
 
   return safe.slice(0, MAX_ERROR_TRANSPORT_VALUE_LENGTH);
+}
+
+function transportSafeEmbeddedUrl(value: string): string {
+  return (
+    transportSafeUrl(value) ?? value.replace(EMBEDDED_HTTP_AUTHORITY_CREDENTIALS_PATTERN, "$1")
+  );
 }
 
 function transportSafeUrl(value: string): string | null {

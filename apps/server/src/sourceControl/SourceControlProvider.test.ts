@@ -14,6 +14,13 @@ it("removes URL credentials, query parameters, and fragments from error transpor
   );
 });
 
+it("strips credentials from malformed embedded URLs", () => {
+  assert.strictEqual(
+    transportSafeSourceControlErrorValue("remote failed at https://user:secret@[::1"),
+    "remote failed at https://[::1",
+  );
+});
+
 it("normalizes control characters and bounds error transport values", () => {
   assert.strictEqual(
     transportSafeSourceControlErrorValue(`  owner/repo\n\t${"x".repeat(300)}  `),
