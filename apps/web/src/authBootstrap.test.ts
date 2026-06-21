@@ -320,7 +320,7 @@ describe("resolveInitialServerAuthGateState", () => {
       browserSession: () => Effect.fail(cause),
     });
 
-    const { isPrimaryEnvironmentRequestError, submitServerAuthCredential } =
+    const { isPrimaryEnvironmentPairingCredentialRejectedError, submitServerAuthCredential } =
       await import("./environments/primary");
 
     const error = await submitServerAuthCredential("bad-token").then(
@@ -328,14 +328,13 @@ describe("resolveInitialServerAuthGateState", () => {
       (failure: unknown) => failure,
     );
     expect(error).toMatchObject({
-      _tag: "PrimaryEnvironmentRequestError",
-      operation: "exchange-bootstrap-credential",
-      status: 401,
-      detail: "Invalid pairing token. Check the token and try again.",
+      _tag: "PrimaryEnvironmentPairingCredentialRejectedError",
+      providedLength: 9,
+      message: "Invalid pairing token. Check the token and try again.",
     });
-    expect(isPrimaryEnvironmentRequestError(error)).toBe(true);
-    if (!isPrimaryEnvironmentRequestError(error)) {
-      throw new Error("Expected a structured primary environment request error.");
+    expect(isPrimaryEnvironmentPairingCredentialRejectedError(error)).toBe(true);
+    if (!isPrimaryEnvironmentPairingCredentialRejectedError(error)) {
+      throw new Error("Expected a structured rejected pairing credential error.");
     }
     expect(error.cause).toMatchObject({
       _tag: "EnvironmentAuthInvalidError",
@@ -344,6 +343,22 @@ describe("resolveInitialServerAuthGateState", () => {
       traceId: "trace-invalid-credential",
     });
     expect(testApi.calls.browserSession).toEqual([{ credential: "bad-token" }]);
+  });
+
+  it("derives primary request messages from structural request context", async () => {
+    const cause = new Error("private transport detail");
+    const { PrimaryEnvironmentRequestError } = await import("./environments/primary");
+    const error = PrimaryEnvironmentRequestError.fromCause({
+      operation: "list-pairing-links",
+      cause,
+    });
+
+    expect(error.status).toBe(500);
+    expect(error.cause).toBe(cause);
+    expect(error.message).toBe(
+      "Primary environment request failed during list-pairing-links (HTTP 500).",
+    );
+    expect(error.message).not.toContain(cause.message);
   });
 
   it("waits for the authenticated session to become observable after silent desktop bootstrap", async () => {
