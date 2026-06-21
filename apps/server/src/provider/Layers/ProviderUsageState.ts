@@ -205,7 +205,10 @@ export const ProviderUsageStateLive = Layer.effect(
           mergedUsage,
           updatedAtMs,
         );
-        yield* publishUsageLimits(providerInstanceId, mergedUsage);
+        // Publish only the sparse event delta. The registry merges by window
+        // kind; sending the full in-memory snapshot would let stale windows
+        // from other threads overwrite fresher quota from a recent status probe.
+        yield* publishUsageLimits(providerInstanceId, usage);
       }),
     ).pipe(Effect.forkScoped);
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   parseCodexRuntimeUsageLimits,
   resolveCodexRateLimitSnapshotUsageLimits,
+  resolveCodexRefreshUsageLimits,
 } from "./codexUsageProbe.ts";
 
 const CHECKED_AT = "2026-06-20T00:00:00.000Z";
@@ -123,6 +124,55 @@ describe("codexUsageProbe", () => {
         checkedAt: CHECKED_AT,
         windows: [],
       });
+    });
+  });
+
+  describe("resolveCodexRefreshUsageLimits", () => {
+    const runtimeUsage = {
+      source: "codexAppServer" as const,
+      available: true as const,
+      checkedAt: "2026-04-18T00:02:00.000Z",
+      windows: [
+        {
+          kind: "session" as const,
+          label: "Session",
+          usedPercent: 60,
+          windowDurationMins: 300,
+        },
+        {
+          kind: "weekly" as const,
+          label: "Weekly",
+          usedPercent: 15,
+          windowDurationMins: 10080,
+        },
+      ],
+    };
+    const unavailableProbe = {
+      source: "codexAppServer" as const,
+      available: false as const,
+      checkedAt: CHECKED_AT,
+      reason: "No Codex subscription quota windows reported.",
+      windows: [] as const,
+    };
+
+    it("prefers cached runtime usage over an unavailable status probe", () => {
+      expect(
+        resolveCodexRefreshUsageLimits({
+          runtimeUsageLimits: runtimeUsage,
+          probedUsageLimits: unavailableProbe,
+          isApiKeyAccount: false,
+        }),
+      ).toEqual(runtimeUsage);
+    });
+
+    it("keeps the unavailable probe result for api key accounts", () => {
+      expect(
+        resolveCodexRefreshUsageLimits({
+          runtimeUsageLimits: runtimeUsage,
+          probedUsageLimits: unavailableProbe,
+          isApiKeyAccount: true,
+        }),
+      ).toEqual(unavailableProbe);
     });
   });
 

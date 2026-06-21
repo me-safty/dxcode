@@ -137,6 +137,26 @@ export function resolveCodexRateLimitSnapshotUsageLimits(input: {
 }
 
 /**
+ * Resolve Codex usage limits for a scheduled status refresh. Matches Claude
+ * refresh behavior by preferring live runtime telemetry whenever it is
+ * available, so a failed or empty `account/rateLimits/read` cannot replace
+ * fresher limits cached from `account.rate-limits.updated` events.
+ */
+export function resolveCodexRefreshUsageLimits(input: {
+  readonly runtimeUsageLimits: ServerProviderUsageLimits | undefined;
+  readonly probedUsageLimits: ServerProviderUsageLimits;
+  readonly isApiKeyAccount: boolean;
+}): ServerProviderUsageLimits {
+  if (input.isApiKeyAccount) {
+    return input.probedUsageLimits;
+  }
+  if (input.runtimeUsageLimits?.available) {
+    return input.runtimeUsageLimits;
+  }
+  return input.probedUsageLimits;
+}
+
+/**
  * Parse a sparse `account/rateLimits/updated` notification payload into
  * usage limits. Returns `undefined` when the payload carries no usable
  * windows, so the runtime ingestion path can fall back to the last known

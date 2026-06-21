@@ -398,6 +398,51 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       );
 
+      it.effect("preserves cached runtime usage when the status probe fails", () =>
+        Effect.gen(function* () {
+          const runtimeUsage = {
+            source: "codexAppServer" as const,
+            available: true as const,
+            checkedAt: "2026-04-18T00:02:00.000Z",
+            windows: [
+              {
+                kind: "session" as const,
+                label: "Session",
+                usedPercent: 60,
+                windowDurationMins: 300,
+              },
+              {
+                kind: "weekly" as const,
+                label: "Weekly",
+                usedPercent: 15,
+                windowDurationMins: 10080,
+              },
+            ],
+          };
+          const providerUsageState = {
+            get: () => Effect.succeed(runtimeUsage),
+            set: () => Effect.void,
+            clear: () => Effect.void,
+          };
+
+          const status = yield* checkCodexProviderStatus(
+            defaultCodexSettings,
+            () =>
+              Effect.fail(
+                new CodexErrors.CodexAppServerSpawnError({
+                  command: "codex app-server",
+                  cause: new Error("probe failed"),
+                }),
+              ),
+            undefined,
+            ProviderInstanceId.make("codex"),
+            providerUsageState,
+          );
+
+          assert.deepStrictEqual(status.usageLimits, runtimeUsage);
+        }),
+      );
+
       it.effect("prefers cached runtime usage over an empty status probe on refresh", () =>
         Effect.gen(function* () {
           const runtimeUsage = {

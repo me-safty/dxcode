@@ -273,10 +273,10 @@ describe("ProviderUsageStateLive", () => {
     expect(state).toBeUndefined();
   });
 
-  it("does not patch provider registry when grok token usage arrives", async () => {
+  it("does not patch provider registry when unavailable token usage arrives", async () => {
     const patches: Array<{
       readonly instanceId: ProviderInstanceId;
-      readonly usage: { readonly source: string };
+      readonly usage: { readonly source?: string; readonly available?: boolean };
     }> = [];
     const registryLayer = Layer.succeed(ProviderRegistry, {
       getProviders: Effect.succeed([]),
@@ -309,35 +309,6 @@ describe("ProviderUsageStateLive", () => {
             },
           },
         });
-        yield* Effect.sleep("10 millis");
-      }).pipe(Effect.provide(harness.layer.pipe(Layer.provide(registryLayer)))),
-    );
-
-    expect(patches).toHaveLength(0);
-  });
-
-  it("does not patch provider registry when cursor token usage arrives", async () => {
-    const patches: Array<{
-      readonly instanceId: ProviderInstanceId;
-      readonly usage: { readonly available: boolean };
-    }> = [];
-    const registryLayer = Layer.succeed(ProviderRegistry, {
-      getProviders: Effect.succeed([]),
-      refresh: () => Effect.succeed([]),
-      refreshInstance: () => Effect.succeed([]),
-      getProviderMaintenanceCapabilitiesForInstance: () => Effect.die("unused"),
-      setProviderMaintenanceActionState: () => Effect.succeed([]),
-      patchProviderUsageLimits: (instanceId, usageLimits) =>
-        Effect.sync(() => {
-          patches.push({ instanceId, usage: usageLimits });
-        }),
-      streamChanges: Stream.empty,
-    });
-    const harness = makeProviderUsageStateTestHarness();
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* Effect.sleep("10 millis");
         yield* PubSub.publish(harness.pubsub, {
           type: "thread.token-usage.updated",
           eventId: "evt-cursor-patch" as never,
@@ -357,6 +328,64 @@ describe("ProviderUsageStateLive", () => {
     );
 
     expect(patches).toHaveLength(0);
+  });
+
+  it("patches provider registry with sparse runtime updates only", async () => {
+    const patches: Array<{
+      readonly instanceId: ProviderInstanceId;
+      readonly usage: { readonly windows: ReadonlyArray<{ readonly kind: string }> };
+    }> = [];
+    const registryLayer = Layer.succeed(ProviderRegistry, {
+      getProviders: Effect.succeed([]),
+      refresh: () => Effect.succeed([]),
+      refreshInstance: () => Effect.succeed([]),
+      getProviderMaintenanceCapabilitiesForInstance: () => Effect.die("unused"),
+      setProviderMaintenanceActionState: () => Effect.succeed([]),
+      patchProviderUsageLimits: (instanceId, usageLimits) =>
+        Effect.sync(() => {
+          patches.push({ instanceId, usage: usageLimits });
+        }),
+      streamChanges: Stream.empty,
+    });
+    const harness = makeProviderUsageStateTestHarness();
+    const instanceId = ProviderInstanceId.make("codex");
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.sleep("10 millis");
+        yield* PubSub.publish(harness.pubsub, {
+          type: "account.rate-limits.updated",
+          eventId: "evt-1" as never,
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: instanceId,
+          threadId: "thread-a" as never,
+          createdAt: "2026-04-18T00:00:00.000Z",
+          payload: {
+            rateLimits: {
+              primary: { usedPercent: 10, windowDurationMins: 300 },
+              secondary: { usedPercent: 15, windowDurationMins: 10080 },
+            },
+          },
+        });
+        yield* PubSub.publish(harness.pubsub, {
+          type: "account.rate-limits.updated",
+          eventId: "evt-2" as never,
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: instanceId,
+          threadId: "thread-b" as never,
+          createdAt: "2026-04-18T00:01:00.000Z",
+          payload: {
+            rateLimits: {
+              primary: { usedPercent: 60, windowDurationMins: 300 },
+            },
+          },
+        });
+        yield* Effect.sleep("10 millis");
+      }).pipe(Effect.provide(harness.layer.pipe(Layer.provide(registryLayer)))),
+    );
+
+    expect(patches).toHaveLength(2);
+    expect(patches[1]?.usage.windows.map((window) => window.kind)).toEqual(["session"]);
   });
 
   it("ignores Claude runtime rate limit telemetry when utilization is absent", async () => {

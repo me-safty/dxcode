@@ -26,7 +26,10 @@ import type {
 import { ProviderDriverKind } from "@t3tools/contracts";
 import { ServerSettingsError } from "@t3tools/contracts";
 import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
-import { resolveCodexRateLimitSnapshotUsageLimits } from "../codexUsageProbe.ts";
+import {
+  resolveCodexRateLimitSnapshotUsageLimits,
+  resolveCodexRefreshUsageLimits,
+} from "../codexUsageProbe.ts";
 import type { ProviderUsageStateShape } from "../Services/ProviderUsageState.ts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
@@ -495,6 +498,12 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const resolvedEnvironment = environment ?? process.env;
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const emptyModels = emptyCodexModelsFromSettings(codexSettings);
+  const runtimeUsageLimits = providerUsageState
+    ? yield* providerUsageState
+        .get(CODEX_DRIVER, instanceId)
+        .pipe(Effect.orElseSucceed(() => undefined))
+    : undefined;
+  const cachedRuntimeUsageLimits = runtimeUsageLimits?.available ? runtimeUsageLimits : undefined;
 
   if (!codexSettings.enabled) {
     return buildServerProvider({
@@ -542,6 +551,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         message: installed
           ? `Codex app-server provider probe failed: ${error.message}.`
           : "Codex CLI (`codex`) is not installed or not on PATH.",
+        ...(cachedRuntimeUsageLimits ? { usageLimits: cachedRuntimeUsageLimits } : {}),
       },
     });
   }
@@ -559,32 +569,29 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         status: "error",
         auth: { status: "unknown" },
         message: "Timed out while checking Codex app-server provider status.",
+        ...(cachedRuntimeUsageLimits ? { usageLimits: cachedRuntimeUsageLimits } : {}),
       },
     });
   }
 
   const snapshot = probeResult.success.value;
   const accountStatus = accountProbeStatus(snapshot.account);
-  const runtimeUsageLimits = providerUsageState
-    ? yield* providerUsageState
-        .get(CODEX_DRIVER, instanceId)
-        .pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
-  const probedUsageLimits =
-    snapshot.account.account?.type === "apiKey"
-      ? makeUnavailableUsageLimits({
-          source: "codexAppServer",
-          checkedAt,
-          reason: "Usage limits unavailable for API key Codex accounts.",
-        })
-      : resolveCodexRateLimitSnapshotUsageLimits({
-          checkedAt,
-          ...(snapshot.rateLimits ? { snapshot: snapshot.rateLimits } : {}),
-        });
-  const usageLimits =
-    snapshot.account.account?.type === "apiKey"
-      ? probedUsageLimits
-      : (runtimeUsageLimits ?? probedUsageLimits);
+  const isApiKeyAccount = snapshot.account.account?.type === "apiKey";
+  const probedUsageLimits = isApiKeyAccount
+    ? makeUnavailableUsageLimits({
+        source: "codexAppServer",
+        checkedAt,
+        reason: "Usage limits unavailable for API key Codex accounts.",
+      })
+    : resolveCodexRateLimitSnapshotUsageLimits({
+        checkedAt,
+        ...(snapshot.rateLimits ? { snapshot: snapshot.rateLimits } : {}),
+      });
+  const usageLimits = resolveCodexRefreshUsageLimits({
+    runtimeUsageLimits,
+    probedUsageLimits,
+    isApiKeyAccount: isApiKeyAccount === true,
+  });
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,
