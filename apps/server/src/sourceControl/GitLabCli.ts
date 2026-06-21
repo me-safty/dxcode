@@ -63,14 +63,40 @@ export class GitLabCliAuthenticationError extends Schema.TaggedErrorClass<GitLab
 
 export class GitLabMergeRequestNotFoundError extends Schema.TaggedErrorClass<GitLabMergeRequestNotFoundError>()(
   "GitLabMergeRequestNotFoundError",
-  gitLabCliExecutionErrorContext,
+  {
+    ...gitLabCliExecutionErrorContext,
+    reference: Schema.String,
+  },
 ) {
   get detail(): string {
-    return "Merge request not found. Check the MR number or URL and try again.";
+    return `Merge request ${this.reference} was not found. Check the MR number or URL and try again.`;
   }
 
   override get message(): string {
     return `GitLab CLI failed in ${this.operation}: ${this.detail}`;
+  }
+
+  static fromVcsError(
+    context: {
+      readonly operation: "execute";
+      readonly command: "glab";
+      readonly cwd: string;
+      readonly reference: string;
+    },
+    error: VcsError,
+  ): GitLabCliError {
+    if (error._tag === "VcsProcessExitError" && error.failureKind === "not-found") {
+      return new GitLabMergeRequestNotFoundError({ ...context, cause: error });
+    }
+
+    return GitLabCliCommandError.fromVcsError(
+      {
+        operation: context.operation,
+        command: context.command,
+        cwd: context.cwd,
+      },
+      error,
+    );
   }
 }
 
@@ -101,7 +127,6 @@ export class GitLabCliCommandError extends Schema.TaggedErrorClass<GitLabCliComm
           case "authentication":
             return new GitLabCliAuthenticationError({ ...context, cause });
           case "not-found":
-            return new GitLabMergeRequestNotFoundError({ ...context, cause });
           case "command-failed":
           case undefined:
             return new GitLabCliCommandError({ ...context, cause });
@@ -362,7 +387,10 @@ function parseRepositoryPath(repository: string): {
 export const make = Effect.gen(function* () {
   const process = yield* VcsProcess.VcsProcess;
 
-  const execute: GitLabCli["Service"]["execute"] = (input) =>
+  const run = (
+    input: Parameters<GitLabCli["Service"]["execute"]>[0],
+    mapError: (error: VcsError) => GitLabCliError,
+  ) =>
     process
       .run({
         operation: "GitLabCli.execute",
@@ -371,14 +399,32 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       })
-      .pipe(
-        Effect.mapError((error) =>
-          GitLabCliCommandError.fromVcsError(
-            { operation: "execute", command: "glab", cwd: input.cwd },
-            error,
-          ),
-        ),
-      );
+      .pipe(Effect.mapError(mapError));
+
+  const execute: GitLabCli["Service"]["execute"] = (input) =>
+    run(input, (error) =>
+      GitLabCliCommandError.fromVcsError(
+        { operation: "execute", command: "glab", cwd: input.cwd },
+        error,
+      ),
+    );
+
+  const executeMergeRequest = (input: {
+    readonly cwd: string;
+    readonly reference: string;
+    readonly args: ReadonlyArray<string>;
+  }) =>
+    run(input, (error) =>
+      GitLabMergeRequestNotFoundError.fromVcsError(
+        {
+          operation: "execute",
+          command: "glab",
+          cwd: input.cwd,
+          reference: input.reference,
+        },
+        error,
+      ),
+    );
 
   return GitLabCli.of({
     execute,
@@ -420,8 +466,9 @@ export const make = Effect.gen(function* () {
         ),
       ),
     getMergeRequest: (input) =>
-      execute({
+      executeMergeRequest({
         cwd: input.cwd,
+        reference: input.reference,
         args: ["mr", "view", input.reference, "--output", "json"],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -575,8 +622,9 @@ export const make = Effect.gen(function* () {
         Effect.map((value) => value.default_branch ?? null),
       ),
     checkoutMergeRequest: (input) =>
-      execute({
+      executeMergeRequest({
         cwd: input.cwd,
+        reference: input.reference,
         args: ["mr", "checkout", input.reference],
       }).pipe(Effect.asVoid),
   });
