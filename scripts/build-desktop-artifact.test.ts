@@ -9,7 +9,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
-  BuildScriptError,
+  BuildCommandFailedError,
   createStageWorkspaceConfig,
   createStagePnpmConfig,
   createBuildConfig,
@@ -18,6 +18,7 @@ import {
   InvalidMacPasskeyPublishableKeyError,
   isMacPasskeySigningConfigurationError,
   LinuxIconResizeError,
+  MacPasskeySigningConfigurationResolutionError,
   MissingMacPasskeyProvisioningProfileError,
   renderMacPasskeyEntitlements,
   resolveClerkPasskeyNativeArtifacts,
@@ -249,10 +250,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       const aggregateCause = error.cause as AggregateError;
       assert.lengthOf(aggregateCause.errors, 2);
       assert.strictEqual(aggregateCause.cause, aggregateCause.errors[0]);
-      assert.instanceOf(aggregateCause.errors[0], BuildScriptError);
-      assert.instanceOf(aggregateCause.errors[1], BuildScriptError);
-      assert.include((aggregateCause.errors[0] as BuildScriptError).message, "magick linux icon");
-      assert.include((aggregateCause.errors[1] as BuildScriptError).message, "convert linux icon");
+      assert.instanceOf(aggregateCause.errors[0], BuildCommandFailedError);
+      assert.instanceOf(aggregateCause.errors[1], BuildCommandFailedError);
+      const primaryError = aggregateCause.errors[0] as BuildCommandFailedError;
+      const fallbackError = aggregateCause.errors[1] as BuildCommandFailedError;
+      assert.equal(primaryError.command, "magick linux icon 512x512");
+      assert.equal(primaryError.exitCode, 1);
+      assert.include(primaryError.message, "magick linux icon");
+      assert.equal(fallbackError.command, "convert linux icon 512x512");
+      assert.equal(fallbackError.exitCode, 2);
+      assert.include(fallbackError.message, "convert linux icon");
       assert.deepStrictEqual(
         commands.map(({ command }) => command),
         ["magick", "convert"],
@@ -356,7 +363,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("preserves known passkey signing configuration errors at the build boundary", () => {
     const decodingCause = new Error("publishable-key-decode-failed");
     const knownError = new InvalidMacPasskeyPublishableKeyError({ cause: decodingCause });
-    const error = BuildScriptError.fromMacPasskeySigningConfiguration(knownError);
+    const error = MacPasskeySigningConfigurationResolutionError.fromCause(knownError);
 
     assert.strictEqual(error, knownError);
     assert.instanceOf(error, InvalidMacPasskeyPublishableKeyError);
@@ -367,9 +374,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("wraps unknown passkey signing configuration defects without copying cause text", () => {
     const secret = "pk_test_do-not-retain";
     const cause = new Error(secret);
-    const error = BuildScriptError.fromMacPasskeySigningConfiguration(cause);
+    const error = MacPasskeySigningConfigurationResolutionError.fromCause(cause);
 
-    assert.instanceOf(error, BuildScriptError);
+    assert.instanceOf(error, MacPasskeySigningConfigurationResolutionError);
     assert.strictEqual(error.cause, cause);
     assert.equal(error.message, "Failed to resolve macOS passkey signing configuration.");
     assert.notInclude(error.message, secret);
