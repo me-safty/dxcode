@@ -54,6 +54,7 @@ import {
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+import { mergeProviderUsageLimits } from "../providerUsageLimits.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
 const loadProviders = (
@@ -399,10 +400,11 @@ export const ProviderRegistryLive = Layer.effect(
         if (provider.instanceId !== instanceId || !provider.enabled) {
           return provider;
         }
-        if (Equal.equals(provider.usageLimits, usageLimits)) {
+        const mergedUsageLimits = mergeProviderUsageLimits(provider.usageLimits, usageLimits);
+        if (Equal.equals(provider.usageLimits, mergedUsageLimits)) {
           return provider;
         }
-        patchedProvider = { ...provider, usageLimits };
+        patchedProvider = { ...provider, usageLimits: mergedUsageLimits };
         return patchedProvider;
       });
 

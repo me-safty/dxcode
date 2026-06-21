@@ -18,13 +18,16 @@ import type {
   ServerProvider,
   ServerProviderState,
   ModelCapabilities,
+  ProviderInstanceId,
   ProviderOptionDescriptor,
   ServerProviderModel,
   ServerProviderSkill,
 } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@t3tools/contracts";
 import { ServerSettingsError } from "@t3tools/contracts";
 import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
 import { resolveCodexRateLimitSnapshotUsageLimits } from "../codexUsageProbe.ts";
+import type { ProviderUsageStateShape } from "../Services/ProviderUsageState.ts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -43,6 +46,8 @@ const CODEX_PRESENTATION = {
   displayName: "Codex",
   showInteractionModeToggle: true,
 } as const;
+
+const CODEX_DRIVER = ProviderDriverKind.make("codex");
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
@@ -480,6 +485,8 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   > = probeCodexAppServerProvider,
   environment?: NodeJS.ProcessEnv,
+  instanceId?: ProviderInstanceId,
+  providerUsageState?: ProviderUsageStateShape,
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
@@ -558,7 +565,12 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
 
   const snapshot = probeResult.success.value;
   const accountStatus = accountProbeStatus(snapshot.account);
-  const usageLimits =
+  const runtimeUsageLimits = providerUsageState
+    ? yield* providerUsageState
+        .get(CODEX_DRIVER, instanceId)
+        .pipe(Effect.orElseSucceed(() => undefined))
+    : undefined;
+  const probedUsageLimits =
     snapshot.account.account?.type === "apiKey"
       ? makeUnavailableUsageLimits({
           source: "codexAppServer",
@@ -569,6 +581,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
           checkedAt,
           ...(snapshot.rateLimits ? { snapshot: snapshot.rateLimits } : {}),
         });
+  const usageLimits =
+    snapshot.account.account?.type === "apiKey"
+      ? probedUsageLimits
+      : (runtimeUsageLimits ?? probedUsageLimits);
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,

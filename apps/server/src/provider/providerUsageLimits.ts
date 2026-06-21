@@ -93,6 +93,46 @@ export function makeUnavailableUsageLimits(input: {
   };
 }
 
+function sortUsageWindows(
+  windows: ReadonlyArray<ServerProviderUsageWindow>,
+): ReadonlyArray<ServerProviderUsageWindow> {
+  return windows.toSorted((left, right) => {
+    if (left.kind === right.kind) return 0;
+    return left.kind === "session" ? -1 : 1;
+  });
+}
+
+/**
+ * Merge a sparse runtime usage update into an existing snapshot. Windows
+ * present in `incoming` replace matching kinds from `previous`; other kinds
+ * are preserved so partial Codex `account.rate-limits.updated` events do not
+ * drop quota windows that were not included in the notification.
+ */
+export function mergeProviderUsageLimits(
+  previous: ServerProviderUsageLimits | undefined,
+  incoming: ServerProviderUsageLimits,
+): ServerProviderUsageLimits {
+  if (!incoming.available || incoming.windows.length === 0) {
+    return previous ?? incoming;
+  }
+
+  if (!previous?.available || previous.windows.length === 0) {
+    return incoming;
+  }
+
+  const windowsByKind = new Map(previous.windows.map((window) => [window.kind, window] as const));
+  for (const window of incoming.windows) {
+    windowsByKind.set(window.kind, window);
+  }
+
+  return {
+    source: incoming.source,
+    available: true,
+    checkedAt: incoming.checkedAt,
+    windows: sortUsageWindows([...windowsByKind.values()]),
+  };
+}
+
 export function makeUsageLimitsSnapshot(input: {
   readonly source: ServerProviderUsageLimits["source"];
   readonly checkedAt: string;

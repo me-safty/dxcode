@@ -14,6 +14,7 @@ import * as Stream from "effect/Stream";
 
 import { parseClaudeRuntimeUsageLimits } from "../claudeUsageProbe.ts";
 import { parseCodexRuntimeUsageLimits } from "../codexUsageProbe.ts";
+import { mergeProviderUsageLimits } from "../providerUsageLimits.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import {
   ProviderUsageState,
@@ -190,6 +191,9 @@ export const ProviderUsageStateLive = Layer.effect(
           return;
         }
 
+        const existingUsage = yield* service.get(event.provider, providerInstanceId);
+        const mergedUsage = mergeProviderUsageLimits(existingUsage, usage);
+
         const maybeDate = DateTime.make(event.createdAt);
         const updatedAtMs = Option.isSome(maybeDate)
           ? DateTime.toEpochMillis(maybeDate.value)
@@ -198,10 +202,10 @@ export const ProviderUsageStateLive = Layer.effect(
           event.provider,
           providerInstanceId,
           event.threadId,
-          usage,
+          mergedUsage,
           updatedAtMs,
         );
-        yield* publishUsageLimits(providerInstanceId, usage);
+        yield* publishUsageLimits(providerInstanceId, mergedUsage);
       }),
     ).pipe(Effect.forkScoped);
 

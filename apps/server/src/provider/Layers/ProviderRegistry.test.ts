@@ -398,6 +398,57 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       );
 
+      it.effect("prefers cached runtime usage over an empty status probe on refresh", () =>
+        Effect.gen(function* () {
+          const runtimeUsage = {
+            source: "codexAppServer" as const,
+            available: true as const,
+            checkedAt: "2026-04-18T00:02:00.000Z",
+            windows: [
+              {
+                kind: "session" as const,
+                label: "Session",
+                usedPercent: 60,
+                windowDurationMins: 300,
+              },
+              {
+                kind: "weekly" as const,
+                label: "Weekly",
+                usedPercent: 15,
+                windowDurationMins: 10080,
+              },
+            ],
+          };
+          const providerUsageState = {
+            get: () => Effect.succeed(runtimeUsage),
+            set: () => Effect.void,
+            clear: () => Effect.void,
+          };
+
+          const status = yield* checkCodexProviderStatus(
+            defaultCodexSettings,
+            () =>
+              Effect.succeed(
+                makeCodexProbeSnapshot({
+                  account: {
+                    account: {
+                      type: "chatgpt",
+                      email: "test@example.com",
+                      planType: "pro",
+                    },
+                    requiresOpenaiAuth: false,
+                  },
+                }),
+              ),
+            undefined,
+            ProviderInstanceId.make("codex"),
+            providerUsageState,
+          );
+
+          assert.deepStrictEqual(status.usageLimits, runtimeUsage);
+        }),
+      );
+
       it.effect("returns unauthenticated when app-server requires OpenAI auth", () =>
         Effect.gen(function* () {
           const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>

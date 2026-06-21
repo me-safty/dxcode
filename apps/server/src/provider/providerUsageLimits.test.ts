@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clampPercent,
   makeUsageLimitsSnapshot,
+  mergeProviderUsageLimits,
   windowKindFromDuration,
 } from "./providerUsageLimits.ts";
 
@@ -59,6 +60,44 @@ describe("providerUsageLimits", () => {
         longestWindowDurationMins: 10080,
       }),
     ).toBe("weekly");
+  });
+
+  it("merges sparse runtime updates without dropping untouched quota windows", () => {
+    const previous = makeUsageLimitsSnapshot({
+      source: "codexAppServer",
+      checkedAt: "2026-04-17T10:00:00.000Z",
+      unavailableReason: "missing",
+      windows: [
+        { label: "Session", usedPercent: 10, windowDurationMins: 300 },
+        { label: "Weekly", usedPercent: 20, windowDurationMins: 10_080 },
+      ],
+    });
+    const incoming = makeUsageLimitsSnapshot({
+      source: "codexAppServer",
+      checkedAt: "2026-04-18T00:00:00.000Z",
+      unavailableReason: "missing",
+      windows: [{ label: "Session", usedPercent: 60, windowDurationMins: 300 }],
+    });
+
+    expect(mergeProviderUsageLimits(previous, incoming)).toEqual({
+      source: "codexAppServer",
+      available: true,
+      checkedAt: "2026-04-18T00:00:00.000Z",
+      windows: [
+        {
+          kind: "session",
+          label: "Session",
+          usedPercent: 60,
+          windowDurationMins: 300,
+        },
+        {
+          kind: "weekly",
+          label: "Weekly",
+          usedPercent: 20,
+          windowDurationMins: 10080,
+        },
+      ],
+    });
   });
 
   it("keeps intermediate windows as session instead of dropping them", () => {

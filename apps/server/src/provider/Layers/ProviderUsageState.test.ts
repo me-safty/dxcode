@@ -119,6 +119,7 @@ describe("ProviderUsageStateLive", () => {
           payload: {
             rateLimits: {
               primary: { usedPercent: 10, windowDurationMins: 300 },
+              secondary: { usedPercent: 15, windowDurationMins: 10080 },
             },
           },
         });
@@ -154,6 +155,7 @@ describe("ProviderUsageStateLive", () => {
 
     expect(state?.windows).toEqual([
       { kind: "session", label: "Session", usedPercent: 60, windowDurationMins: 300 },
+      { kind: "weekly", label: "Weekly", usedPercent: 15, windowDurationMins: 10080 },
     ]);
   });
 
