@@ -71,6 +71,18 @@ function installTestBrowser(url: string) {
   return testWindow;
 }
 
+function installDesktopBootstrap() {
+  const testWindow = installTestBrowser("http://localhost/");
+  testWindow.desktopBridge = {
+    getLocalEnvironmentBootstrap: () => ({
+      label: "Local environment",
+      httpBaseUrl: "http://localhost:3773",
+      wsBaseUrl: "ws://localhost:3773",
+      bootstrapToken: "desktop-bootstrap-token",
+    }),
+  } as DesktopBridge;
+}
+
 function sequence<A>(...values: ReadonlyArray<A>) {
   let index = 0;
   return () => values[Math.min(index++, values.length - 1)]!;
@@ -131,15 +143,7 @@ describe("resolveInitialServerAuthGateState", () => {
       browserSession: () => Effect.succeed(browserSession(["orchestration:read", "access:write"])),
     });
 
-    const testWindow = installTestBrowser("http://localhost/");
-    testWindow.desktopBridge = {
-      getLocalEnvironmentBootstrap: () => ({
-        label: "Local environment",
-        httpBaseUrl: "http://localhost:3773",
-        wsBaseUrl: "ws://localhost:3773",
-        bootstrapToken: "desktop-bootstrap-token",
-      }),
-    } as DesktopBridge;
+    installDesktopBootstrap();
 
     const { resolveInitialServerAuthGateState } = await import("./environments/primary");
 
@@ -289,6 +293,23 @@ describe("resolveInitialServerAuthGateState", () => {
     expect(testApi.calls.session).toBe(2);
   });
 
+  it("rejects a blank pairing token with a structured validation error", async () => {
+    const { PrimaryEnvironmentPairingCredentialRequiredError, submitServerAuthCredential } =
+      await import("./environments/primary/auth");
+
+    const error = await submitServerAuthCredential("   ").then(
+      () => null,
+      (failure: unknown) => failure,
+    );
+
+    expect(error).toBeInstanceOf(PrimaryEnvironmentPairingCredentialRequiredError);
+    expect(error).toMatchObject({
+      _tag: "PrimaryEnvironmentPairingCredentialRequiredError",
+      providedLength: 3,
+      message: "Enter a pairing token to continue.",
+    });
+  });
+
   it("surfaces a friendly error message when an invalid pairing token is submitted", async () => {
     const cause = new EnvironmentAuthInvalidError({
       code: "auth_invalid",
@@ -337,15 +358,7 @@ describe("resolveInitialServerAuthGateState", () => {
       browserSession: () => Effect.succeed(browserSession(["orchestration:read", "access:write"])),
     });
 
-    const testWindow = installTestBrowser("http://localhost/");
-    testWindow.desktopBridge = {
-      getLocalEnvironmentBootstrap: () => ({
-        label: "Local environment",
-        httpBaseUrl: "http://localhost:3773",
-        wsBaseUrl: "ws://localhost:3773",
-        bootstrapToken: "desktop-bootstrap-token",
-      }),
-    } as DesktopBridge;
+    installDesktopBootstrap();
 
     const { resolveInitialServerAuthGateState } = await import("./environments/primary");
 
@@ -354,6 +367,28 @@ describe("resolveInitialServerAuthGateState", () => {
 
     await expect(gateStatePromise).resolves.toEqual({ status: "authenticated" });
     expect(testApi.calls.session).toBe(3);
+  });
+
+  it("preserves the timeout message when a bootstrapped session never becomes observable", async () => {
+    vi.useFakeTimers();
+    const testApi = await installAuthApi({
+      session: () => unauthenticatedSession(DESKTOP_AUTH),
+      browserSession: () => Effect.succeed(browserSession(["orchestration:read", "access:write"])),
+    });
+
+    installDesktopBootstrap();
+
+    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+
+    const gateStatePromise = resolveInitialServerAuthGateState();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(gateStatePromise).resolves.toEqual({
+      status: "requires-auth",
+      auth: DESKTOP_AUTH,
+      errorMessage: "Timed out waiting for authenticated session after bootstrap.",
+    });
+    expect(testApi.calls.browserSession).toEqual([{ credential: "desktop-bootstrap-token" }]);
   });
 
   it("memoizes the authenticated gate state after the first successful read", async () => {

@@ -72,6 +72,38 @@ export class PrimaryEnvironmentRequestError extends Schema.TaggedErrorClass<Prim
 }
 
 export const isPrimaryEnvironmentRequestError = Schema.is(PrimaryEnvironmentRequestError);
+
+export class PrimaryEnvironmentAuthSessionTimeoutError extends Schema.TaggedErrorClass<PrimaryEnvironmentAuthSessionTimeoutError>()(
+  "PrimaryEnvironmentAuthSessionTimeoutError",
+  {
+    timeoutMs: Schema.Number,
+    elapsedMs: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return "Timed out waiting for authenticated session after bootstrap.";
+  }
+}
+
+export const isPrimaryEnvironmentAuthSessionTimeoutError = Schema.is(
+  PrimaryEnvironmentAuthSessionTimeoutError,
+);
+
+export class PrimaryEnvironmentPairingCredentialRequiredError extends Schema.TaggedErrorClass<PrimaryEnvironmentPairingCredentialRequiredError>()(
+  "PrimaryEnvironmentPairingCredentialRequiredError",
+  {
+    providedLength: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return "Enter a pairing token to continue.";
+  }
+}
+
+export const isPrimaryEnvironmentPairingCredentialRequiredError = Schema.is(
+  PrimaryEnvironmentPairingCredentialRequiredError,
+);
+
 const isEnvironmentHttpCommonError = Schema.is(EnvironmentHttpCommonError);
 
 export interface ServerPairingLinkRecord {
@@ -244,8 +276,12 @@ async function waitForAuthenticatedSessionAfterBootstrap(): Promise<AuthSessionS
       return session;
     }
 
-    if (Date.now() - startedAt >= AUTH_SESSION_ESTABLISH_TIMEOUT_MS) {
-      throw new Error("Timed out waiting for authenticated session after bootstrap.");
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs >= AUTH_SESSION_ESTABLISH_TIMEOUT_MS) {
+      throw new PrimaryEnvironmentAuthSessionTimeoutError({
+        timeoutMs: AUTH_SESSION_ESTABLISH_TIMEOUT_MS,
+        elapsedMs,
+      });
     }
 
     await waitForBootstrapRetry(AUTH_SESSION_ESTABLISH_STEP_MS);
@@ -323,7 +359,9 @@ async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
 export async function submitServerAuthCredential(credential: string): Promise<void> {
   const trimmedCredential = credential.trim();
   if (!trimmedCredential) {
-    throw new Error("Enter a pairing token to continue.");
+    throw new PrimaryEnvironmentPairingCredentialRequiredError({
+      providedLength: credential.length,
+    });
   }
 
   resolvedAuthenticatedGateState = null;
