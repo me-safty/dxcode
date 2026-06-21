@@ -1,6 +1,6 @@
-import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -190,7 +190,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
                 if (!runtimeMock.state.keepSubscriptionOpen) {
                   break;
                 }
-                await new Promise((resolve) => setTimeout(resolve, 5));
+                await sleep(5);
               }
             })(),
           };
