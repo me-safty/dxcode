@@ -3,6 +3,9 @@ import * as Schema from "effect/Schema";
 export class ServerCliCommandExitError extends Schema.TaggedErrorClass<ServerCliCommandExitError>()(
   "ServerCliCommandExitError",
   {
+    command: Schema.String,
+    args: Schema.Array(Schema.String),
+    cwd: Schema.optional(Schema.String),
     exitCode: Schema.Int,
   },
 ) {

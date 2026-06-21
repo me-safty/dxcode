@@ -19,7 +19,14 @@ import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import serverPackageJson from "../package.json" with { type: "json" };
-import * as CliErrors from "./cliErrors.ts";
+import {
+  ServerCliBuildAssetMissingError,
+  ServerCliCommandExitError,
+  ServerCliDevelopmentIconSourceMissingError,
+  ServerCliDevelopmentIconTargetMissingError,
+  ServerCliPublishIconSourceMissingError,
+  ServerCliPublishIconTargetMissingError,
+} from "./cliErrors.ts";
 
 interface PackageJson {
   name: string;
@@ -59,13 +66,18 @@ const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
   return yield* decodeWorkspaceConfig(workspaceYaml);
 });
 
-const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.Command) {
+const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.StandardCommand) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const child = yield* spawner.spawn(command);
   const exitCode = yield* child.exitCode;
 
   if (exitCode !== 0) {
-    return yield* new CliErrors.ServerCliCommandExitError({ exitCode });
+    return yield* new ServerCliCommandExitError({
+      command: command.command,
+      args: command.args,
+      cwd: command.options.cwd,
+      exitCode,
+    });
   }
 });
 
@@ -88,10 +100,10 @@ const applyPublishIconOverrides = Effect.fn("applyPublishIconOverrides")(functio
     const backupPath = `${targetPath}.publish-bak`;
 
     if (!(yield* fs.exists(sourcePath))) {
-      return yield* new CliErrors.ServerCliPublishIconSourceMissingError({ sourcePath });
+      return yield* new ServerCliPublishIconSourceMissingError({ sourcePath });
     }
     if (!(yield* fs.exists(targetPath))) {
-      return yield* new CliErrors.ServerCliPublishIconTargetMissingError({ targetPath });
+      return yield* new ServerCliPublishIconTargetMissingError({ targetPath });
     }
 
     yield* fs.copyFile(targetPath, backupPath);
@@ -127,10 +139,10 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
     const targetPath = path.join(serverDir, override.targetRelativePath);
 
     if (!(yield* fs.exists(sourcePath))) {
-      return yield* new CliErrors.ServerCliDevelopmentIconSourceMissingError({ sourcePath });
+      return yield* new ServerCliDevelopmentIconSourceMissingError({ sourcePath });
     }
     if (!(yield* fs.exists(targetPath))) {
-      return yield* new CliErrors.ServerCliDevelopmentIconTargetMissingError({ targetPath });
+      return yield* new ServerCliDevelopmentIconTargetMissingError({ targetPath });
     }
 
     yield* fs.copyFile(sourcePath, targetPath);
@@ -230,7 +242,7 @@ const publishCmd = Command.make(
       for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
         const abs = path.join(serverDir, relPath);
         if (!(yield* fs.exists(abs))) {
-          return yield* new CliErrors.ServerCliBuildAssetMissingError({ assetPath: abs });
+          return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
         }
       }
 
