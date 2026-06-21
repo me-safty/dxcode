@@ -35,8 +35,8 @@ import * as Stream from "effect/Stream";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
 import {
-  getHostBearerToken,
-  getHostLocalEnvironmentBootstrap,
+  getDesktopManagedBearerToken,
+  getDesktopManagedEnvironmentBootstrap,
 } from "../environments/primary/hostBootstrap";
 import { readPrimaryEnvironmentTarget } from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
@@ -270,12 +270,12 @@ const capabilitiesLayer = Layer.effectContext(
 );
 
 function readHostPrimaryConnectionRegistration(): PrimaryConnectionRegistration | null {
-  const bootstrap = getHostLocalEnvironmentBootstrap();
+  const bootstrap = getDesktopManagedEnvironmentBootstrap();
   if (!bootstrap?.environmentId || !bootstrap.httpBaseUrl || !bootstrap.wsBaseUrl) {
     return null;
   }
 
-  const bearerToken = getHostBearerToken();
+  const bearerToken = getDesktopManagedBearerToken();
   return new PrimaryConnectionRegistration({
     target: new PrimaryConnectionTarget({
       environmentId: bootstrap.environmentId,
@@ -305,8 +305,8 @@ const loadPrimaryConnectionRegistration = Effect.fn(
   const descriptor = yield* fetchRemoteEnvironmentDescriptor({
     httpBaseUrl: resolved.target.httpBaseUrl,
   }).pipe(Effect.provide(primaryEnvironmentHttpLayer), Effect.mapError(mapRemoteEnvironmentError));
-  const hostEnvironmentId = getHostLocalEnvironmentBootstrap()?.environmentId;
-  const hostBearerToken = getHostBearerToken();
+  const hostEnvironmentId = getDesktopManagedEnvironmentBootstrap()?.environmentId;
+  const hostBearerToken = getDesktopManagedBearerToken();
   return new PrimaryConnectionRegistration({
     target: new PrimaryConnectionTarget({
       environmentId: hostEnvironmentId ?? descriptor.environmentId,

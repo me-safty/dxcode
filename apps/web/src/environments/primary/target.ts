@@ -1,4 +1,4 @@
-import { getHostLocalEnvironmentBootstrap } from "./hostBootstrap";
+import { getDesktopManagedEnvironmentBootstrap } from "./hostBootstrap";
 import * as Schema from "effect/Schema";
 
 const PrimaryEnvironmentTargetSource = Schema.Literals([
@@ -228,7 +228,7 @@ function resolveWindowOriginPrimaryTarget(): PrimaryEnvironmentTarget {
 }
 
 function resolveHostPrimaryTarget(): PrimaryEnvironmentTarget | null {
-  const hostBootstrap = getHostLocalEnvironmentBootstrap();
+  const hostBootstrap = getDesktopManagedEnvironmentBootstrap();
   if (!hostBootstrap) {
     return null;
   }

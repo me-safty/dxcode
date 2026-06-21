@@ -21,7 +21,10 @@ import {
 
 import { PrimaryEnvironmentHttpClient } from "./httpClient";
 import { runPrimaryHttp } from "../../lib/runtime";
-import { getHostBearerToken, getHostBootstrapCredential } from "./hostBootstrap";
+import {
+  getDesktopManagedBearerToken,
+  getDesktopManagedBootstrapCredential,
+} from "./hostBootstrap";
 
 const PrimaryEnvironmentRequestOperation = Schema.Literals([
   "fetch-session-state",
@@ -306,7 +309,7 @@ function isTransientBootstrapError(error: unknown): boolean {
 }
 
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
-  if (getHostBearerToken()) {
+  if (getDesktopManagedBearerToken()) {
     const session = await fetchSessionState();
     if (session.authenticated) {
       return { status: "authenticated" };
@@ -317,7 +320,7 @@ async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
     };
   }
 
-  const bootstrapCredential = getHostBootstrapCredential();
+  const bootstrapCredential = getDesktopManagedBootstrapCredential();
   const currentSession = await fetchSessionState();
   if (currentSession.authenticated) {
     return { status: "authenticated" };

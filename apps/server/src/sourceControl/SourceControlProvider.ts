@@ -3,12 +3,12 @@ import * as Effect from "effect/Effect";
 import type {
   ChangeRequest,
   ChangeRequestState,
-  SourceControlProviderError,
   SourceControlProviderInfo,
   SourceControlProviderKind,
   SourceControlRepositoryCloneUrls,
   SourceControlRepositoryVisibility,
 } from "@t3tools/contracts";
+import { SourceControlProviderError } from "@t3tools/contracts";
 
 export interface SourceControlProviderContext {
   readonly provider: SourceControlProviderInfo;
@@ -77,6 +77,41 @@ export function sourceControlRefFromInput(input: {
   readonly source?: SourceControlRefSelector;
 }): SourceControlRefSelector | undefined {
   return input.source ?? parseSourceControlOwnerRef(input.headSelector);
+}
+
+export interface SourceControlProviderCommandError {
+  readonly command?: string;
+  readonly detail?: string;
+  readonly message?: string;
+}
+
+export function sourceControlProviderError(input: {
+  readonly provider: SourceControlProviderKind;
+  readonly operation: string;
+  readonly cwd: string;
+  readonly error: SourceControlProviderCommandError;
+  readonly detail?: string;
+  readonly reference?: string;
+  readonly repository?: string;
+}): SourceControlProviderError {
+  return new SourceControlProviderError({
+    provider: input.provider,
+    operation: input.operation,
+    ...(input.error.command !== undefined ? { command: input.error.command } : {}),
+    cwd: input.cwd,
+    ...(input.reference !== undefined
+      ? { reference: transportSafeSourceControlErrorValue(input.reference) }
+      : {}),
+    ...(input.repository !== undefined
+      ? { repository: transportSafeSourceControlErrorValue(input.repository) }
+      : {}),
+    detail:
+      input.error.detail ??
+      input.detail ??
+      input.error.message ??
+      "Source control provider operation failed.",
+    cause: input.error,
+  });
 }
 
 export function repositoryPathFromRemoteUrl(remoteUrl: string): string | null {

@@ -1,9 +1,9 @@
-import { getHostBearerToken } from "./hostBootstrap";
+import { getDesktopManagedBearerToken } from "./hostBootstrap";
 
 let desktopBearerTokenPromise: Promise<string> | null = null;
 
 export function readDesktopPrimaryBearerToken(): Promise<string | null> {
-  const hostBearerToken = getHostBearerToken();
+  const hostBearerToken = getDesktopManagedBearerToken();
   if (hostBearerToken) {
     return Promise.resolve(hostBearerToken);
   }

@@ -8,6 +8,8 @@ import type {
 
 import {
   openTerminalAndWaitForInputReady,
+  ProjectActionTerminalReadinessTimeoutError,
+  projectActionTerminalReadinessFailureFromEvent,
   projectActionTerminalId,
   resolveProjectActionTerminalId,
   terminalSessionIsReadyForProjectActionInput,
@@ -196,6 +198,34 @@ describe("terminalSessionIsReadyForProjectActionInput", () => {
 });
 
 describe("openTerminalAndWaitForInputReady", () => {
+  it("classifies terminal attach errors as typed readiness failures", () => {
+    const error = projectActionTerminalReadinessFailureFromEvent(OPEN_INPUT, {
+      type: "error",
+      threadId: OPEN_INPUT.threadId,
+      terminalId: OPEN_INPUT.terminalId,
+      message: "PTY closed unexpectedly.",
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?._tag).toBe("ProjectActionTerminalAttachError");
+    expect(error?.threadId).toBe(OPEN_INPUT.threadId);
+    expect(error?.terminalId).toBe(OPEN_INPUT.terminalId);
+    expect(error?.cwd).toBe(OPEN_INPUT.cwd);
+    expect(error?.detail).toBe("PTY closed unexpectedly.");
+  });
+
+  it("uses a typed timeout error for project action terminal readiness", () => {
+    const error = new ProjectActionTerminalReadinessTimeoutError({
+      threadId: OPEN_INPUT.threadId,
+      terminalId: OPEN_INPUT.terminalId,
+      cwd: OPEN_INPUT.cwd,
+      timeoutMs: 1_000,
+    });
+
+    expect(error._tag).toBe("ProjectActionTerminalReadinessTimeoutError");
+    expect(error.message).toContain(OPEN_INPUT.terminalId);
+  });
+
   it("resolves from a prompt already present in the snapshot history", async () => {
     vi.useFakeTimers();
     const unsubscribe = vi.fn();
