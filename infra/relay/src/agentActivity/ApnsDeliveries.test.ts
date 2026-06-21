@@ -638,8 +638,7 @@ describe("ApnsDeliveries", () => {
         return;
       }
       const error = Redacted.value(annotation);
-      // @effect-diagnostics-next-line instanceOfSchema:off
-      if (error instanceof ApnsDeliveries.ApnsDeliveryTransportError) {
+      if (ApnsDeliveries.isApnsDeliveryTransportError(error)) {
         transportErrors.push(error);
       }
     });
