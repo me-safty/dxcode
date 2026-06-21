@@ -520,6 +520,12 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     });
   }
 
+  // Read runtime usage before the probe so sparse `account/rateLimits/updated`
+  // events that arrive during a long refresh cannot replace a full snapshot, and
+  // so quota is preserved when in-memory state is cleared while the probe runs.
+  const runtimeUsageLimits = yield* readRuntimeUsageLimits();
+  const cachedRuntimeUsageLimits = runtimeUsageLimits?.available ? runtimeUsageLimits : undefined;
+
   const probeResult = yield* probe({
     binaryPath: codexSettings.binaryPath,
     homePath: codexSettings.homePath,
@@ -531,9 +537,6 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)),
     Effect.result,
   );
-
-  const runtimeUsageLimits = yield* readRuntimeUsageLimits();
-  const cachedRuntimeUsageLimits = runtimeUsageLimits?.available ? runtimeUsageLimits : undefined;
 
   if (Result.isFailure(probeResult)) {
     const error = probeResult.failure;

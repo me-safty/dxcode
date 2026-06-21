@@ -79,6 +79,24 @@ export function normalizeUsageWindows(
     });
 }
 
+/**
+ * Keep the last known available usage limits when a scheduled refresh would
+ * replace them with an unavailable stub (for example when
+ * `account/rateLimits/read` fails but live patches already populated quota).
+ */
+export function preserveAvailableUsageLimitsOnRefresh(
+  previous: ServerProviderUsageLimits | undefined,
+  next: ServerProviderUsageLimits | undefined,
+): ServerProviderUsageLimits | undefined {
+  if (next?.available) {
+    return next;
+  }
+  if (previous?.available) {
+    return previous;
+  }
+  return next;
+}
+
 export function makeUnavailableUsageLimits(input: {
   readonly source: ServerProviderUsageLimits["source"];
   readonly checkedAt: string;

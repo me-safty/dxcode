@@ -495,24 +495,29 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       );
 
       it.effect(
-        "reads provider usage state after the probe so live updates during probe are used",
+        "reads provider usage state before the probe so sparse updates during probe do not win",
         () =>
           Effect.gen(function* () {
-            const runtimeUsageRef = yield* Ref.make<
-              | {
-                  readonly source: "codexAppServer";
-                  readonly available: true;
-                  readonly checkedAt: string;
-                  readonly windows: ReadonlyArray<{
-                    readonly kind: "session";
-                    readonly label: "Session";
-                    readonly usedPercent: number;
-                    readonly windowDurationMins: number;
-                  }>;
-                }
-              | undefined
-            >(undefined);
-            const freshRuntimeUsage = {
+            const runtimeUsageRef = yield* Ref.make({
+              source: "codexAppServer" as const,
+              available: true as const,
+              checkedAt: "2026-04-18T00:02:00.000Z",
+              windows: [
+                {
+                  kind: "session" as const,
+                  label: "Session",
+                  usedPercent: 40,
+                  windowDurationMins: 300,
+                },
+                {
+                  kind: "weekly" as const,
+                  label: "Weekly",
+                  usedPercent: 12,
+                  windowDurationMins: 10080,
+                },
+              ],
+            });
+            const sparseRuntimeUsage = {
               source: "codexAppServer" as const,
               available: true as const,
               checkedAt: "2026-04-18T00:05:00.000Z",
@@ -535,7 +540,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               defaultCodexSettings,
               () =>
                 Effect.gen(function* () {
-                  yield* Ref.set(runtimeUsageRef, freshRuntimeUsage);
+                  yield* Ref.set(runtimeUsageRef, sparseRuntimeUsage);
                   return makeCodexProbeSnapshot({
                     account: {
                       account: {
@@ -545,6 +550,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                       },
                       requiresOpenaiAuth: false,
                     },
+                    rateLimits: {
+                      primary: { usedPercent: 30, windowDurationMins: 300 },
+                      secondary: { usedPercent: 55, windowDurationMins: 10080 },
+                    },
                   });
                 }),
               undefined,
@@ -552,7 +561,76 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               providerUsageState,
             );
 
-            assert.deepStrictEqual(status.usageLimits, freshRuntimeUsage);
+            assert.deepStrictEqual(status.usageLimits, {
+              source: "codexAppServer",
+              available: true,
+              checkedAt: "2026-04-18T00:02:00.000Z",
+              windows: [
+                {
+                  kind: "session",
+                  label: "Session",
+                  usedPercent: 40,
+                  windowDurationMins: 300,
+                },
+                {
+                  kind: "weekly",
+                  label: "Weekly",
+                  usedPercent: 12,
+                  windowDurationMins: 10080,
+                },
+              ],
+            });
+          }),
+      );
+
+      it.effect(
+        "preserves cached runtime usage when provider state is cleared during a failed probe",
+        () =>
+          Effect.gen(function* () {
+            const runtimeUsage = {
+              source: "codexAppServer" as const,
+              available: true as const,
+              checkedAt: "2026-04-18T00:02:00.000Z",
+              windows: [
+                {
+                  kind: "session" as const,
+                  label: "Session",
+                  usedPercent: 60,
+                  windowDurationMins: 300,
+                },
+                {
+                  kind: "weekly" as const,
+                  label: "Weekly",
+                  usedPercent: 15,
+                  windowDurationMins: 10080,
+                },
+              ],
+            };
+            let clearedDuringProbe = false;
+            const providerUsageState = {
+              get: () => Effect.succeed(clearedDuringProbe ? undefined : runtimeUsage),
+              set: () => Effect.void,
+              clear: () => Effect.void,
+            };
+
+            const status = yield* checkCodexProviderStatus(
+              defaultCodexSettings,
+              () =>
+                Effect.gen(function* () {
+                  clearedDuringProbe = true;
+                  return yield* Effect.fail(
+                    new CodexErrors.CodexAppServerSpawnError({
+                      command: "codex app-server",
+                      cause: new Error("probe failed"),
+                    }),
+                  );
+                }),
+              undefined,
+              ProviderInstanceId.make("codex"),
+              providerUsageState,
+            );
+
+            assert.deepStrictEqual(status.usageLimits, runtimeUsage);
           }),
       );
 
