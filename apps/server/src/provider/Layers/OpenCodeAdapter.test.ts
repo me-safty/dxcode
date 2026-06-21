@@ -190,7 +190,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
                 if (!runtimeMock.state.keepSubscriptionOpen) {
                   break;
                 }
-                await Effect.runPromise(Effect.sleep("5 millis"));
+                await new Promise((resolve) => setTimeout(resolve, 5));
               }
             })(),
           };
