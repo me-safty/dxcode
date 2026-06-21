@@ -36,8 +36,8 @@ const makeDesktopRunId = Crypto.Crypto.pipe(
 export class DesktopBackendPortUnavailableError extends Schema.TaggedErrorClass<DesktopBackendPortUnavailableError>()(
   "DesktopBackendPortUnavailableError",
   {
-    startPort: Schema.Number,
-    maxPort: Schema.Number,
+    startPort: Schema.Int,
+    maxPort: Schema.Int,
     hosts: Schema.Array(Schema.String),
   },
 ) {
