@@ -721,7 +721,7 @@ describe("mobile cloud link environment client", () => {
         httpBaseUrlHostname: "desktop.example.test",
         environmentError: {
           _tag: "EnvironmentHttpUnauthorizedError",
-          message: "Invalid environment bearer session.",
+          reason: "cloud_cli_authorization_required",
         },
       });
       expect(error.message).toBe(
