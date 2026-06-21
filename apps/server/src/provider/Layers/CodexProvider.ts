@@ -498,12 +498,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const resolvedEnvironment = environment ?? process.env;
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const emptyModels = emptyCodexModelsFromSettings(codexSettings);
-  const runtimeUsageLimits = providerUsageState
-    ? yield* providerUsageState
-        .get(CODEX_DRIVER, instanceId)
-        .pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
-  const cachedRuntimeUsageLimits = runtimeUsageLimits?.available ? runtimeUsageLimits : undefined;
+  const readRuntimeUsageLimits = () =>
+    providerUsageState
+      ? providerUsageState.get(CODEX_DRIVER, instanceId).pipe(Effect.orElseSucceed(() => undefined))
+      : Effect.succeed(undefined);
 
   if (!codexSettings.enabled) {
     return buildServerProvider({
@@ -533,6 +531,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)),
     Effect.result,
   );
+
+  const runtimeUsageLimits = yield* readRuntimeUsageLimits();
+  const cachedRuntimeUsageLimits = runtimeUsageLimits?.available ? runtimeUsageLimits : undefined;
 
   if (Result.isFailure(probeResult)) {
     const error = probeResult.failure;

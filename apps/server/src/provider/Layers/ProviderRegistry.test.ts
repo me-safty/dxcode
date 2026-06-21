@@ -494,6 +494,68 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       );
 
+      it.effect(
+        "reads provider usage state after the probe so live updates during probe are used",
+        () =>
+          Effect.gen(function* () {
+            const runtimeUsageRef = yield* Ref.make<
+              | {
+                  readonly source: "codexAppServer";
+                  readonly available: true;
+                  readonly checkedAt: string;
+                  readonly windows: ReadonlyArray<{
+                    readonly kind: "session";
+                    readonly label: "Session";
+                    readonly usedPercent: number;
+                    readonly windowDurationMins: number;
+                  }>;
+                }
+              | undefined
+            >(undefined);
+            const freshRuntimeUsage = {
+              source: "codexAppServer" as const,
+              available: true as const,
+              checkedAt: "2026-04-18T00:05:00.000Z",
+              windows: [
+                {
+                  kind: "session" as const,
+                  label: "Session" as const,
+                  usedPercent: 72,
+                  windowDurationMins: 300,
+                },
+              ],
+            };
+            const providerUsageState = {
+              get: () => Ref.get(runtimeUsageRef),
+              set: () => Effect.void,
+              clear: () => Effect.void,
+            };
+
+            const status = yield* checkCodexProviderStatus(
+              defaultCodexSettings,
+              () =>
+                Effect.gen(function* () {
+                  yield* Ref.set(runtimeUsageRef, freshRuntimeUsage);
+                  return makeCodexProbeSnapshot({
+                    account: {
+                      account: {
+                        type: "chatgpt",
+                        email: "test@example.com",
+                        planType: "pro",
+                      },
+                      requiresOpenaiAuth: false,
+                    },
+                  });
+                }),
+              undefined,
+              ProviderInstanceId.make("codex"),
+              providerUsageState,
+            );
+
+            assert.deepStrictEqual(status.usageLimits, freshRuntimeUsage);
+          }),
+      );
+
       it.effect("returns unauthenticated when app-server requires OpenAI auth", () =>
         Effect.gen(function* () {
           const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
