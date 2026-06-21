@@ -1,11 +1,20 @@
 import { describe, expect, it } from "@effect/vitest";
-import { CommandId, EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EnvironmentId,
+  MessageId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 
 import {
   decodeQueuedThreadMessage,
+  encodeQueuedThreadMessage,
   groupQueuedThreadMessages,
+  modelSelectionsEqual,
   resolveThreadOutboxDeliveryAction,
+  resolveQueuedThreadSettings,
   shouldRetryThreadOutboxDelivery,
   threadOutboxRetryDelayMs,
   type QueuedThreadMessage,
@@ -64,6 +73,54 @@ describe("thread outbox", () => {
         environmentId: "environment-1",
       }),
     ).toThrow();
+  });
+
+  it("persists the exact selector snapshot while remaining compatible with v1 messages", () => {
+    const legacyMessage = queuedMessage({
+      messageId: "message-1",
+      createdAt: "2026-06-08T10:00:01.000Z",
+    });
+    const selectedMessage = {
+      ...legacyMessage,
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+        options: [{ id: "reasoningEffort", value: "xhigh" }],
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+    } satisfies QueuedThreadMessage;
+
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(selectedMessage))).toEqual(
+      selectedMessage,
+    );
+    expect(
+      resolveQueuedThreadSettings(legacyMessage, {
+        modelSelection: selectedMessage.modelSelection,
+        runtimeMode: selectedMessage.runtimeMode,
+        interactionMode: selectedMessage.interactionMode,
+      }),
+    ).toEqual({
+      modelSelection: selectedMessage.modelSelection,
+      runtimeMode: selectedMessage.runtimeMode,
+      interactionMode: selectedMessage.interactionMode,
+    });
+  });
+
+  it("compares model options as part of the queued settings change", () => {
+    const base = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.4",
+      options: [{ id: "reasoningEffort", value: "medium" }],
+    } as const;
+
+    expect(modelSelectionsEqual(base, base)).toBe(true);
+    expect(
+      modelSelectionsEqual(base, {
+        ...base,
+        options: [{ id: "reasoningEffort", value: "xhigh" }],
+      }),
+    ).toBe(false);
   });
 
   it("backs off queued delivery retries and caps them at sixteen seconds", () => {
