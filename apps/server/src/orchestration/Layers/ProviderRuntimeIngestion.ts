@@ -1292,10 +1292,16 @@ const make = Effect.gen(function* () {
                 eventType: event.type,
                 threadId: thread.id,
                 cause: Cause.pretty(cause),
-              }).pipe(Effect.as({ switched: false, skipped: [] })),
+              }).pipe(
+                Effect.as({
+                  switched: false,
+                  restoredOriginalInstance: false,
+                  skipped: [],
+                }),
+              ),
             ),
           );
-          if (fallback.switched) return;
+          if (fallback.switched || fallback.restoredOriginalInstance) return;
         }
       }
 

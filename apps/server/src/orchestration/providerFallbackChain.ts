@@ -1,7 +1,27 @@
-import { type ProviderInstanceId, type ThreadId } from "@t3tools/contracts";
+import {
+  type ModelSelection,
+  type ProviderInstanceId,
+  type ProviderSession,
+  type ThreadId,
+} from "@t3tools/contracts";
+import type { ProviderFallbackFailure } from "../provider/providerFallback.ts";
+
+export interface ProviderFallbackChainOrigin {
+  readonly instanceId: ProviderInstanceId;
+  readonly displayName: string;
+  readonly failure: ProviderFallbackFailure;
+  readonly modelSelection: ModelSelection;
+  readonly session: ProviderSession | undefined;
+}
+
+export interface ProviderFallbackChainSnapshot {
+  readonly attemptedInstanceIds: ReadonlySet<ProviderInstanceId>;
+  readonly origin: ProviderFallbackChainOrigin;
+}
 
 interface ProviderFallbackChainState {
   readonly attemptedInstanceIds: Set<ProviderInstanceId>;
+  readonly origin: ProviderFallbackChainOrigin;
   activeInstanceId: ProviderInstanceId;
 }
 
@@ -23,11 +43,15 @@ function makeRoomForProviderFallbackChain(): void {
 export function beginProviderFallbackChain(
   threadId: ThreadId,
   failedInstanceId: ProviderInstanceId,
-): ReadonlySet<ProviderInstanceId> {
+  origin: ProviderFallbackChainOrigin,
+): ProviderFallbackChainSnapshot {
   const existing = providerFallbackChains.get(threadId);
   if (existing?.activeInstanceId === failedInstanceId) {
     existing.attemptedInstanceIds.add(failedInstanceId);
-    return new Set(existing.attemptedInstanceIds);
+    return {
+      attemptedInstanceIds: new Set(existing.attemptedInstanceIds),
+      origin: existing.origin,
+    };
   }
 
   makeRoomForProviderFallbackChain();
@@ -35,8 +59,9 @@ export function beginProviderFallbackChain(
   providerFallbackChains.set(threadId, {
     attemptedInstanceIds,
     activeInstanceId: failedInstanceId,
+    origin,
   });
-  return new Set(attemptedInstanceIds);
+  return { attemptedInstanceIds: new Set(attemptedInstanceIds), origin };
 }
 
 export function markProviderFallbackInstanceAttempted(

@@ -51,6 +51,7 @@ export interface ProviderFallbackAttemptInput {
 
 export interface ProviderFallbackAttemptResult {
   readonly switched: boolean;
+  readonly restoredOriginalInstance?: boolean;
   readonly skipped: ReadonlyArray<ProviderFallbackSkip>;
 }
 
@@ -151,7 +152,16 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
     return { switched: false, skipped: [] } satisfies ProviderFallbackAttemptResult;
   }
 
-  const attemptedInstanceIds = beginProviderFallbackChain(input.threadId, input.failedInstanceId);
+  const activeSession = (yield* providerService.listSessions()).find(
+    (session) => session.threadId === input.threadId,
+  );
+  const fallbackChain = beginProviderFallbackChain(input.threadId, input.failedInstanceId, {
+    instanceId: input.failedInstanceId,
+    displayName: providerFallbackDisplayName(currentProvider),
+    failure: input.failure,
+    modelSelection: input.modelSelection,
+    session: activeSession,
+  });
 
   const plan = planProviderFallback({
     settings,
@@ -159,13 +169,11 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
     currentInstanceId: input.failedInstanceId,
     modelSelection: input.modelSelection,
     requireCompatibleContinuation: input.requireCompatibleContinuation,
-    excludedInstanceIds: attemptedInstanceIds,
+    excludedInstanceIds: fallbackChain.attemptedInstanceIds,
   });
   const skipped: ProviderFallbackSkip[] = [...plan.skipped];
-  const originalSession = (yield* providerService.listSessions()).find(
-    (session) => session.threadId === input.threadId,
-  );
   let bindingChanged = false;
+  let restoredOriginalInstance = false;
   let boundFallbackInstance: ProviderFallbackCandidate | undefined;
   let currentTrialToken: ProviderFallbackTrialToken | undefined;
 
@@ -177,6 +185,7 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
     readonly tone: "error" | "info";
     readonly toInstanceId?: ProviderInstanceId;
     readonly toDisplayName?: string;
+    readonly useOriginalFailure?: boolean;
   }) =>
     Effect.all({ commandId: nextCommandId(outcome.kind), eventId: crypto.randomUUIDv4 }).pipe(
       Effect.flatMap(({ commandId, eventId }) =>
@@ -190,12 +199,21 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
             kind: outcome.kind,
             summary: outcome.summary,
             payload: {
-              fromInstanceId: input.failedInstanceId,
-              fromDisplayName: providerFallbackDisplayName(currentProvider),
+              fromInstanceId: outcome.useOriginalFailure
+                ? fallbackChain.origin.instanceId
+                : input.failedInstanceId,
+              fromDisplayName: outcome.useOriginalFailure
+                ? fallbackChain.origin.displayName
+                : providerFallbackDisplayName(currentProvider),
               ...(outcome.toInstanceId ? { toInstanceId: outcome.toInstanceId } : {}),
               ...(outcome.toDisplayName ? { toDisplayName: outcome.toDisplayName } : {}),
-              failureKind: input.failure.kind,
-              detail: input.failure.message,
+              failureKind: outcome.useOriginalFailure
+                ? fallbackChain.origin.failure.kind
+                : input.failure.kind,
+              detail: outcome.useOriginalFailure
+                ? fallbackChain.origin.failure.message
+                : input.failure.message,
+              ...(outcome.useOriginalFailure ? { restoredOriginalInstance: true } : {}),
               skipped,
             },
             turnId: thread.session?.activeTurnId ?? null,
@@ -236,8 +254,8 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
         providerInstanceId: candidate.instanceId,
         ...(cwd ? { cwd } : {}),
         modelSelection: candidate.modelSelection,
-        ...(input.requireCompatibleContinuation && originalSession?.resumeCursor !== undefined
-          ? { resumeCursor: originalSession.resumeCursor }
+        ...(input.requireCompatibleContinuation && activeSession?.resumeCursor !== undefined
+          ? { resumeCursor: activeSession.resumeCursor }
           : {}),
         runtimeMode: input.runtimeMode,
       });
@@ -297,7 +315,10 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
     return { switched: true, skipped } satisfies ProviderFallbackAttemptResult;
   }
 
-  if (bindingChanged) {
+  const originalSession = fallbackChain.origin.session;
+  const shouldRestoreOriginalInstance =
+    bindingChanged || fallbackChain.origin.instanceId !== input.failedInstanceId;
+  if (shouldRestoreOriginalInstance) {
     if (originalSession) {
       const originalInstanceId = originalSession.providerInstanceId;
       if (originalInstanceId === undefined) {
@@ -308,11 +329,7 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
         });
         yield* stopFallbackSessionAndProject();
       } else {
-        const originalModelSelection: ModelSelection = {
-          ...thread.modelSelection,
-          instanceId: originalInstanceId,
-          ...(originalSession.model !== undefined ? { model: originalSession.model } : {}),
-        };
+        const originalModelSelection: ModelSelection = fallbackChain.origin.modelSelection;
         const restored = yield* providerService
           .startSession(input.threadId, {
             threadId: input.threadId,
@@ -327,6 +344,12 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
           })
           .pipe(Effect.result);
         if (restored._tag === "Success") {
+          yield* engine.dispatch({
+            type: "thread.meta.update",
+            commandId: yield* nextCommandId("provider-fallback-restore-model"),
+            threadId: input.threadId,
+            modelSelection: originalModelSelection,
+          });
           yield* engine.dispatch({
             type: "thread.session.set",
             commandId: yield* nextCommandId("provider-fallback-restore"),
@@ -343,6 +366,14 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
             },
             createdAt: input.createdAt,
           });
+          const attemptedOriginSkip = skipped.findIndex(
+            (entry) =>
+              entry.instanceId === originalInstanceId &&
+              entry.reason ===
+                "This instance was already attempted during the current fallback chain.",
+          );
+          if (attemptedOriginSkip >= 0) skipped.splice(attemptedOriginSkip, 1);
+          restoredOriginalInstance = true;
         } else {
           skipped.push({
             instanceId: originalInstanceId,
@@ -361,9 +392,14 @@ const attemptProviderFallbackUnlocked = Effect.fn("attemptProviderFallbackUnlock
     kind: "provider.fallback.failed",
     summary: "Automatic provider fallback failed",
     tone: "error",
+    useOriginalFailure: restoredOriginalInstance,
   });
   completeProviderFallbackChain(input.threadId);
-  return { switched: false, skipped } satisfies ProviderFallbackAttemptResult;
+  return {
+    switched: false,
+    restoredOriginalInstance,
+    skipped,
+  } satisfies ProviderFallbackAttemptResult;
 });
 
 export const attemptProviderFallback = Effect.fn("attemptProviderFallback")(function* (

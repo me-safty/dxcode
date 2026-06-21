@@ -1714,6 +1714,7 @@ function ChatViewContent(props: ChatViewProps) {
         typeof payload.fromDisplayName === "string" ? payload.fromDisplayName : "current instance";
       const to = typeof payload.toDisplayName === "string" ? payload.toDisplayName : null;
       const detail = typeof payload.detail === "string" ? payload.detail : undefined;
+      const restoredOriginalInstance = payload.restoredOriginalInstance === true;
       const skipped = Array.isArray(payload.skipped)
         ? payload.skipped.filter(
             (entry): entry is { instanceId: string; displayName: string; reason: string } =>
@@ -1755,7 +1756,9 @@ function ChatViewContent(props: ChatViewProps) {
           title:
             activity.kind === "provider.fallback.succeeded" && to
               ? `Switched from ${from} to ${to}`
-              : `Could not switch from ${from}`,
+              : restoredOriginalInstance
+                ? "No fallback instance succeeded"
+                : `Could not switch from ${from}`,
           ...(description ? { description } : {}),
           data: {
             threadRef: activeThreadRef,
