@@ -383,7 +383,10 @@ async function submitServerAuthCredentialOnce(trimmedCredential: string): Promis
     await exchangeBootstrapCredential(trimmedCredential);
     await waitForAuthenticatedSessionAfterBootstrap();
   } catch (error) {
-    if (isBootstrapHttpError(error) && error.status === 401) {
+    if (
+      (isPrimaryEnvironmentRequestError(error) && error.status === 401) ||
+      isPrimaryEnvironmentPairingCredentialRejectedError(error)
+    ) {
       const currentSession = await fetchSessionState().catch(() => null);
       if (currentSession?.authenticated) {
         resolvedAuthenticatedGateState = { status: "authenticated" };

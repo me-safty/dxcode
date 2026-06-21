@@ -31,7 +31,7 @@ const makeDesktopClerkLayer = (isDevelopment = true) => {
     isDevelopment,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
-  return DesktopClerk.layer.pipe(
+  return DesktopClerk.makeDesktopClerkLayer(true).pipe(
     Layer.provide(Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment)),
   );
 };

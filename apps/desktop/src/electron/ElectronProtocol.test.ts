@@ -122,18 +122,13 @@ describe("ElectronProtocol", () => {
         handler = nextHandler;
       });
       const chunk = new TextEncoder().encode("streamed");
-      const httpClientLayer = makeHttpClientLayer((request) =>
-        Effect.succeed(
-          HttpClientResponse.fromWeb(
-            request,
-            new Response(
-              new ReadableStream<Uint8Array>({
-                start(controller) {
-                  controller.enqueue(chunk);
-                },
-              }),
-            ),
-          ),
+      netFetchMock.mockResolvedValue(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(chunk);
+            },
+          }),
         ),
       );
 
@@ -154,7 +149,7 @@ describe("ElectronProtocol", () => {
             ),
           );
         }),
-      ).pipe(Effect.provide(ElectronProtocol.layer.pipe(Layer.provide(httpClientLayer))));
+      ).pipe(Effect.provide(ElectronProtocol.layer));
 
       const reader = response.body?.getReader();
       assert.isDefined(reader);
