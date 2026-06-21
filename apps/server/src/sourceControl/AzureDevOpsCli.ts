@@ -94,7 +94,9 @@ export class AzureDevOpsCommandFailedError extends Schema.TaggedErrorClass<Azure
     if (
       cause._tag === "VcsProcessSpawnError" &&
       cause.cause instanceof PlatformError.PlatformError &&
-      cause.cause.reason._tag === "NotFound"
+      cause.cause.reason._tag === "NotFound" &&
+      cause.cause.reason.pathOrDescriptor !== context.cwd &&
+      cause.cause.reason.syscall !== "chdir"
     ) {
       return new AzureDevOpsCliUnavailableError(fields);
     }

@@ -4,8 +4,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { VcsProcessExitError } from "@t3tools/contracts";
+import { VcsProcessExitError, VcsProcessSpawnError } from "@t3tools/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
@@ -353,6 +354,34 @@ describe("AzureDevOpsCli.layer", () => {
       assert.strictEqual(error.detail, "Azure DevOps CLI command failed.");
       assert.strictEqual(error.cause, cause);
       assert.equal(error.message.includes("sensitive-upstream-detail"), false);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("does not report a missing working directory as a missing Azure CLI", () =>
+    Effect.gen(function* () {
+      const cwd = "/missing/repo";
+      const platformCause = PlatformError.systemError({
+        _tag: "NotFound",
+        module: "ChildProcess",
+        method: "spawn",
+        syscall: "chdir",
+        pathOrDescriptor: cwd,
+      });
+      const cause = new VcsProcessSpawnError({
+        operation: "AzureDevOpsCli.execute",
+        command: "az",
+        cwd,
+        argumentCount: 2,
+        cause: platformCause,
+      });
+      mockRun.mockReturnValueOnce(Effect.fail(cause));
+
+      const az = yield* AzureDevOpsCli.AzureDevOpsCli;
+      const error = yield* az.execute({ cwd, args: ["repos", "list"] }).pipe(Effect.flip);
+
+      assert.instanceOf(error, AzureDevOpsCli.AzureDevOpsCommandFailedError);
+      assert.strictEqual(error.cwd, cwd);
+      assert.strictEqual(error.cause, cause);
     }).pipe(Effect.provide(layer)),
   );
 
