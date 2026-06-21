@@ -158,23 +158,18 @@ export const make = Effect.gen(function* () {
                       })),
                     )
                   : Effect.fail(
-                      new SourceControlProviderError({
-                        provider: "github",
+                      new GitHubCli.GitHubChangeRequestListDecodeError({
                         operation: "listChangeRequests",
                         command: "gh",
                         cwd: input.cwd,
-                        reference: SourceControlProvider.transportSafeSourceControlErrorValue(
-                          input.headSelector,
-                        ),
-                        detail: "GitHub CLI returned invalid change request JSON.",
                         cause: decoded.failure,
                       }),
                     ),
               ),
             );
           }),
-          Effect.catchTags({
-            GitHubCliError: (error) =>
+          Effect.mapError(
+            (error) =>
               new SourceControlProviderError({
                 provider: "github",
                 operation: "listChangeRequests",
@@ -186,7 +181,7 @@ export const make = Effect.gen(function* () {
                 detail: error.detail,
                 cause: error,
               }),
-          }),
+          ),
         );
     };
 

@@ -18,67 +18,171 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export class GitHubCliError extends Schema.TaggedErrorClass<GitHubCliError>()("GitHubCliError", {
-  operation: Schema.String,
-  command: Schema.String,
+const gitHubCliFailureFields = {
+  operation: Schema.Literal("execute"),
+  command: Schema.Literal("gh"),
   cwd: Schema.String,
-  detail: Schema.String,
-  cause: Schema.optional(Schema.Defect()),
-}) {
+  cause: Schema.Defect(),
+} as const;
+
+export class GitHubCliUnavailableError extends Schema.TaggedErrorClass<GitHubCliUnavailableError>()(
+  "GitHubCliUnavailableError",
+  gitHubCliFailureFields,
+) {
+  get detail(): string {
+    return "GitHub CLI (`gh`) is required but not available on PATH.";
+  }
+
   override get message(): string {
     return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
   }
+}
 
-  static fromVcsError(
-    context: {
-      readonly operation: "execute";
-      readonly command: "gh";
-      readonly cwd: string;
-    },
-    error: VcsError | unknown,
-  ): GitHubCliError {
-    const lower = errorText(error).toLowerCase();
-
-    if (lower.includes("command not found: gh") || lower.includes("enoent")) {
-      return new GitHubCliError({
-        ...context,
-        detail: "GitHub CLI (`gh`) is required but not available on PATH.",
-        cause: error,
-      });
-    }
-
-    if (
-      lower.includes("authentication failed") ||
-      lower.includes("not logged in") ||
-      lower.includes("gh auth login") ||
-      lower.includes("no oauth token")
-    ) {
-      return new GitHubCliError({
-        ...context,
-        detail: "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
-        cause: error,
-      });
-    }
-
-    if (
-      lower.includes("could not resolve to a pullrequest") ||
-      lower.includes("repository.pullrequest") ||
-      lower.includes("no pull requests found for branch") ||
-      lower.includes("pull request not found")
-    ) {
-      return new GitHubCliError({
-        ...context,
-        detail: "Pull request not found. Check the PR number or URL and try again.",
-        cause: error,
-      });
-    }
-
-    return new GitHubCliError({
-      ...context,
-      detail: "GitHub CLI command failed.",
-      cause: error,
-    });
+export class GitHubCliAuthenticationError extends Schema.TaggedErrorClass<GitHubCliAuthenticationError>()(
+  "GitHubCliAuthenticationError",
+  gitHubCliFailureFields,
+) {
+  get detail(): string {
+    return "GitHub CLI is not authenticated. Run `gh auth login` and retry.";
   }
+
+  override get message(): string {
+    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export class GitHubPullRequestNotFoundError extends Schema.TaggedErrorClass<GitHubPullRequestNotFoundError>()(
+  "GitHubPullRequestNotFoundError",
+  gitHubCliFailureFields,
+) {
+  get detail(): string {
+    return "Pull request not found. Check the PR number or URL and try again.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export class GitHubCliCommandError extends Schema.TaggedErrorClass<GitHubCliCommandError>()(
+  "GitHubCliCommandError",
+  gitHubCliFailureFields,
+) {
+  get detail(): string {
+    return "GitHub CLI command failed.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+const gitHubCliDecodeFields = {
+  command: Schema.Literal("gh"),
+  cwd: Schema.String,
+  cause: Schema.Defect(),
+} as const;
+
+export class GitHubPullRequestListDecodeError extends Schema.TaggedErrorClass<GitHubPullRequestListDecodeError>()(
+  "GitHubPullRequestListDecodeError",
+  {
+    ...gitHubCliDecodeFields,
+    operation: Schema.Literal("listOpenPullRequests"),
+  },
+) {
+  get detail(): string {
+    return "GitHub CLI returned invalid PR list JSON.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export class GitHubChangeRequestListDecodeError extends Schema.TaggedErrorClass<GitHubChangeRequestListDecodeError>()(
+  "GitHubChangeRequestListDecodeError",
+  {
+    ...gitHubCliDecodeFields,
+    operation: Schema.Literal("listChangeRequests"),
+  },
+) {
+  get detail(): string {
+    return "GitHub CLI returned invalid change request JSON.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export class GitHubPullRequestDecodeError extends Schema.TaggedErrorClass<GitHubPullRequestDecodeError>()(
+  "GitHubPullRequestDecodeError",
+  {
+    ...gitHubCliDecodeFields,
+    operation: Schema.Literal("getPullRequest"),
+  },
+) {
+  get detail(): string {
+    return "GitHub CLI returned invalid pull request JSON.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export class GitHubRepositoryDecodeError extends Schema.TaggedErrorClass<GitHubRepositoryDecodeError>()(
+  "GitHubRepositoryDecodeError",
+  {
+    ...gitHubCliDecodeFields,
+    operation: Schema.Literal("getRepositoryCloneUrls"),
+  },
+) {
+  get detail(): string {
+    return "GitHub CLI returned invalid repository JSON.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export const GitHubCliError = Schema.Union([
+  GitHubCliUnavailableError,
+  GitHubCliAuthenticationError,
+  GitHubPullRequestNotFoundError,
+  GitHubCliCommandError,
+  GitHubPullRequestListDecodeError,
+  GitHubChangeRequestListDecodeError,
+  GitHubPullRequestDecodeError,
+  GitHubRepositoryDecodeError,
+]);
+export type GitHubCliError = typeof GitHubCliError.Type;
+
+export const isGitHubCliError = Schema.is(GitHubCliError);
+
+export function fromVcsError(
+  context: {
+    readonly operation: "execute";
+    readonly command: "gh";
+    readonly cwd: string;
+  },
+  error: VcsError,
+): GitHubCliError {
+  if (error._tag === "VcsProcessSpawnError") {
+    return new GitHubCliUnavailableError({ ...context, cause: error });
+  }
+
+  if (error._tag === "VcsProcessExitError") {
+    if (error.failureKind === "authentication") {
+      return new GitHubCliAuthenticationError({ ...context, cause: error });
+    }
+    if (error.failureKind === "not-found") {
+      return new GitHubPullRequestNotFoundError({ ...context, cause: error });
+    }
+  }
+
+  return new GitHubCliCommandError({ ...context, cause: error });
 }
 
 export interface GitHubPullRequestSummary {
@@ -150,22 +254,14 @@ export class GitHubCli extends Context.Service<
   }
 >()("t3/sourceControl/GitHubCli") {}
 
-function errorText(error: VcsError | unknown): string {
-  if (typeof error === "object" && error !== null) {
-    const tag = "_tag" in error && typeof error._tag === "string" ? error._tag : "";
-    const detail = "detail" in error && typeof error.detail === "string" ? error.detail : "";
-    const message = "message" in error && typeof error.message === "string" ? error.message : "";
-    return [tag, detail, message].filter(Boolean).join("\n");
-  }
-
-  return String(error);
-}
-
 const RawGitHubRepositoryCloneUrlsSchema = Schema.Struct({
   nameWithOwner: TrimmedNonEmptyString,
   url: TrimmedNonEmptyString,
   sshUrl: TrimmedNonEmptyString,
 });
+const decodeRawGitHubRepositoryCloneUrls = Schema.decodeEffect(
+  Schema.fromJsonString(RawGitHubRepositoryCloneUrlsSchema),
+);
 
 function normalizeRepositoryCloneUrls(
   raw: Schema.Schema.Type<typeof RawGitHubRepositoryCloneUrlsSchema>,
@@ -214,27 +310,6 @@ function deriveRepositoryCloneUrlsFromCreateOutput(
   };
 }
 
-function decodeGitHubJson<S extends Schema.Top>(
-  raw: string,
-  schema: S,
-  operation: "listOpenPullRequests" | "getPullRequest" | "getRepositoryCloneUrls",
-  invalidDetail: string,
-  cwd: string,
-): Effect.Effect<S["Type"], GitHubCliError, S["DecodingServices"]> {
-  return Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
-    Effect.mapError(
-      (error) =>
-        new GitHubCliError({
-          operation,
-          command: "gh",
-          cwd,
-          detail: invalidDetail,
-          cause: error,
-        }),
-    ),
-  );
-}
-
 export const make = Effect.gen(function* () {
   const process = yield* VcsProcess.VcsProcess;
 
@@ -249,10 +324,7 @@ export const make = Effect.gen(function* () {
       })
       .pipe(
         Effect.mapError((error) =>
-          GitHubCliError.fromVcsError(
-            { operation: "execute", command: "gh", cwd: input.cwd },
-            error,
-          ),
+          fromVcsError({ operation: "execute", command: "gh", cwd: input.cwd }, error),
         ),
       );
 
@@ -282,11 +354,10 @@ export const make = Effect.gen(function* () {
                 Effect.flatMap((decoded) => {
                   if (!Result.isSuccess(decoded)) {
                     return Effect.fail(
-                      new GitHubCliError({
+                      new GitHubPullRequestListDecodeError({
                         operation: "listOpenPullRequests",
                         command: "gh",
                         cwd: input.cwd,
-                        detail: "GitHub CLI returned invalid PR list JSON.",
                         cause: decoded.failure,
                       }),
                     );
@@ -316,11 +387,10 @@ export const make = Effect.gen(function* () {
             Effect.flatMap((decoded) => {
               if (!Result.isSuccess(decoded)) {
                 return Effect.fail(
-                  new GitHubCliError({
+                  new GitHubPullRequestDecodeError({
                     operation: "getPullRequest",
                     command: "gh",
                     cwd: input.cwd,
-                    detail: "GitHub CLI returned invalid pull request JSON.",
                     cause: decoded.failure,
                   }),
                 );
@@ -340,12 +410,16 @@ export const make = Effect.gen(function* () {
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
-          decodeGitHubJson(
-            raw,
-            RawGitHubRepositoryCloneUrlsSchema,
-            "getRepositoryCloneUrls",
-            "GitHub CLI returned invalid repository JSON.",
-            input.cwd,
+          decodeRawGitHubRepositoryCloneUrls(raw).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GitHubRepositoryDecodeError({
+                  operation: "getRepositoryCloneUrls",
+                  command: "gh",
+                  cwd: input.cwd,
+                  cause,
+                }),
+            ),
           ),
         ),
         Effect.map(normalizeRepositoryCloneUrls),

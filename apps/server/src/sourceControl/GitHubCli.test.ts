@@ -274,6 +274,7 @@ describe("GitHubCli.layer", () => {
         command: "gh pr view",
         cwd: "/repo",
         exitCode: 1,
+        failureKind: "not-found",
         detail:
           "GraphQL: Could not resolve to a PullRequest with the number of 4888. (repository.pullRequest)",
       });
@@ -288,6 +289,7 @@ describe("GitHubCli.layer", () => {
         .pipe(Effect.flip);
 
       assert.equal(error.message.includes("Pull request not found"), true);
+      assert.strictEqual(error._tag, "GitHubPullRequestNotFoundError");
       assert.strictEqual(error.command, "gh");
       assert.strictEqual(error.cwd, "/repo");
       assert.strictEqual(error.cause, cause);
