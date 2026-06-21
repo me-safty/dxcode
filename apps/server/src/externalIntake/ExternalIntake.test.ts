@@ -87,6 +87,26 @@ describe("modelSelectionFromIntakeTags", () => {
   });
 
   it.each([
+    ["glm", "openrouter/z-ai/glm-5.2"],
+    ["kimi", "openrouter/moonshotai/kimi-k2.7-code"],
+  ])("routes [%s] to OpenCode with the requested OpenRouter model", (tag, model) => {
+    expect(modelSelectionFromIntakeTags(`[${tag}] fix the build`)).toEqual({
+      instanceId: "opencode",
+      model,
+    });
+  });
+
+  it.each([
+    ["glm", "openrouter/z-ai/glm-5.2"],
+    ["kimi", "openrouter/moonshotai/kimi-k2.7-code"],
+  ])("routes a leading %s: prefix to OpenCode with the requested model", (tag, model) => {
+    expect(modelSelectionFromIntakeTags(`${tag}: fix the build`)).toEqual({
+      instanceId: "opencode",
+      model,
+    });
+  });
+
+  it.each([
     ["claude", "claude-opus-4-8", "xhigh"],
     ["claude-opus", "claude-opus-4-8", "xhigh"],
     ["claude-opus-high", "claude-opus-4-8", "high"],

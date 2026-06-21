@@ -156,11 +156,20 @@ function codexModelSelection(input: {
   };
 }
 
+function openCodeModelSelection(input: { readonly model: string }): ModelSelection {
+  return {
+    instanceId: ProviderInstanceId.make("opencode"),
+    model: input.model,
+  };
+}
+
 const INTAKE_MODEL_SELECTION_BY_TAG = {
   "codex-fast": codexModelSelection({ reasoningEffort: "medium", serviceTier: "priority" }),
   codex: codexModelSelection({ reasoningEffort: "medium", serviceTier: "default" }),
   "codex-high-fast": codexModelSelection({ reasoningEffort: "high", serviceTier: "priority" }),
   "codex-high": codexModelSelection({ reasoningEffort: "high", serviceTier: "default" }),
+  glm: openCodeModelSelection({ model: "openrouter/z-ai/glm-5.2" }),
+  kimi: openCodeModelSelection({ model: "openrouter/moonshotai/kimi-k2.7-code" }),
   claude: claudeModelSelection({ model: "claude-opus-4-8", effort: "xhigh" }),
   "claude-opus": claudeModelSelection({ model: "claude-opus-4-8", effort: "xhigh" }),
   "claude-opus-high": claudeModelSelection({ model: "claude-opus-4-8", effort: "high" }),
@@ -212,6 +221,8 @@ const DEFAULT_MODEL_SELECTION = {
  *   - `codex:` / `[codex]`                     → GPT-5.5, medium reasoning, standard service tier
  *   - `codex-high-fast:` / `[codex-high-fast]` → GPT-5.5, high reasoning, fast service tier
  *   - `codex-high:` / `[codex-high]`           → GPT-5.5, high reasoning, standard service tier
+ *   - `glm:` / `[glm]`                         → OpenCode via OpenRouter GLM 5.2
+ *   - `kimi:` / `[kimi]`                       → OpenCode via OpenRouter Kimi K2.7 Code
  *   - `claude:` / `[claude]`                   → Claude Opus 4.8, xhigh effort
  *   - `claude-opus-high:`                      → Claude Opus 4.8, high effort
  *   - `claude-opus-ultracode:`                 → Claude Opus 4.8, ultracode effort
