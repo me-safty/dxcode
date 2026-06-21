@@ -1,12 +1,17 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -23,6 +28,10 @@ import {
   mergeToolCallState,
   parseSessionModeState,
   parseSessionUpdateEvent,
+  sessionUpdateIsReplay,
+  syntheticLoadSessionResponseFromInitialize,
+  waitForSessionLoadReplayIdle,
+  type SessionLoadGate,
   type AcpParsedSessionEvent,
   type AcpSessionModeState,
   type AcpToolCallState,
@@ -31,6 +40,26 @@ import {
 function formatConfigOptionValue(value: string | boolean): string {
   return JSON.stringify(value);
 }
+
+const XAiPromptCompleteNotification = Schema.Struct({
+  sessionId: Schema.String,
+  promptId: Schema.optional(Schema.String),
+  stopReason: Schema.optional(Schema.String),
+  agentResult: Schema.optional(Schema.NullOr(Schema.Unknown)),
+});
+
+type XAiPromptCompleteNotification = typeof XAiPromptCompleteNotification.Type;
+
+interface PendingXAiPromptCompletion {
+  readonly sessionId: string;
+  readonly promptId: string;
+  readonly deferred: Deferred.Deferred<EffectAcpSchema.PromptResponse>;
+}
+
+const completedXAiPromptIdLimit = 128;
+const defaultSessionLoadTimeout = Duration.seconds(90);
+const defaultSessionLoadReplayIdleGap = Duration.seconds(2);
+const xAiStopReasonMissingMetaKey = "xAiStopReasonMissing";
 
 export interface AcpSpawnInput {
   readonly command: string;
@@ -43,6 +72,8 @@ export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
   readonly cwd: string;
   readonly resumeSessionId?: string;
+  readonly sessionLoadTimeout?: Duration.Input;
+  readonly sessionLoadReplayIdleGap?: Duration.Input;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
   readonly clientInfo: {
     readonly name: string;
@@ -260,6 +291,20 @@ export const make = (
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
     const configOptionsRef = yield* Ref.make(sessionConfigOptionsFromSetup(undefined));
     const startStateRef = yield* Ref.make<AcpStartState>({ _tag: "NotStarted" });
+    const promptSerializationSemaphore = yield* Semaphore.make(1);
+    const activePromptFiberRef = yield* Ref.make<
+      Option.Option<Fiber.Fiber<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>>
+    >(Option.none());
+    const pendingXAiPromptCompletionsRef = yield* Ref.make<
+      ReadonlyArray<PendingXAiPromptCompletion>
+    >([]);
+    const completedXAiPromptIdsRef = yield* Ref.make<ReadonlyArray<string>>([]);
+    const sessionLoadGateRef = yield* Ref.make<Option.Option<SessionLoadGate>>(Option.none());
+    let nextXAiPromptFallbackId = 0;
+    const allocateXAiPromptFallbackId = Effect.sync(() => {
+      nextXAiPromptFallbackId += 1;
+      return `t3-xai-prompt-${nextXAiPromptFallbackId}`;
+    });
 
     const logRequest = (event: AcpSessionRequestLogEvent) =>
       options.requestLogger ? options.requestLogger(event) : Effect.void;
@@ -331,13 +376,40 @@ export const make = (
     const acp = yield* Effect.service(EffectAcpClient.AcpClient).pipe(Effect.provide(acpContext));
 
     yield* acp.handleSessionUpdate((notification) =>
-      handleSessionUpdate({
-        queue: eventQueue,
-        modeStateRef,
-        toolCallsRef,
-        assistantSegmentRef,
-        params: notification,
+      Effect.gen(function* () {
+        const gate = yield* Ref.get(sessionLoadGateRef);
+        if (Option.isSome(gate) && gate.value.active) {
+          const lastActivityAtMillis = yield* Clock.currentTimeMillis;
+          yield* Ref.set(
+            sessionLoadGateRef,
+            Option.some({
+              ...gate.value,
+              lastActivityAtMillis,
+            }),
+          );
+          return;
+        }
+        if (sessionUpdateIsReplay(notification)) {
+          return;
+        }
+        yield* handleSessionUpdate({
+          queue: eventQueue,
+          modeStateRef,
+          toolCallsRef,
+          assistantSegmentRef,
+          params: notification,
+        });
       }),
+    );
+    yield* acp.handleExtNotification(
+      "_x.ai/session/prompt_complete",
+      XAiPromptCompleteNotification,
+      (notification) =>
+        resolveXAiPromptCompletionFallback({
+          pendingRef: pendingXAiPromptCompletionsRef,
+          completedPromptIdsRef: completedXAiPromptIdsRef,
+          notification,
+        }).pipe(Effect.catch(() => Effect.void)),
     );
 
     const initializeClientCapabilities = {
@@ -499,27 +571,74 @@ export const make = (
           cwd: options.cwd,
           mcpServers: options.mcpServers ?? [],
         } satisfies EffectAcpSchema.LoadSessionRequest;
-        const resumed = yield* runLoggedRequest(
-          "session/load",
-          loadPayload,
-          acp.agent.loadSession(loadPayload),
-        ).pipe(Effect.exit);
-        if (Exit.isSuccess(resumed)) {
-          sessionId = options.resumeSessionId;
-          sessionSetupResult = resumed.value;
-        } else {
-          const createPayload = {
-            cwd: options.cwd,
-            mcpServers: options.mcpServers ?? [],
-          } satisfies EffectAcpSchema.NewSessionRequest;
-          const created = yield* runLoggedRequest(
-            "session/new",
-            createPayload,
-            acp.agent.createSession(createPayload),
+        const sessionLoadTimeout = Duration.fromInputUnsafe(
+          options.sessionLoadTimeout ?? defaultSessionLoadTimeout,
+        );
+        const sessionLoadReplayIdleGap = Duration.fromInputUnsafe(
+          options.sessionLoadReplayIdleGap ?? defaultSessionLoadReplayIdleGap,
+        );
+
+        yield* Ref.set(
+          sessionLoadGateRef,
+          Option.some({
+            active: true,
+            lastActivityAtMillis: undefined,
+            idleGap: sessionLoadReplayIdleGap,
+            initializeResult,
+          }),
+        );
+
+        sessionId = options.resumeSessionId;
+        sessionSetupResult = yield* Effect.gen(function* () {
+          yield* logRequest({
+            method: "session/load",
+            payload: loadPayload,
+            status: "started",
+          });
+
+          const idleFiber = yield* waitForSessionLoadReplayIdle({
+            gateRef: sessionLoadGateRef,
+          }).pipe(Effect.forkIn(runtimeScope));
+          const loaded = yield* Effect.raceFirst(
+            acp.agent.loadSession(loadPayload),
+            Fiber.join(idleFiber),
+          ).pipe(
+            Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
+            Effect.timeoutOption(sessionLoadTimeout),
+            Effect.flatMap((result) =>
+              Option.match(result, {
+                onNone: () =>
+                  Effect.fail(
+                    new EffectAcpErrors.AcpTransportError({
+                      operation: "call-rpc",
+                      method: "session/load",
+                      detail: "session/load timed out waiting for RPC response or replay idle gap",
+                      cause: undefined,
+                    }),
+                  ),
+                onSome: Effect.succeed,
+              }),
+            ),
+            Effect.tap((result) =>
+              logRequest({
+                method: "session/load",
+                payload: loadPayload,
+                status: "succeeded",
+                result,
+              }),
+            ),
+            Effect.onError((cause) =>
+              logRequest({
+                method: "session/load",
+                payload: loadPayload,
+                status: "failed",
+                cause,
+              }),
+            ),
           );
-          sessionId = created.sessionId;
-          sessionSetupResult = created;
-        }
+
+          return loaded;
+        }).pipe(Effect.ensuring(Ref.set(sessionLoadGateRef, Option.none())));
       } else {
         const createPayload = {
           cwd: options.cwd,
@@ -599,22 +718,65 @@ export const make = (
       getModeState: Ref.get(modeStateRef),
       getConfigOptions: Ref.get(configOptionsRef),
       prompt: (payload) =>
-        getStartedState.pipe(
-          Effect.flatMap((started) => {
+        promptSerializationSemaphore.withPermit(
+          Effect.gen(function* () {
+            const started = yield* getStartedState;
+            const promptId = yield* allocateXAiPromptFallbackId;
+            yield* closeActiveAssistantSegment({
+              queue: eventQueue,
+              assistantSegmentRef,
+            });
+            const fallback = yield* registerXAiPromptCompletionFallback(
+              pendingXAiPromptCompletionsRef,
+              started.sessionId,
+              promptId,
+            );
             const requestPayload = {
               sessionId: started.sessionId,
               ...payload,
+              _meta: {
+                ...payload._meta,
+                promptId: fallback.promptId,
+                requestId: fallback.promptId,
+              },
             } satisfies EffectAcpSchema.PromptRequest;
-            return closeActiveAssistantSegment({
-              queue: eventQueue,
-              assistantSegmentRef,
-            }).pipe(
-              Effect.andThen(
-                runLoggedRequest(
-                  "session/prompt",
-                  requestPayload,
-                  acp.agent.prompt(requestPayload),
+            const cancelledResponse = promptResponseFromXAi({
+              sessionId: started.sessionId,
+              promptId: fallback.promptId,
+              stopReason: "cancelled",
+              agentResult: null,
+            });
+            // Grok can emit its private prompt-complete notification even when the
+            // standard session/prompt RPC never settles. Race the RPC with that
+            // notification so callers still emit turn completion and clear UI state.
+            const promptRpcFiber = yield* runLoggedRequest(
+              "session/prompt",
+              requestPayload,
+              acp.agent.prompt(requestPayload),
+            ).pipe(Effect.forkIn(runtimeScope));
+            yield* Ref.set(activePromptFiberRef, Option.some(promptRpcFiber));
+            return yield* Effect.raceFirst(
+              Fiber.join(promptRpcFiber).pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.succeed(cancelledResponse)
+                    : Effect.failCause(cause),
                 ),
+              ),
+              Deferred.await(fallback.deferred),
+            ).pipe(
+              Effect.tap((response) =>
+                rememberCompletedXAiPromptId(completedXAiPromptIdsRef, response, fallback.promptId),
+              ),
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  yield* Fiber.interrupt(promptRpcFiber).pipe(Effect.ignore);
+                  yield* unregisterXAiPromptCompletionFallback(
+                    pendingXAiPromptCompletionsRef,
+                    fallback.deferred,
+                  );
+                  yield* Ref.set(activePromptFiberRef, Option.none());
+                }),
               ),
               Effect.tap(() =>
                 closeActiveAssistantSegment({
@@ -626,7 +788,18 @@ export const make = (
           }),
         ),
       cancel: getStartedState.pipe(
-        Effect.flatMap((started) => acp.agent.cancel({ sessionId: started.sessionId })),
+        Effect.flatMap((started) =>
+          Effect.gen(function* () {
+            const activePromptFiber = yield* Ref.get(activePromptFiberRef);
+            if (Option.isSome(activePromptFiber)) {
+              yield* Fiber.interrupt(activePromptFiber.value).pipe(Effect.ignore);
+            }
+            yield* abortPendingPromptCompletions(pendingXAiPromptCompletionsRef, started.sessionId);
+            yield* acp.agent
+              .cancel({ sessionId: started.sessionId })
+              .pipe(Effect.ignore, Effect.forkIn(runtimeScope));
+          }),
+        ),
       ),
       setMode: (modeId) =>
         Ref.get(modeStateRef).pipe(
@@ -855,3 +1028,174 @@ const closeActiveAssistantSegment = ({
       } satisfies AcpAssistantSegmentState,
     ] as const;
   }).pipe(Effect.flatMap((event) => (event ? Queue.offer(queue, event) : Effect.void)));
+
+const registerXAiPromptCompletionFallback = (
+  pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>,
+  sessionId: string,
+  promptId: string,
+) =>
+  Deferred.make<EffectAcpSchema.PromptResponse>().pipe(
+    Effect.tap((deferred) =>
+      Ref.update(pendingRef, (pending) => [...pending, { sessionId, promptId, deferred }]),
+    ),
+    Effect.map((deferred) => ({ deferred, promptId })),
+  );
+
+const unregisterXAiPromptCompletionFallback = (
+  pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>,
+  deferred: Deferred.Deferred<EffectAcpSchema.PromptResponse>,
+) => Ref.update(pendingRef, (pending) => pending.filter((entry) => entry.deferred !== deferred));
+
+const abortPendingPromptCompletions = (
+  pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>,
+  sessionId: string,
+) =>
+  Ref.modify(pendingRef, (pending) => {
+    const [toAbort, remaining] = pending.reduce<
+      [ReadonlyArray<PendingXAiPromptCompletion>, ReadonlyArray<PendingXAiPromptCompletion>]
+    >(
+      ([aborting, kept], entry) =>
+        entry.sessionId === sessionId ? [[...aborting, entry], kept] : [aborting, [...kept, entry]],
+      [[], []],
+    );
+    if (toAbort.length === 0) {
+      return [Effect.void, pending] as const;
+    }
+    return [
+      Effect.forEach(
+        toAbort,
+        (entry) =>
+          Deferred.succeed(
+            entry.deferred,
+            promptResponseFromXAi({
+              sessionId: entry.sessionId,
+              promptId: entry.promptId,
+              stopReason: "cancelled",
+              agentResult: null,
+            }),
+          ),
+        { concurrency: "unbounded" },
+      ).pipe(Effect.asVoid),
+      remaining,
+    ] as const;
+  }).pipe(Effect.flatten);
+
+const resolveXAiPromptCompletionFallback = ({
+  pendingRef,
+  completedPromptIdsRef,
+  notification,
+}: {
+  readonly pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>;
+  readonly completedPromptIdsRef: Ref.Ref<ReadonlyArray<string>>;
+  readonly notification: XAiPromptCompleteNotification;
+}) =>
+  Ref.get(completedPromptIdsRef).pipe(
+    Effect.flatMap((completedPromptIds) => {
+      if (
+        notification.promptId !== undefined &&
+        completedPromptIds.includes(notification.promptId)
+      ) {
+        return Effect.void;
+      }
+      return Ref.modify(pendingRef, (pending) => {
+        const index =
+          notification.promptId !== undefined
+            ? pending.findIndex(
+                (entry) =>
+                  entry.sessionId === notification.sessionId &&
+                  entry.promptId === notification.promptId,
+              )
+            : (() => {
+                const sessionPendingIndexes = pending.flatMap((entry, entryIndex) =>
+                  entry.sessionId === notification.sessionId ? [entryIndex] : [],
+                );
+                if (sessionPendingIndexes.length === 0) {
+                  return -1;
+                }
+                // xAI may omit promptId while multiple steered prompts are in flight.
+                // Resolve the oldest pending fallback FIFO for this session.
+                return sessionPendingIndexes[0] ?? -1;
+              })();
+        if (index < 0) {
+          return [Effect.void, pending] as const;
+        }
+        const entry = pending[index];
+        if (!entry) {
+          return [Effect.void, pending] as const;
+        }
+        return [
+          Deferred.succeed(entry.deferred, promptResponseFromXAi(notification)).pipe(Effect.asVoid),
+          [...pending.slice(0, index), ...pending.slice(index + 1)],
+        ] as const;
+      }).pipe(Effect.flatten);
+    }),
+  );
+
+const rememberCompletedXAiPromptId = (
+  completedPromptIdsRef: Ref.Ref<ReadonlyArray<string>>,
+  response: EffectAcpSchema.PromptResponse,
+  fallbackPromptId: string,
+) => {
+  const promptId = promptIdFromResponse(response) ?? fallbackPromptId;
+  if (promptId.length === 0) {
+    return Effect.void;
+  }
+  return Ref.update(completedPromptIdsRef, (completedPromptIds) => {
+    if (completedPromptIds.includes(promptId)) {
+      return completedPromptIds;
+    }
+    return [...completedPromptIds, promptId].slice(-completedXAiPromptIdLimit);
+  });
+};
+
+function promptIdFromResponse(response: EffectAcpSchema.PromptResponse): string | undefined {
+  const meta = response._meta;
+  if (meta === null || typeof meta !== "object") {
+    return undefined;
+  }
+  const promptId = meta.promptId ?? meta.requestId;
+  return typeof promptId === "string" && promptId.length > 0 ? promptId : undefined;
+}
+
+export function promptResponseHasMissingXAiStopReason(
+  response: EffectAcpSchema.PromptResponse,
+): boolean {
+  const meta = response._meta;
+  return meta !== null && typeof meta === "object" && meta[xAiStopReasonMissingMetaKey] === true;
+}
+
+function promptResponseFromXAi(
+  notification: XAiPromptCompleteNotification,
+): EffectAcpSchema.PromptResponse {
+  const stopReason = normalizeXAiStopReason(notification.stopReason);
+  const meta: Record<string, unknown> = {
+    sessionId: notification.sessionId,
+  };
+  if (notification.stopReason === undefined) {
+    meta[xAiStopReasonMissingMetaKey] = true;
+  }
+  if (notification.promptId !== undefined) {
+    meta.promptId = notification.promptId;
+    meta.requestId = notification.promptId;
+  }
+  if (notification.agentResult !== undefined) {
+    meta.agentResult = notification.agentResult;
+  }
+  return {
+    stopReason,
+    _meta: meta,
+  };
+}
+
+function normalizeXAiStopReason(value: string | undefined): EffectAcpSchema.StopReason {
+  switch (value) {
+    case "cancelled":
+    case "end_turn":
+    case "max_tokens":
+    case "max_turn_requests":
+    case "refusal":
+      return value;
+    default:
+      return "end_turn";
+  }
+}

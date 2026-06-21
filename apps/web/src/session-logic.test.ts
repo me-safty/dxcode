@@ -1493,6 +1493,64 @@ describe("deriveWorkLogEntries", () => {
 });
 
 describe("deriveTimelineEntries", () => {
+  it("orders reused Grok assistant segments by createdAt so they stay below the active user message", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("assistant-segment-0"),
+          role: "assistant",
+          text: "Health-check response.",
+          createdAt: "2026-06-24T01:12:00.260Z",
+          turnId: TurnId.make("turn-health"),
+          updatedAt: "2026-06-24T01:12:00.260Z",
+          streaming: false,
+        },
+        {
+          id: MessageId.make("user-health"),
+          role: "user",
+          text: "does all seem well?",
+          createdAt: "2026-06-24T01:10:45.533Z",
+          turnId: null,
+          updatedAt: "2026-06-24T01:10:45.533Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [],
+    );
+
+    expect(entries.map((entry) => entry.id)).toEqual(["user-health", "assistant-segment-0"]);
+  });
+
+  it("keeps a completed assistant response above the next user message when updatedAt bumps without createdAt changes", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("assistant-yep"),
+          role: "assistant",
+          text: "Yep — that background task dying with exit 143...",
+          createdAt: "2026-06-24T01:00:00.000Z",
+          turnId: TurnId.make("turn-n"),
+          updatedAt: "2026-06-24T01:02:00.000Z",
+          streaming: false,
+        },
+        {
+          id: MessageId.make("user-followup"),
+          role: "user",
+          text: "i see it now. what's the source of truth for those categories?",
+          createdAt: "2026-06-24T01:03:00.000Z",
+          turnId: null,
+          updatedAt: "2026-06-24T01:03:00.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [],
+    );
+
+    expect(entries.map((entry) => entry.id)).toEqual(["assistant-yep", "user-followup"]);
+  });
+
   it("includes proposed plans alongside messages and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [

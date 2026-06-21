@@ -7,6 +7,8 @@ import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Stream from "effect/Stream";
 import { describe, expect } from "vite-plus/test";
 
@@ -102,6 +104,185 @@ describe("AcpSessionRuntime", () => {
           spawn: {
             command: mockAgentCommand,
             args: mockAgentArgs,
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("resolves a prompt from xAI prompt completion when the prompt RPC hangs", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const promptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+
+      const promptId = promptResult._meta?.promptId;
+      expect(typeof promptId).toBe("string");
+      expect(promptResult).toMatchObject({
+        stopReason: "end_turn",
+        _meta: {
+          sessionId: "mock-session-1",
+          promptId,
+          requestId: promptId,
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("serializes prompt calls so only one session/prompt is in flight", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const firstPromptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "first" }],
+      });
+      const secondPromptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "second" }],
+      });
+
+      const firstPromptId = firstPromptResult._meta?.promptId;
+      const secondPromptId = secondPromptResult._meta?.promptId;
+      expect(typeof firstPromptId).toBe("string");
+      expect(typeof secondPromptId).toBe("string");
+      expect(firstPromptId).not.toBe(secondPromptId);
+      expect(firstPromptResult).toMatchObject({
+        stopReason: "end_turn",
+        _meta: {
+          promptId: firstPromptId,
+          requestId: firstPromptId,
+        },
+      });
+      expect(secondPromptResult).toMatchObject({
+        stopReason: "end_turn",
+        _meta: {
+          promptId: secondPromptId,
+          requestId: secondPromptId,
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("releases a fully silent prompt when session/cancel is requested", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const promptFiber = yield* runtime
+        .prompt({
+          prompt: [{ type: "text", text: "hang forever" }],
+        })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* TestClock.adjust("500 millis");
+      yield* runtime.cancel;
+
+      const firstPromptResult = yield* Fiber.join(promptFiber);
+      expect(firstPromptResult).toMatchObject({ stopReason: "cancelled" });
+
+      const secondPromptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "second" }],
+      });
+      expect(secondPromptResult).toMatchObject({ stopReason: "end_turn" });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_HANG_FIRST_PROMPT_FOREVER: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("ignores stale xAI prompt completion for an already completed prompt", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const firstPromptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "first" }],
+      });
+      expect(firstPromptResult).toMatchObject({
+        stopReason: "end_turn",
+        _meta: {
+          promptId: "mock-stale-xai-prompt-1",
+        },
+      });
+
+      const secondPromptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "second" }],
+      });
+      const secondPromptId = secondPromptResult._meta?.promptId;
+      expect(typeof secondPromptId).toBe("string");
+      expect(secondPromptId).not.toBe("mock-stale-xai-prompt-1");
+      expect(secondPromptResult).toMatchObject({
+        stopReason: "end_turn",
+        _meta: {
+          promptId: secondPromptId,
+          requestId: secondPromptId,
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_EMIT_STALE_XAI_PROMPT_COMPLETE_BEFORE_SECOND_HANG: "1",
+            },
           },
           cwd: process.cwd(),
           clientInfo: { name: "t3-test", version: "0.0.0" },
@@ -345,6 +526,70 @@ describe("AcpSessionRuntime", () => {
       Effect.provide(NodeServices.layer),
     );
   });
+
+  it.effect("fails session startup when session/load returns an error", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const error = yield* runtime.start().pipe(Effect.flip);
+
+      expect(error._tag).toBe("AcpRequestError");
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_FAIL_LOAD_SESSION: "1",
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: "stale-session-id",
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("ignores session/update replay notifications during session/load", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 4)));
+      expect(notes.map((note) => note._tag)).toEqual([
+        "PlanUpdated",
+        "AssistantItemStarted",
+        "ContentDelta",
+        "AssistantItemCompleted",
+      ]);
+      expect(notes.some((note) => note._tag === "ToolCallUpdated")).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_EMIT_LOAD_REPLAY: "1",
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: "mock-session-1",
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
 
   it.effect("rejects invalid config option values before sending session/set_config_option", () => {
     const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-runtime-"));

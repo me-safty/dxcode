@@ -9,7 +9,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import type { OrchestrationThread } from "@t3tools/contracts";
+import type { OrchestrationMessage, OrchestrationThread } from "@t3tools/contracts";
 
 import { applyThreadDetailEvent } from "./threadReducer.ts";
 
@@ -219,6 +219,308 @@ describe("applyThreadDetailEvent", () => {
       }
     });
 
+    it("resumes streaming on the active turn after segment-level completion", () => {
+      const threadWithRunningSession: OrchestrationThread = {
+        ...baseThread,
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "grok",
+          runtimeMode: "full-access",
+          activeTurnId: TurnId.make("turn-n"),
+          lastError: null,
+          updatedAt: "2026-06-24T01:02:00.000Z",
+        },
+        messages: [
+          {
+            id: MessageId.make("assistant-segment-0"),
+            role: "assistant",
+            text: "Done",
+            streaming: false,
+            turnId: TurnId.make("turn-n"),
+            createdAt: "2026-06-24T01:02:00.000Z",
+            updatedAt: "2026-06-24T01:02:00.500Z",
+          } as OrchestrationMessage,
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithRunningSession, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-06-24T01:02:01.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-segment-0"),
+          role: "assistant",
+          text: " — same listing.",
+          turnId: TurnId.make("turn-n"),
+          streaming: true,
+          createdAt: "2026-06-24T01:02:01.000Z",
+          updatedAt: "2026-06-24T01:02:01.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.messages).toHaveLength(1);
+        expect(result.thread.messages[0]?.text).toBe("Done — same listing.");
+        expect(result.thread.messages[0]?.streaming).toBe(true);
+      }
+    });
+
+    it("accepts trailing streaming chunks for the same settled turn", () => {
+      const threadWithCompletedAssistant: OrchestrationThread = {
+        ...baseThread,
+        messages: [
+          {
+            id: MessageId.make("assistant-yep"),
+            role: "assistant",
+            text: "Yep — that background task dying with exit 143...",
+            streaming: false,
+            turnId: TurnId.make("turn-n"),
+            createdAt: "2026-06-24T01:00:00.000Z",
+            updatedAt: "2026-06-24T01:02:00.000Z",
+          } as OrchestrationMessage,
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithCompletedAssistant, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-06-24T01:05:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-yep"),
+          role: "assistant",
+          text: " trailing",
+          turnId: TurnId.make("turn-n"),
+          streaming: true,
+          createdAt: "2026-06-24T01:05:00.000Z",
+          updatedAt: "2026-06-24T01:05:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.messages[0]?.text).toBe(
+          "Yep — that background task dying with exit 143... trailing",
+        );
+        expect(result.thread.messages[0]?.streaming).toBe(true);
+      }
+    });
+
+    it("does not regress interrupted latestTurn on late streaming chunks", () => {
+      const threadWithInterruptedTurn: OrchestrationThread = {
+        ...baseThread,
+        latestTurn: {
+          turnId: TurnId.make("turn-n"),
+          state: "interrupted",
+          requestedAt: "2026-06-24T01:00:00.000Z",
+          startedAt: "2026-06-24T01:00:00.000Z",
+          completedAt: "2026-06-24T01:02:00.000Z",
+          assistantMessageId: MessageId.make("assistant-yep"),
+        },
+        messages: [
+          {
+            id: MessageId.make("assistant-yep"),
+            role: "assistant",
+            text: "Partial",
+            streaming: true,
+            turnId: TurnId.make("turn-n"),
+            createdAt: "2026-06-24T01:00:00.000Z",
+            updatedAt: "2026-06-24T01:02:00.000Z",
+          } as OrchestrationMessage,
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithInterruptedTurn, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-06-24T01:05:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-yep"),
+          role: "assistant",
+          text: " trailing",
+          turnId: TurnId.make("turn-n"),
+          streaming: true,
+          createdAt: "2026-06-24T01:05:00.000Z",
+          updatedAt: "2026-06-24T01:05:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.latestTurn?.state).toBe("interrupted");
+        expect(result.thread.latestTurn?.completedAt).toBe("2026-06-24T01:02:00.000Z");
+      }
+    });
+
+    it("archives replayed assistant rows when streaming binds a reused segment to a new turn", () => {
+      const threadWithReplayedSegment: OrchestrationThread = {
+        ...baseThread,
+        latestTurn: {
+          turnId: TurnId.make("turn-replay"),
+          state: "completed",
+          requestedAt: "2026-06-24T00:29:27.101Z",
+          startedAt: "2026-06-24T00:29:27.101Z",
+          completedAt: "2026-06-24T00:29:27.101Z",
+          assistantMessageId: MessageId.make("assistant-segment-0"),
+        },
+        messages: [
+          {
+            id: MessageId.make("assistant-segment-0"),
+            role: "assistant",
+            text: "Health-check response from replay.",
+            streaming: false,
+            turnId: TurnId.make("turn-replay"),
+            createdAt: "2026-06-24T00:29:27.101Z",
+            updatedAt: "2026-06-24T00:29:27.101Z",
+          } as OrchestrationMessage,
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithReplayedSegment, {
+        ...baseEventFields,
+        sequence: 7,
+        occurredAt: "2026-06-24T01:12:00.260Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-segment-0"),
+          role: "assistant",
+          text: "New ",
+          turnId: TurnId.make("turn-follow-up"),
+          streaming: true,
+          createdAt: "2026-06-24T01:12:00.260Z",
+          updatedAt: "2026-06-24T01:12:00.260Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.messages).toHaveLength(2);
+        expect(result.thread.messages[0]?.text).toBe("Health-check response from replay.");
+        expect(result.thread.messages[1]?.text).toBe("New ");
+        expect(result.thread.messages[1]?.turnId).toBe("turn-follow-up");
+        expect(result.thread.latestTurn?.turnId).toBe("turn-follow-up");
+        expect(result.thread.latestTurn?.state).toBe("running");
+        expect(result.thread.latestTurn?.assistantMessageId).toBe("assistant-segment-0");
+      }
+    });
+
+    it("does not inherit a prior rebound turn's terminal latestTurn state", () => {
+      const threadWithFailedReplay: OrchestrationThread = {
+        ...baseThread,
+        latestTurn: {
+          turnId: TurnId.make("turn-replay"),
+          state: "error",
+          requestedAt: "2026-06-24T00:29:27.101Z",
+          startedAt: "2026-06-24T00:29:27.101Z",
+          completedAt: "2026-06-24T00:29:27.101Z",
+          assistantMessageId: MessageId.make("assistant-segment-0"),
+        },
+        messages: [
+          {
+            id: MessageId.make("assistant-segment-0"),
+            role: "assistant",
+            text: "Failed replay response.",
+            streaming: false,
+            turnId: TurnId.make("turn-replay"),
+            createdAt: "2026-06-24T00:29:27.101Z",
+            updatedAt: "2026-06-24T00:29:27.101Z",
+          } as OrchestrationMessage,
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithFailedReplay, {
+        ...baseEventFields,
+        sequence: 7,
+        occurredAt: "2026-06-24T01:12:00.260Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-segment-0"),
+          role: "assistant",
+          text: "Recovered response.",
+          turnId: TurnId.make("turn-follow-up"),
+          streaming: false,
+          createdAt: "2026-06-24T01:12:00.260Z",
+          updatedAt: "2026-06-24T01:12:00.260Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.latestTurn?.turnId).toBe("turn-follow-up");
+        expect(result.thread.latestTurn?.state).toBe("completed");
+      }
+    });
+
+    it("rewrites checkpoint assistant ids after a later assistant message", () => {
+      const threadWithCheckpoint: OrchestrationThread = {
+        ...baseThread,
+        latestTurn: {
+          turnId: TurnId.make("turn-1"),
+          state: "completed",
+          requestedAt: "2026-04-01T06:59:00.000Z",
+          startedAt: "2026-04-01T06:59:00.000Z",
+          completedAt: "2026-04-01T07:00:00.000Z",
+          assistantMessageId: MessageId.make("msg-first"),
+        },
+        checkpoints: [
+          {
+            turnId: TurnId.make("turn-1"),
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.make("ref-1"),
+            status: "ready",
+            files: [],
+            assistantMessageId: MessageId.make("msg-first"),
+            completedAt: "2026-04-01T07:00:00.000Z",
+          },
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithCheckpoint, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-04-01T07:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("msg-later"),
+          role: "assistant",
+          text: "Later commentary.",
+          turnId: TurnId.make("turn-1"),
+          streaming: false,
+          createdAt: "2026-04-01T07:01:00.000Z",
+          updatedAt: "2026-04-01T07:01:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.checkpoints[0]?.assistantMessageId).toBe("msg-later");
+        expect(result.thread.latestTurn?.assistantMessageId).toBe("msg-later");
+        expect(result.thread.latestTurn?.completedAt).toBe("2026-04-01T07:00:00.000Z");
+      }
+    });
+
     it("appends text for streaming messages", () => {
       const threadWithMessage: OrchestrationThread = {
         ...baseThread,
@@ -286,6 +588,55 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.latestTurn?.turnId).toBe("turn-1");
         expect(result.thread.latestTurn?.state).toBe("completed");
         expect(result.thread.latestTurn?.assistantMessageId).toBe("msg-3");
+      }
+    });
+
+    it("advances latestTurn when a fresh assistant message belongs to the active turn", () => {
+      const threadWithCompletedTurn: OrchestrationThread = {
+        ...baseThread,
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "grok",
+          runtimeMode: "full-access",
+          activeTurnId: TurnId.make("turn-2"),
+          lastError: null,
+          updatedAt: "2026-04-01T08:00:00.000Z",
+        },
+        latestTurn: {
+          turnId: TurnId.make("turn-1"),
+          state: "completed",
+          requestedAt: "2026-04-01T07:00:00.000Z",
+          startedAt: "2026-04-01T07:00:00.000Z",
+          completedAt: "2026-04-01T07:05:00.000Z",
+          assistantMessageId: MessageId.make("msg-1"),
+        },
+      };
+
+      const result = applyThreadDetailEvent(threadWithCompletedTurn, {
+        ...baseEventFields,
+        sequence: 9,
+        occurredAt: "2026-04-01T08:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("msg-2"),
+          role: "assistant",
+          text: "Working",
+          turnId: TurnId.make("turn-2"),
+          streaming: true,
+          createdAt: "2026-04-01T08:01:00.000Z",
+          updatedAt: "2026-04-01T08:01:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.latestTurn?.turnId).toBe("turn-2");
+        expect(result.thread.latestTurn?.state).toBe("running");
+        expect(result.thread.latestTurn?.assistantMessageId).toBe("msg-2");
       }
     });
 

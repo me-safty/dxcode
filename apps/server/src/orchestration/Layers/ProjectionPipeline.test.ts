@@ -33,6 +33,7 @@ import {
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
+import { archivedAssistantSegmentMessageId } from "@t3tools/shared/orchestrationMessages";
 import { ServerConfig } from "../../config.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -1232,6 +1233,338 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("archives replayed assistant rows on null-turn rebound in projection", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-null-turn-rebind");
+      const priorTurnId = TurnId.make("turn-replay");
+      const segmentId = MessageId.make("assistant-segment-0");
+      const now = "2026-06-25T02:00:00.000Z";
+
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-ntr-1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-ntr-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-ntr-1"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-null-turn-rebind"),
+          title: "Null turn rebind",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("grok"),
+            model: "grok-composer-2.5-fast",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-ntr-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-ntr-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-ntr-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: segmentId,
+          role: "assistant",
+          text: "Replayed response.",
+          turnId: priorTurnId,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-ntr-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-06-25T02:00:01.000Z",
+        commandId: CommandId.make("cmd-ntr-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-ntr-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: segmentId,
+          role: "assistant",
+          text: "New ",
+          turnId: null,
+          streaming: true,
+          createdAt: "2026-06-25T02:00:01.000Z",
+          updatedAt: "2026-06-25T02:00:01.000Z",
+        },
+      });
+
+      const archivedMessageId = MessageId.make(
+        archivedAssistantSegmentMessageId(segmentId, priorTurnId),
+      );
+      const messageRows = yield* sql<{ readonly messageId: string; readonly text: string }>`
+        SELECT message_id AS "messageId", text
+        FROM projection_thread_messages
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, message_id ASC
+      `;
+      assert.deepEqual(messageRows, [
+        { messageId: archivedMessageId, text: "Replayed response." },
+        { messageId: segmentId, text: "New " },
+      ]);
+    }),
+  );
+
+  it.effect(
+    "accumulates rebound assistant segment streaming text across turn changes in projection",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-segment-rebind");
+        const priorTurnId = TurnId.make("turn-prior");
+        const nextTurnId = TurnId.make("turn-next");
+        const segmentId = MessageId.make(
+          "assistant:assistant:019efa67-b48b-7022-b4c0-0cba45dfa83d:segment:0",
+        );
+        const now = "2026-06-25T01:26:00.000Z";
+
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+        yield* appendAndProject({
+          type: "thread.created",
+          eventId: EventId.make("evt-sr-1"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-sr-1"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-sr-1"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-segment-rebind"),
+            title: "Segment rebind",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("grok"),
+              model: "grok-composer-2.5-fast",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-sr-2"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-sr-2"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-sr-2"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId: segmentId,
+            role: "assistant",
+            text: "Old replayed response.",
+            turnId: priorTurnId,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.session-set",
+          eventId: EventId.make("evt-sr-session"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-25T01:26:49.000Z",
+          commandId: CommandId.make("cmd-sr-session"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-sr-session"),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "running",
+              providerName: "grok",
+              runtimeMode: "full-access",
+              activeTurnId: nextTurnId,
+              lastError: null,
+              updatedAt: "2026-06-25T01:26:49.000Z",
+            },
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-sr-3-0"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-25T01:26:49.524Z",
+          commandId: CommandId.make("cmd-sr-3-0"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-sr-3-0"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId: segmentId,
+            role: "assistant",
+            text: "Done",
+            turnId: nextTurnId,
+            streaming: true,
+            createdAt: "2026-06-25T01:26:49.524Z",
+            updatedAt: "2026-06-25T01:26:49.524Z",
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-sr-3-complete-early"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-25T01:26:49.530Z",
+          commandId: CommandId.make("cmd-sr-3-complete-early"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-sr-3-complete-early"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId: segmentId,
+            role: "assistant",
+            text: "",
+            turnId: nextTurnId,
+            streaming: false,
+            createdAt: "2026-06-25T01:26:49.530Z",
+            updatedAt: "2026-06-25T01:26:49.530Z",
+          },
+        });
+
+        const deltas = [" —", " same", " listing", "."] as const;
+        for (const [index, delta] of deltas.entries()) {
+          yield* appendAndProject({
+            type: "thread.message-sent",
+            eventId: EventId.make(`evt-sr-3-${index + 1}`),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: `2026-06-25T01:26:49.${540 + index}Z`,
+            commandId: CommandId.make(`cmd-sr-3-${index + 1}`),
+            causationEventId: null,
+            correlationId: CorrelationId.make(`cmd-sr-3-${index + 1}`),
+            metadata: {},
+            payload: {
+              threadId,
+              messageId: segmentId,
+              role: "assistant",
+              text: delta,
+              turnId: nextTurnId,
+              streaming: true,
+              createdAt: `2026-06-25T01:26:49.${540 + index}Z`,
+              updatedAt: `2026-06-25T01:26:49.${540 + index}Z`,
+            },
+          });
+        }
+
+        yield* appendAndProject({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-sr-4"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-25T01:26:49.949Z",
+          commandId: CommandId.make("cmd-sr-4"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-sr-4"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId: segmentId,
+            role: "assistant",
+            text: "",
+            turnId: nextTurnId,
+            streaming: false,
+            createdAt: "2026-06-25T01:26:49.949Z",
+            updatedAt: "2026-06-25T01:26:49.949Z",
+          },
+        });
+
+        const messageRows = yield* sql<{ readonly text: string }>`
+          SELECT text FROM projection_thread_messages WHERE message_id = ${segmentId}
+        `;
+        assert.deepEqual(messageRows, [{ text: "Done — same listing." }]);
+
+        const archivedAssistantMessageId = MessageId.make(
+          archivedAssistantSegmentMessageId(segmentId, priorTurnId),
+        );
+        const priorTurnRows = yield* sql<{ readonly assistantMessageId: string | null }>`
+          SELECT assistant_message_id AS "assistantMessageId"
+          FROM projection_turns
+          WHERE thread_id = ${threadId} AND turn_id = ${priorTurnId}
+        `;
+        assert.deepEqual(priorTurnRows, [{ assistantMessageId: archivedAssistantMessageId }]);
+
+        yield* appendAndProject({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-sr-stale-prior"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-25T01:26:50.000Z",
+          commandId: CommandId.make("cmd-sr-stale-prior"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-sr-stale-prior"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId: segmentId,
+            role: "assistant",
+            text: " stale",
+            turnId: priorTurnId,
+            streaming: true,
+            createdAt: "2026-06-25T01:26:50.000Z",
+            updatedAt: "2026-06-25T01:26:50.000Z",
+          },
+        });
+
+        const priorTurnRowsAfterStale = yield* sql<{ readonly assistantMessageId: string | null }>`
+          SELECT assistant_message_id AS "assistantMessageId"
+          FROM projection_turns
+          WHERE thread_id = ${threadId} AND turn_id = ${priorTurnId}
+        `;
+        assert.deepEqual(priorTurnRowsAfterStale, [
+          { assistantMessageId: archivedAssistantMessageId },
+        ]);
+      }),
+  );
+
   it.effect("keeps the turn running across interim assistant messages until the session ends", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
@@ -1320,23 +1653,60 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       const runningRows = yield* sql<{
         readonly state: string;
         readonly completedAt: string | null;
+        readonly assistantMessageId: string | null;
       }>`
-        SELECT state, completed_at AS "completedAt"
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          assistant_message_id AS "assistantMessageId"
         FROM projection_turns
         WHERE thread_id = ${threadId} AND turn_id = ${turnId}
       `;
-      assert.deepEqual(runningRows, [{ state: "running", completedAt: null }]);
+      assert.deepEqual(runningRows, [
+        { state: "running", completedAt: null, assistantMessageId: "message-tl-interim" },
+      ]);
+
+      yield* eventStore.append({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-tl4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:10.000Z",
+        commandId: CommandId.make("cmd-tl4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-tl4"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.make("message-tl-latest"),
+          role: "assistant",
+          text: "later commentary",
+          turnId,
+          streaming: false,
+          createdAt: "2026-01-01T00:00:10.000Z",
+          updatedAt: "2026-01-01T00:00:10.000Z",
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const latestMessageRows = yield* sql<{ readonly assistantMessageId: string | null }>`
+        SELECT assistant_message_id AS "assistantMessageId"
+        FROM projection_turns
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(latestMessageRows, [{ assistantMessageId: "message-tl-latest" }]);
 
       // The session leaving "running" is the turn-end signal.
       yield* eventStore.append({
         type: "thread.session-set",
-        eventId: EventId.make("evt-tl4"),
+        eventId: EventId.make("evt-tl5"),
         aggregateKind: "thread",
         aggregateId: threadId,
         occurredAt: "2026-01-01T00:01:00.000Z",
-        commandId: CommandId.make("cmd-tl4"),
+        commandId: CommandId.make("cmd-tl5"),
         causationEventId: null,
-        correlationId: CorrelationId.make("cmd-tl4"),
+        correlationId: CorrelationId.make("cmd-tl5"),
         metadata: {},
         payload: {
           threadId,
@@ -2527,6 +2897,134 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
       ),
     ),
   ),
+);
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-bootstrap-order-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("replays bootstrap events in order across projectors", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-bootstrap-order");
+        const turnId = TurnId.make("turn-bootstrap-order");
+        const messageId = MessageId.make("message-bootstrap-order");
+        const createdAt = "2026-06-25T03:00:00.000Z";
+        const runningAt = "2026-06-25T03:00:01.000Z";
+        const messageAt = "2026-06-25T03:00:02.000Z";
+        const completedAt = "2026-06-25T03:00:10.000Z";
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("evt-bootstrap-order-1"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          commandId: CommandId.make("cmd-bootstrap-order-1"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-bootstrap-order-1"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-bootstrap-order"),
+            title: "Bootstrap order",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("grok"),
+              model: "grok-build",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.session-set",
+          eventId: EventId.make("evt-bootstrap-order-2"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: runningAt,
+          commandId: CommandId.make("cmd-bootstrap-order-2"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-bootstrap-order-2"),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "running",
+              providerName: "grok",
+              runtimeMode: "full-access",
+              activeTurnId: turnId,
+              lastError: null,
+              updatedAt: runningAt,
+            },
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-bootstrap-order-3"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: messageAt,
+          commandId: CommandId.make("cmd-bootstrap-order-3"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-bootstrap-order-3"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId,
+            role: "assistant",
+            text: "complete",
+            turnId,
+            streaming: false,
+            createdAt: messageAt,
+            updatedAt: messageAt,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.session-set",
+          eventId: EventId.make("evt-bootstrap-order-4"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: completedAt,
+          commandId: CommandId.make("cmd-bootstrap-order-4"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-bootstrap-order-4"),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: "grok",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: completedAt,
+            },
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly state: string;
+          readonly completedAt: string | null;
+        }>`
+          SELECT state, completed_at AS "completedAt"
+          FROM projection_turns
+          WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+        `;
+        assert.deepEqual(rows, [{ state: "completed", completedAt }]);
+      }),
+    );
+  },
 );
 
 const engineLayer = it.layer(

@@ -1337,6 +1337,16 @@ function compareActivityLifecycleRank(kind: string): number {
   return 1;
 }
 
+function timelineEntrySortAt(entry: TimelineEntry): string {
+  if (entry.kind === "message" && entry.message.role === "assistant") {
+    // Grok session/load reuses assistant segment ids across turns. Projection
+    // resets createdAt only when a rebound starts or turn binding changes, so
+    // sort by createdAt instead of mutable updatedAt streaming bumps.
+    return entry.message.createdAt;
+  }
+  return entry.createdAt;
+}
+
 export function deriveTimelineEntries(
   messages: ReadonlyArray<ChatMessage>,
   proposedPlans: ReadonlyArray<ProposedPlan>,
@@ -1361,7 +1371,7 @@ export function deriveTimelineEntries(
     entry,
   }));
   return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
+    timelineEntrySortAt(a).localeCompare(timelineEntrySortAt(b)),
   );
 }
 
