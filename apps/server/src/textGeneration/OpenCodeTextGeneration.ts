@@ -120,6 +120,11 @@ interface OpenCodePromptFailure {
   readonly message: string;
 }
 
+interface OpenCodeTextPart {
+  readonly type: "text";
+  readonly text: string;
+}
+
 function getOpenCodePromptFailure(error: unknown): OpenCodePromptFailure | null {
   if (!error || typeof error !== "object") {
     return null;
@@ -151,20 +156,21 @@ function getOpenCodePromptFailure(error: unknown): OpenCodePromptFailure | null 
   return null;
 }
 
+function isOpenCodeTextPart(part: unknown): part is OpenCodeTextPart {
+  return (
+    part !== null &&
+    typeof part === "object" &&
+    "type" in part &&
+    part.type === "text" &&
+    "text" in part &&
+    typeof part.text === "string"
+  );
+}
+
 function getOpenCodeTextResponse(parts: ReadonlyArray<unknown> | undefined): string {
   return (parts ?? [])
-    .flatMap((part) => {
-      if (!part || typeof part !== "object") {
-        return [];
-      }
-      if (!("type" in part) || part.type !== "text") {
-        return [];
-      }
-      if (!("text" in part) || typeof part.text !== "string") {
-        return [];
-      }
-      return [part.text];
-    })
+    .filter(isOpenCodeTextPart)
+    .map((part) => part.text)
     .join("")
     .trim();
 }
@@ -441,9 +447,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
           return yield* new OpenCodeTextGenerationEmptyOutputError({
             ...promptContext,
             responsePartCount: responseParts.length,
-            textPartCount: responseParts.filter(
-              (part) => part.type === "text" && typeof part.text === "string",
-            ).length,
+            textPartCount: responseParts.filter(isOpenCodeTextPart).length,
           });
         }
         return rawText;

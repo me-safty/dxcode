@@ -24,7 +24,7 @@ const runtimeMock = {
     sessionResult: undefined as { data?: { id: string } } | undefined,
     promptRequestError: undefined as unknown,
     promptResult: undefined as
-      | { data?: { info?: { error?: unknown }; parts?: Array<{ type: string; text?: string }> } }
+      | { data?: { info?: { error?: unknown }; parts?: Array<unknown> } }
       | undefined,
   },
   reset() {
@@ -310,10 +310,14 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
     ),
   );
 
-  it.effect("returns a typed empty-output error when OpenCode returns no text parts", () =>
+  it.effect("returns a typed empty-output error for malformed and blank response parts", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
-        runtimeMock.state.promptResult = { data: {} };
+        runtimeMock.state.promptResult = {
+          data: {
+            parts: [null, { type: "tool" }, { type: "text", text: "   " }],
+          },
+        };
 
         const error = yield* textGeneration
           .generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT)
@@ -327,8 +331,8 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
           sessionId: "http://127.0.0.1:4301/session",
           providerId: "openai",
           modelId: "gpt-5",
-          responsePartCount: 0,
-          textPartCount: 0,
+          responsePartCount: 3,
+          textPartCount: 1,
         });
         expect(error.cause).not.toHaveProperty("cause");
       }),
