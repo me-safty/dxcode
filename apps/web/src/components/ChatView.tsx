@@ -2892,7 +2892,13 @@ function ChatViewContent(props: ChatViewProps) {
         onDiffPanelOpen?.();
       }
     },
-    [diffOpen, dismissPlanSidebarForCurrentTurn, onDiffPanelOpen, planSidebarOpen, workspaceThreadRef],
+    [
+      diffOpen,
+      dismissPlanSidebarForCurrentTurn,
+      onDiffPanelOpen,
+      planSidebarOpen,
+      workspaceThreadRef,
+    ],
   );
   const toggleRightPanel = useCallback(() => {
     if (!workspaceThreadRef) return;
