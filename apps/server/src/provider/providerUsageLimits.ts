@@ -79,10 +79,28 @@ export function normalizeUsageWindows(
     });
 }
 
+/** Reasons emitted when a probe could not read quota windows, not when the account cannot have them. */
+const TRANSIENT_UNAVAILABLE_USAGE_REASONS = new Set([
+  "No Codex subscription quota windows reported.",
+  "Unable to fetch usage",
+]);
+
+function isTransientUnavailableUsageStub(
+  usageLimits: ServerProviderUsageLimits | undefined,
+): boolean {
+  if (!usageLimits || usageLimits.available) {
+    return false;
+  }
+  const reason = usageLimits.reason ?? "Unable to fetch usage";
+  return TRANSIENT_UNAVAILABLE_USAGE_REASONS.has(reason);
+}
+
 /**
  * Keep the last known available usage limits when a scheduled refresh would
  * replace them with an unavailable stub (for example when
  * `account/rateLimits/read` fails but live patches already populated quota).
+ * Authoritative unavailable results, such as an API key account after auth
+ * changes, replace the prior snapshot so the UI does not show stale quota bars.
  */
 export function preserveAvailableUsageLimitsOnRefresh(
   previous: ServerProviderUsageLimits | undefined,
@@ -91,7 +109,7 @@ export function preserveAvailableUsageLimitsOnRefresh(
   if (next?.available) {
     return next;
   }
-  if (previous?.available) {
+  if (previous?.available && isTransientUnavailableUsageStub(next)) {
     return previous;
   }
   return next;
