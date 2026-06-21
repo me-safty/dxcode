@@ -1,8 +1,20 @@
 # Harness Enhancements Tracker
 
-> Last updated: 2026-06-20
+> Last updated: 2026-06-21
 
 This tracks planned improvements to make T3 Code a stronger harness around coding agents, inspired by the useful parts of Conductor's workspace model: persistent context, injected guidance, action-specific prompts, isolated workspaces, review flow, and merge readiness.
+
+## Current Upstream Baseline
+
+The fork is synced through upstream `pingdotgg/t3code` `803c2b77` plus local harness planning and dev-sandbox changes.
+
+Relevant upstream changes to build on:
+
+- Right-panel and diff state now use store-driven surfaces instead of URL-driven diff state. Harness review/editor work should build on that model.
+- Desktop backend output logging was extracted into `DesktopBackendOutputLog`; avoid reintroducing old observability helpers.
+- Settings are split between server/environment settings and client-local settings. Workspace defaults such as local vs worktree mode should come from the target environment.
+- Source-control, workspace filesystem/search, preview automation, and provider/runtime error handling received broad structured-error improvements. Harness work should reuse those primitives instead of adding parallel error wrappers.
+- The repo now enforces stricter script/import conventions, including namespace imports for Node built-ins.
 
 ## Priority Summary
 
@@ -15,10 +27,12 @@ This tracks planned improvements to make T3 Code a stronger harness around codin
 | P0       | Workspace context folder                          | Not started     | Gives each workspace durable memory across turns, restarts, and provider handoffs.                                                |
 | P0       | Durable task list                                 | Not started     | Gives every workspace a trustworthy task state instead of relying on the agent to update a checklist.                             |
 | P1       | Workspace setup scripts and local file copy rules | Not started     | Makes workspace creation reliable by handling setup, run scripts, and `.env*` copying before agents start work.                   |
+| P1       | Prevent system sleep during active work           | Not started     | Keeps long-running agent turns, checks, terminals, and previews alive while T3 Code is actively working.                          |
 | P1       | T3 Code harness prompt injection                  | Not started     | Teaches Codex, Claude, Cursor, and OpenCode how to behave inside T3 Code workspaces instead of acting like raw CLIs.              |
 | P1       | Context and task update reactor                   | Not started     | Keeps `.context` and task state useful after meaningful turns without asking users to manually summarize state.                   |
 | P1       | Action-specific prompts                           | Not started     | Makes UI actions such as review, PR creation, fix checks, and handoff more consistent.                                            |
 | P1       | Source-control action target resolution           | Not started     | Ensures commit, push, and PR actions target the checked-out repository/branch instead of the wrong fork or upstream remote.       |
+| P1       | Fork sync command and drift monitor               | In progress     | Keeps a fork close to upstream with a repeatable checked command and scheduled drift alerts.                                      |
 | P1       | Workspace lifecycle dashboard                     | Not started     | Makes the workspace/worktree/branch/terminal/diff/PR lifecycle visible as one unit of work.                                       |
 | P1       | Integrated file editor and review surface         | Not started     | Gives users a Conductor-style file editor for inspecting, editing, and reviewing agent changes next to chat, diffs, and comments. |
 | P1       | File diff review improvements                     | Not started     | Makes large diffs easier to navigate, filter, comment on, and hand back to agents.                                                |
@@ -384,6 +398,55 @@ Initial implementation notes:
 - Avoid copying unignored secret files.
 - Store shared copy defaults in repo config, and user-specific additions in local app settings or an ignored local config file.
 
+## P1: Prevent System Sleep During Active Work
+
+Add an opt-in setting that keeps the machine awake while T3 Code is actively doing agent work.
+
+Problem to solve:
+
+- Long-running agent tasks can be interrupted if the laptop sleeps.
+- A sleeping machine can stop local terminals, dev servers, preview sessions, file watchers, and provider subprocesses.
+- Users should not have to remember to run a separate `caffeinate` command before starting autonomous work.
+
+Decision:
+
+- Add a Settings toggle: "Prevent system sleep while T3 Code is working".
+- Default should be off unless product decides desktop users expect this by default.
+- The setting should live near runtime, desktop, or automation settings, not hidden inside provider settings.
+- T3 Code should only hold the wake lock while there is active work, not for the whole time the app is open.
+- Releasing the lock must be reliable when work finishes, fails, is interrupted, the app quits, or the setting is turned off.
+
+What counts as active work:
+
+- A provider turn is running or waiting on tool approval/user input.
+- A project script/check launched by T3 Code is running.
+- A workspace terminal launched by T3 Code is running a long-lived command, if T3 can reliably identify it.
+- Preview automation is actively running a task.
+
+What should not count by itself:
+
+- A passive open chat.
+- A completed thread with uncommitted changes.
+- An idle terminal prompt.
+- A preview tab that is merely open.
+
+Expected behavior:
+
+- Desktop app requests a platform wake lock when the first active work item starts.
+- Desktop app releases it when the last active work item settles.
+- UI shows a small status indicator when sleep prevention is active.
+- Settings explain that display sleep is separate from system sleep unless the implementation explicitly prevents both.
+- The wake lock is reference-counted or keyed by work item so one completed task does not release it while another task is still running.
+
+Initial implementation notes:
+
+- Start desktop-only. Web browsers have limited and inconsistent system sleep control.
+- macOS can use a managed `caffeinate` child process or native Electron/power APIs if available.
+- Windows/Linux should use platform-specific power-save blockers if the desktop runtime supports them.
+- Reuse orchestration/thread activity, terminal session state, script/check state, and preview automation state instead of polling raw processes.
+- Add tests for active count transitions: first active starts lock, additional active work keeps lock, final completion releases lock, setting disable releases immediately, app shutdown releases.
+- Make failure safe: if the wake-lock implementation crashes, agent work should continue and the user should see a warning rather than losing the whole run.
+
 ## P1: T3 Code Harness Prompt Injection
 
 Inject a concise system/developer prompt into provider sessions explaining T3 Code's environment.
@@ -508,6 +571,45 @@ Initial implementation notes:
   stale worktree metadata, missing remote head refs, and no-commit branches.
 - Keep commit and push preflights in the same resolver so "commit, push & PR" reports one coherent
   target instead of resolving each step differently.
+
+## P1: Fork Sync Command and Drift Monitor
+
+Add repeatable tooling for keeping a fork synced with upstream without losing local harness work.
+
+Decision:
+
+- Prefer a local checked command for the actual merge: `pnpm run sync:upstream`.
+- Add a scheduled workflow that checks upstream drift several times a day and opens/updates a tracking issue.
+- Do not let the scheduler auto-merge into `main` by default; upstream changes can conflict with local harness changes and should be resolved with context.
+- The local command should refuse to run on a dirty worktree so uncommitted planning or implementation work is not overwritten.
+
+Expected behavior:
+
+- Fetch `origin` and `upstream`.
+- Report ahead/behind counts before merging.
+- Merge `upstream/main` into local `main`.
+- If dependency files changed, refresh dependencies from the lockfile.
+- Run `vp check` and `vp run typecheck`.
+- Push `origin/main` only after the merge and checks succeed.
+- If conflicts occur, stop with the merge in progress and clear instructions.
+
+Scheduled behavior:
+
+- Run multiple times per day.
+- Report drift with ahead/behind counts and recent upstream commits.
+- Open or update one issue instead of creating duplicate notifications.
+- Never force-push, reset, discard local commits, or auto-resolve conflicts.
+
+Completed scope:
+
+- `pnpm run sync:upstream` runs `scripts/sync-upstream.ts --verify --push`.
+- `.github/workflows/upstream-sync-check.yml` checks upstream drift four times daily and opens or updates a sync issue.
+
+Initial implementation notes:
+
+- Later, T3 Code itself can expose this as an in-app repository maintenance action.
+- A Codex/Claude skill can wrap the same command for agent-assisted conflict resolution.
+- If automatic PR creation becomes useful, create a sync branch and PR instead of pushing directly to `main`.
 
 ## P1: Workspace Lifecycle Dashboard
 
@@ -693,15 +795,17 @@ Initial implementation notes:
 8. Add durable workspace task-list schemas and a basic task UI.
 9. Mirror task state into `.context/tasks.md`.
 10. Add repo setup profiles and prebuilt `.env*` worktree copy rules.
-11. Inject a small T3 Code harness prompt for Codex sessions using workspace context.
-12. Add manual "Update handoff" and "Read workspace context" actions.
-13. Add deterministic context and task updates after turn completion.
-14. Add action-specific prompts for review and PR creation.
-15. Add source-control target resolution for commit, push, and PR actions.
-16. Make changed-file clicks use the current integrated review surface by default.
-17. Add diff grouping, filters, collapse state, clearer turn labels, and per-file review state.
-18. Build the workspace lifecycle dashboard.
-19. Add the merge readiness checks panel.
-20. Persist structured review comments.
-21. Add issue/PR fanout.
-22. Design and build Spotlight-style root runner.
+11. Add desktop sleep prevention while T3 Code has active agent/script/check work.
+12. Inject a small T3 Code harness prompt for Codex sessions using workspace context.
+13. Add manual "Update handoff" and "Read workspace context" actions.
+14. Add deterministic context and task updates after turn completion.
+15. Add action-specific prompts for review and PR creation.
+16. Add source-control target resolution for commit, push, and PR actions.
+17. Add fork sync command and scheduled upstream drift monitor.
+18. Make changed-file clicks use the current integrated review surface by default.
+19. Add diff grouping, filters, collapse state, clearer turn labels, and per-file review state.
+20. Build the workspace lifecycle dashboard.
+21. Add the merge readiness checks panel.
+22. Persist structured review comments.
+23. Add issue/PR fanout.
+24. Design and build Spotlight-style root runner.

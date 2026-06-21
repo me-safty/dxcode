@@ -1,0 +1,95 @@
+name: Upstream Sync Check
+
+on:
+  schedule:
+    # Four times a day. The job only opens/updates an issue; it does not merge.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Check upstream drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/pingdotgg/t3code.git || git remote set-url upstream https://github.com/pingdotgg/t3code.git
+          git fetch --no-tags upstream main
+
+      - name: Compute drift
+        id: drift
+        run: |
+          set -euo pipefail
+          read -r ahead behind < <(git rev-list --left-right --count HEAD...upstream/main)
+          upstream_sha="$(git rev-parse upstream/main)"
+          head_sha="$(git rev-parse HEAD)"
+          echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          git log --oneline --max-count=20 HEAD..upstream/main > /tmp/upstream-commits.txt
+
+      - name: Open or update sync issue
+        if: steps.drift.outputs.behind != '0'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require("node:fs");
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = "Sync fork with upstream";
+            const ahead = "${{ steps.drift.outputs.ahead }}";
+            const behind = "${{ steps.drift.outputs.behind }}";
+            const upstreamSha = "${{ steps.drift.outputs.upstream_sha }}";
+            const headSha = "${{ steps.drift.outputs.head_sha }}";
+            const commits = fs.readFileSync("/tmp/upstream-commits.txt", "utf8").trim();
+            const body = [
+              `The fork is currently ${ahead} commits ahead of and ${behind} commits behind \`pingdotgg/t3code:main\`.`,
+              "",
+              `Fork head: \`${headSha}\``,
+              `Upstream head: \`${upstreamSha}\``,
+              "",
+              "Run the local sync command from a clean checkout:",
+              "",
+              "```bash",
+              "pnpm run sync:upstream",
+              "```",
+              "",
+              "Recent upstream commits:",
+              "",
+              commits ? `\`\`\`text\n${commits}\n\`\`\`` : "_No commit list available._",
+              "",
+              "This scheduled workflow only reports drift. It does not auto-merge because upstream syncs can conflict with local harness work.",
+            ].join("\n");
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+            const existing = issues.find((issue) => issue.title === title && !issue.pull_request);
+            if (existing) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+              });
+            }
