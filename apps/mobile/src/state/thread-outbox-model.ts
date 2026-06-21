@@ -153,3 +153,21 @@ export function shouldRetryThreadOutboxDelivery(error: unknown): boolean {
   }
   return isTransportConnectionErrorMessage(errorMessage(error));
 }
+
+export type ThreadOutboxCommandStage = "settings-sync" | "start-turn";
+export type ThreadOutboxFailureAction = "retry" | "discard";
+
+export function resolveThreadOutboxFailureAction(input: {
+  readonly stage: ThreadOutboxCommandStage;
+  readonly error: unknown;
+  readonly interrupted: boolean;
+}): ThreadOutboxFailureAction {
+  if (
+    input.stage === "settings-sync" ||
+    input.interrupted ||
+    shouldRetryThreadOutboxDelivery(input.error)
+  ) {
+    return "retry";
+  }
+  return "discard";
+}

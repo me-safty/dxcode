@@ -11,12 +11,13 @@ import { appAtomRegistry } from "./atom-registry";
 import { useThreadShells } from "./entities";
 import { ensureThreadOutboxLoaded, removeThreadOutboxMessage } from "./thread-outbox";
 import {
-  resolveThreadOutboxDeliveryAction,
-  resolveQueuedThreadSettings,
-  shouldRetryThreadOutboxDelivery,
   modelSelectionsEqual,
+  resolveThreadOutboxDeliveryAction,
+  resolveThreadOutboxFailureAction,
+  resolveQueuedThreadSettings,
   threadOutboxRetryDelayMs,
   type QueuedThreadMessage,
+  type ThreadOutboxCommandStage,
 } from "./thread-outbox-model";
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
@@ -85,23 +86,34 @@ export function useThreadOutboxDrain(): void {
   const sendQueuedMessage = useCallback(
     async (queuedMessage: QueuedThreadMessage, thread: EnvironmentThreadShell) => {
       const settings = resolveQueuedThreadSettings(queuedMessage, thread);
+      const reportFailure = (
+        commandResult: AtomCommandResult<unknown, unknown>,
+        stage: ThreadOutboxCommandStage,
+      ): boolean => {
+        if (!AsyncResult.isFailure(commandResult)) {
+          return false;
+        }
+        const action = resolveThreadOutboxFailureAction({
+          stage,
+          error: Cause.squash(commandResult.cause),
+          interrupted: Cause.hasInterruptsOnly(commandResult.cause),
+        });
+        const retry = action === "retry";
+        console.warn("[thread-outbox] queued message delivery failed", {
+          environmentId: queuedMessage.environmentId,
+          threadId: queuedMessage.threadId,
+          messageId: queuedMessage.messageId,
+          stage,
+          cause: commandResult.cause,
+          retry,
+        });
+        return retry;
+      };
       const completeDelivery = async (
         deliveryResult: AtomCommandResult<unknown, unknown>,
       ): Promise<boolean> => {
-        if (AsyncResult.isFailure(deliveryResult)) {
-          const error = Cause.squash(deliveryResult.cause);
-          const retry =
-            Cause.hasInterruptsOnly(deliveryResult.cause) || shouldRetryThreadOutboxDelivery(error);
-          console.warn("[thread-outbox] queued message delivery failed", {
-            environmentId: queuedMessage.environmentId,
-            threadId: queuedMessage.threadId,
-            messageId: queuedMessage.messageId,
-            cause: deliveryResult.cause,
-            retry,
-          });
-          if (retry) {
-            return false;
-          }
+        if (reportFailure(deliveryResult, "start-turn")) {
+          return false;
         }
 
         try {
@@ -128,7 +140,8 @@ export function useThreadOutboxDrain(): void {
           },
         });
         if (AsyncResult.isFailure(updateResult)) {
-          return completeDelivery(updateResult);
+          reportFailure(updateResult, "settings-sync");
+          return false;
         }
       }
 
@@ -143,7 +156,8 @@ export function useThreadOutboxDrain(): void {
           },
         });
         if (AsyncResult.isFailure(runtimeResult)) {
-          return completeDelivery(runtimeResult);
+          reportFailure(runtimeResult, "settings-sync");
+          return false;
         }
       }
 
@@ -158,7 +172,8 @@ export function useThreadOutboxDrain(): void {
           },
         });
         if (AsyncResult.isFailure(interactionResult)) {
-          return completeDelivery(interactionResult);
+          reportFailure(interactionResult, "settings-sync");
+          return false;
         }
       }
 

@@ -14,6 +14,7 @@ import {
   groupQueuedThreadMessages,
   modelSelectionsEqual,
   resolveThreadOutboxDeliveryAction,
+  resolveThreadOutboxFailureAction,
   resolveQueuedThreadSettings,
   shouldRetryThreadOutboxDelivery,
   threadOutboxRetryDelayMs,
@@ -327,5 +328,24 @@ describe("thread outbox", () => {
       }),
     ).toBe(true);
     expect(shouldRetryThreadOutboxDelivery(new Error("Thread no longer exists"))).toBe(false);
+  });
+
+  it("retains queued messages when settings synchronization fails before startTurn", () => {
+    const deterministicFailure = new Error("Thread no longer exists");
+
+    expect(
+      resolveThreadOutboxFailureAction({
+        stage: "settings-sync",
+        error: deterministicFailure,
+        interrupted: false,
+      }),
+    ).toBe("retry");
+    expect(
+      resolveThreadOutboxFailureAction({
+        stage: "start-turn",
+        error: deterministicFailure,
+        interrupted: false,
+      }),
+    ).toBe("discard");
   });
 });
