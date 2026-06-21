@@ -1684,6 +1684,86 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const seenFallbackActivityIdsByThreadRef = useRef(new Map<string, Set<string>>());
+  useEffect(() => {
+    if (!activeThreadKey || !activeThreadRef) return;
+    const existing = seenFallbackActivityIdsByThreadRef.current.get(activeThreadKey);
+    if (!existing) {
+      seenFallbackActivityIdsByThreadRef.current.set(
+        activeThreadKey,
+        new Set(threadActivities.map((activity) => String(activity.id))),
+      );
+      return;
+    }
+
+    for (const activity of threadActivities) {
+      const activityId = String(activity.id);
+      if (existing.has(activityId)) continue;
+      existing.add(activityId);
+      if (
+        activity.kind !== "provider.fallback.succeeded" &&
+        activity.kind !== "provider.fallback.failed"
+      ) {
+        continue;
+      }
+      const payload =
+        activity.payload && typeof activity.payload === "object" && !Array.isArray(activity.payload)
+          ? (activity.payload as Record<string, unknown>)
+          : {};
+      const from =
+        typeof payload.fromDisplayName === "string" ? payload.fromDisplayName : "current instance";
+      const to = typeof payload.toDisplayName === "string" ? payload.toDisplayName : null;
+      const detail = typeof payload.detail === "string" ? payload.detail : undefined;
+      const skipped = Array.isArray(payload.skipped)
+        ? payload.skipped.filter(
+            (entry): entry is { instanceId: string; displayName: string; reason: string } =>
+              Boolean(entry) &&
+              typeof entry === "object" &&
+              typeof (entry as Record<string, unknown>).instanceId === "string" &&
+              typeof (entry as Record<string, unknown>).displayName === "string" &&
+              typeof (entry as Record<string, unknown>).reason === "string",
+          )
+        : [];
+      const expandableContent =
+        skipped.length > 0 ? (
+          <ul className="grid gap-1.5 text-xs text-muted-foreground">
+            {skipped.map((entry) => (
+              <li key={entry.instanceId}>
+                <span className="font-medium text-foreground">{entry.displayName}</span>:{" "}
+                {entry.reason}
+              </li>
+            ))}
+          </ul>
+        ) : undefined;
+      const description =
+        activity.kind === "provider.fallback.succeeded" && detail
+          ? `Switched after “${from}” reported: ${detail}`
+          : detail;
+
+      toastManager.add(
+        stackedThreadToast({
+          type: activity.kind === "provider.fallback.succeeded" ? "success" : "error",
+          title:
+            activity.kind === "provider.fallback.succeeded" && to
+              ? `Switched from ${from} to ${to}`
+              : `Could not switch from ${from}`,
+          ...(description ? { description } : {}),
+          data: {
+            threadRef: activeThreadRef,
+            ...(expandableContent
+              ? {
+                  expandableContent,
+                  expandableLabels: {
+                    expand: "Show skipped instances",
+                    collapse: "Hide skipped instances",
+                  },
+                }
+              : {}),
+          },
+        }),
+      );
+    }
+  }, [activeThreadKey, activeThreadRef, threadActivities]);
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),

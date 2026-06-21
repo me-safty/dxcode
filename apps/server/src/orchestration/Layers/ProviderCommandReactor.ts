@@ -29,6 +29,7 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
+import { classifyProviderServiceFailure } from "../../provider/providerFallback.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -41,6 +42,7 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { attemptProviderFallback } from "../providerFallbackWorkflow.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -825,8 +827,46 @@ const make = Effect.gen(function* () {
       );
     };
 
+    const attemptFallbackBeforeReporting = Effect.fnUntraced(function* (
+      cause: Cause.Cause<unknown>,
+    ) {
+      const failure = classifyProviderServiceFailure(cause);
+      if (!failure) return false;
+      const modelSelection = event.payload.modelSelection ?? thread.modelSelection;
+      const fallback = yield* attemptProviderFallback({
+        threadId: event.payload.threadId,
+        currentInstanceId: modelSelection.instanceId,
+        modelSelection,
+        runtimeMode: event.payload.runtimeMode,
+        sendTurnInput: {
+          threadId: event.payload.threadId,
+          ...(toNonEmptyProviderInput(message.text)
+            ? { input: toNonEmptyProviderInput(message.text) }
+            : {}),
+          ...(message.attachments && message.attachments.length > 0
+            ? { attachments: message.attachments }
+            : {}),
+          modelSelection,
+          interactionMode: event.payload.interactionMode,
+        },
+        failure,
+        requireCompatibleContinuation: !isFirstUserMessageTurn,
+        createdAt: event.payload.createdAt,
+      });
+      return fallback.switched;
+    });
+
     const recoverTurnStartFailure = (cause: Cause.Cause<unknown>) =>
-      handleTurnStartFailure(cause).pipe(
+      attemptFallbackBeforeReporting(cause).pipe(
+        Effect.catchCause((fallbackCause) =>
+          Effect.logWarning("provider command reactor fallback attempt failed", {
+            eventType: event.type,
+            threadId: event.payload.threadId,
+            cause: Cause.pretty(fallbackCause),
+            originalCause: Cause.pretty(cause),
+          }).pipe(Effect.as(false)),
+        ),
+        Effect.flatMap((switched) => (switched ? Effect.void : handleTurnStartFailure(cause))),
         Effect.catchCause((recoveryCause) =>
           Effect.logWarning("provider command reactor failed to recover turn start failure", {
             eventType: event.type,
@@ -848,7 +888,7 @@ const make = Effect.gen(function* () {
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.map(Option.some),
-      Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
+      Effect.catchCause((cause) => recoverTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
     );
 
     if (Option.isNone(sendTurnRequest)) {

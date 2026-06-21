@@ -28,6 +28,7 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { classifyProviderRuntimeFailure } from "../../provider/providerFallback.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { isGitRepository } from "../../git/Utils.ts";
@@ -38,6 +39,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { attemptProviderFallback } from "../providerFallbackWorkflow.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 
@@ -54,6 +56,8 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const HANDLED_FALLBACK_EVENT_CACHE_CAPACITY = 10_000;
+const HANDLED_FALLBACK_EVENT_TTL = Duration.minutes(120);
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 type TurnStartRequestedDomainEvent = Extract<
@@ -666,6 +670,12 @@ const make = Effect.gen(function* () {
     lookup: () => Effect.succeed({ text: "", createdAt: "" }),
   });
 
+  const handledFallbackEvents = yield* Cache.make<string, true>({
+    capacity: HANDLED_FALLBACK_EVENT_CACHE_CAPACITY,
+    timeToLive: HANDLED_FALLBACK_EVENT_TTL,
+    lookup: () => Effect.succeed(true),
+  });
+
   const resolveThreadDetail = Effect.fn("resolveThreadDetail")(function* (threadId: ThreadId) {
     return yield* projectionSnapshotQuery
       .getThreadDetailById(threadId)
@@ -1208,6 +1218,17 @@ const make = Effect.gen(function* () {
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
+      // Trial sessions can emit before a fallback handoff commits or after it
+      // rolls back. Ignore events from an instance that no longer owns the
+      // thread so stale trial output cannot overwrite the restored binding.
+      if (
+        event.providerInstanceId !== undefined &&
+        thread.session?.providerInstanceId !== undefined &&
+        event.providerInstanceId !== thread.session.providerInstanceId
+      ) {
+        return;
+      }
+
       let loadedThreadDetail: OrchestrationThread | null | undefined;
       const getLoadedThreadDetail = () =>
         Effect.gen(function* () {
@@ -1221,6 +1242,45 @@ const make = Effect.gen(function* () {
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
       const activeTurnId = thread.session?.activeTurnId ?? null;
+
+      const fallbackFailure = classifyProviderRuntimeFailure(event);
+      const fallbackInstanceId = event.providerInstanceId ?? thread.session?.providerInstanceId;
+      if (
+        fallbackFailure &&
+        fallbackInstanceId !== undefined &&
+        (activeTurnId !== null || eventTurnId !== undefined)
+      ) {
+        const fallbackKey = `${thread.id}:${fallbackInstanceId}:${eventTurnId ?? activeTurnId ?? event.eventId}`;
+        const handled = yield* Cache.getOption(handledFallbackEvents, fallbackKey);
+        if (Option.isNone(handled)) {
+          yield* Cache.set(handledFallbackEvents, fallbackKey, true);
+          const fallback = yield* attemptProviderFallback({
+            threadId: thread.id,
+            currentInstanceId: fallbackInstanceId,
+            modelSelection: thread.modelSelection,
+            runtimeMode: thread.runtimeMode,
+            sendTurnInput: {
+              threadId: thread.id,
+              input: "Continue.",
+              modelSelection: thread.modelSelection,
+              interactionMode: thread.interactionMode,
+            },
+            failure: fallbackFailure,
+            requireCompatibleContinuation: true,
+            createdAt: now,
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("provider runtime fallback attempt failed", {
+                eventId: event.eventId,
+                eventType: event.type,
+                threadId: thread.id,
+                cause: Cause.pretty(cause),
+              }).pipe(Effect.as({ switched: false, skipped: [] })),
+            ),
+          );
+          if (fallback.switched) return;
+        }
+      }
 
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
