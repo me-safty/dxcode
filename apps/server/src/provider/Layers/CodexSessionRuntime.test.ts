@@ -222,7 +222,7 @@ describe("hasConfiguredMcpServer", () => {
 
 describe("codexSessionAppServerArgs", () => {
   it("keeps the app-server subcommand when explicit args are provided", () => {
-    assert.deepStrictEqual(codexSessionAppServerArgs(["-c", "model=gpt-5"], undefined), [
+    NodeAssert.deepStrictEqual(codexSessionAppServerArgs(["-c", "model=gpt-5"], undefined), [
       "app-server",
       "-c",
       "model=gpt-5",

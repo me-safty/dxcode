@@ -745,7 +745,7 @@ export const makeCodexSessionRuntime = (
         Effect.mapError(
           (cause) =>
             new CodexErrors.CodexAppServerSpawnError({
-              command: `${options.binaryPath} ${appServerArgs.join(" ")}`,
+              command: `${options.binaryPath} app-server`,
               cause,
             }),
         ),

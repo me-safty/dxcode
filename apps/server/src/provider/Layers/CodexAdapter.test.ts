@@ -386,8 +386,8 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       });
 
       const runtime = runtimeFactory.lastRuntime;
-      assert.ok(runtime);
-      assert.equal(runtime.options.launchArgs, "--strict-config --enable foo");
+      NodeAssert.ok(runtime);
+      NodeAssert.equal(runtime.options.launchArgs, "--strict-config --enable foo");
     }).pipe(Effect.provide(layer));
   });
 
