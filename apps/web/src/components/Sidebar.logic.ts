@@ -6,16 +6,20 @@ import {
   toSortableTimestamp,
   type ThreadSortInput,
 } from "../lib/threadSort";
-import type { Project, SidebarThreadSummary, Thread } from "../types";
+import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ProjectId, ScopedThreadRef } from "@t3tools/contracts";
-import type { T3HostVscodeWorkspaceBootstrap } from "@t3tools/contracts";
+import { resolveServerBackedAppStageLabel } from "../branding.logic";
+
+export {
+  filterProjectsForVscodeScope,
+  resolveVscodeInitialThreadRef,
+  resolveVscodeProjectScope,
+} from "@t3tools/client-runtime/environment";
+export type { VscodeProjectScope } from "@t3tools/client-runtime/environment";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
-const NIGHTLY_SERVER_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/;
 // Visible sidebar rows are prewarmed into the thread-detail cache so opening a
 // nearby thread usually reuses an already-hot subscription.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
@@ -26,83 +30,23 @@ type SidebarProject = {
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
 };
-export type VscodeProjectScope = {
-  environmentId: EnvironmentId | null;
-  projectId?: ProjectId | null | undefined;
-  projectIds?: readonly ProjectId[] | null | undefined;
-  activeProjectId?: ProjectId | null | undefined;
-  cwd?: string | null | undefined;
-  cwds?: readonly string[] | null | undefined;
-};
 
-type VscodeBootstrapProject = {
-  readonly projectId: ProjectId;
-  readonly cwd: string;
-  readonly isActive?: boolean;
-};
-
-export function resolveVscodeProjectScope(input: {
-  readonly serverWelcome:
-    | {
-        readonly environment: { readonly environmentId: EnvironmentId };
-        readonly bootstrapProjectId?: ProjectId | null | undefined;
-        readonly bootstrapProjects?: readonly VscodeBootstrapProject[] | null | undefined;
-        readonly cwd?: string | null | undefined;
-      }
-    | null
-    | undefined;
-  readonly serverConfig:
-    | {
-        readonly environment: { readonly environmentId: EnvironmentId };
-        readonly cwd?: string | null | undefined;
-      }
-    | null
-    | undefined;
-  readonly vscodeWorkspaceBootstrap?: T3HostVscodeWorkspaceBootstrap | null | undefined;
-  readonly fallbackEnvironmentId?: EnvironmentId | null | undefined;
-}): VscodeProjectScope {
-  const bootstrapProjects = input.serverWelcome?.bootstrapProjects ?? null;
-  const vscodeBootstrapProjects = input.vscodeWorkspaceBootstrap?.bootstrapProjects ?? null;
-  const bootstrapProjectId = input.serverWelcome?.bootstrapProjectId ?? null;
-  const firstVscodeProjectId = vscodeBootstrapProjects?.[0]?.projectId;
-  const activeBootstrapProjectId =
-    bootstrapProjects?.find((project) => project.isActive)?.projectId ??
-    vscodeBootstrapProjects?.find((project) => project.isActive)?.projectId ??
-    bootstrapProjectId ??
-    firstVscodeProjectId;
-
-  return {
-    environmentId:
-      input.serverWelcome?.environment.environmentId ??
-      input.serverConfig?.environment.environmentId ??
-      input.vscodeWorkspaceBootstrap?.environmentId ??
-      input.fallbackEnvironmentId ??
-      null,
-    projectId: bootstrapProjectId ?? firstVscodeProjectId ?? null,
-    projectIds:
-      bootstrapProjects?.map((project) => project.projectId) ??
-      vscodeBootstrapProjects?.map((project) => project.projectId) ??
-      null,
-    activeProjectId: activeBootstrapProjectId,
-    cwd: input.serverConfig?.cwd ?? input.serverWelcome?.cwd ?? null,
-    cwds:
-      bootstrapProjects?.map((project) => project.cwd) ??
-      vscodeBootstrapProjects?.map((project) => project.cwd) ??
-      null,
-  };
-}
-
-export type SidebarThreadParentRelation = {
-  readonly kind: string;
-  readonly parentThreadId?: string | undefined;
-  readonly depth?: number | undefined;
-  readonly status?: string | undefined;
-  readonly [key: string]: unknown;
+type SidebarThreadParentRelationInput = {
+  readonly parentRelation?: { readonly kind: string } | null | undefined;
 };
 
 type SidebarThreadVisibilityInput = {
   readonly id: string;
-  readonly parentRelation?: SidebarThreadParentRelation | null | undefined;
+  readonly parentRelation?:
+    | {
+        readonly kind: string;
+        readonly parentThreadId?: string | undefined;
+        readonly parentActivitySequence?: number | undefined;
+        readonly depth?: number | undefined;
+        readonly status?: string | undefined;
+      }
+    | null
+    | undefined;
   readonly session?: { readonly status: string } | null | undefined;
 };
 
@@ -168,10 +112,7 @@ export function resolveSidebarStageBadgeLabel(input: {
   primaryServerVersion: string | null | undefined;
   fallbackStageLabel: string;
 }): string {
-  return input.primaryServerVersion &&
-    NIGHTLY_SERVER_VERSION_PATTERN.test(input.primaryServerVersion)
-    ? "Nightly"
-    : input.fallbackStageLabel;
+  return resolveServerBackedAppStageLabel(input);
 }
 
 export function createThreadJumpHintVisibilityController(input: {
@@ -385,37 +326,64 @@ export function getVisibleSidebarThreadIds<TThreadId>(
   );
 }
 
-function readSidebarThreadParentRelation(thread: unknown): SidebarThreadParentRelation | null {
-  if (thread === null || typeof thread !== "object" || !("parentRelation" in thread)) {
-    return null;
-  }
-  const relation = (thread as { readonly parentRelation?: unknown }).parentRelation;
-  if (relation === null || typeof relation !== "object") {
-    return null;
-  }
-  const kind = (relation as { readonly kind?: unknown }).kind;
-  if (typeof kind !== "string") {
-    return null;
-  }
-  return relation as SidebarThreadParentRelation;
-}
-
-export function isRootSidebarThread<T>(thread: T): boolean {
-  return readSidebarThreadParentRelation(thread)?.kind !== "subagent";
+export function isRootSidebarThread<T extends SidebarThreadParentRelationInput>(
+  thread: T,
+): boolean {
+  return thread.parentRelation?.kind !== "subagent";
 }
 
 export function isContextualSubagentSidebarThread<T extends SidebarThreadVisibilityInput>(
   thread: T,
   activeThreadId: string | null | undefined,
 ): boolean {
-  const parentRelation = readSidebarThreadParentRelation(thread);
-  if (parentRelation?.kind !== "subagent") {
+  if (thread.parentRelation?.kind !== "subagent") {
     return false;
   }
   if (activeThreadId !== null && activeThreadId !== undefined && thread.id === activeThreadId) {
     return true;
   }
-  return parentRelation.status === "running" || thread.session?.status === "running";
+  return thread.parentRelation.status === "running" || thread.session?.status === "running";
+}
+
+function activeSubagentPathThreadIds<T extends SidebarThreadVisibilityInput>(
+  threads: readonly T[],
+  activeThreadId: string | null | undefined,
+): Set<string> {
+  const path = new Set<string>();
+  if (activeThreadId === null || activeThreadId === undefined) {
+    return path;
+  }
+
+  const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
+  let current = threadById.get(activeThreadId) ?? null;
+  while (current) {
+    if (path.has(current.id)) {
+      break;
+    }
+    path.add(current.id);
+    const relation = current.parentRelation;
+    current =
+      relation?.kind === "subagent" && relation.parentThreadId
+        ? (threadById.get(relation.parentThreadId) ?? null)
+        : null;
+  }
+  return path;
+}
+
+function compareSubagentSidebarRows<T extends SidebarThreadVisibilityInput>(
+  left: SidebarThreadRowModel<T>,
+  right: SidebarThreadRowModel<T>,
+): number {
+  const leftRelation =
+    left.thread.parentRelation?.kind === "subagent" ? left.thread.parentRelation : null;
+  const rightRelation =
+    right.thread.parentRelation?.kind === "subagent" ? right.thread.parentRelation : null;
+  const sequence =
+    (leftRelation?.parentActivitySequence ?? 0) - (rightRelation?.parentActivitySequence ?? 0);
+  if (sequence !== 0) {
+    return sequence;
+  }
+  return left.thread.id.localeCompare(right.thread.id);
 }
 
 export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
@@ -423,47 +391,65 @@ export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
   activeThreadId: string | null | undefined,
 ): SidebarThreadRowModel<T>[] {
   const rootRows: SidebarThreadRowModel<T>[] = [];
-  const childRowsByParentId = new Map<string, SidebarThreadRowModel<T>[]>();
+  const childRowsByParentId = new Map<
+    string,
+    { row: SidebarThreadRowModel<T>; visible: boolean }[]
+  >();
   const orphanChildRows: SidebarThreadRowModel<T>[] = [];
+  const activePathThreadIds = activeSubagentPathThreadIds(threads, activeThreadId);
 
   for (const thread of threads) {
     if (isRootSidebarThread(thread)) {
       rootRows.push({ thread, indentLevel: 0 });
       continue;
     }
-    if (!isContextualSubagentSidebarThread(thread, activeThreadId)) {
-      continue;
-    }
+    const visible =
+      activePathThreadIds.has(thread.id) ||
+      isContextualSubagentSidebarThread(thread, activeThreadId);
 
-    const parentRelation = readSidebarThreadParentRelation(thread);
-    const indentLevel = Math.max(1, parentRelation?.depth ?? 1);
+    const indentLevel = Math.max(1, thread.parentRelation?.depth ?? 1);
     const row = { thread, indentLevel };
-    const parentThreadId = parentRelation?.parentThreadId;
+    const parentThreadId = thread.parentRelation?.parentThreadId;
     if (!parentThreadId) {
-      orphanChildRows.push(row);
+      if (visible) {
+        orphanChildRows.push(row);
+      }
       continue;
     }
     const existing = childRowsByParentId.get(parentThreadId);
     if (existing) {
-      existing.push(row);
+      existing.push({ row, visible });
     } else {
-      childRowsByParentId.set(parentThreadId, [row]);
+      childRowsByParentId.set(parentThreadId, [{ row, visible }]);
     }
+  }
+  for (const children of childRowsByParentId.values()) {
+    children.sort((left, right) => compareSubagentSidebarRows(left.row, right.row));
   }
 
   const rows: SidebarThreadRowModel<T>[] = [];
   const renderedChildThreadIds = new Set<string>();
-  for (const row of rootRows) {
+  const appendRow = (row: SidebarThreadRowModel<T>) => {
     rows.push(row);
+    appendChildren(row);
+  };
+  const appendChildren = (row: SidebarThreadRowModel<T>) => {
     const childRows = childRowsByParentId.get(row.thread.id) ?? [];
-    rows.push(...childRows);
-    for (const childRow of childRows) {
-      renderedChildThreadIds.add(childRow.thread.id);
+    for (const child of childRows) {
+      renderedChildThreadIds.add(child.row.thread.id);
+      if (child.visible) {
+        appendRow(child.row);
+      } else {
+        appendChildren(child.row);
+      }
     }
+  };
+  for (const row of rootRows) {
+    appendRow(row);
   }
-  for (const row of [...childRowsByParentId.values()].flat()) {
-    if (!renderedChildThreadIds.has(row.thread.id)) {
-      rows.push(row);
+  for (const child of [...childRowsByParentId.values()].flat()) {
+    if (child.visible && !renderedChildThreadIds.has(child.row.thread.id)) {
+      appendRow(child.row);
     }
   }
   rows.push(...orphanChildRows);
@@ -475,99 +461,6 @@ export function getSidebarThreadIdsToPrewarm<TThreadId>(
   limit = SIDEBAR_THREAD_PREWARM_LIMIT,
 ): TThreadId[] {
   return visibleThreadIds.slice(0, Math.max(0, limit));
-}
-
-export function filterProjectsForVscodeScope<
-  TProject extends Pick<Project, "environmentId" | "id"> & { readonly workspaceRoot: string },
->(projects: readonly TProject[], scope: VscodeProjectScope): TProject[] {
-  if (!scope.environmentId) {
-    return [];
-  }
-
-  return projects.filter((project) => {
-    if (project.environmentId !== scope.environmentId) {
-      return false;
-    }
-    if (scope.projectIds && scope.projectIds.length > 0) {
-      return scope.projectIds.includes(project.id);
-    }
-    if (scope.projectId) {
-      return project.id === scope.projectId;
-    }
-    if (scope.cwds && scope.cwds.length > 0) {
-      return scope.cwds.includes(project.workspaceRoot);
-    }
-    return Boolean(scope.cwd) && project.workspaceRoot === scope.cwd;
-  });
-}
-
-export function resolveVscodeInitialThreadRef(input: {
-  threads: readonly SidebarThreadSummary[];
-  threadLastVisitedAtById: Readonly<Record<string, string>>;
-  scope: VscodeProjectScope;
-}): ScopedThreadRef | null {
-  if (!input.scope.environmentId) {
-    return null;
-  }
-  const scopedProjectIds =
-    input.scope.projectIds && input.scope.projectIds.length > 0
-      ? input.scope.projectIds
-      : input.scope.projectId
-        ? [input.scope.projectId]
-        : [];
-  if (scopedProjectIds.length === 0) {
-    return null;
-  }
-
-  const allCandidates = input.threads.filter(
-    (thread) =>
-      thread.environmentId === input.scope.environmentId &&
-      scopedProjectIds.includes(thread.projectId) &&
-      thread.archivedAt === null,
-  );
-  const activeProjectId = input.scope.activeProjectId ?? input.scope.projectId ?? null;
-  const activeCandidates = activeProjectId
-    ? allCandidates.filter((thread) => thread.projectId === activeProjectId)
-    : [];
-  const candidates = activeCandidates.length > 0 ? activeCandidates : allCandidates;
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const sorted = candidates.toSorted((left, right) => {
-    if (activeProjectId && left.projectId !== right.projectId) {
-      if (left.projectId === activeProjectId) {
-        return -1;
-      }
-      if (right.projectId === activeProjectId) {
-        return 1;
-      }
-    }
-
-    const leftVisitedAt =
-      toSortableTimestamp(
-        input.threadLastVisitedAtById[scopedThreadKey(scopeThreadRef(left.environmentId, left.id))],
-      ) ?? Number.NEGATIVE_INFINITY;
-    const rightVisitedAt =
-      toSortableTimestamp(
-        input.threadLastVisitedAtById[
-          scopedThreadKey(scopeThreadRef(right.environmentId, right.id))
-        ],
-      ) ?? Number.NEGATIVE_INFINITY;
-    if (leftVisitedAt !== rightVisitedAt) {
-      return rightVisitedAt - leftVisitedAt;
-    }
-
-    const rightTimestamp = getThreadSortTimestamp(right, "updated_at");
-    const leftTimestamp = getThreadSortTimestamp(left, "updated_at");
-    if (rightTimestamp !== leftTimestamp) {
-      return rightTimestamp - leftTimestamp;
-    }
-
-    return right.id.localeCompare(left.id);
-  });
-  const thread = sorted[0];
-  return thread ? scopeThreadRef(thread.environmentId, thread.id) : null;
 }
 
 export function resolveAdjacentThreadId<T>(input: {
@@ -635,6 +528,19 @@ export function resolveThreadRowClassName(input: {
   }
 
   return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
+}
+
+export function resolveThreadRowIndentStyle(input: {
+  indentLevel: number;
+  flattenHierarchyChrome: boolean;
+}): React.CSSProperties | undefined {
+  if (input.flattenHierarchyChrome || input.indentLevel <= 0) {
+    return undefined;
+  }
+
+  return {
+    paddingLeft: `${1.25 + (input.indentLevel - 1) * 0.875}rem`,
+  };
 }
 
 export function resolveThreadListClassName(input: { hideThreadGroupRail: boolean }): string {

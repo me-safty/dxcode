@@ -41,11 +41,11 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import {
   type ContextMenuItem,
+  DEFAULT_SERVER_SETTINGS,
   ProjectId,
   type ScopedThreadRef,
   type ResolvedKeybindingsConfig,
   type SidebarProjectGroupingMode,
-  type ThreadEnvMode,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -55,12 +55,13 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
+import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
   MIN_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -72,11 +73,13 @@ import { isElectron, isVscodeWebview } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isMacPlatform } from "../lib/utils";
+import { cn, isMacPlatform } from "../lib/utils";
 import {
   readThreadShell,
   useProject,
   useProjects,
+  useThreadShell,
+  useServerConfigs,
   useThreadShells,
   useThreadShellsForProjectRefs,
 } from "../state/entities";
@@ -192,6 +195,7 @@ import {
   resolveVscodeProjectScope,
   resolveThreadListClassName,
   resolveThreadRowClassName,
+  resolveThreadRowIndentStyle,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
@@ -206,7 +210,7 @@ import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
-import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
+import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import {
   primaryServerConfigAtom,
   primaryServerKeybindingsAtom,
@@ -241,12 +245,28 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   easing: "ease-out",
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
+function getSidebarThreadKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id">): string {
+  return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+}
+
+function includeSidebarThreadByKey(
+  threads: readonly SidebarThreadSummary[],
+  thread: SidebarThreadSummary | null | undefined,
+): readonly SidebarThreadSummary[] {
+  if (!thread) {
+    return threads;
+  }
+  const key = getSidebarThreadKey(thread);
+  return threads.some((candidate) => getSidebarThreadKey(candidate) === key)
+    ? threads
+    : [...threads, thread];
+}
+
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
 };
-
 const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
   "inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 const VSCODE_BOOTSTRAP_FALLBACK_PROJECT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
@@ -745,7 +765,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
-        })} ${indentLevel > 0 && !flattenHierarchyChrome ? "pl-5" : ""} relative isolate`}
+        })} relative isolate`}
+        style={resolveThreadRowIndentStyle({ indentLevel, flattenHierarchyChrome })}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
@@ -1148,6 +1169,7 @@ interface SidebarProjectItemProps {
   dragHandleProps: SortableProjectHandleProps | null;
   hideProjectChrome: boolean;
   projectThreadsOverride?: readonly SidebarThreadSummary[] | undefined;
+  activeRouteThread?: SidebarThreadSummary | null | undefined;
 }
 
 const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjectItemProps) {
@@ -1170,20 +1192,19 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     dragHandleProps,
     hideProjectChrome,
     projectThreadsOverride,
+    activeRouteThread,
   } = props;
-  const threadSortOrder = useSettings<SidebarThreadSortOrder>(
+  const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   );
-  const appSettingsConfirmThreadDelete = useSettings<boolean>(
+  const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   );
-  const appSettingsConfirmThreadArchive = useSettings<boolean>(
+  const appSettingsConfirmThreadArchive = useClientSettings<boolean>(
     (settings) => settings.confirmThreadArchive,
   );
-  const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
-    (settings) => settings.defaultThreadEnvMode,
-  );
-  const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const serverConfigs = useServerConfigs();
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
   });
@@ -1193,8 +1214,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  const updateSettings = useUpdateSettings();
-  const sidebarThreadPreviewCount = useSettings<SidebarThreadPreviewCount>(
+  const updateSettings = useUpdateClientSettings();
+  const sidebarThreadPreviewCount = useClientSettings<SidebarThreadPreviewCount>(
     (settings) => settings.sidebarThreadPreviewCount,
   );
   const router = useRouter();
@@ -1248,7 +1269,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   });
   const openPrLink = useOpenPrLink();
   const projectThreadShells = useThreadShellsForProjectRefs(project.memberProjectRefs);
-  const projectThreads = projectThreadsOverride ?? projectThreadShells;
+  const projectThreads = useMemo(
+    () =>
+      includeSidebarThreadByKey(projectThreadsOverride ?? projectThreadShells, activeRouteThread),
+    [activeRouteThread, projectThreadShells, projectThreadsOverride],
+  );
   const activeRouteThreadId = useMemo(
     () =>
       activeRouteThreadKey ? (parseScopedThreadKey(activeRouteThreadKey)?.threadId ?? null) : null,
@@ -1637,7 +1662,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   console.error("Failed to remove project", {
                     projectId: member.id,
                     environmentId: member.environmentId,
-                    error,
+                    ...safeErrorLogAttributes(error),
                   });
                   toastManager.add(
                     stackedThreadToast({
@@ -1672,7 +1697,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         console.error("Failed to remove project", {
           projectId: member.id,
           environmentId: member.environmentId,
-          error,
+          ...safeErrorLogAttributes(error),
         });
         toastManager.add(
           stackedThreadToast({
@@ -1957,7 +1982,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const seedContext = resolveSidebarNewThreadSeedContext({
         projectId: member.id,
         defaultEnvMode: resolveSidebarNewThreadEnvMode({
-          defaultEnvMode: defaultThreadEnvMode,
+          defaultEnvMode:
+            serverConfigs.get(member.environmentId)?.settings.defaultThreadEnvMode ??
+            DEFAULT_SERVER_SETTINGS.defaultThreadEnvMode,
         }),
         activeThread:
           currentActiveThread && currentActiveThread.projectId === member.id
@@ -2006,7 +2033,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         }
       })();
     },
-    [defaultThreadEnvMode, handleNewThread, isMobile, router, setOpenMobile],
+    [handleNewThread, isMobile, router, serverConfigs, setOpenMobile],
   );
 
   const handleCreateThreadClick = useCallback(
@@ -2794,31 +2821,27 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }: {
   isElectron: boolean;
 }) {
+  const navigate = useNavigate();
   const primaryServerVersion =
     useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
   const stageBadgeLabel = resolveSidebarStageBadgeLabel({
     primaryServerVersion,
     fallbackStageLabel: APP_STAGE_LABEL,
   });
+  const handleHomeClick = useCallback(() => {
+    void navigate({ to: "/" });
+  }, [navigate]);
   const wordmark = (
     <div className="flex items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
+      <SidebarTrigger className={cn("shrink-0", isVscodeWebview ? "" : "md:hidden")} />
       <Tooltip>
         <TooltipTrigger
           render={
-            <Link
+            <SidebarHomeButton
               aria-label="Go to threads"
-              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
-              to="/"
-            >
-              <T3Wordmark />
-              <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
-                Code
-              </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {stageBadgeLabel}
-              </span>
-            </Link>
+              onClick={handleHomeClick}
+              stageBadgeLabel={stageBadgeLabel}
+            />
           }
         />
         <TooltipPopup side="bottom" sideOffset={2}>
@@ -2836,6 +2859,33 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
     <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">{wordmark}</SidebarHeader>
   );
 });
+
+export function SidebarHomeButton({
+  className,
+  stageBadgeLabel = APP_STAGE_LABEL,
+  ...props
+}: React.ComponentProps<"button"> & {
+  readonly stageBadgeLabel?: string;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md bg-transparent p-0 text-left outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2",
+        className,
+      )}
+      {...props}
+    >
+      <T3Wordmark />
+      <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
+        Code
+      </span>
+      <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+        {stageBadgeLabel}
+      </span>
+    </button>
+  );
+}
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
@@ -2877,7 +2927,7 @@ interface SidebarProjectsContentProps {
   threadSortOrder: SidebarThreadSortOrder;
   projectGroupingMode: SidebarProjectGroupingMode;
   threadPreviewCount: SidebarThreadPreviewCount;
-  updateSettings: ReturnType<typeof useUpdateSettings>;
+  updateSettings: ReturnType<typeof useUpdateClientSettings>;
   openAddProject: () => void;
   isManualProjectSorting: boolean;
   projectDnDSensors: ReturnType<typeof useSensors>;
@@ -2893,6 +2943,7 @@ interface SidebarProjectsContentProps {
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
+  routeThread: SidebarThreadSummary | null;
   newThreadShortcutLabel: string | null;
   commandPaletteShortcutLabel: string | null;
   threadJumpLabelByKey: ReadonlyMap<string, string>;
@@ -2936,6 +2987,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     expandedThreadListsByProject,
     activeRouteProjectKey,
     routeThreadKey,
+    routeThread,
     newThreadShortcutLabel,
     commandPaletteShortcutLabel,
     threadJumpLabelByKey,
@@ -3093,6 +3145,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         activeRouteThreadKey={
                           activeRouteProjectKey === project.projectKey ? routeThreadKey : null
                         }
+                        activeRouteThread={
+                          activeRouteProjectKey === project.projectKey ? routeThread : null
+                        }
                         newThreadShortcutLabel={newThreadShortcutLabel}
                         handleNewThread={handleNewThread}
                         archiveThread={archiveThread}
@@ -3130,6 +3185,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
                 activeRouteThreadKey={
                   activeRouteProjectKey === project.projectKey ? routeThreadKey : null
+                }
+                activeRouteThread={
+                  activeRouteProjectKey === project.projectKey ? routeThread : null
                 }
                 newThreadShortcutLabel={newThreadShortcutLabel}
                 handleNewThread={handleNewThread}
@@ -3175,12 +3233,12 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
-  const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
-  const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
-  const sidebarProjectGroupingMode = useSettings((s) => s.sidebarProjectGroupingMode);
-  const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
-  const sidebarThreadPreviewCount = useSettings((s) => s.sidebarThreadPreviewCount);
-  const updateSettings = useUpdateSettings();
+  const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
+  const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarProjectGroupingMode = useClientSettings((s) => s.sidebarProjectGroupingMode);
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount);
+  const updateSettings = useUpdateClientSettings();
   const handleNewThread = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -3189,6 +3247,7 @@ export default function Sidebar() {
     select: (params) => resolveThreadRouteRef(params),
   });
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  const routeThread = useThreadShell(routeThreadRef);
   const routeTerminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
@@ -3216,14 +3275,9 @@ export default function Sidebar() {
   const vscodeProjectScope = useMemo(
     () =>
       isVscodeWebview
-        ? resolveVscodeProjectScope({
-            serverConfig,
-            serverWelcome,
-            vscodeWorkspaceBootstrap,
-            fallbackEnvironmentId: primaryEnvironmentId,
-          })
+        ? resolveVscodeProjectScope({ serverConfig, serverWelcome, vscodeWorkspaceBootstrap })
         : null,
-    [primaryEnvironmentId, serverConfig, serverWelcome, vscodeWorkspaceBootstrap],
+    [serverConfig, serverWelcome, vscodeWorkspaceBootstrap],
   );
   const projects = useMemo(
     () =>
@@ -3243,17 +3297,24 @@ export default function Sidebar() {
       ),
     [projects],
   );
-  const scopedSidebarThreads = useMemo(
-    () =>
-      vscodeProjectScope
-        ? allSidebarThreads.filter((thread) =>
-            visibleProjectKeys.has(
-              scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
-            ),
-          )
-        : allSidebarThreads,
-    [allSidebarThreads, visibleProjectKeys, vscodeProjectScope],
-  );
+  const scopedSidebarThreads = useMemo(() => {
+    const scopedThreads = vscodeProjectScope
+      ? allSidebarThreads.filter((thread) =>
+          visibleProjectKeys.has(
+            scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+          ),
+        )
+      : allSidebarThreads;
+    const scopedRouteThread =
+      routeThread &&
+      (!vscodeProjectScope ||
+        visibleProjectKeys.has(
+          scopedProjectKey(scopeProjectRef(routeThread.environmentId, routeThread.projectId)),
+        ))
+        ? routeThread
+        : null;
+    return includeSidebarThreadByKey(scopedThreads, scopedRouteThread);
+  }, [allSidebarThreads, routeThread, visibleProjectKeys, vscodeProjectScope]);
   const rootSidebarThreads = useMemo(
     () => scopedSidebarThreads.filter(isRootSidebarThread),
     [scopedSidebarThreads],
@@ -3835,6 +3896,7 @@ export default function Sidebar() {
             expandedThreadListsByProject={expandedThreadListsByProject}
             activeRouteProjectKey={activeRouteProjectKey}
             routeThreadKey={routeThreadKey}
+            routeThread={routeThread}
             newThreadShortcutLabel={newThreadShortcutLabel}
             commandPaletteShortcutLabel={commandPaletteShortcutLabel}
             threadJumpLabelByKey={visibleThreadJumpLabelByKey}
