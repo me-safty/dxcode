@@ -1738,12 +1738,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           sequence: session.eventSequence,
           message,
         });
-      yield* Effect.logError("failed to start terminal", {
-        threadId: session.threadId,
-        terminalId: session.terminalId,
-        cause: error,
-        ...(startedShell ? { shell: startedShell } : {}),
-      });
+        yield* Effect.logError("failed to start terminal", {
+          threadId: session.threadId,
+          terminalId: session.terminalId,
+          cause: error,
+          ...(startedShell ? { shell: startedShell } : {}),
+        });
       }
     });
 

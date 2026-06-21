@@ -16,7 +16,6 @@ import {
   isWindowsCommandNotFound,
   ProcessOutputLimitError,
   ProcessRunner,
-  ProcessTimeoutError,
   layer as ProcessRunnerLive,
   type ProcessRunInput,
 } from "./processRunner.ts";
