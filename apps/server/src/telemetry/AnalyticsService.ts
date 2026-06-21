@@ -1,18 +1,21 @@
 /**
- * Anonymous PostHog telemetry service.
+ * Opt-in anonymous PostHog telemetry service.
  *
- * Persists an installation-scoped anonymous identifier, buffers events in
- * memory, and flushes batches over Effect's HTTP client.
+ * When enabled, persists an installation-scoped anonymous identifier, buffers
+ * events in memory, and flushes batches over Effect's HTTP client.
  *
  * @module AnalyticsService
  */
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -20,6 +23,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
+import * as ServerSettingsModule from "../serverSettings.ts";
 import { getTelemetryIdentifier } from "./Identify.ts";
 
 interface BufferedAnalyticsEvent {
@@ -35,7 +39,7 @@ const TelemetryEnvConfig = Config.all({
   posthogHost: Config.string("T3CODE_POSTHOG_HOST").pipe(
     Config.withDefault("https://us.i.posthog.com"),
   ),
-  enabled: Config.boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.withDefault(true)),
+  telemetryEnvEnabled: Config.boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.option),
   flushBatchSize: Config.number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
   maxBufferedEvents: Config.number("T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
     Config.withDefault(1_000),
@@ -68,13 +72,57 @@ export class AnalyticsService extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const telemetryConfig = yield* TelemetryEnvConfig;
+
   const httpClient = yield* HttpClient.HttpClient;
   const serverConfig = yield* ServerConfig.ServerConfig;
-  const identifier = yield* getTelemetryIdentifier;
+  const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+  const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const bufferRef = yield* Ref.make<ReadonlyArray<BufferedAnalyticsEvent>>([]);
   const clientType = serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
   const hostPlatform = yield* HostProcessPlatform;
   const hostArchitecture = yield* HostProcessArchitecture;
+
+  yield* serverSettings.start.pipe(
+    Effect.catch((cause) =>
+      Effect.logDebug("Failed to start telemetry settings watcher", { cause }),
+    ),
+  );
+
+  const telemetryEnvEnabled = telemetryConfig.telemetryEnvEnabled;
+  const telemetryEnvExplicitlyDisabled =
+    Option.isSome(telemetryEnvEnabled) && telemetryEnvEnabled.value === false;
+
+  if (Option.isSome(telemetryEnvEnabled) && telemetryEnvEnabled.value === true) {
+    yield* serverSettings.getSettings.pipe(
+      Effect.flatMap((settings) =>
+        settings.telemetryPreferenceSet || settings.telemetryEnabled
+          ? Effect.void
+          : serverSettings
+              .updateSettings({ telemetryEnabled: true, telemetryPreferenceSet: true })
+              .pipe(Effect.asVoid),
+      ),
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to seed telemetry setting from environment", { cause }),
+      ),
+    );
+  }
+
+  const isTelemetryEnabled = Effect.fn("isTelemetryEnabled")(function* () {
+    if (telemetryEnvExplicitlyDisabled) {
+      return false;
+    }
+    return yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.telemetryEnabled),
+    );
+  });
+  const resolveTelemetryIdentifier = getTelemetryIdentifier.pipe(
+    Effect.provideService(Crypto.Crypto, crypto),
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(ServerConfig.ServerConfig, serverConfig),
+  );
 
   const enqueueBufferedEvent = (event: string, properties?: Readonly<Record<string, unknown>>) =>
     Effect.flatMap(DateTime.now, (now) =>
@@ -106,7 +154,15 @@ export const make = Effect.gen(function* () {
   const sendBatch = Effect.fn("AnalyticsService.sendBatch")(function* (
     events: ReadonlyArray<BufferedAnalyticsEvent>,
   ) {
-    if (!telemetryConfig.enabled || !identifier) return;
+    if (!(yield* isTelemetryEnabled())) {
+      return;
+    }
+
+    const identifier = yield* resolveTelemetryIdentifier;
+    if (!identifier) {
+      yield* Effect.logDebug("Skipping telemetry batch; identifier unavailable");
+      return;
+    }
 
     const payload = {
       api_key: telemetryConfig.posthogKey,
@@ -135,6 +191,16 @@ export const make = Effect.gen(function* () {
 
   const flush: AnalyticsService["Service"]["flush"] = Effect.gen(function* () {
     while (true) {
+      if (!(yield* isTelemetryEnabled())) {
+        yield* Ref.set(bufferRef, []);
+        return;
+      }
+
+      const bufferedEvents = yield* Ref.get(bufferRef);
+      if (bufferedEvents.length === 0) {
+        return;
+      }
+
       const batch = yield* Ref.modify(bufferRef, (current) => {
         if (current.length === 0) {
           return [[] as ReadonlyArray<BufferedAnalyticsEvent>, current] as const;
@@ -148,6 +214,25 @@ export const make = Effect.gen(function* () {
         return;
       }
 
+      const telemetryEnabledAfterDequeue = yield* isTelemetryEnabled().pipe(
+        Effect.catch((error) =>
+          Ref.update(bufferRef, (current) => [...batch, ...current]).pipe(
+            Effect.flatMap(() => Effect.fail(error)),
+          ),
+        ),
+      );
+      if (!telemetryEnabledAfterDequeue) {
+        yield* Ref.set(bufferRef, []);
+        return;
+      }
+
+      const identifier = yield* resolveTelemetryIdentifier;
+      if (!identifier) {
+        yield* Ref.update(bufferRef, (current) => [...batch, ...current]);
+        yield* Effect.logDebug("Deferring telemetry flush; identifier unavailable");
+        return;
+      }
+
       yield* sendBatch(batch).pipe(
         Effect.catch((error) =>
           Ref.update(bufferRef, (current) => [...batch, ...current]).pipe(
@@ -156,11 +241,16 @@ export const make = Effect.gen(function* () {
         ),
       );
     }
-  }).pipe(Effect.catch((cause) => Effect.logError("Failed to flush telemetry", { cause })));
+  }).pipe(Effect.catch((cause) => Effect.logDebug("Failed to flush telemetry", { cause })));
 
   const record: AnalyticsService["Service"]["record"] = Effect.fn("AnalyticsService.record")(
     function* (event, properties) {
-      if (!telemetryConfig.enabled || !identifier) return;
+      const telemetryEnabled = yield* isTelemetryEnabled().pipe(
+        Effect.catch((cause) =>
+          Effect.logDebug("Failed to read telemetry setting", { cause }).pipe(Effect.as(false)),
+        ),
+      );
+      if (!telemetryEnabled) return;
 
       const enqueueResult = yield* enqueueBufferedEvent(event, properties);
       if (enqueueResult.dropped) {

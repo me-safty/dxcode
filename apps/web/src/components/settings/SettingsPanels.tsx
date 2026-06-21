@@ -77,6 +77,7 @@ import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import {
   buildProviderInstanceUpdatePatch,
+  buildRestoreDefaultsPatch,
   formatDiagnosticsDescription,
 } from "./SettingsPanels.logic";
 import {
@@ -424,6 +425,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Delete confirmation"]
         : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
+      ...(settings.telemetryEnabled !== DEFAULT_UNIFIED_SETTINGS.telemetryEnabled ||
+      settings.telemetryPreferenceSet !== DEFAULT_UNIFIED_SETTINGS.telemetryPreferenceSet
+        ? ["Telemetry"]
+        : []),
     ],
     [
       isGitWritingModelDirty,
@@ -437,6 +442,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
+      settings.telemetryEnabled,
+      settings.telemetryPreferenceSet,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       theme,
@@ -454,23 +461,16 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     setTheme("system");
-    updateSettings({
-      timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
-      diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
-      diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
-      sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
-      autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
-      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
-      automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
-      defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-      newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-      addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-      confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
-      confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-      textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-    });
+    updateSettings(buildRestoreDefaultsPatch({ settings, isGitWritingModelDirty }));
     onRestored?.();
-  }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
+  }, [
+    changedSettingLabels,
+    isGitWritingModelDirty,
+    onRestored,
+    setTheme,
+    settings,
+    updateSettings,
+  ]);
 
   return {
     changedSettingLabels,
@@ -970,6 +970,34 @@ export function GeneralSettingsPanel() {
             <Button render={<Link to="/settings/diagnostics" />} size="xs" variant="outline">
               View diagnostics
             </Button>
+          }
+        />
+        <SettingsRow
+          title="Telemetry"
+          description="Share anonymous usage metadata. Chat content and file contents are not included."
+          resetAction={
+            settings.telemetryEnabled !== DEFAULT_UNIFIED_SETTINGS.telemetryEnabled ? (
+              <SettingResetButton
+                label="telemetry"
+                onClick={() =>
+                  updateSettings({
+                    telemetryEnabled: DEFAULT_UNIFIED_SETTINGS.telemetryEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.telemetryEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({
+                  telemetryEnabled: Boolean(checked),
+                  telemetryPreferenceSet: true,
+                })
+              }
+              aria-label="Share anonymous telemetry"
+            />
           }
         />
       </SettingsSection>

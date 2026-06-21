@@ -7,6 +7,8 @@ import { createModelSelection } from "./model.ts";
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 const decodeServerSettingsJson = Schema.decodeUnknownOption(ServerSettingsJson);
+const UnknownJson = fromLenientJson(Schema.Unknown);
+const decodeUnknownJson = Schema.decodeUnknownOption(UnknownJson);
 
 export interface PersistedServerObservabilitySettings {
   readonly otlpTracesUrl: string | undefined;
@@ -40,6 +42,29 @@ export function parsePersistedServerObservabilitySettings(
     return extractPersistedServerObservabilitySettings(decoded.value);
   }
   return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
+}
+
+export function normalizeDecodedPersistedServerSettings(
+  settings: ServerSettings,
+  raw: string,
+): ServerSettings {
+  const decodedRaw = decodeUnknownJson(raw);
+  if (
+    Option.isSome(decodedRaw) &&
+    decodedRaw.value !== null &&
+    typeof decodedRaw.value === "object" &&
+    Object.prototype.hasOwnProperty.call(decodedRaw.value, "telemetryEnabled")
+  ) {
+    const rawTelemetryEnabled = (decodedRaw.value as Record<string, unknown>).telemetryEnabled;
+    return {
+      ...settings,
+      ...(typeof rawTelemetryEnabled === "boolean"
+        ? { telemetryEnabled: rawTelemetryEnabled }
+        : {}),
+      telemetryPreferenceSet: true,
+    };
+  }
+  return settings;
 }
 
 function shouldReplaceTextGenerationModelSelection(
@@ -80,6 +105,14 @@ export function applyServerSettingsPatch(
   const next = deepMerge(current, patchForMerge);
   const nextWithReplacements = {
     ...next,
+    ...(patch.telemetryPreferenceSet === false &&
+    (patch.telemetryEnabled === undefined || patch.telemetryEnabled === false)
+      ? { telemetryPreferenceSet: false }
+      : current.telemetryPreferenceSet ||
+          patch.telemetryEnabled !== undefined ||
+          patch.telemetryPreferenceSet === true
+        ? { telemetryPreferenceSet: true }
+        : {}),
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
       : {}),

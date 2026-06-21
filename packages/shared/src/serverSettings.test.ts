@@ -9,6 +9,7 @@ import {
   applyServerSettingsPatch,
   extractPersistedServerObservabilitySettings,
   normalizePersistedServerSettingString,
+  normalizeDecodedPersistedServerSettings,
   parsePersistedServerObservabilitySettings,
 } from "./serverSettings.ts";
 
@@ -158,6 +159,116 @@ describe("serverSettings helpers", () => {
         { id: "variant", value: "prod" },
         { id: "agent", value: "build" },
       ],
+    });
+  });
+
+  it("marks telemetry preference set when telemetry is patched", () => {
+    expect(
+      applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+        telemetryEnabled: false,
+      }),
+    ).toMatchObject({
+      telemetryEnabled: false,
+      telemetryPreferenceSet: true,
+    });
+
+    expect(
+      applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+        telemetryEnabled: true,
+        telemetryPreferenceSet: false,
+      }),
+    ).toMatchObject({
+      telemetryEnabled: true,
+      telemetryPreferenceSet: true,
+    });
+  });
+
+  it("keeps telemetry preference sticky when the patch omits the marker", () => {
+    expect(
+      applyServerSettingsPatch(
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          telemetryEnabled: false,
+          telemetryPreferenceSet: true,
+        },
+        {
+          enableAssistantStreaming: true,
+        },
+      ),
+    ).toMatchObject({
+      telemetryEnabled: false,
+      telemetryPreferenceSet: true,
+    });
+  });
+
+  it("clears telemetry preference when the patch explicitly resets the marker", () => {
+    expect(
+      applyServerSettingsPatch(
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          telemetryEnabled: false,
+          telemetryPreferenceSet: true,
+        },
+        {
+          telemetryPreferenceSet: false,
+        },
+      ),
+    ).toMatchObject({
+      telemetryEnabled: false,
+      telemetryPreferenceSet: false,
+    });
+  });
+
+  it("clears telemetry preference when restore defaults resets telemetry", () => {
+    expect(
+      applyServerSettingsPatch(
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          telemetryEnabled: false,
+          telemetryPreferenceSet: true,
+        },
+        {
+          telemetryEnabled: false,
+          telemetryPreferenceSet: false,
+        },
+      ),
+    ).toMatchObject({
+      telemetryEnabled: false,
+      telemetryPreferenceSet: false,
+    });
+  });
+
+  it("treats persisted telemetryEnabled as an explicit preference", () => {
+    expect(
+      normalizeDecodedPersistedServerSettings(
+        { ...DEFAULT_SERVER_SETTINGS, telemetryEnabled: false, telemetryPreferenceSet: false },
+        '{ "telemetryEnabled": false }',
+      ),
+    ).toMatchObject({
+      telemetryEnabled: false,
+      telemetryPreferenceSet: true,
+    });
+
+    expect(
+      normalizeDecodedPersistedServerSettings(
+        { ...DEFAULT_SERVER_SETTINGS, telemetryEnabled: false, telemetryPreferenceSet: false },
+        '{ "telemetryEnabled": true }',
+      ),
+    ).toMatchObject({
+      telemetryEnabled: true,
+      telemetryPreferenceSet: true,
+    });
+  });
+
+  it("treats malformed persisted telemetryEnabled as an explicit preference", () => {
+    expect(
+      normalizeDecodedPersistedServerSettings(
+        { ...DEFAULT_SERVER_SETTINGS, telemetryEnabled: false, telemetryPreferenceSet: false },
+        '{ "telemetryEnabled": "false" }',
+      ),
+    ).toMatchObject({
+      telemetryEnabled: false,
+      telemetryPreferenceSet: true,
     });
   });
 

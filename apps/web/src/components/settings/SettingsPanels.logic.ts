@@ -6,6 +6,7 @@ import type {
   UnifiedSettings,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import * as Duration from "effect/Duration";
 
 function collapseOtelSignalsUrl(input: {
   readonly tracesUrl: string;
@@ -86,6 +87,63 @@ export function buildProviderInstanceUpdatePatch(input: {
     },
     ...(input.textGenerationModelSelection !== undefined
       ? { textGenerationModelSelection: input.textGenerationModelSelection }
+      : {}),
+  };
+}
+
+export function buildRestoreDefaultsPatch(input: {
+  readonly settings: UnifiedSettings;
+  readonly isGitWritingModelDirty: boolean;
+}): Partial<UnifiedSettings> {
+  return {
+    ...(input.settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
+      ? { timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat }
+      : {}),
+    ...(input.settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
+      ? { diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap }
+      : {}),
+    ...(input.settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
+      ? { diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace }
+      : {}),
+    ...(input.settings.sidebarThreadPreviewCount !==
+    DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
+      ? { sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount }
+      : {}),
+    ...(input.settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
+      ? { autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar }
+      : {}),
+    ...(input.settings.enableAssistantStreaming !==
+    DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
+      ? { enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming }
+      : {}),
+    ...(input.settings.telemetryEnabled !== DEFAULT_UNIFIED_SETTINGS.telemetryEnabled
+      ? { telemetryEnabled: DEFAULT_UNIFIED_SETTINGS.telemetryEnabled }
+      : {}),
+    ...(input.settings.telemetryPreferenceSet !== DEFAULT_UNIFIED_SETTINGS.telemetryPreferenceSet
+      ? { telemetryPreferenceSet: DEFAULT_UNIFIED_SETTINGS.telemetryPreferenceSet }
+      : {}),
+    ...(Duration.toMillis(input.settings.automaticGitFetchInterval) !==
+    Duration.toMillis(DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval)
+      ? { automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval }
+      : {}),
+    ...(input.settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
+      ? { defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode }
+      : {}),
+    ...(input.settings.newWorktreesStartFromOrigin !==
+    DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
+      ? { newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin }
+      : {}),
+    ...(input.settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
+      ? { addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory }
+      : {}),
+    ...(input.settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
+      ? { confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive }
+      : {}),
+    ...(input.settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
+      ? { confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete }
+      : {}),
+    ...(input.isGitWritingModelDirty
+      ? { textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection }
       : {}),
   };
 }

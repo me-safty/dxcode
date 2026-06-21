@@ -8,6 +8,15 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
+describe("ServerSettings.telemetryEnabled", () => {
+  it("defaults telemetry to disabled for legacy settings files", () => {
+    expect(DEFAULT_SERVER_SETTINGS.telemetryEnabled).toBe(false);
+    expect(DEFAULT_SERVER_SETTINGS.telemetryPreferenceSet).toBe(false);
+    expect(decodeServerSettings({}).telemetryEnabled).toBe(false);
+    expect(decodeServerSettings({}).telemetryPreferenceSet).toBe(false);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});
@@ -103,6 +112,15 @@ describe("ServerSettingsPatch.providerInstances", () => {
     });
     const ollamaId = ProviderInstanceId.make("ollama_local");
     expect(patch.providerInstances?.[ollamaId]?.driver).toBe("ollama");
+  });
+});
+
+describe("ServerSettingsPatch.telemetryEnabled", () => {
+  it("decodes telemetry opt-in patches", () => {
+    expect(decodeServerSettingsPatch({ telemetryEnabled: true }).telemetryEnabled).toBe(true);
+    expect(decodeServerSettingsPatch({ telemetryPreferenceSet: true }).telemetryPreferenceSet).toBe(
+      true,
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_UNIFIED_SETTINGS,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInstanceConfig,
@@ -7,6 +8,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import {
   buildProviderInstanceUpdatePatch,
+  buildRestoreDefaultsPatch,
   formatDiagnosticsDescription,
 } from "./SettingsPanels.logic";
 
@@ -100,5 +102,50 @@ describe("buildProviderInstanceUpdatePatch", () => {
 
     expect(patch.providerInstances?.[instanceId]).toEqual(nextInstance);
     expect(patch.providers).toBeUndefined();
+  });
+});
+
+describe("buildRestoreDefaultsPatch", () => {
+  it("does not include telemetry when restoring unrelated settings", () => {
+    const patch = buildRestoreDefaultsPatch({
+      settings: {
+        ...DEFAULT_UNIFIED_SETTINGS,
+        timestampFormat: "12-hour",
+      },
+      isGitWritingModelDirty: false,
+    });
+
+    expect(patch).toEqual({
+      timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+    });
+  });
+
+  it("includes telemetry when telemetry itself is restored", () => {
+    const patch = buildRestoreDefaultsPatch({
+      settings: {
+        ...DEFAULT_UNIFIED_SETTINGS,
+        telemetryEnabled: true,
+      },
+      isGitWritingModelDirty: false,
+    });
+
+    expect(patch).toEqual({
+      telemetryEnabled: false,
+    });
+  });
+
+  it("clears sticky telemetry preference markers when restoring defaults", () => {
+    const patch = buildRestoreDefaultsPatch({
+      settings: {
+        ...DEFAULT_UNIFIED_SETTINGS,
+        telemetryEnabled: false,
+        telemetryPreferenceSet: true,
+      },
+      isGitWritingModelDirty: false,
+    });
+
+    expect(patch).toEqual({
+      telemetryPreferenceSet: false,
+    });
   });
 });

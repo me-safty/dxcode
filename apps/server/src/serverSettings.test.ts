@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
@@ -486,6 +487,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       const next = yield* serverSettings.updateSettings({
         addProjectBaseDirectory: "~/Development",
+        automaticGitFetchInterval: Duration.seconds(10),
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -499,7 +501,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             serverPassword: "secret-password",
           },
         },
-        automaticGitFetchInterval: Duration.seconds(10),
+        telemetryEnabled: true,
+        telemetryPreferenceSet: true,
       });
 
       assert.equal(next.providers.codex.binaryPath, "/opt/homebrew/bin/codex");
@@ -508,6 +511,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       // @effect-diagnostics-next-line preferSchemaOverJson:off
       assert.deepEqual(JSON.parse(raw), {
         addProjectBaseDirectory: "~/Development",
+        automaticGitFetchInterval: 10_000,
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -521,9 +525,115 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             serverPassword: "secret-password",
           },
         },
-        automaticGitFetchInterval: 10_000,
+        telemetryEnabled: true,
+        telemetryPreferenceSet: true,
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("persists explicit telemetry opt-out marker", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* serverSettings.updateSettings({
+        telemetryEnabled: false,
+      });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      assert.deepEqual(JSON.parse(raw), {
+        telemetryPreferenceSet: true,
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("loads persisted telemetryEnabled as an explicit preference", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3code-server-settings-telemetry-",
+      });
+      const settingsPath = path.join(baseDir, "userdata", "settings.json");
+      yield* fileSystem.makeDirectory(path.dirname(settingsPath), { recursive: true });
+      yield* fileSystem.writeFileString(settingsPath, '{ "telemetryEnabled": false }\n');
+
+      const layer = ServerSettingsModule.layer.pipe(
+        Layer.provide(ServerSecretStore.layer),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+      );
+      const settings = yield* Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+        yield* serverSettings.start;
+        return yield* serverSettings.getSettings;
+      }).pipe(Effect.provide(layer));
+
+      assert.deepInclude(settings, {
+        telemetryEnabled: false,
+        telemetryPreferenceSet: true,
+      });
+    }),
+  );
+
+  it.effect("loads malformed persisted telemetryEnabled as an explicit preference", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3code-server-settings-telemetry-malformed-",
+      });
+      const settingsPath = path.join(baseDir, "userdata", "settings.json");
+      yield* fileSystem.makeDirectory(path.dirname(settingsPath), { recursive: true });
+      yield* fileSystem.writeFileString(settingsPath, '{ "telemetryEnabled": "false" }\n');
+
+      const layer = ServerSettingsModule.layer.pipe(
+        Layer.provide(ServerSecretStore.layer),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+      );
+      const settings = yield* Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+        yield* serverSettings.start;
+        return yield* serverSettings.getSettings;
+      }).pipe(Effect.provide(layer));
+
+      assert.deepInclude(settings, {
+        telemetryEnabled: false,
+        telemetryPreferenceSet: true,
+      });
+    }),
+  );
+
+  it.effect("loads persisted telemetry opt-in from schema-invalid settings", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3code-server-settings-telemetry-invalid-opt-in-",
+      });
+      const settingsPath = path.join(baseDir, "userdata", "settings.json");
+      yield* fileSystem.makeDirectory(path.dirname(settingsPath), { recursive: true });
+      yield* fileSystem.writeFileString(
+        settingsPath,
+        '{ "telemetryEnabled": true, "providers": null }\n',
+      );
+
+      const layer = ServerSettingsModule.layer.pipe(
+        Layer.provide(ServerSecretStore.layer),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+      );
+      const settings = yield* Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+        yield* serverSettings.start;
+        return yield* serverSettings.getSettings;
+      }).pipe(Effect.provide(layer));
+
+      assert.deepInclude(settings, {
+        telemetryEnabled: true,
+        telemetryPreferenceSet: true,
+      });
+    }),
   );
 
   it.effect("stores sensitive provider instance environment values outside settings.json", () =>

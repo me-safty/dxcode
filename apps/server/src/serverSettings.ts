@@ -47,7 +47,10 @@ import { writeFileStringAtomically } from "./atomicWrite.ts";
 import * as ServerConfig from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
-import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
+import {
+  applyServerSettingsPatch,
+  normalizeDecodedPersistedServerSettings,
+} from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
@@ -306,9 +309,9 @@ const make = Effect.gen(function* () {
         issues: Cause.pretty(decoded.cause),
         cause: decoded.cause,
       });
-      return DEFAULT_SERVER_SETTINGS;
+      return normalizeDecodedPersistedServerSettings(DEFAULT_SERVER_SETTINGS, raw);
     }
-    return decoded.value;
+    return normalizeDecodedPersistedServerSettings(decoded.value, raw);
   });
 
   const settingsCache = yield* Cache.make<typeof cacheKey, ServerSettings, ServerSettingsError>({
