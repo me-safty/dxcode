@@ -11,6 +11,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 const ACTION_TERMINAL_ID_PREFIX = "action-";
@@ -29,6 +30,40 @@ const OSC_ESCAPE_PATTERN = new RegExp(
 );
 const BELL_CHARACTER = String.fromCharCode(7);
 const SHELL_LABELS = new Set(["bash", "zsh", "sh", "fish", "csh", "tcsh", "pwsh", "powershell"]);
+
+export class ProjectActionTerminalReadinessTimeoutError extends Schema.TaggedErrorClass<ProjectActionTerminalReadinessTimeoutError>()(
+  "ProjectActionTerminalReadinessTimeoutError",
+  {
+    threadId: Schema.String,
+    terminalId: Schema.String,
+    cwd: Schema.String,
+    timeoutMs: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Timed out waiting for project action terminal input readiness: ${this.threadId}/${this.terminalId}.`;
+  }
+}
+
+export class ProjectActionTerminalAttachError extends Schema.TaggedErrorClass<ProjectActionTerminalAttachError>()(
+  "ProjectActionTerminalAttachError",
+  {
+    threadId: Schema.String,
+    terminalId: Schema.String,
+    cwd: Schema.String,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Project action terminal attach failed: ${this.detail}`;
+  }
+}
+
+export const ProjectActionTerminalReadinessError = Schema.Union([
+  ProjectActionTerminalReadinessTimeoutError,
+  ProjectActionTerminalAttachError,
+]);
+export type ProjectActionTerminalReadinessError = typeof ProjectActionTerminalReadinessError.Type;
 
 function projectActionTerminalIdBase(scriptId: ProjectScript["id"]): string {
   return `${ACTION_TERMINAL_ID_PREFIX}${encodeURIComponent(scriptId)}`;
@@ -170,10 +205,57 @@ function terminalAttachEventCompletesReadyWait(
   if (event.type === "output") {
     return appendAndCheck(event.data);
   }
-  return event.type === "closed" || event.type === "error" || event.type === "exited";
+  return event.type === "error";
 }
 
-export function waitForProjectActionTerminalInputReady(
+export function projectActionTerminalReadinessFailureFromEvent(
+  input: TerminalOpenInput,
+  event: TerminalAttachStreamEvent,
+): ProjectActionTerminalAttachError | null {
+  if (event.type === "error") {
+    return new ProjectActionTerminalAttachError({
+      threadId: input.threadId,
+      terminalId: input.terminalId,
+      cwd: input.cwd,
+      detail: event.message,
+    });
+  }
+  if (event.type === "closed") {
+    return new ProjectActionTerminalAttachError({
+      threadId: input.threadId,
+      terminalId: input.terminalId,
+      cwd: input.cwd,
+      detail: "Terminal closed before it was ready for input.",
+    });
+  }
+  if (event.type === "exited") {
+    return new ProjectActionTerminalAttachError({
+      threadId: input.threadId,
+      terminalId: input.terminalId,
+      cwd: input.cwd,
+      detail: "Terminal process exited before it was ready for input.",
+    });
+  }
+  return null;
+}
+
+function projectActionTerminalReadinessTimeoutError(
+  input: TerminalOpenInput,
+  timeoutMs: number,
+): ProjectActionTerminalReadinessTimeoutError {
+  return new ProjectActionTerminalReadinessTimeoutError({
+    threadId: input.threadId,
+    terminalId: input.terminalId,
+    cwd: input.cwd,
+    timeoutMs,
+  });
+}
+
+type ProjectActionTerminalReadinessOutcome =
+  | { readonly _tag: "ready" }
+  | { readonly _tag: "failed"; readonly error: ProjectActionTerminalReadinessError };
+
+export function waitForProjectActionTerminalInputReadyStrict(
   input: TerminalOpenInput,
   timeoutMs = ACTION_TERMINAL_READY_TIMEOUT_MS,
 ) {
@@ -184,16 +266,47 @@ export function waitForProjectActionTerminalInputReady(
   };
 
   return subscribe(WS_METHODS.terminalAttach, terminalAttachInputFromOpenInput(input)).pipe(
-    Stream.filterMap((event) =>
-      terminalAttachEventCompletesReadyWait(event, appendAndCheck)
-        ? Result.succeed(undefined)
-        : Result.failVoid,
-    ),
+    Stream.filterMap((event) => {
+      const error = projectActionTerminalReadinessFailureFromEvent(input, event);
+      if (error) {
+        return Result.succeed<ProjectActionTerminalReadinessOutcome>({
+          _tag: "failed",
+          error,
+        });
+      }
+      return terminalAttachEventCompletesReadyWait(event, appendAndCheck)
+        ? Result.succeed<ProjectActionTerminalReadinessOutcome>({ _tag: "ready" })
+        : Result.failVoid;
+    }),
     Stream.runHead,
     Effect.timeoutOption(Duration.millis(timeoutMs)),
-    Effect.flatMap((result) =>
-      Option.isSome(result) && Option.isSome(result.value) ? Effect.void : Effect.void,
-    ),
+    Effect.flatMap((result) => {
+      if (Option.isNone(result)) {
+        return Effect.fail(projectActionTerminalReadinessTimeoutError(input, timeoutMs));
+      }
+      if (Option.isNone(result.value)) {
+        return Effect.fail(
+          new ProjectActionTerminalAttachError({
+            threadId: input.threadId,
+            terminalId: input.terminalId,
+            cwd: input.cwd,
+            detail: "Terminal attach stream ended before it was ready for input.",
+          }),
+        );
+      }
+      const outcome = result.value.value;
+      return outcome._tag === "failed" ? Effect.fail(outcome.error) : Effect.void;
+    }),
+  );
+}
+
+// The strict path exposes typed readiness failures for callers that need diagnostics;
+// the best-effort path preserves the UI fallback and still writes after failures.
+export function waitForProjectActionTerminalInputReady(
+  input: TerminalOpenInput,
+  timeoutMs = ACTION_TERMINAL_READY_TIMEOUT_MS,
+) {
+  return waitForProjectActionTerminalInputReadyStrict(input, timeoutMs).pipe(
     Effect.catchCause(() => Effect.void),
   );
 }

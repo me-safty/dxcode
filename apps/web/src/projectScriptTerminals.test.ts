@@ -1,24 +1,67 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type {
+  EnvironmentId,
   EnvironmentApi,
   TerminalAttachInput,
   TerminalAttachStreamEvent,
   TerminalOpenInput,
 } from "@t3tools/contracts";
+import {
+  AVAILABLE_CONNECTION_STATE,
+  EnvironmentSupervisor,
+  type PreparedConnection,
+  PrimaryConnectionTarget,
+} from "@t3tools/client-runtime/connection";
+import { subscribe, type RpcSession } from "@t3tools/client-runtime/rpc";
+import { assert, it as effectIt } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import {
   openTerminalAndWaitForInputReady,
+  ProjectActionTerminalReadinessTimeoutError,
+  projectActionTerminalReadinessFailureFromEvent,
   projectActionTerminalId,
   resolveProjectActionTerminalId,
   terminalSessionIsReadyForProjectActionInput,
   terminalOutputLooksReadyForInput,
+  waitForProjectActionTerminalInputReady,
+  waitForProjectActionTerminalInputReadyStrict,
 } from "./projectScriptTerminals";
+
+vi.mock("@t3tools/client-runtime/rpc", () => ({
+  subscribe: vi.fn(),
+}));
 
 const OPEN_INPUT: TerminalOpenInput = {
   threadId: "thread-1",
   terminalId: "action-build",
   cwd: "/repo",
 };
+
+const subscribeMock = vi.mocked(subscribe);
+
+const makeSupervisor = Effect.gen(function* () {
+  const state = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
+  const session = yield* SubscriptionRef.make(Option.none<RpcSession>());
+  const prepared = yield* SubscriptionRef.make(Option.none<PreparedConnection>());
+  return EnvironmentSupervisor.of({
+    target: new PrimaryConnectionTarget({
+      environmentId: "environment-test" as EnvironmentId,
+      label: "Test environment",
+      httpBaseUrl: "https://environment.example.test",
+      wsBaseUrl: "wss://environment.example.test",
+    }),
+    state,
+    session,
+    prepared,
+    connect: Effect.void,
+    disconnect: Effect.void,
+    retryNow: Effect.void,
+  } satisfies EnvironmentSupervisor["Service"]);
+});
 
 function createReadyApi(
   snapshotHistory: string,
@@ -52,6 +95,7 @@ function createReadyApi(
 
 afterEach(() => {
   vi.useRealTimers();
+  subscribeMock.mockReset();
 });
 
 describe("project action terminal ids", () => {
@@ -196,6 +240,54 @@ describe("terminalSessionIsReadyForProjectActionInput", () => {
 });
 
 describe("openTerminalAndWaitForInputReady", () => {
+  it("classifies terminal attach errors as typed readiness failures", () => {
+    const error = projectActionTerminalReadinessFailureFromEvent(OPEN_INPUT, {
+      type: "error",
+      threadId: OPEN_INPUT.threadId,
+      terminalId: OPEN_INPUT.terminalId,
+      message: "PTY closed unexpectedly.",
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?._tag).toBe("ProjectActionTerminalAttachError");
+    expect(error?.threadId).toBe(OPEN_INPUT.threadId);
+    expect(error?.terminalId).toBe(OPEN_INPUT.terminalId);
+    expect(error?.cwd).toBe(OPEN_INPUT.cwd);
+    expect(error?.detail).toBe("PTY closed unexpectedly.");
+  });
+
+  it("classifies closed and exited terminals as typed readiness failures", () => {
+    const closed = projectActionTerminalReadinessFailureFromEvent(OPEN_INPUT, {
+      type: "closed",
+      threadId: OPEN_INPUT.threadId,
+      terminalId: OPEN_INPUT.terminalId,
+    });
+    const exited = projectActionTerminalReadinessFailureFromEvent(OPEN_INPUT, {
+      type: "exited",
+      threadId: OPEN_INPUT.threadId,
+      terminalId: OPEN_INPUT.terminalId,
+      exitCode: 1,
+      exitSignal: null,
+    });
+
+    expect(closed?._tag).toBe("ProjectActionTerminalAttachError");
+    expect(closed?.detail).toBe("Terminal closed before it was ready for input.");
+    expect(exited?._tag).toBe("ProjectActionTerminalAttachError");
+    expect(exited?.detail).toBe("Terminal process exited before it was ready for input.");
+  });
+
+  it("uses a typed timeout error for project action terminal readiness", () => {
+    const error = new ProjectActionTerminalReadinessTimeoutError({
+      threadId: OPEN_INPUT.threadId,
+      terminalId: OPEN_INPUT.terminalId,
+      cwd: OPEN_INPUT.cwd,
+      timeoutMs: 1_000,
+    });
+
+    expect(error._tag).toBe("ProjectActionTerminalReadinessTimeoutError");
+    expect(error.message).toContain(OPEN_INPUT.terminalId);
+  });
+
   it("resolves from a prompt already present in the snapshot history", async () => {
     vi.useFakeTimers();
     const unsubscribe = vi.fn();
@@ -273,4 +365,68 @@ describe("openTerminalAndWaitForInputReady", () => {
 
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  effectIt.effect(
+    "fails strict readiness on terminal closure but preserves best-effort fallback",
+    () =>
+      Effect.gen(function* () {
+        const supervisor = yield* makeSupervisor;
+        subscribeMock.mockReturnValueOnce(
+          Stream.make({
+            type: "closed",
+            threadId: OPEN_INPUT.threadId,
+            terminalId: OPEN_INPUT.terminalId,
+          }),
+        );
+
+        const error = yield* waitForProjectActionTerminalInputReadyStrict(OPEN_INPUT, 1_000).pipe(
+          Effect.provideService(EnvironmentSupervisor, supervisor),
+          Effect.flip,
+        );
+
+        assert.strictEqual(error._tag, "ProjectActionTerminalAttachError");
+        if (error._tag !== "ProjectActionTerminalAttachError") {
+          return yield* Effect.die(new Error("Expected a terminal attach error."));
+        }
+        assert.strictEqual(error.detail, "Terminal closed before it was ready for input.");
+
+        subscribeMock.mockReturnValueOnce(
+          Stream.make({
+            type: "closed",
+            threadId: OPEN_INPUT.threadId,
+            terminalId: OPEN_INPUT.terminalId,
+          }),
+        );
+
+        yield* waitForProjectActionTerminalInputReady(OPEN_INPUT, 1_000).pipe(
+          Effect.provideService(EnvironmentSupervisor, supervisor),
+        );
+      }),
+  );
+
+  effectIt.effect("fails strict readiness when the attach stream ends without readiness", () =>
+    Effect.gen(function* () {
+      const supervisor = yield* makeSupervisor;
+      subscribeMock.mockReturnValueOnce(Stream.empty);
+
+      const error = yield* waitForProjectActionTerminalInputReadyStrict(OPEN_INPUT, 1_000).pipe(
+        Effect.provideService(EnvironmentSupervisor, supervisor),
+        Effect.flip,
+      );
+
+      assert.strictEqual(error._tag, "ProjectActionTerminalAttachError");
+      if (error._tag !== "ProjectActionTerminalAttachError") {
+        return yield* Effect.die(new Error("Expected a terminal attach error."));
+      }
+      assert.strictEqual(
+        error.detail,
+        "Terminal attach stream ended before it was ready for input.",
+      );
+
+      subscribeMock.mockReturnValueOnce(Stream.empty);
+      yield* waitForProjectActionTerminalInputReady(OPEN_INPUT, 1_000).pipe(
+        Effect.provideService(EnvironmentSupervisor, supervisor),
+      );
+    }),
+  );
 });
