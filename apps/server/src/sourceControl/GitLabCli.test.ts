@@ -315,10 +315,11 @@ layer("GitLabCli.layer", (it) => {
     Effect.gen(function* () {
       const cause = new VcsProcessExitError({
         operation: "GitLabCli.execute",
-        command: "glab mr view 4888",
+        command: "glab",
         cwd: "/repo",
         exitCode: 1,
         detail: "GET 404 merge request not found",
+        failureKind: "not-found",
       });
       mockedRun.mockReturnValueOnce(Effect.fail(cause));
 
@@ -331,6 +332,7 @@ layer("GitLabCli.layer", (it) => {
       }).pipe(Effect.flip);
 
       assert.equal(error.message.includes("Merge request not found"), true);
+      assert.strictEqual(error._tag, "GitLabMergeRequestNotFoundError");
       assert.strictEqual(error.command, "glab");
       assert.strictEqual(error.cwd, "/repo");
       assert.strictEqual(error.cause, cause);
