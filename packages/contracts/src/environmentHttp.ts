@@ -94,6 +94,10 @@ export class EnvironmentRequestInvalidError extends Schema.TaggedErrorClass<Envi
   },
   { httpApiStatus: 400 },
 ) {
+  override get message(): string {
+    return `Environment request rejected with ${this.code} (${this.reason}; trace ${this.traceId}).`;
+  }
+
   [HttpServerRespondable.symbol]() {
     return HttpServerResponse.schemaJson(EnvironmentRequestInvalidError)(this, { status: 400 });
   }
@@ -108,6 +112,10 @@ export class EnvironmentAuthInvalidError extends Schema.TaggedErrorClass<Environ
   },
   { httpApiStatus: 401 },
 ) {
+  override get message(): string {
+    return `Environment authentication rejected with ${this.code} (${this.reason}; trace ${this.traceId}).`;
+  }
+
   [HttpServerRespondable.symbol]() {
     return HttpServerResponse.schemaJson(EnvironmentAuthInvalidError)(this, { status: 401 });
   }
@@ -122,6 +130,10 @@ export class EnvironmentScopeRequiredError extends Schema.TaggedErrorClass<Envir
   },
   { httpApiStatus: 403 },
 ) {
+  override get message(): string {
+    return `Environment authorization requires scope ${this.requiredScope} (${this.code}; trace ${this.traceId}).`;
+  }
+
   [HttpServerRespondable.symbol]() {
     return HttpServerResponse.schemaJson(EnvironmentScopeRequiredError)(this, { status: 403 });
   }
@@ -136,6 +148,10 @@ export class EnvironmentOperationForbiddenError extends Schema.TaggedErrorClass<
   },
   { httpApiStatus: 403 },
 ) {
+  override get message(): string {
+    return `Environment operation rejected with ${this.code} (${this.reason}; trace ${this.traceId}).`;
+  }
+
   [HttpServerRespondable.symbol]() {
     return HttpServerResponse.schemaJson(EnvironmentOperationForbiddenError)(this, { status: 403 });
   }
@@ -150,6 +166,10 @@ export class EnvironmentInternalError extends Schema.TaggedErrorClass<Environmen
   },
   { httpApiStatus: 500 },
 ) {
+  override get message(): string {
+    return `Environment request failed with ${this.code} (${this.reason}; trace ${this.traceId}).`;
+  }
+
   [HttpServerRespondable.symbol]() {
     return HttpServerResponse.schemaJson(EnvironmentInternalError)(this, { status: 500 });
   }
