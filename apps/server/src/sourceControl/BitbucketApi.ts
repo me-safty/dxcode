@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
+  NonNegativeInt,
   TrimmedNonEmptyString,
   type SourceControlProviderAuth,
   type SourceControlRepositoryCloneUrls,
@@ -77,14 +78,11 @@ export class BitbucketResponseError extends Schema.TaggedErrorClass<BitbucketRes
   {
     operation: BitbucketApiOperation,
     status: Schema.Int,
-    responseBody: Schema.String,
+    responseBodyLength: NonNegativeInt,
   },
 ) {
   override get message(): string {
-    const body = this.responseBody.trim();
-    return body.length > 0
-      ? `Bitbucket API failed in ${this.operation}: Bitbucket returned HTTP ${this.status}: ${body}`
-      : `Bitbucket API failed in ${this.operation}: Bitbucket returned HTTP ${this.status}.`;
+    return `Bitbucket API failed in ${this.operation}: Bitbucket returned HTTP ${this.status}.`;
   }
 }
 
@@ -493,7 +491,7 @@ function responseError(
         new BitbucketResponseError({
           operation,
           status: response.status,
-          responseBody: body,
+          responseBodyLength: body.length,
         }),
       ),
     ),

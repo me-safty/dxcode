@@ -544,8 +544,8 @@ it.effect("preserves the HTTP client failure without deriving the domain message
   }).pipe(Effect.provide(layer));
 });
 
-it.effect("preserves structured Bitbucket HTTP failures through checkout", () => {
-  const responseBody = '{"error":{"message":"forbidden"}}';
+it.effect("keeps Bitbucket response bodies out of checkout diagnostics", () => {
+  const responseBody = '{"error":{"message":"credential=secret-value"}}';
   const { layer } = makeLayer({
     response: () => new Response(responseBody, { status: 403 }),
   });
@@ -559,11 +559,13 @@ it.effect("preserves structured Bitbucket HTTP failures through checkout", () =>
     assert.instanceOf(error, BitbucketApi.BitbucketResponseError);
     assert.strictEqual(error.operation, "getPullRequest");
     assert.strictEqual(error.status, 403);
-    assert.strictEqual(error.responseBody, responseBody);
+    assert.strictEqual(error.responseBodyLength, responseBody.length);
+    assert.notProperty(error, "responseBody");
     assert.strictEqual(
       error.message,
-      `Bitbucket API failed in getPullRequest: Bitbucket returned HTTP 403: ${responseBody}`,
+      "Bitbucket API failed in getPullRequest: Bitbucket returned HTTP 403.",
     );
+    assert.notInclude(error.message, "secret-value");
   }).pipe(Effect.provide(layer));
 });
 
