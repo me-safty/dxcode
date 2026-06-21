@@ -16,6 +16,7 @@ import {
   DESKTOP_ASAR_UNPACK,
   InvalidMacPasskeyRpDomainError,
   InvalidMacPasskeyPublishableKeyError,
+  InvalidMockUpdateServerPortError,
   isMacPasskeySigningConfigurationError,
   LinuxIconResizeError,
   MacPasskeySigningConfigurationResolutionError,
@@ -459,6 +460,27 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       }
     }),
   );
+
+  it("classifies invalid configured ports with the decoder's number grammar", () => {
+    const cause = new Error("invalid configured port");
+
+    assert.equal(
+      InvalidMockUpdateServerPortError.fromConfigValue("0x10", cause).reason,
+      "not-numeric",
+    );
+    assert.equal(
+      InvalidMockUpdateServerPortError.fromConfigValue("12.5", cause).reason,
+      "not-integer",
+    );
+    assert.equal(
+      InvalidMockUpdateServerPortError.fromConfigValue("65536", cause).reason,
+      "out-of-range",
+    );
+    assert.strictEqual(
+      InvalidMockUpdateServerPortError.fromConfigValue("0x10", cause).cause,
+      cause,
+    );
+  });
 
   it.effect("resolves default platform and architecture from host references", () =>
     Effect.gen(function* () {

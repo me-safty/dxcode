@@ -188,6 +188,14 @@ export class InvalidMockUpdateServerPortError extends Schema.TaggedErrorClass<In
   override get message(): string {
     return "Invalid mock update server port.";
   }
+
+  static fromConfigValue(configuredPort: string, cause: unknown) {
+    return new InvalidMockUpdateServerPortError({
+      reason: invalidMockUpdateServerPortReason(configuredPort),
+      inputLength: configuredPort.length,
+      cause,
+    });
+  }
 }
 
 export class BuildCommandFailedError extends Schema.TaggedErrorClass<BuildCommandFailedError>()(
@@ -910,7 +918,11 @@ function invalidMockUpdateServerPortReason(
 ): typeof InvalidMockUpdateServerPortReason.Type {
   const parsed = Number(configuredPort);
   if (!Number.isFinite(parsed)) return "not-numeric";
-  return Number.isInteger(parsed) ? "out-of-range" : "not-integer";
+  if (!Number.isInteger(parsed)) return "not-integer";
+  if (parsed < 1 || parsed > 65535) return "out-of-range";
+  // This mapper is only called after schema decoding failed. An otherwise
+  // valid integer therefore used a representation the decoder did not accept.
+  return "not-numeric";
 }
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
@@ -971,13 +983,8 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     (configuredMockUpdateServerPort === undefined
       ? undefined
       : yield* resolveMockUpdateServerPort(configuredMockUpdateServerPort).pipe(
-          Effect.mapError(
-            (cause) =>
-              new InvalidMockUpdateServerPortError({
-                reason: invalidMockUpdateServerPortReason(configuredMockUpdateServerPort),
-                inputLength: configuredMockUpdateServerPort.length,
-                cause,
-              }),
+          Effect.mapError((cause) =>
+            InvalidMockUpdateServerPortError.fromConfigValue(configuredMockUpdateServerPort, cause),
           ),
         ));
 
