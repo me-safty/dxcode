@@ -345,11 +345,35 @@ describe("AzureDevOpsCli.layer", () => {
       const az = yield* AzureDevOpsCli.AzureDevOpsCli;
       const error = yield* az.execute({ cwd: "/repo", args: ["repos", "list"] }).pipe(Effect.flip);
 
+      assert.instanceOf(error, AzureDevOpsCli.AzureDevOpsCommandFailedError);
+      assert.strictEqual(error.operation, "execute");
       assert.strictEqual(error.command, "az");
       assert.strictEqual(error.cwd, "/repo");
+      assert.strictEqual(error.argumentCount, 2);
       assert.strictEqual(error.detail, "Azure DevOps CLI command failed.");
       assert.strictEqual(error.cause, cause);
       assert.equal(error.message.includes("sensitive-upstream-detail"), false);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("keeps invalid pull request output diagnostics structured", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("not-json")));
+
+      const az = yield* AzureDevOpsCli.AzureDevOpsCli;
+      const error = yield* az.getPullRequest({ cwd: "/repo", reference: "42" }).pipe(Effect.flip);
+
+      assert.instanceOf(error, AzureDevOpsCli.AzureDevOpsPullRequestDecodeError);
+      assert.strictEqual(error.operation, "getPullRequest");
+      assert.strictEqual(error.command, "az");
+      assert.strictEqual(error.cwd, "/repo");
+      assert.strictEqual(error.outputLength, 8);
+      assert.strictEqual(error.detail, "Azure DevOps CLI returned invalid pull request JSON.");
+      assert.exists(error.cause);
+      assert.strictEqual(
+        error.message,
+        "Azure DevOps CLI failed in getPullRequest: Azure DevOps CLI returned invalid pull request JSON.",
+      );
     }).pipe(Effect.provide(layer)),
   );
 });
