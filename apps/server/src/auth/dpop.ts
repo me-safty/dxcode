@@ -18,14 +18,18 @@ function firstHeaderValue(value: string | undefined): string | undefined {
   return first && first.length > 0 ? first : undefined;
 }
 
-export function requestAbsoluteUrl(request: HttpServerRequest.HttpServerRequest): string {
+export function requestAbsoluteUrl(request: HttpServerRequest.HttpServerRequest): string | null {
   try {
     return new URL(request.originalUrl).href;
   } catch {
     const host = firstHeaderValue(request.headers.host) ?? "127.0.0.1";
     const forwardedProto = firstHeaderValue(request.headers["x-forwarded-proto"]);
     const proto = forwardedProto === "https" || forwardedProto === "http" ? forwardedProto : "http";
-    return new URL(request.originalUrl, `${proto}://${host}`).href;
+    try {
+      return new URL(request.originalUrl, `${proto}://${host}`).href;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -48,11 +52,17 @@ export const verifyRequestDpopProof = (input: {
 }) =>
   Effect.gen(function* () {
     const proof = input.request.headers.dpop;
+    const url = requestAbsoluteUrl(input.request);
+    if (url === null) {
+      return yield* new ServerAuthInvalidCredentialError({
+        diagnostic: "Invalid DPoP request URL.",
+      });
+    }
     const now = yield* DateTime.now;
     const result = verifyDpopProof({
       proof,
       method: input.request.method,
-      url: requestAbsoluteUrl(input.request),
+      url,
       nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
       ...(input.expectedThumbprint ? { expectedThumbprint: input.expectedThumbprint } : {}),
       ...(input.expectedAccessToken ? { expectedAccessToken: input.expectedAccessToken } : {}),
