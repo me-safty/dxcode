@@ -33,6 +33,7 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
+  OrchestrationSearchContentError,
   ORCHESTRATION_WS_METHODS,
   ProjectListEntriesError,
   ProjectReadFileError,
@@ -147,6 +148,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.searchContent, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
@@ -1003,6 +1005,21 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 (cause) =>
                   new OrchestrationGetSnapshotError({
                     message: "Failed to load archived orchestration shell snapshot",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.searchContent]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.searchContent,
+            projectionSnapshotQuery.searchThreadContent(input).pipe(
+              Effect.map((hits) => ({ hits })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationSearchContentError({
+                    message: "Failed to search thread content",
                     cause,
                   }),
               ),

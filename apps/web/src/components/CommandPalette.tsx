@@ -10,6 +10,7 @@ import {
   DEFAULT_MODEL,
   type EnvironmentId,
   type FilesystemBrowseResult,
+  type OrchestrationSearchContentHit,
   type ProjectId,
   ProviderInstanceId,
   type SourceControlDiscoveryResult,
@@ -48,6 +49,7 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
 import { filesystemEnvironment } from "../state/filesystem";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
@@ -435,6 +437,71 @@ function CommandPaletteDialog(props: {
   );
 }
 
+const MIN_CONTENT_SEARCH_QUERY_LENGTH = 2;
+
+// The server wraps matched terms in U+0001 (open) / U+0002 (close) sentinels.
+// Render the snippet with those spans bolded, as keyed nodes (no dangerous HTML).
+function renderSnippetWithHighlights(snippet: string): ReactNode {
+  const open = String.fromCharCode(1);
+  const close = String.fromCharCode(2);
+  const nodes: ReactNode[] = [];
+  let remaining = snippet.trim();
+  let key = 0;
+  while (remaining.length > 0) {
+    const openAt = remaining.indexOf(open);
+    if (openAt === -1) {
+      nodes.push(<span key={key}>{remaining}</span>);
+      break;
+    }
+    if (openAt > 0) {
+      nodes.push(<span key={key}>{remaining.slice(0, openAt)}</span>);
+      key += 1;
+    }
+    const afterOpen = remaining.slice(openAt + 1);
+    const closeAt = afterOpen.indexOf(close);
+    if (closeAt === -1) {
+      // Unbalanced sentinel — render the rest plain.
+      nodes.push(<span key={key}>{afterOpen}</span>);
+      break;
+    }
+    nodes.push(
+      <strong key={key} className="font-semibold text-foreground">
+        {afterOpen.slice(0, closeAt)}
+      </strong>,
+    );
+    key += 1;
+    remaining = afterOpen.slice(closeAt + 1);
+  }
+  return nodes.length > 0 ? nodes : null;
+}
+
+/**
+ * Runs the message-content (FTS) search for a single environment and reports its
+ * hits up. Rendered once per environment so each gets its own query hook
+ * (rules-of-hooks safe) — that's how content search spans every connected
+ * environment. Renders nothing.
+ */
+function ContentSearchRunner(props: {
+  readonly environmentId: EnvironmentId;
+  readonly query: string;
+  readonly onResult: (
+    environmentId: EnvironmentId,
+    hits: ReadonlyArray<OrchestrationSearchContentHit> | null,
+  ) => void;
+}) {
+  const { environmentId, query, onResult } = props;
+  const result = useEnvironmentQuery(
+    query.length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
+      ? orchestrationEnvironment.searchContent({ environmentId, input: { query } })
+      : null,
+  );
+  const hits = result.data?.hits ?? null;
+  useEffect(() => {
+    onResult(environmentId, hits);
+  }, [environmentId, hits, onResult]);
+  return null;
+}
+
 function OpenCommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
@@ -447,6 +514,32 @@ function OpenCommandPaletteDialog(props: {
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
+  // Message-content search hits, keyed by environment (filled by ContentSearchRunner
+  // children, one per environment). The setter no-ops on unchanged refs so the
+  // runners' effects can't drive a re-render loop.
+  const [contentHitsByEnv, setContentHitsByEnv] = useState<
+    Record<string, ReadonlyArray<OrchestrationSearchContentHit>>
+  >({});
+  const handleContentSearchResult = useCallback(
+    (environmentId: EnvironmentId, hits: ReadonlyArray<OrchestrationSearchContentHit> | null) => {
+      setContentHitsByEnv((previous) => {
+        const existing = previous[environmentId];
+        if (hits === null || hits.length === 0) {
+          if (existing === undefined) {
+            return previous;
+          }
+          const next = { ...previous };
+          delete next[environmentId];
+          return next;
+        }
+        if (existing === hits) {
+          return previous;
+        }
+        return { ...previous, [environmentId]: hits };
+      });
+    },
+    [],
+  );
   const settings = useSettings();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
@@ -1035,6 +1128,54 @@ function OpenCommandPaletteDialog(props: {
     threadSearchItems: allThreadItems,
   });
 
+  // Threads already surfaced by title/branch match, so content matches can skip
+  // them (no duplicate rows across the "Threads" and "Found in messages" groups).
+  const titleMatchedThreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of filteredGroups) {
+      for (const item of group.items) {
+        if (item.value.startsWith("thread:")) {
+          ids.add(item.value.slice("thread:".length));
+        }
+      }
+    }
+    return ids;
+  }, [filteredGroups]);
+
+  const contentMatchItems = useMemo<ReadonlyArray<CommandPaletteActionItem>>(() => {
+    if (isActionsOnly || deferredQuery.length < MIN_CONTENT_SEARCH_QUERY_LENGTH) {
+      return [];
+    }
+    const items: CommandPaletteActionItem[] = [];
+    const seen = new Set<string>();
+    for (const [environmentId, hits] of Object.entries(contentHitsByEnv)) {
+      const envId = environmentId as EnvironmentId;
+      for (const hit of hits) {
+        if (titleMatchedThreadIds.has(hit.threadId) || seen.has(hit.threadId)) {
+          continue;
+        }
+        seen.add(hit.threadId);
+        items.push({
+          kind: "action",
+          value: `content:${environmentId}:${hit.threadId}`,
+          searchTerms: [],
+          title: hit.title.length > 0 ? hit.title : "Untitled thread",
+          // Drop the U+0001/U+0002 highlight sentinels for the plain-text preview.
+          description: renderSnippetWithHighlights(hit.snippet),
+          icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            await navigate({
+              to: "/$environmentId/$threadId",
+              params: buildThreadRouteParams(scopeThreadRef(envId, hit.threadId)),
+              search: { message: hit.messageId },
+            });
+          },
+        });
+      }
+    }
+    return items;
+  }, [contentHitsByEnv, titleMatchedThreadIds, isActionsOnly, deferredQuery, navigate]);
+
   const handleAddProject = useCallback(
     async (rawCwd: string) => {
       if (!browseEnvironmentId) return;
@@ -1357,6 +1498,12 @@ function OpenCommandPaletteDialog(props: {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
     displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
+  } else if (contentMatchItems.length > 0) {
+    // Root search view: append message-content matches below the title matches.
+    displayedGroups = [
+      ...filteredGroups,
+      { value: "content-search", label: "Found in messages", items: contentMatchItems },
+    ];
   }
 
   const inputPlaceholder =
@@ -1667,6 +1814,14 @@ function OpenCommandPaletteDialog(props: {
               </div>
             </div>
           ) : null}
+          {environments.map((environment) => (
+            <ContentSearchRunner
+              key={environment.environmentId}
+              environmentId={environment.environmentId}
+              query={isActionsOnly ? "" : deferredQuery}
+              onResult={handleContentSearchResult}
+            />
+          ))}
           <CommandPaletteResults
             groups={displayedGroups}
             highlightedItemValue={highlightedItemValue}

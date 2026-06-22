@@ -1,90 +1,85 @@
-# T3 Code
+# T3 Code (Ian Henriques' fork)
 
-T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).
+T3 Code is a minimal web/desktop GUI for coding agents — it gives you a single
+interface in front of CLI agents like Codex, Claude, Cursor, and OpenCode, with
+threaded conversations, a sidebar of projects, git/worktree integration, and a
+GitHub PR workflow.
 
-## Installation
+This is my fork. It tracks upstream but adds the features below.
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, and OpenCode.
-> Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `cursor-agent login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+## What's different in this fork
 
-### Run without installing
+I've been working on my own fork and it's diverged enough that it's
+worth switching over. The main additions:
 
-```bash
-npx t3@latest
-```
+- **Per-conversation cost tracking.** Each thread shows its running cost next to
+  the title (hidden until it crosses a cent, so new threads stay clean). Claude
+  reports its actual cost through the SDK; Codex only gives token counts, so I
+  estimate from a pricing table and prefix it with `est.`. If it doesn't recognize
+  the model, it shows nothing rather than a wrong number.
 
-Tip: Use `npx t3@latest --help` for the full CLI reference.
+- **Conversation forking.** Fork any chat from its sidebar row or the button next
+  to the send box. The fork opens a fresh draft that carries over the model,
+  reasoning effort, runtime/interaction mode, and worktree; nothing's persisted
+  until you send, and forks are labelled `(fork, est. $X.XX)` in the cost readout.
+  It also won't let you delete a thread that an unsent fork still depends on.
 
-### Desktop app
+- **VS Code theme import.** It reads your installed VS Code themes — both
+  built-in and extensions — and applies them to code blocks and diffs. New
+  themes show up without a restart.
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+- **A real PR workflow.** The sidebar splits into Development and Pull Requests
+  tabs so reviews stay out of the way of your dev threads. There's a PR picker for
+  starting a review, PR-review threads show a live status badge (open / draft /
+  merged / closed) pulled from GitHub, and they auto-archive once the PR is merged
+  or closed. The review's PR identity is stored server-side, so renaming a thread
+  never loses track of which PR it belongs to.
 
-#### Windows (`winget`)
+- **Full-text message search.** The command palette searches inside message
+  content now, not just thread titles — backed by a SQLite full-text index, so
+  it's fast and spans every connected environment. Existing conversations are
+  backfilled, so your old chats are searchable too. Matches appear under a "Found
+  in messages" group with the hit term highlighted in a snippet, and clicking one
+  jumps straight to that message — it scrolls the message into view and briefly
+  highlights it.
 
-```bash
-winget install T3Tools.T3Code
-```
+- **Bookmarking.** Option/Alt+click any thread in the sidebar to bookmark it
+  (persisted server-side); Option/Alt+click again to clear it.
 
-#### macOS (Homebrew)
+- **Page zoom that behaves.** Cmd +/− zooms the whole UI, and I fixed the chrome
+  that usually breaks under zoom — native right-click menus open in the right
+  place, and the macOS traffic-light spacing stays aligned at any zoom level.
 
-```bash
-brew install --cask t3-code
-```
+- **One-command setup.** `./setup.sh` gets you running on macOS in a single step.
+  It's safe to re-run, and there's a flag to skip Homebrew if you manage your own
+  deps (Nix, etc.).
 
-#### Arch Linux (AUR)
+Everything's covered by tests. One caveat worth mentioning: the cost figures are
+estimates, not billing — though that matters less on a ChatGPT subscription,
+where there's no per-token charge anyway.
 
-```bash
-yay -S t3code-bin
-```
+## Getting started with my fork
 
-## Some notes
+Install and authenticate at least one provider before use:
 
-We are very very early in this project. Expect bugs.
+- Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
+- Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
+- Cursor: install [Cursor CLI](https://cursor.com/cli) and run `cursor-agent login`
+- OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
-We are not accepting contributions yet.
-
-There's no public docs site yet, checkout the miscellaneous markdown files in [docs](./docs).
-
-## Documentation
-
-- [Getting started](./docs/getting-started/quick-start.md)
-- [Architecture overview](./docs/architecture/overview.md)
-- [Provider guides](./docs/providers/codex.md)
-- [Operations](./docs/operations/ci.md)
-- [Reference](./docs/reference/encyclopedia.md)
-
-## If you REALLY want to contribute still.... read this first
-
-### Install `vp`
-
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
-
-#### macOS / Linux
-
-```bash
-curl -fsSL https://vite.plus | bash
-```
-
-#### Windows
+Then, from a clone of this fork on macOS, use my custom install script:
 
 ```bash
-irm https://vite.plus/ps1 | iex
+./setup.sh
 ```
 
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
+This installs the toolchain (including the `vp` / Vite+ CLI the dev runner needs)
+and workspace dependencies. It's idempotent, and if you manage system deps
+yourself (Nix, etc.) run `T3_SETUP_NO_BREW=1 ./setup.sh` to verify rather than
+install them.
 
-### Install dependencies
+Then start the desktop dev server with:
 
 ```bash
-vp i
+vp run dev:desktop
 ```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).

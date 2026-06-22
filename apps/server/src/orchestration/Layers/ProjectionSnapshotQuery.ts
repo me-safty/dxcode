@@ -7,6 +7,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
+  OrchestrationSearchContentHit,
   OrchestrationShellSnapshot,
   OrchestrationThread,
   ProjectScript,
@@ -260,6 +261,26 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
       : toPersistenceSqlError(sqlOperation)(cause);
 }
 
+/**
+ * Translate a raw user query into a safe FTS5 MATCH expression: each whitespace
+ * term is quoted (which escapes FTS operators like `-`, `:`, `"`, `*`, so weird
+ * input can't throw a syntax error), terms are implicitly AND-ed, and the final
+ * term gets a `*` for as-you-type prefix matching. Returns null for blank input.
+ */
+function buildFtsMatchQuery(raw: string): string | null {
+  const terms = raw
+    .trim()
+    .split(/\s+/)
+    .map((term) => term.replace(/["*]/g, ""))
+    .filter((term) => term.length > 0);
+  if (terms.length === 0) {
+    return null;
+  }
+  return terms
+    .map((term, index) => (index === terms.length - 1 ? `"${term}"*` : `"${term}"`))
+    .join(" ");
+}
+
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
@@ -432,6 +453,29 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt"
         FROM projection_thread_messages
         ORDER BY thread_id ASC, created_at ASC, message_id ASC
+      `,
+  });
+
+  // FTS5 content search. `char(1)`/`char(2)` wrap matched terms (U+0001/U+0002)
+  // for client-side highlighting; rank orders best matches first. Returns one
+  // row per matching message — callers dedupe to one hit per thread.
+  const searchThreadContentRows = SqlSchema.findAll({
+    Request: Schema.Struct({ match: Schema.String, limit: Schema.Int }),
+    Result: OrchestrationSearchContentHit,
+    execute: ({ match, limit }) =>
+      sql`
+        SELECT
+          t.thread_id AS "threadId",
+          t.project_id AS "projectId",
+          f.message_id AS "messageId",
+          t.title AS "title",
+          snippet(projection_thread_messages_fts, 0, char(1), char(2), '…', 12) AS "snippet"
+        FROM projection_thread_messages_fts f
+        JOIN projection_threads t ON t.thread_id = f.thread_id
+        WHERE projection_thread_messages_fts MATCH ${match}
+          AND t.deleted_at IS NULL
+        ORDER BY rank
+        LIMIT ${limit}
       `,
   });
 
@@ -2070,6 +2114,37 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       );
     });
 
+  const searchThreadContent: ProjectionSnapshotQueryShape["searchThreadContent"] = (input) =>
+    Effect.gen(function* () {
+      const match = buildFtsMatchQuery(input.query);
+      if (match === null) {
+        return [];
+      }
+      const cap = Math.min(Math.max(Math.trunc(input.limit ?? 30), 1), 100);
+      // Over-fetch message hits so dedup-by-thread still yields up to `cap` threads.
+      const rows = yield* searchThreadContentRows({ match, limit: cap * 6 }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.searchThreadContent:query",
+            "ProjectionSnapshotQuery.searchThreadContent:decodeRows",
+          ),
+        ),
+      );
+      const seen = new Set<string>();
+      const hits: Array<OrchestrationSearchContentHit> = [];
+      for (const row of rows) {
+        if (seen.has(row.threadId)) {
+          continue;
+        }
+        seen.add(row.threadId);
+        hits.push(row);
+        if (hits.length >= cap) {
+          break;
+        }
+      }
+      return hits;
+    });
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -2084,6 +2159,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getFullThreadDiffContext,
     getThreadShellById,
     getThreadDetailById,
+    searchThreadContent,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

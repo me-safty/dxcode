@@ -46,9 +46,22 @@ function ChatThreadRouteView() {
       return;
     }
 
-    if (!routeThreadExists && environmentHasAnyThreads) {
-      void navigate({ to: "/", replace: true });
+    if (routeThreadExists || !environmentHasAnyThreads) {
+      return;
     }
+
+    // The thread isn't in the loaded set yet. That's expected when opening one
+    // that loads on demand — e.g. a content-search result for an older/archived
+    // thread not in the active sidebar set. Give the detail a moment to arrive
+    // before concluding it doesn't exist and bouncing to the thread list; if it
+    // loads, `routeThreadExists` flips true and this effect's cleanup cancels the
+    // bounce. (Without the grace it would bounce mid-load, then work on retry.)
+    const bounceTimer = window.setTimeout(() => {
+      void navigate({ to: "/", replace: true });
+    }, 3000);
+    return () => {
+      window.clearTimeout(bounceTimer);
+    };
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, routeThreadExists, threadRef]);
 
   useEffect(() => {

@@ -71,4 +71,13 @@ describe("parseDiffRouteSearch", () => {
       diff: "1",
     });
   });
+
+  it("parses the content-search message deep-link param", () => {
+    expect(parseDiffRouteSearch({ message: "message-42" })).toEqual({ message: "message-42" });
+  });
+
+  it("ignores blank or non-string message values", () => {
+    expect(parseDiffRouteSearch({ message: "  " })).toEqual({});
+    expect(parseDiffRouteSearch({ message: 5 })).toEqual({});
+  });
 });

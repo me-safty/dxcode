@@ -30,6 +30,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  searchContent: "orchestration.searchContent",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -1256,6 +1257,39 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+// Full-text content search over message bodies (FTS5). `query` is matched
+// case-insensitively against words/prefixes; results are one hit per thread.
+export const OrchestrationSearchContentInput = Schema.Struct({
+  query: TrimmedNonEmptyString,
+  limit: Schema.optional(Schema.Int),
+});
+export type OrchestrationSearchContentInput = typeof OrchestrationSearchContentInput.Type;
+
+export const OrchestrationSearchContentHit = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  // The best-matching message in the thread, so the client can jump to it.
+  messageId: MessageId,
+  title: Schema.String,
+  // A short excerpt of the best-matching message, with matched terms wrapped in
+  // U+0001 … U+0002 sentinels so the client can highlight them as plain text.
+  snippet: Schema.String,
+});
+export type OrchestrationSearchContentHit = typeof OrchestrationSearchContentHit.Type;
+
+export const OrchestrationSearchContentResult = Schema.Struct({
+  hits: Schema.Array(OrchestrationSearchContentHit),
+});
+export type OrchestrationSearchContentResult = typeof OrchestrationSearchContentResult.Type;
+
+export class OrchestrationSearchContentError extends Schema.TaggedErrorClass<OrchestrationSearchContentError>()(
+  "OrchestrationSearchContentError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1284,6 +1318,10 @@ export const OrchestrationRpcSchemas = {
   subscribeShell: {
     input: Schema.Struct({}),
     output: OrchestrationShellStreamItem,
+  },
+  searchContent: {
+    input: OrchestrationSearchContentInput,
+    output: OrchestrationSearchContentResult,
   },
 } as const;
 

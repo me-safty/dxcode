@@ -137,6 +137,8 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
+// Id of the message to briefly highlight after a content-search jump (or null).
+const TimelineHighlightCtx = createContext<MessageId | null>(null);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -166,6 +168,8 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  /** Content-search jump target: scroll to + briefly highlight this message. */
+  scrollToMessageId?: MessageId | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +197,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  scrollToMessageId = null,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
 
@@ -297,7 +302,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const previousRowCount = previousRowCountRef.current;
     previousRowCountRef.current = rows.length;
 
-    if (previousRowCount > 0 || rows.length === 0) {
+    // A pending content-search jump owns the initial scroll position — don't
+    // yank to the bottom out from under it.
+    if (previousRowCount > 0 || rows.length === 0 || scrollToMessageId) {
       return;
     }
 
@@ -308,7 +315,59 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [listRef, onIsAtEndChange, rows.length]);
+  }, [listRef, onIsAtEndChange, rows.length, scrollToMessageId]);
+
+  // Content-search jump: highlighted message (fades on its own after ~2s).
+  const [highlightedMessageId, setHighlightedMessageId] = useState<MessageId | null>(null);
+  useEffect(() => {
+    if (!highlightedMessageId) {
+      return;
+    }
+    const timer = window.setTimeout(() => setHighlightedMessageId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [highlightedMessageId]);
+
+  // Scroll to + highlight the jump target once it's present in the loaded rows.
+  // Re-runs as rows stream in; the ref guard makes us jump exactly once per target
+  // (so a later-arriving row can't re-yank the user). Best-effort: a target beyond
+  // the loaded window is simply ignored.
+  const scrolledForTargetRef = useRef<MessageId | null>(null);
+  useEffect(() => {
+    if (!scrollToMessageId || scrolledForTargetRef.current === scrollToMessageId) {
+      return;
+    }
+    const index = rows.findIndex(
+      (row) => row.kind === "message" && row.message.id === scrollToMessageId,
+    );
+    if (index === -1) {
+      // Not a visible row yet. It may be inside a collapsed turn — find it in the
+      // full entry list and expand that turn so it renders, then this effect
+      // re-runs and scrolls. If it isn't loaded at all, we simply wait/ignore.
+      const entry = timelineEntries.find(
+        (candidate) => candidate.kind === "message" && candidate.message.id === scrollToMessageId,
+      );
+      const turnId = entry?.kind === "message" ? entry.message.turnId : null;
+      if (turnId && !expandedTurnIds.has(turnId)) {
+        setExpandedTurnIds((existing) => {
+          const next = new Set(existing);
+          next.add(turnId);
+          return next;
+        });
+      }
+      return;
+    }
+    scrolledForTargetRef.current = scrollToMessageId;
+    setHighlightedMessageId(scrollToMessageId);
+    // Re-assert across a couple of frames: the list renders these rows this commit
+    // and items measure lazily, so a single call can land short. No cleanup — the
+    // ref guard prevents re-scheduling and a stale listRef call is a no-op.
+    const jump = () => {
+      void listRef.current?.scrollToIndex?.({ index, viewPosition: 0.3, animated: false });
+    };
+    window.requestAnimationFrame(jump);
+    window.setTimeout(jump, 120);
+    window.setTimeout(jump, 320);
+  }, [scrollToMessageId, rows, timelineEntries, expandedTurnIds, listRef]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
@@ -372,21 +431,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd={!foldToggleSettling}
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="scrollbar-gutter-both h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <TimelineHighlightCtx value={highlightedMessageId}>
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd={scrollToMessageId == null}
+            maintainScrollAtEnd={!foldToggleSettling}
+            maintainScrollAtEndThreshold={0.1}
+            maintainVisibleContentPosition
+            onScroll={handleScroll}
+            className="scrollbar-gutter-both h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </TimelineHighlightCtx>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -406,6 +467,8 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const highlightedMessageId = use(TimelineHighlightCtx);
+  const isHighlighted = row.kind === "message" && row.message.id === highlightedMessageId;
   return (
     <div
       className={cn(
@@ -416,6 +479,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
           ? "pb-2"
           : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
+        // Content-search jump highlight; the tint fades out when it clears (~2s).
+        "rounded-lg transition-colors duration-700",
+        isHighlighted ? "bg-primary/10" : null,
       )}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}

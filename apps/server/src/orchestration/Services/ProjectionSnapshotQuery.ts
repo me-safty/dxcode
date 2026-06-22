@@ -13,6 +13,7 @@ import type {
   OrchestrationProjectShell,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
+  OrchestrationSearchContentHit,
   OrchestrationThread,
   OrchestrationThreadShell,
   ProjectId,
@@ -157,6 +158,15 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadDetailById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+
+  /**
+   * Full-text search over message bodies (FTS5). Returns one hit per matching
+   * thread (best-ranked message), excluding deleted threads, across all projects.
+   */
+  readonly searchThreadContent: (input: {
+    readonly query: string;
+    readonly limit?: number | undefined;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationSearchContentHit>, ProjectionRepositoryError>;
 }
 
 /**

@@ -1041,6 +1041,30 @@ function ChatViewContent(props: ChatViewProps) {
     strict: false,
     select: (params) => parseDiffRouteSearch(params),
   });
+  // Content-search deep link: `?message=<id>` asks the timeline to scroll to and
+  // briefly highlight that message. Read it synchronously (lazy init) so the
+  // timeline knows the target at mount and can skip the open-at-bottom behavior;
+  // then strip it from the URL so it doesn't re-fire on refresh/back.
+  const [scrollTargetMessageId, setScrollTargetMessageId] = useState<MessageId | null>(
+    () => rawSearch.message ?? null,
+  );
+  const lastSeenMessageParamRef = useRef<MessageId | null>(rawSearch.message ?? null);
+  useEffect(() => {
+    const target = rawSearch.message ?? null;
+    if (target && target !== lastSeenMessageParamRef.current) {
+      setScrollTargetMessageId(target);
+    }
+    lastSeenMessageParamRef.current = target;
+    if (!target) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId },
+      replace: true,
+      search: (previous) => ({ ...previous, message: undefined }),
+    });
+  }, [rawSearch.message, navigate, environmentId, threadId]);
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -4887,6 +4911,7 @@ function ChatViewContent(props: ChatViewProps) {
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                 onIsAtEndChange={onIsAtEndChange}
+                scrollToMessageId={scrollTargetMessageId}
               />
 
               {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}

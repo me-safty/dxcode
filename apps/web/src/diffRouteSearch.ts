@@ -1,9 +1,11 @@
-import { TurnId } from "@t3tools/contracts";
+import { MessageId, TurnId } from "@t3tools/contracts";
 
 export interface DiffRouteSearch {
   diff?: "1" | undefined;
   diffTurnId?: TurnId | undefined;
   diffFilePath?: string | undefined;
+  /** Content-search deep link: scroll to (and briefly highlight) this message. */
+  message?: MessageId | undefined;
 }
 
 function isDiffOpenValue(value: unknown): boolean {
@@ -30,10 +32,13 @@ export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRoute
   const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
   const diffTurnId = diffTurnIdRaw ? TurnId.make(diffTurnIdRaw) : undefined;
   const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
+  const messageRaw = normalizeSearchString(search.message);
+  const message = messageRaw ? MessageId.make(messageRaw) : undefined;
 
   return {
     ...(diff ? { diff } : {}),
     ...(diffTurnId ? { diffTurnId } : {}),
     ...(diffFilePath ? { diffFilePath } : {}),
+    ...(message ? { message } : {}),
   };
 }
