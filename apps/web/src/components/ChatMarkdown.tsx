@@ -296,8 +296,9 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
-  const wrapDefault = useClientSettings((settings) => settings.chatWordWrap);
-  const [expanded, setExpanded] = useState(wrapDefault);
+  const [expanded, setExpanded] = useState(
+    useClientSettings((settings) => settings.chatWordWrap)
+  );
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
@@ -527,8 +528,9 @@ function MarkdownCodeBlock({
   children: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
-  const wrapDefault = useClientSettings((settings) => settings.chatWordWrap);
-  const [wrapped, setWrapped] = useState(wrapDefault);
+  const [wrapped, setWrapped] = useState(
+    useClientSettings((settings) => settings.chatWordWrap)
+  );
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
   const copyLabel = copied ? "Copied" : "Copy code";
