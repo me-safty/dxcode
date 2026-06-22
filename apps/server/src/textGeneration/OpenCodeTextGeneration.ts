@@ -20,6 +20,8 @@ import { resolveAttachmentPath } from "../attachmentStore.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildMergeConflictPrompt,
+  buildMergeResolutionVerificationPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
@@ -161,7 +163,9 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution";
   }) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* () {
@@ -271,7 +275,9 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution";
     readonly cwd: string;
     readonly prompt: string;
     readonly outputSchemaJson: S;
@@ -459,10 +465,54 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     };
   });
 
+  const resolveMergeConflict: TextGenerationShape["resolveMergeConflict"] = Effect.fn(
+    "OpenCodeTextGeneration.resolveMergeConflict",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeConflictPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+    });
+    const generated = yield* runOpenCodeJson({
+      operation: "resolveMergeConflict",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      resolvedContent: generated.resolvedContent,
+    };
+  });
+
+  const verifyMergeResolution: TextGenerationShape["verifyMergeResolution"] = Effect.fn(
+    "OpenCodeTextGeneration.verifyMergeResolution",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeResolutionVerificationPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+      resolvedContent: input.resolvedContent,
+    });
+    const generated = yield* runOpenCodeJson({
+      operation: "verifyMergeResolution",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      ok: generated.ok,
+      reason: generated.reason,
+    };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    resolveMergeConflict,
+    verifyMergeResolution,
   } satisfies TextGenerationShape;
 });

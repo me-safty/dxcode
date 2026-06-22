@@ -194,6 +194,7 @@ import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
+import { SyncWithRemoteDialog } from "./SyncWithRemoteDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
@@ -1014,6 +1015,9 @@ function ChatViewContent(props: ChatViewProps) {
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
+  const syncThreadWithRemote = useAtomCommand(threadEnvironment.syncWithRemote, {
+    reportFailure: false,
+  });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -1128,6 +1132,7 @@ function ChatViewContent(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -1610,6 +1615,32 @@ function ChatViewContent(props: ChatViewProps) {
       void forkThread(activeThread);
     }
   }, [activeThread, isServerThread, forkThread]);
+
+  // The sync button opens a centered picker so the user chooses the remote and
+  // branch to merge; the actual fetch + merge (with AI-assisted conflict
+  // resolution) runs server-side and surfaces as thread activities.
+  const handleSyncWithRemote = useCallback(() => {
+    if (activeThread && isServerThread) {
+      setSyncDialogOpen(true);
+    }
+  }, [activeThread, isServerThread]);
+
+  const handleSyncSelect = useCallback(
+    (selection: { remoteName: string; branch: string }) => {
+      setSyncDialogOpen(false);
+      if (activeThread && isServerThread && environmentId) {
+        void syncThreadWithRemote({
+          environmentId,
+          input: {
+            threadId: activeThread.id,
+            remoteName: selection.remoteName,
+            branch: selection.branch,
+          },
+        });
+      }
+    },
+    [activeThread, isServerThread, environmentId, syncThreadWithRemote],
+  );
 
   const handlePreparedPullRequestThread = useCallback(
     async (input: { branch: string; worktreePath: string | null }) => {
@@ -4978,6 +5009,9 @@ function ChatViewContent(props: ChatViewProps) {
                     onForkConversation={
                       isServerThread && activeProject ? handleForkConversation : undefined
                     }
+                    onSyncWithRemote={
+                      isServerThread && activeProject ? handleSyncWithRemote : undefined
+                    }
                     lockedProvider={lockedProvider}
                     providerStatuses={providerStatuses as ServerProvider[]}
                     activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
@@ -5057,6 +5091,17 @@ function ChatViewContent(props: ChatViewProps) {
                   }
                 }}
                 onPrepared={handlePreparedPullRequestThread}
+              />
+            ) : null}
+
+            {syncDialogOpen ? (
+              <SyncWithRemoteDialog
+                open
+                environmentId={activeThread.environmentId}
+                cwd={activeProject?.workspaceRoot ?? null}
+                projectName={activeProject?.title ?? "this project"}
+                onOpenChange={setSyncDialogOpen}
+                onSelect={handleSyncSelect}
               />
             ) : null}
           </div>

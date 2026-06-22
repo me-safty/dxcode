@@ -17,6 +17,10 @@ export function createGitEnvironmentAtoms<R, E>(
       label: "environment-data:git:list-remotes",
       tag: WS_METHODS.vcsListRemotes,
     }),
+    listRemoteBranches: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:list-remote-branches",
+      tag: WS_METHODS.vcsListRemoteBranches,
+    }),
     listPullRequests: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:list-pull-requests",
       tag: WS_METHODS.gitListPullRequests,

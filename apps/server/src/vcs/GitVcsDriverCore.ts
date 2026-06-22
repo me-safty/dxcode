@@ -1710,6 +1710,161 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const listConflictedFilesImpl = (
+    cwd: string,
+  ): Effect.Effect<ReadonlyArray<string>, GitCommandError> =>
+    runGitStdout(
+      "GitVcsDriver.listConflictedFiles",
+      cwd,
+      ["diff", "--name-only", "--diff-filter=U", "-z"],
+      true,
+    ).pipe(
+      Effect.map((stdout) =>
+        stdout
+          .split("\0")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0),
+      ),
+    );
+
+  const listConflictedFiles: GitVcsDriver.GitVcsDriverShape["listConflictedFiles"] =
+    listConflictedFilesImpl;
+
+  // Merge `ref` (e.g. "origin/main") into the current branch. Returns the
+  // outcome instead of throwing on conflict: a conflicted merge leaves
+  // MERGE_HEAD set and conflict markers in the working tree so the caller can
+  // resolve them and finalize a single merge commit. A non-zero exit with no
+  // conflicted files is a real error and fails the effect.
+  const merge: GitVcsDriver.GitVcsDriverShape["merge"] = Effect.fn("merge")(function* (input) {
+    const beforeSha = yield* runGitStdout(
+      "GitVcsDriver.merge.beforeSha",
+      input.cwd,
+      ["rev-parse", "HEAD"],
+      true,
+    ).pipe(Effect.map((stdout) => stdout.trim()));
+
+    const result = yield* executeGit(
+      "GitVcsDriver.merge",
+      input.cwd,
+      ["merge", "--no-edit", input.ref],
+      { allowNonZeroExit: true, timeoutMs: 60_000 },
+    );
+
+    if (result.exitCode === 0) {
+      const afterSha = yield* runGitStdout(
+        "GitVcsDriver.merge.afterSha",
+        input.cwd,
+        ["rev-parse", "HEAD"],
+        true,
+      ).pipe(Effect.map((stdout) => stdout.trim()));
+      if (beforeSha.length > 0 && beforeSha === afterSha) {
+        return { outcome: "up-to-date" as const, conflictedFiles: [] };
+      }
+      return {
+        outcome: /fast-forward/i.test(result.stdout) ? ("fast-forward" as const) : ("merged" as const),
+        conflictedFiles: [],
+      };
+    }
+
+    const conflictedFiles = yield* listConflictedFilesImpl(input.cwd);
+    if (conflictedFiles.length > 0) {
+      return { outcome: "conflict" as const, conflictedFiles };
+    }
+
+    return yield* createGitCommandError(
+      "GitVcsDriver.merge",
+      input.cwd,
+      ["merge", "--no-edit", input.ref],
+      result.stderr.trim() || "git merge failed",
+    );
+  });
+
+  const mergeAbort: GitVcsDriver.GitVcsDriverShape["mergeAbort"] = (cwd) =>
+    runGit("GitVcsDriver.mergeAbort", cwd, ["merge", "--abort"], true);
+
+  // Stages all changes (including conflict resolutions) and creates the commit.
+  // With MERGE_HEAD set this produces a two-parent merge commit. Uses git's
+  // prepared MERGE_MSG unless an explicit message is supplied.
+  const finalizeMergeCommit: GitVcsDriver.GitVcsDriverShape["finalizeMergeCommit"] = Effect.fn(
+    "finalizeMergeCommit",
+  )(function* (input) {
+    yield* runGit("GitVcsDriver.finalizeMergeCommit.add", input.cwd, ["add", "-A"]);
+    const args =
+      input.message !== undefined && input.message.trim().length > 0
+        ? ["commit", "-m", input.message]
+        : ["commit", "--no-edit"];
+    yield* executeGit("GitVcsDriver.finalizeMergeCommit.commit", input.cwd, args, {
+      timeoutMs: 60_000,
+      fallbackErrorMessage: "git commit (merge) failed",
+    });
+    const commitSha = yield* runGitStdout("GitVcsDriver.finalizeMergeCommit.head", input.cwd, [
+      "rev-parse",
+      "HEAD",
+    ]).pipe(Effect.map((stdout) => stdout.trim()));
+    return { commitSha };
+  });
+
+  const stashPushIncludingUntracked: GitVcsDriver.GitVcsDriverShape["stashPushIncludingUntracked"] =
+    Effect.fn("stashPushIncludingUntracked")(function* (input) {
+      const result = yield* executeGit(
+        "GitVcsDriver.stashPush",
+        input.cwd,
+        ["stash", "push", "--include-untracked", "-m", input.message],
+        { allowNonZeroExit: true, timeoutMs: 30_000 },
+      );
+      if (result.exitCode !== 0) {
+        return yield* createGitCommandError(
+          "GitVcsDriver.stashPush",
+          input.cwd,
+          ["stash", "push", "--include-untracked"],
+          result.stderr.trim() || "git stash push failed",
+        );
+      }
+      const stashed = !/no local changes to save/i.test(`${result.stdout}\n${result.stderr}`);
+      return { stashed };
+    });
+
+  const stashApply: GitVcsDriver.GitVcsDriverShape["stashApply"] = Effect.fn("stashApply")(
+    function* (input) {
+      const result = yield* executeGit(
+        "GitVcsDriver.stashApply",
+        input.cwd,
+        ["stash", "apply", input.ref],
+        { allowNonZeroExit: true, timeoutMs: 30_000 },
+      );
+      if (result.exitCode === 0) {
+        return { conflicted: false };
+      }
+      const conflictedFiles = yield* listConflictedFilesImpl(input.cwd);
+      if (conflictedFiles.length > 0) {
+        return { conflicted: true };
+      }
+      return yield* createGitCommandError(
+        "GitVcsDriver.stashApply",
+        input.cwd,
+        ["stash", "apply", input.ref],
+        result.stderr.trim() || "git stash apply failed",
+      );
+    },
+  );
+
+  const stashDrop: GitVcsDriver.GitVcsDriverShape["stashDrop"] = (input) =>
+    runGit("GitVcsDriver.stashDrop", input.cwd, ["stash", "drop", input.ref], true);
+
+  const resolveRemoteDefaultBranch: GitVcsDriver.GitVcsDriverShape["resolveRemoteDefaultBranch"] =
+    Effect.fn("resolveRemoteDefaultBranch")(function* (input) {
+      const fromHead = yield* resolveDefaultBranchName(input.cwd, input.remoteName);
+      if (fromHead) {
+        return fromHead;
+      }
+      for (const candidate of ["main", "master"]) {
+        if (yield* remoteBranchExists(input.cwd, input.remoteName, candidate)) {
+          return candidate;
+        }
+      }
+      return null;
+    });
+
   const readRangeContext: GitVcsDriver.GitVcsDriverShape["readRangeContext"] = Effect.fn(
     "readRangeContext",
   )(function* (cwd, baseRef) {
@@ -2405,6 +2560,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     commit,
     pushCurrentBranch,
     pullCurrentBranch,
+    merge,
+    mergeAbort,
+    listConflictedFiles,
+    finalizeMergeCommit,
+    stashPushIncludingUntracked,
+    stashApply,
+    stashDrop,
+    resolveRemoteDefaultBranch,
     readRangeContext,
     getReviewDiffPreview,
     readConfigValue,

@@ -24,6 +24,8 @@ import {
   GitListPullRequestsResult,
   VcsListRemotesInput,
   VcsListRemotesResult,
+  VcsListRemoteBranchesInput,
+  VcsListRemoteBranchesResult,
   GitRunStackedActionInput,
   GitRunStackedActionResult,
   GitStackedAction,
@@ -88,6 +90,9 @@ export interface GitManagerShape {
   readonly listRemotes: (
     input: VcsListRemotesInput,
   ) => Effect.Effect<VcsListRemotesResult, GitManagerServiceError>;
+  readonly listRemoteBranches: (
+    input: VcsListRemoteBranchesInput,
+  ) => Effect.Effect<VcsListRemoteBranchesResult, GitManagerServiceError>;
   readonly listPullRequests: (
     input: GitListPullRequestsInput,
   ) => Effect.Effect<GitListPullRequestsResult, GitManagerServiceError>;
@@ -1470,6 +1475,58 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     return { remotes, freshness };
   });
 
+  // Lists a remote's branches directly from the remote (GitHub), so the picker
+  // reflects what's actually on the server rather than stale local tracking refs.
+  const listRemoteBranches: GitManagerShape["listRemoteBranches"] = Effect.fn(
+    "listRemoteBranches",
+  )(function* (input) {
+    const result = yield* gitCore.execute({
+      operation: "GitManager.listRemoteBranches",
+      cwd: input.cwd,
+      args: ["ls-remote", "--symref", input.remote, "HEAD", "refs/heads/*"],
+      allowNonZeroExit: true,
+      timeoutMs: 20_000,
+      maxOutputBytes: 1024 * 1024,
+    });
+    const observedAt = yield* DateTime.now;
+    const freshness = {
+      source: "live-local" as const,
+      observedAt,
+      expiresAt: Option.none(),
+    };
+    if (result.exitCode !== 0) {
+      return yield* new GitManagerError({
+        operation: "GitManager.listRemoteBranches",
+        detail:
+          result.stderr.trim() || `Could not list branches for remote '${input.remote}'.`,
+      });
+    }
+    const headsPrefix = "refs/heads/";
+    const symrefPrefix = `ref: ${headsPrefix}`;
+    const branches: string[] = [];
+    let defaultBranch: string | null = null;
+    for (const line of result.stdout.split("\n")) {
+      const trimmed = line.trim();
+      const tab = trimmed.indexOf("\t");
+      if (tab < 0) {
+        continue;
+      }
+      const left = trimmed.slice(0, tab);
+      const right = trimmed.slice(tab + 1);
+      // Symref line: "ref: refs/heads/<name>\tHEAD" identifies the default branch.
+      if (left.startsWith(symrefPrefix) && right === "HEAD") {
+        defaultBranch = left.slice(symrefPrefix.length);
+        continue;
+      }
+      // Normal line: "<sha>\trefs/heads/<name>".
+      if (right.startsWith(headsPrefix)) {
+        branches.push(right.slice(headsPrefix.length));
+      }
+    }
+    branches.sort((left, right) => left.localeCompare(right));
+    return { branches, defaultBranch, freshness };
+  });
+
   const listPullRequests: GitManagerShape["listPullRequests"] = Effect.fn("listPullRequests")(
     function* (input) {
       const remoteName = input.remote ?? "origin";
@@ -1897,6 +1954,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     invalidateStatus,
     resolvePullRequest,
     listRemotes,
+    listRemoteBranches,
     listPullRequests,
     preparePullRequestThread,
     runStackedAction,

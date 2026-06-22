@@ -104,6 +104,19 @@ interface FakeGitTextGeneration {
     message: string;
     modelSelection: ModelSelection;
   }) => Effect.Effect<{ title: string }, TextGenerationError>;
+  resolveMergeConflict: (input: {
+    cwd: string;
+    path: string;
+    conflictedContent: string;
+    modelSelection: ModelSelection;
+  }) => Effect.Effect<{ resolvedContent: string }, TextGenerationError>;
+  verifyMergeResolution: (input: {
+    cwd: string;
+    path: string;
+    conflictedContent: string;
+    resolvedContent: string;
+    modelSelection: ModelSelection;
+  }) => Effect.Effect<{ ok: boolean; reason: string }, TextGenerationError>;
 }
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
@@ -333,6 +346,15 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
       Effect.succeed({
         title: "Update workflow",
       }),
+    resolveMergeConflict: () =>
+      Effect.succeed({
+        resolvedContent: "",
+      }),
+    verifyMergeResolution: () =>
+      Effect.succeed({
+        ok: true,
+        reason: "",
+      }),
     ...overrides,
   };
 
@@ -376,6 +398,28 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
           (cause) =>
             new TextGenerationError({
               operation: "generateThreadTitle",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    resolveMergeConflict: (input) =>
+      implementation.resolveMergeConflict(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "resolveMergeConflict",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    verifyMergeResolution: (input) =>
+      implementation.verifyMergeResolution(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "verifyMergeResolution",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),
@@ -3436,6 +3480,26 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           label: "Creating pull request...",
         }),
       ]);
+    }),
+  );
+
+  it.effect("lists a remote's branches and reports its default branch", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/list-branches"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/list-branches"]);
+      // Point the bare remote's HEAD at main so the default branch is deterministic.
+      yield* runGit(remoteDir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+      const { manager } = yield* makeManager();
+      const result = yield* manager.listRemoteBranches({ cwd: repoDir, remote: "origin" });
+
+      expect([...result.branches]).toEqual(["feature/list-branches", "main"]);
+      expect(result.defaultBranch).toBe("main");
     }),
   );
 });

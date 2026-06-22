@@ -175,6 +175,12 @@ export const VcsListRemotesInput = Schema.Struct({
 });
 export type VcsListRemotesInput = typeof VcsListRemotesInput.Type;
 
+export const VcsListRemoteBranchesInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  remote: TrimmedNonEmptyStringSchema,
+});
+export type VcsListRemoteBranchesInput = typeof VcsListRemoteBranchesInput.Type;
+
 export const GitListPullRequestsInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   remote: Schema.optional(TrimmedNonEmptyStringSchema),

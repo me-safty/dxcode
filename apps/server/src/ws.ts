@@ -182,6 +182,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.gitResolvePullRequest, AuthOrchestrationOperateScope],
   [WS_METHODS.gitListPullRequests, AuthOrchestrationReadScope],
   [WS_METHODS.vcsListRemotes, AuthOrchestrationReadScope],
+  [WS_METHODS.vcsListRemoteBranches, AuthOrchestrationReadScope],
   [WS_METHODS.gitPreparePullRequestThread, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsListRefs, AuthOrchestrationReadScope],
   [WS_METHODS.vcsCreateWorktree, AuthOrchestrationOperateScope],
@@ -1432,6 +1433,14 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(WS_METHODS.vcsListRemotes, gitWorkflow.listRemotes(input), {
             "rpc.aggregate": "vcs",
           }),
+        [WS_METHODS.vcsListRemoteBranches]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsListRemoteBranches,
+            gitWorkflow.listRemoteBranches(input),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitPreparePullRequestThread,

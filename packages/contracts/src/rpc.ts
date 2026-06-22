@@ -43,12 +43,13 @@ import {
   GitListPullRequestsInput,
   GitListPullRequestsResult,
   VcsListRemotesInput,
+  VcsListRemoteBranchesInput,
   GitRunStackedActionInput,
   VcsStatusInput,
   VcsStatusResult,
   VcsStatusStreamEvent,
 } from "./git.ts";
-import { VcsListRemotesResult } from "./vcs.ts";
+import { VcsListRemotesResult, VcsListRemoteBranchesResult } from "./vcs.ts";
 import {
   ReviewDiffPreviewError,
   ReviewDiffPreviewInput,
@@ -180,6 +181,7 @@ export const WS_METHODS = {
   vcsSwitchRef: "vcs.switchRef",
   vcsInit: "vcs.init",
   vcsListRemotes: "vcs.listRemotes",
+  vcsListRemoteBranches: "vcs.listRemoteBranches",
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
@@ -461,6 +463,12 @@ export const WsGitListPullRequestsRpc = Rpc.make(WS_METHODS.gitListPullRequests,
 export const WsVcsListRemotesRpc = Rpc.make(WS_METHODS.vcsListRemotes, {
   payload: VcsListRemotesInput,
   success: VcsListRemotesResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
+export const WsVcsListRemoteBranchesRpc = Rpc.make(WS_METHODS.vcsListRemoteBranches, {
+  payload: VcsListRemoteBranchesInput,
+  success: VcsListRemoteBranchesResult,
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
 });
 
@@ -757,6 +765,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitResolvePullRequestRpc,
   WsGitListPullRequestsRpc,
   WsVcsListRemotesRpc,
+  WsVcsListRemoteBranchesRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,

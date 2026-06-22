@@ -13,6 +13,8 @@ import { type ThreadTitleGenerationResult, type TextGenerationShape } from "./Te
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildMergeConflictPrompt,
+  buildMergeResolutionVerificationPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
@@ -33,7 +35,9 @@ function mapCursorAcpError(
     | "generateCommitMessage"
     | "generatePrContent"
     | "generateBranchName"
-    | "generateThreadTitle",
+    | "generateThreadTitle"
+    | "resolveMergeConflict"
+    | "verifyMergeResolution",
   detail: string,
   cause: unknown,
 ): TextGenerationError {
@@ -75,7 +79,9 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -270,10 +276,56 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     } satisfies ThreadTitleGenerationResult;
   });
 
+  const resolveMergeConflict: TextGenerationShape["resolveMergeConflict"] = Effect.fn(
+    "CursorTextGeneration.resolveMergeConflict",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeConflictPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+    });
+
+    const generated = yield* runCursorJson({
+      operation: "resolveMergeConflict",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      resolvedContent: generated.resolvedContent,
+    };
+  });
+
+  const verifyMergeResolution: TextGenerationShape["verifyMergeResolution"] = Effect.fn(
+    "CursorTextGeneration.verifyMergeResolution",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeResolutionVerificationPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+      resolvedContent: input.resolvedContent,
+    });
+
+    const generated = yield* runCursorJson({
+      operation: "verifyMergeResolution",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      ok: generated.ok,
+      reason: generated.reason,
+    };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    resolveMergeConflict,
+    verifyMergeResolution,
   } satisfies TextGenerationShape;
 });

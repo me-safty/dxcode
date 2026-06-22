@@ -58,6 +58,13 @@ export const VcsListRemotesResult = Schema.Struct({
 });
 export type VcsListRemotesResult = typeof VcsListRemotesResult.Type;
 
+export const VcsListRemoteBranchesResult = Schema.Struct({
+  branches: Schema.Array(TrimmedNonEmptyString),
+  defaultBranch: Schema.NullOr(TrimmedNonEmptyString),
+  freshness: VcsFreshness,
+});
+export type VcsListRemoteBranchesResult = typeof VcsListRemoteBranchesResult.Type;
+
 export interface VcsProcessErrorContext {
   readonly operation: string;
   readonly command: string;

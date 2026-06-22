@@ -23,6 +23,8 @@ import {
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildMergeConflictPrompt,
+  buildMergeResolutionVerificationPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
@@ -101,7 +103,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -120,7 +124,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution",
     attachments: BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -162,7 +168,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -402,10 +410,56 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     } satisfies ThreadTitleGenerationResult;
   });
 
+  const resolveMergeConflict: TextGenerationShape["resolveMergeConflict"] = Effect.fn(
+    "CodexTextGeneration.resolveMergeConflict",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeConflictPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+    });
+
+    const generated = yield* runCodexJson({
+      operation: "resolveMergeConflict",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      resolvedContent: generated.resolvedContent,
+    };
+  });
+
+  const verifyMergeResolution: TextGenerationShape["verifyMergeResolution"] = Effect.fn(
+    "CodexTextGeneration.verifyMergeResolution",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeResolutionVerificationPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+      resolvedContent: input.resolvedContent,
+    });
+
+    const generated = yield* runCodexJson({
+      operation: "verifyMergeResolution",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      ok: generated.ok,
+      reason: generated.reason,
+    };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    resolveMergeConflict,
+    verifyMergeResolution,
   } satisfies TextGenerationShape;
 });

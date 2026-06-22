@@ -101,6 +101,7 @@ import {
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  RefreshCwIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -347,6 +348,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   onForkConversation?: (() => void) | undefined;
+  onSyncWithRemote?: (() => void) | undefined;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -361,6 +363,34 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
       ) : null}
       {props.isPreparingWorktree ? (
         <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
+      ) : null}
+      {/* Sync with remote — sits to the left of fork, same visibility rules.
+          Fetches + merges the remote default branch into the thread's branch,
+          with AI-assisted conflict resolution handled server-side. */}
+      {props.onSyncWithRemote &&
+      !props.isRunning &&
+      !props.pendingAction &&
+      !props.showPlanFollowUpPrompt ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                className="shrink-0 rounded-full text-muted-foreground/70 hover:text-foreground/80"
+                disabled={props.isEnvironmentUnavailable}
+                aria-label="Sync with remote"
+                onClick={() => {
+                  props.onSyncWithRemote?.();
+                }}
+              />
+            }
+          >
+            <RefreshCwIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Sync with remote</TooltipPopup>
+        </Tooltip>
       ) : null}
       {/* Fork conversation — shown only alongside the send button (not while running /
           answering / refining) and only when a fork handler is available (server threads). */}
@@ -510,6 +540,10 @@ export interface ChatComposerProps {
   /** Fork the current conversation into a fresh draft with the same settings.
    * Provided only for server-backed threads; absent hides the fork button. */
   onForkConversation?: (() => void) | undefined;
+  /** Sync the thread's branch with its remote default branch (fetch + merge,
+   * with server-side AI conflict resolution). Provided only for server-backed
+   * threads; absent hides the sync button. */
+  onSyncWithRemote?: (() => void) | undefined;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -2597,6 +2631,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   hasSendableContent={composerSendState.hasSendableContent}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onForkConversation={props.onForkConversation}
+                  onSyncWithRemote={props.onSyncWithRemote}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}
                   onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

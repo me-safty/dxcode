@@ -20,6 +20,10 @@ const makeStubTextGeneration = (overrides: Partial<TextGenerationShape>): TextGe
   generatePrContent: () => Effect.die("generatePrContent stub not configured for this test"),
   generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
   generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
+  resolveMergeConflict: () =>
+    Effect.die("resolveMergeConflict stub not configured for this test"),
+  verifyMergeResolution: () =>
+    Effect.die("verifyMergeResolution stub not configured for this test"),
   ...overrides,
 });
 

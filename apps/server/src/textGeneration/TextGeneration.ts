@@ -70,6 +70,40 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface MergeConflictResolutionInput {
+  cwd: string;
+  /** Repo-relative path of the conflicted file (used for prompt context only). */
+  path: string;
+  /** Full file contents including git conflict markers. */
+  conflictedContent: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface MergeConflictResolutionResult {
+  /** The complete file contents with all conflict markers resolved. */
+  resolvedContent: string;
+}
+
+export interface MergeResolutionVerificationInput {
+  cwd: string;
+  /** Repo-relative path of the conflicted file (used for prompt context only). */
+  path: string;
+  /** The original file contents including git conflict markers. */
+  conflictedContent: string;
+  /** The proposed resolved file contents to review. */
+  resolvedContent: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface MergeResolutionVerificationResult {
+  /** True only if the resolution faithfully combines both sides without loss. */
+  ok: boolean;
+  /** A short explanation, primarily useful when `ok` is false. */
+  reason: string;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -77,6 +111,12 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  resolveMergeConflict(
+    input: MergeConflictResolutionInput,
+  ): Promise<MergeConflictResolutionResult>;
+  verifyMergeResolution(
+    input: MergeResolutionVerificationInput,
+  ): Promise<MergeResolutionVerificationResult>;
 }
 
 /**
@@ -110,6 +150,24 @@ export interface TextGenerationShape {
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+  /**
+   * Resolve a single file's git merge conflicts, returning the full resolved
+   * file contents. Single-shot: the model only produces text; the caller writes
+   * it back and creates the commit.
+   */
+  readonly resolveMergeConflict: (
+    input: MergeConflictResolutionInput,
+  ) => Effect.Effect<MergeConflictResolutionResult, TextGenerationError>;
+
+  /**
+   * Independently review a proposed merge-conflict resolution for correctness
+   * (no leftover markers, both sides preserved, nothing dropped). Used as a
+   * fail-closed gate before committing an AI-resolved merge.
+   */
+  readonly verifyMergeResolution: (
+    input: MergeResolutionVerificationInput,
+  ) => Effect.Effect<MergeResolutionVerificationResult, TextGenerationError>;
 }
 
 /**
@@ -123,7 +181,9 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "resolveMergeConflict"
+  | "verifyMergeResolution";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistryShape,
@@ -161,6 +221,14 @@ export const makeTextGenerationFromRegistry = (
   generateThreadTitle: (input) =>
     resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+    ),
+  resolveMergeConflict: (input) =>
+    resolveInstance(registry, "resolveMergeConflict", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.resolveMergeConflict(input)),
+    ),
+  verifyMergeResolution: (input) =>
+    resolveInstance(registry, "verifyMergeResolution", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.verifyMergeResolution(input)),
     ),
 });
 

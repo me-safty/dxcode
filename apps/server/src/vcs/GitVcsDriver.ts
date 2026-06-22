@@ -172,6 +172,46 @@ export interface GitRemoteStatusOptions {
   readonly refreshUpstream?: boolean;
 }
 
+export interface GitMergeInput {
+  readonly cwd: string;
+  readonly ref: string;
+}
+
+export type GitMergeOutcome = "up-to-date" | "fast-forward" | "merged" | "conflict";
+
+export interface GitMergeResult {
+  readonly outcome: GitMergeOutcome;
+  readonly conflictedFiles: ReadonlyArray<string>;
+}
+
+export interface GitFinalizeMergeCommitInput {
+  readonly cwd: string;
+  readonly message?: string | undefined;
+}
+
+export interface GitStashPushInput {
+  readonly cwd: string;
+  readonly message: string;
+}
+
+export interface GitStashPushResult {
+  readonly stashed: boolean;
+}
+
+export interface GitStashRefInput {
+  readonly cwd: string;
+  readonly ref: string;
+}
+
+export interface GitStashApplyResult {
+  readonly conflicted: boolean;
+}
+
+export interface GitResolveRemoteDefaultBranchInput {
+  readonly cwd: string;
+  readonly remoteName: string;
+}
+
 export interface GitVcsDriverShape {
   readonly execute: (input: ExecuteGitInput) => Effect.Effect<ExecuteGitResult, GitCommandError>;
   readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
@@ -209,6 +249,22 @@ export interface GitVcsDriverShape {
   ) => Effect.Effect<string | null, GitCommandError>;
   readonly listRefs: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, GitCommandError>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly merge: (input: GitMergeInput) => Effect.Effect<GitMergeResult, GitCommandError>;
+  readonly mergeAbort: (cwd: string) => Effect.Effect<void, GitCommandError>;
+  readonly listConflictedFiles: (
+    cwd: string,
+  ) => Effect.Effect<ReadonlyArray<string>, GitCommandError>;
+  readonly finalizeMergeCommit: (
+    input: GitFinalizeMergeCommitInput,
+  ) => Effect.Effect<{ commitSha: string }, GitCommandError>;
+  readonly stashPushIncludingUntracked: (
+    input: GitStashPushInput,
+  ) => Effect.Effect<GitStashPushResult, GitCommandError>;
+  readonly stashApply: (input: GitStashRefInput) => Effect.Effect<GitStashApplyResult, GitCommandError>;
+  readonly stashDrop: (input: GitStashRefInput) => Effect.Effect<void, GitCommandError>;
+  readonly resolveRemoteDefaultBranch: (
+    input: GitResolveRemoteDefaultBranchInput,
+  ) => Effect.Effect<string | null, GitCommandError>;
   readonly createWorktree: (
     input: VcsCreateWorktreeInput,
   ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;

@@ -555,4 +555,146 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
   });
+
+  describe("merge and stash", () => {
+    it.effect("fast-forwards a behind branch, then reports up-to-date", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-ff-remote-");
+        const updater = yield* makeTmpDir("git-ff-updater-");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "-u", "origin", "main"]);
+
+        yield* git(updater, ["clone", remote, "."]);
+        yield* git(updater, ["config", "user.email", "test@test.com"]);
+        yield* git(updater, ["config", "user.name", "Test"]);
+        yield* writeTextFile(updater, "ff.txt", "ff\n");
+        yield* git(updater, ["add", "."]);
+        yield* git(updater, ["commit", "-m", "ff change"]);
+        yield* git(updater, ["push", "origin", "main"]);
+
+        yield* driver.fetchRemoteTrackingBranch({
+          cwd,
+          remoteName: "origin",
+          remoteBranch: "main",
+        });
+
+        const first = yield* driver.merge({ cwd, ref: "origin/main" });
+        assert.equal(first.outcome, "fast-forward");
+
+        const second = yield* driver.merge({ cwd, ref: "origin/main" });
+        assert.equal(second.outcome, "up-to-date");
+      }),
+    );
+
+    it.effect("captures conflicts and finalizes a single two-parent merge commit", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-merge-remote-");
+        const updater = yield* makeTmpDir("git-merge-updater-");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* writeTextFile(cwd, "conflict.txt", "base\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add conflict file"]);
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "-u", "origin", "main"]);
+        yield* git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+
+        // The remote advances main with a conflicting edit.
+        yield* git(updater, ["clone", remote, "."]);
+        yield* git(updater, ["config", "user.email", "test@test.com"]);
+        yield* git(updater, ["config", "user.name", "Test"]);
+        yield* writeTextFile(updater, "conflict.txt", "remote-change\n");
+        yield* git(updater, ["commit", "-am", "remote change"]);
+        yield* git(updater, ["push", "origin", "main"]);
+
+        // The local feature branch makes its own conflicting edit.
+        yield* git(cwd, ["checkout", "-b", "feature"]);
+        yield* writeTextFile(cwd, "conflict.txt", "local-change\n");
+        yield* git(cwd, ["commit", "-am", "local change"]);
+
+        const mainBranch = yield* driver.resolveRemoteDefaultBranch({
+          cwd,
+          remoteName: "origin",
+        });
+        assert.equal(mainBranch, "main");
+        yield* driver.fetchRemoteTrackingBranch({
+          cwd,
+          remoteName: "origin",
+          remoteBranch: "main",
+        });
+
+        const merged = yield* driver.merge({ cwd, ref: "origin/main" });
+        assert.equal(merged.outcome, "conflict");
+        assert.deepEqual([...merged.conflictedFiles], ["conflict.txt"]);
+        assert.deepEqual([...(yield* driver.listConflictedFiles(cwd))], ["conflict.txt"]);
+
+        // Resolve the conflict and let the driver create the single merge commit.
+        yield* fileSystem.writeFileString(pathService.join(cwd, "conflict.txt"), "merged\n");
+        const finalized = yield* driver.finalizeMergeCommit({
+          cwd,
+          message: "Merge origin/main",
+        });
+        assert.match(finalized.commitSha, /^[a-f0-9]{40}$/);
+
+        const parents = yield* git(cwd, ["rev-list", "--parents", "-n", "1", "HEAD"]);
+        // commit sha + two parents = a real merge commit.
+        assert.equal(parents.split(" ").length, 3);
+        assert.equal(yield* git(cwd, ["log", "-1", "--pretty=%s"]), "Merge origin/main");
+        assert.equal(
+          (yield* fileSystem.readFileString(pathService.join(cwd, "conflict.txt"))).trim(),
+          "merged",
+        );
+        assert.deepEqual([...(yield* driver.listConflictedFiles(cwd))], []);
+      }),
+    );
+
+    it.effect("stashes tracked and untracked changes, then reapplies them", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        yield* initRepoWithCommit(cwd);
+
+        yield* writeTextFile(cwd, "README.md", "# changed\n");
+        yield* writeTextFile(cwd, "new.txt", "new\n");
+
+        const pushed = yield* driver.stashPushIncludingUntracked({ cwd, message: "t3 test" });
+        assert.equal(pushed.stashed, true);
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+
+        const applied = yield* driver.stashApply({ cwd, ref: "stash@{0}" });
+        assert.equal(applied.conflicted, false);
+        yield* driver.stashDrop({ cwd, ref: "stash@{0}" });
+
+        assert.equal(
+          (yield* fileSystem.readFileString(pathService.join(cwd, "README.md"))).trim(),
+          "# changed",
+        );
+        assert.equal(yield* fileSystem.exists(pathService.join(cwd, "new.txt")), true);
+      }),
+    );
+
+    it.effect("reports nothing stashed on a clean working tree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(cwd);
+
+        const pushed = yield* driver.stashPushIncludingUntracked({ cwd, message: "t3 test" });
+        assert.equal(pushed.stashed, false);
+      }),
+    );
+  });
 });

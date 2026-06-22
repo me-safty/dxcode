@@ -24,6 +24,8 @@ import {
   type GitListPullRequestsResult,
   type VcsListRemotesInput,
   type VcsListRemotesResult,
+  type VcsListRemoteBranchesInput,
+  type VcsListRemoteBranchesResult,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   type VcsStatusInput,
@@ -61,6 +63,9 @@ export interface GitWorkflowServiceShape {
   readonly listRemotes: (
     input: VcsListRemotesInput,
   ) => Effect.Effect<VcsListRemotesResult, GitManagerServiceError>;
+  readonly listRemoteBranches: (
+    input: VcsListRemoteBranchesInput,
+  ) => Effect.Effect<VcsListRemoteBranchesResult, GitManagerServiceError>;
   readonly listPullRequests: (
     input: GitListPullRequestsInput,
   ) => Effect.Effect<GitListPullRequestsResult, GitManagerServiceError>;
@@ -292,6 +297,10 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       gitManager.resolvePullRequest,
     ),
     listRemotes: routeGitManager("GitWorkflowService.listRemotes", gitManager.listRemotes),
+    listRemoteBranches: routeGitManager(
+      "GitWorkflowService.listRemoteBranches",
+      gitManager.listRemoteBranches,
+    ),
     listPullRequests: routeGitManager(
       "GitWorkflowService.listPullRequests",
       gitManager.listPullRequests,

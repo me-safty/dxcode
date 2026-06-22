@@ -76,6 +76,83 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
 }
 
 // ---------------------------------------------------------------------------
+// Merge conflict resolution
+// ---------------------------------------------------------------------------
+
+export interface MergeConflictPromptInput {
+  path: string;
+  conflictedContent: string;
+}
+
+export function buildMergeConflictPrompt(input: MergeConflictPromptInput) {
+  const prompt = [
+    "You are resolving a git merge conflict in a single file.",
+    "The file content below contains conflict markers: <<<<<<<, =======, and >>>>>>>.",
+    "Within each conflicted region, the lines between <<<<<<< and ======= are the current",
+    "branch's version; the lines between ======= and >>>>>>> are the incoming branch's version.",
+    "Return a JSON object with the single key: resolvedContent.",
+    "Rules:",
+    "- resolvedContent must be the COMPLETE file with every conflict resolved",
+    "- remove ALL conflict markers (every <<<<<<<, =======, and >>>>>>> line)",
+    "- combine both sides' intent where they are complementary; never silently drop functionality",
+    "- do not add commentary, explanations, or markdown code fences — emit only the raw file content",
+    "- preserve the file's original formatting, indentation, and trailing newline",
+    "",
+    `File: ${input.path}`,
+    "",
+    "Conflicted file content:",
+    limitSection(input.conflictedContent, 100_000),
+  ].join("\n");
+
+  return {
+    prompt,
+    outputSchema: Schema.Struct({
+      resolvedContent: Schema.String,
+    }),
+  };
+}
+
+export interface MergeResolutionVerificationPromptInput {
+  path: string;
+  conflictedContent: string;
+  resolvedContent: string;
+}
+
+export function buildMergeResolutionVerificationPrompt(
+  input: MergeResolutionVerificationPromptInput,
+) {
+  const prompt = [
+    "You are reviewing a proposed resolution of a git merge conflict for correctness.",
+    "You are given the ORIGINAL file (with conflict markers showing both sides) and the PROPOSED",
+    "resolved file. Within the original, the lines between <<<<<<< and ======= are the current",
+    "branch's version; the lines between ======= and >>>>>>> are the incoming branch's version.",
+    "Return a JSON object with keys: ok (boolean) and reason (string).",
+    "Set ok=true ONLY if ALL of the following hold:",
+    "- the proposed file contains no remaining conflict markers",
+    "- it preserves the intent of BOTH sides where they are complementary (nothing meaningful dropped)",
+    "- it does not delete or corrupt code that was outside the conflicted regions",
+    "- it is internally consistent and would plausibly compile/parse",
+    "Otherwise set ok=false and briefly state the problem in reason. If you are unsure, set ok=false.",
+    "",
+    `File: ${input.path}`,
+    "",
+    "Original file with conflict markers:",
+    limitSection(input.conflictedContent, 100_000),
+    "",
+    "Proposed resolved file:",
+    limitSection(input.resolvedContent, 100_000),
+  ].join("\n");
+
+  return {
+    prompt,
+    outputSchema: Schema.Struct({
+      ok: Schema.Boolean,
+      reason: Schema.String,
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // PR content
 // ---------------------------------------------------------------------------
 

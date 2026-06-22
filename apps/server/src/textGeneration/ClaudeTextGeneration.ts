@@ -22,6 +22,8 @@ import { type TextGenerationShape } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildMergeConflictPrompt,
+  buildMergeResolutionVerificationPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
@@ -85,7 +87,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -115,7 +119,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "resolveMergeConflict"
+      | "verifyMergeResolution";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -357,10 +363,56 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     };
   });
 
+  const resolveMergeConflict: TextGenerationShape["resolveMergeConflict"] = Effect.fn(
+    "ClaudeTextGeneration.resolveMergeConflict",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeConflictPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+    });
+
+    const generated = yield* runClaudeJson({
+      operation: "resolveMergeConflict",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      resolvedContent: generated.resolvedContent,
+    };
+  });
+
+  const verifyMergeResolution: TextGenerationShape["verifyMergeResolution"] = Effect.fn(
+    "ClaudeTextGeneration.verifyMergeResolution",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildMergeResolutionVerificationPrompt({
+      path: input.path,
+      conflictedContent: input.conflictedContent,
+      resolvedContent: input.resolvedContent,
+    });
+
+    const generated = yield* runClaudeJson({
+      operation: "verifyMergeResolution",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      ok: generated.ok,
+      reason: generated.reason,
+    };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    resolveMergeConflict,
+    verifyMergeResolution,
   } satisfies TextGenerationShape;
 });
