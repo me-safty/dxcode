@@ -62,11 +62,28 @@ describe("decideAgentStopNotifications", () => {
     expect(result.notifications[0]).toMatchObject({ body: "Lucentive · errored", status: "errored" });
   });
 
+  it("fires 'finished' on running -> ready", () => {
+    const result = run(new Map([["thread-1", "running"]]), [thread("ready")]);
+    expect(result.notifications).toHaveLength(1);
+    expect(result.notifications[0]!.status).toBe("finished");
+  });
+
   it("fires 'awaiting input' when finished with pending user input", () => {
     const result = run(new Map([["thread-1", "running"]]), [
       thread("idle", { hasPendingUserInput: true }),
     ]);
     expect(result.notifications[0]).toMatchObject({
+      body: "Lucentive · awaiting input",
+      status: "awaiting input",
+    });
+  });
+
+  it("fires 'awaiting input' when finished with pending approvals", () => {
+    const result = run(new Map([["thread-1", "running"]]), [
+      thread("idle", { hasPendingApprovals: true }),
+    ]);
+    expect(result.notifications).toHaveLength(1);
+    expect(result.notifications[0]!).toMatchObject({
       body: "Lucentive · awaiting input",
       status: "awaiting input",
     });
@@ -128,6 +145,7 @@ describe("decideAgentStopNotifications", () => {
       activeThreadId: null,
       isAppFocused: false,
     });
-    expect(result.notifications[0].body).toBe("Unknown project · finished");
+    expect(result.notifications).toHaveLength(1);
+    expect(result.notifications[0]!.body).toBe("Unknown project · finished");
   });
 });

@@ -81,7 +81,7 @@ export function decideAgentStopNotifications(
     nextStatuses.set(thread.id, status);
 
     const prev = input.prevStatuses.get(thread.id);
-    const transitioned = prev === "running" && status !== "running" && STOP_STATUSES.has(status);
+    const transitioned = prev === "running" && STOP_STATUSES.has(status);
     if (!transitioned) continue;
 
     if (!input.settings.popup && !input.settings.sound) continue;
