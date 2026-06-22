@@ -7,8 +7,8 @@ import {
   SidebarMenuSubButton,
   SidebarProvider,
   SidebarTrigger,
-  resolveSidebarState,
 } from "./sidebar";
+import { resolveSidebarState } from "./sidebarState";
 
 function renderSidebarButton(className?: string) {
   return renderToStaticMarkup(

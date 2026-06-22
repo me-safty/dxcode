@@ -19,6 +19,7 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
+import { resolveSidebarState, type ResponsiveSidebarState } from "./sidebarState";
 import * as Schema from "effect/Schema";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
@@ -29,7 +30,7 @@ const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 
 type SidebarContextProps = {
-  state: "expanded" | "collapsed";
+  state: ResponsiveSidebarState;
   open: boolean;
   setOpen: (open: boolean) => void;
   openMobile: boolean;
@@ -88,14 +89,6 @@ function useSidebar() {
 function useSidebarVisibility() {
   const { isMobile, open, openMobile } = useSidebar();
   return isMobile ? openMobile : open;
-}
-
-function resolveSidebarState(input: {
-  isMobile: boolean;
-  open: boolean;
-  openMobile: boolean;
-}): SidebarContextProps["state"] {
-  return (input.isMobile ? input.openMobile : input.open) ? "expanded" : "collapsed";
 }
 
 function SidebarProvider({
@@ -1022,7 +1015,6 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
-  resolveSidebarState,
   useSidebar,
   useSidebarVisibility,
 };
