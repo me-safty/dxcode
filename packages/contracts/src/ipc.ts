@@ -878,6 +878,18 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+export interface AgentNotificationRequest {
+  readonly title: string;
+  readonly body: string;
+  readonly threadId: string;
+  readonly environmentId: string;
+}
+
+export interface AgentNotificationClick {
+  readonly threadId: string;
+  readonly environmentId: string;
+}
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -921,6 +933,9 @@ export interface DesktopBridge {
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  showAgentNotification: (request: AgentNotificationRequest) => Promise<void>;
+  playSystemSound: () => Promise<void>;
+  onAgentNotificationClicked: (listener: (payload: AgentNotificationClick) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;

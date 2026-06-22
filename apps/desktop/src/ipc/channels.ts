@@ -68,3 +68,6 @@ export const PREVIEW_RECORDING_SAVE_CHANNEL = "desktop:preview-recording-save";
 export const PREVIEW_RECORDING_FRAME_CHANNEL = "desktop:preview-recording-frame";
 export const PREVIEW_STATE_CHANGE_CHANNEL = "desktop:preview-state-change";
 export const PREVIEW_POINTER_EVENT_CHANNEL = "desktop:preview-pointer-event";
+export const SHOW_AGENT_NOTIFICATION_CHANNEL = "desktop:show-agent-notification";
+export const PLAY_SYSTEM_SOUND_CHANNEL = "desktop:play-system-sound";
+export const AGENT_NOTIFICATION_CLICKED_CHANNEL = "desktop:agent-notification-clicked";

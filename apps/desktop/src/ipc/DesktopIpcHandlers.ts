@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 
 import * as DesktopIpc from "./DesktopIpc.ts";
+import { playSystemSound, showAgentNotification } from "./methods/agentNotifications.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import {
   clearConnectionCatalog,
@@ -69,6 +70,9 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setServerExposureMode);
   yield* ipc.handle(setTailscaleServeEnabled);
   yield* ipc.handle(getAdvertisedEndpoints);
+
+  yield* ipc.handle(showAgentNotification);
+  yield* ipc.handle(playSystemSound);
 
   yield* ipc.handle(pickFolder);
   yield* ipc.handle(confirm);
