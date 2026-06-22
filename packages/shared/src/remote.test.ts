@@ -83,7 +83,8 @@ describe("remote", () => {
     }
 
     expect(pairingUrlError).toBeInstanceOf(RemotePairingUrlInvalidError);
-    expect((pairingUrlError as RemotePairingUrlInvalidError).cause).toBeInstanceOf(Error);
+    expect(pairingUrlError).toMatchObject({ protocol: "ftp:" });
+    expect((pairingUrlError as RemotePairingUrlInvalidError).cause).toBeUndefined();
   });
 
   it("rejects unsupported hosted pairing backend protocols", () => {
@@ -98,8 +99,8 @@ describe("remote", () => {
     }
 
     expect(hostError).toBeInstanceOf(RemoteBackendUrlInvalidError);
-    expect(hostError).toMatchObject({ source: "hosted-pairing-host" });
-    expect((hostError as RemoteBackendUrlInvalidError).cause).toBeInstanceOf(Error);
+    expect(hostError).toMatchObject({ source: "hosted-pairing-host", protocol: "ftp:" });
+    expect((hostError as RemoteBackendUrlInvalidError).cause).toBeUndefined();
   });
 
   it("rejects unsupported direct host protocols", () => {
@@ -114,8 +115,8 @@ describe("remote", () => {
     }
 
     expect(hostError).toBeInstanceOf(RemoteBackendUrlInvalidError);
-    expect(hostError).toMatchObject({ source: "direct-host" });
-    expect((hostError as RemoteBackendUrlInvalidError).cause).toBeInstanceOf(Error);
+    expect(hostError).toMatchObject({ source: "direct-host", protocol: "ftp:" });
+    expect((hostError as RemoteBackendUrlInvalidError).cause).toBeUndefined();
   });
 
   it("uses distinct structural errors for missing pairing inputs", () => {

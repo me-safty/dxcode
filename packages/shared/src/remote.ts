@@ -19,7 +19,10 @@ export class RemoteBackendUrlMissingError extends Schema.TaggedErrorClass<Remote
 
 export class RemotePairingUrlInvalidError extends Schema.TaggedErrorClass<RemotePairingUrlInvalidError>()(
   "RemotePairingUrlInvalidError",
-  { cause: Schema.Defect() },
+  {
+    cause: Schema.optional(Schema.Defect()),
+    protocol: Schema.optional(Schema.String),
+  },
 ) {
   override get message(): string {
     return "Pairing URL is invalid.";
@@ -30,7 +33,8 @@ export class RemoteBackendUrlInvalidError extends Schema.TaggedErrorClass<Remote
   "RemoteBackendUrlInvalidError",
   {
     source: Schema.Literals(["direct-host", "hosted-pairing-host"]),
-    cause: Schema.Defect(),
+    cause: Schema.optional(Schema.Defect()),
+    protocol: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
@@ -65,9 +69,6 @@ export const RemotePairingTargetError = Schema.Union([
 ]);
 export type RemotePairingTargetError = typeof RemotePairingTargetError.Type;
 
-const createUnsupportedRemoteBackendProtocolError = (url: URL): TypeError =>
-  new TypeError(`Unsupported remote backend URL protocol: ${url.protocol}`);
-
 const hasSupportedRemoteBackendProtocol = (url: URL): boolean =>
   SUPPORTED_REMOTE_BACKEND_PROTOCOLS.has(url.protocol);
 
@@ -93,7 +94,7 @@ const normalizeRemoteBaseUrl = (
   if (!hasSupportedRemoteBackendProtocol(url)) {
     throw new RemoteBackendUrlInvalidError({
       source,
-      cause: createUnsupportedRemoteBackendProtocolError(url),
+      protocol: url.protocol,
     });
   }
   url.pathname = "/";
@@ -199,7 +200,7 @@ export const resolveRemotePairingTarget = (input: {
     }
     if (!hasSupportedRemoteBackendProtocol(url)) {
       throw new RemotePairingUrlInvalidError({
-        cause: createUnsupportedRemoteBackendProtocolError(url),
+        protocol: url.protocol,
       });
     }
     const hostedPairingRequest = readHostedPairingRequest(url);
