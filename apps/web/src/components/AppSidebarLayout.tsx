@@ -21,7 +21,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
-        void navigate({ to: "/settings", replace: pathnameRef.current.startsWith("/settings") });
+        void navigate({ to: "/settings", replace: /^\/settings(\/|$)/.test(pathnameRef.current) });
       }
     });
 
