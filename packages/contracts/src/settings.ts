@@ -32,6 +32,7 @@ export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode =
 export const AgentStopSoundSource = Schema.Literals(["tone", "system"]);
 export type AgentStopSoundSource = typeof AgentStopSoundSource.Type;
 export const DEFAULT_AGENT_STOP_SOUND_SOURCE: AgentStopSoundSource = "tone";
+
 export const MIN_SIDEBAR_THREAD_PREVIEW_COUNT = 1;
 export const MAX_SIDEBAR_THREAD_PREVIEW_COUNT = 15;
 export const SidebarThreadPreviewCount = Schema.Int.check(
