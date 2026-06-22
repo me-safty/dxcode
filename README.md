@@ -9,8 +9,7 @@ This is my fork. It tracks upstream but adds the features below.
 
 ## What's different in this fork
 
-I've been working on my own fork and it's diverged enough that it's
-worth switching over. The main additions:
+I've been working on my own fork with many new features. The main additions:
 
 - **Per-conversation cost tracking.** Each thread shows its running cost next to
   the title — real figures from Claude, token×price estimates (prefixed `est.`)
