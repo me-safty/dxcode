@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 const PAIRING_TOKEN_PARAM = "token";
 const HOSTED_PAIRING_HOST_PARAM = "host";
 const HOSTED_PAIRING_LABEL_PARAM = "label";
+const SUPPORTED_REMOTE_BACKEND_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
 const readHashParams = (url: URL): URLSearchParams =>
   new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
@@ -64,6 +65,12 @@ export const RemotePairingTargetError = Schema.Union([
 ]);
 export type RemotePairingTargetError = typeof RemotePairingTargetError.Type;
 
+const createUnsupportedRemoteBackendProtocolError = (url: URL): TypeError =>
+  new TypeError(`Unsupported remote backend URL protocol: ${url.protocol}`);
+
+const hasSupportedRemoteBackendProtocol = (url: URL): boolean =>
+  SUPPORTED_REMOTE_BACKEND_PROTOCOLS.has(url.protocol);
+
 const normalizeRemoteBaseUrl = (
   rawValue: string,
   source: RemoteBackendUrlInvalidError["source"],
@@ -82,6 +89,12 @@ const normalizeRemoteBaseUrl = (
     url = new URL(normalizedInput);
   } catch (cause) {
     throw new RemoteBackendUrlInvalidError({ source, cause });
+  }
+  if (!hasSupportedRemoteBackendProtocol(url)) {
+    throw new RemoteBackendUrlInvalidError({
+      source,
+      cause: createUnsupportedRemoteBackendProtocolError(url),
+    });
   }
   url.pathname = "/";
   url.search = "";
@@ -183,6 +196,11 @@ export const resolveRemotePairingTarget = (input: {
       url = new URL(pairingUrl);
     } catch (cause) {
       throw new RemotePairingUrlInvalidError({ cause });
+    }
+    if (!hasSupportedRemoteBackendProtocol(url)) {
+      throw new RemotePairingUrlInvalidError({
+        cause: createUnsupportedRemoteBackendProtocolError(url),
+      });
     }
     const hostedPairingRequest = readHostedPairingRequest(url);
     if (hostedPairingRequest) {

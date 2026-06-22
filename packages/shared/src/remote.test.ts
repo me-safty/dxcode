@@ -72,6 +72,52 @@ describe("remote", () => {
     });
   });
 
+  it("rejects unsupported direct pairing URL protocols", () => {
+    let pairingUrlError: unknown;
+    try {
+      resolveRemotePairingTarget({
+        pairingUrl: "ftp://remote.example.com/pair#token=pairing-token",
+      });
+    } catch (cause) {
+      pairingUrlError = cause;
+    }
+
+    expect(pairingUrlError).toBeInstanceOf(RemotePairingUrlInvalidError);
+    expect((pairingUrlError as RemotePairingUrlInvalidError).cause).toBeInstanceOf(Error);
+  });
+
+  it("rejects unsupported hosted pairing backend protocols", () => {
+    let hostError: unknown;
+    try {
+      resolveRemotePairingTarget({
+        pairingUrl:
+          "https://app.t3.codes/pair?host=ftp%3A%2F%2Fremote.example.com#token=pairing-token",
+      });
+    } catch (cause) {
+      hostError = cause;
+    }
+
+    expect(hostError).toBeInstanceOf(RemoteBackendUrlInvalidError);
+    expect(hostError).toMatchObject({ source: "hosted-pairing-host" });
+    expect((hostError as RemoteBackendUrlInvalidError).cause).toBeInstanceOf(Error);
+  });
+
+  it("rejects unsupported direct host protocols", () => {
+    let hostError: unknown;
+    try {
+      resolveRemotePairingTarget({
+        host: "ftp://remote.example.com",
+        pairingCode: "pairing-token",
+      });
+    } catch (cause) {
+      hostError = cause;
+    }
+
+    expect(hostError).toBeInstanceOf(RemoteBackendUrlInvalidError);
+    expect(hostError).toMatchObject({ source: "direct-host" });
+    expect((hostError as RemoteBackendUrlInvalidError).cause).toBeInstanceOf(Error);
+  });
+
   it("uses distinct structural errors for missing pairing inputs", () => {
     expect(() => resolveRemotePairingTarget({})).toThrowError(RemoteBackendUrlMissingError);
     expect(() =>
