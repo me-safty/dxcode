@@ -1,10 +1,10 @@
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
-import { SidebarInset, useSidebarVisibility } from "./ui/sidebar";
+import { SidebarInset } from "./ui/sidebar";
 import { isElectron } from "../env";
 import { cn } from "~/lib/utils";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 export function NoActiveThreadState() {
-  const sidebarOpen = useSidebarVisibility();
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
@@ -12,8 +12,7 @@ export function NoActiveThreadState() {
           className={cn(
             "border-b border-border px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
             isElectron ? "workspace-topbar drag-region" : "workspace-topbar",
-            !sidebarOpen &&
-              "pl-[calc(var(--workspace-controls-left)+2.5rem)] sm:pl-[calc(var(--workspace-controls-left)+2.5rem)]",
+            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
           {isElectron ? (

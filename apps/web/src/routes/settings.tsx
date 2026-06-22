@@ -11,9 +11,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
-import { SidebarInset, useSidebarVisibility } from "../components/ui/sidebar";
+import { SidebarInset } from "../components/ui/sidebar";
 import { isElectron } from "../env";
 import { cn } from "~/lib/utils";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -36,7 +37,6 @@ function SettingsContentLayout() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
-  const sidebarOpen = useSidebarVisibility();
   const showRestoreDefaults = location.pathname === "/settings/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
@@ -69,8 +69,7 @@ function SettingsContentLayout() {
           <header
             className={cn(
               "border-b border-border px-3 py-2 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
-              !sidebarOpen &&
-                "pl-[calc(var(--workspace-controls-left)+2.5rem)] sm:pl-[calc(var(--workspace-controls-left)+2.5rem)]",
+              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             )}
           >
             <div className="flex min-h-7 items-center gap-2 sm:min-h-6">
@@ -88,7 +87,7 @@ function SettingsContentLayout() {
           <div
             className={cn(
               "drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
-              !sidebarOpen && "pl-[calc(var(--workspace-controls-left)+2.5rem)]",
+              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             )}
           >
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">

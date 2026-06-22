@@ -159,6 +159,7 @@ function SidebarProvider({
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
         )}
+        data-sidebar-state={state}
         data-slot="sidebar-wrapper"
         style={
           {
@@ -320,7 +321,10 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
 
   return (
     <Button
-      className={cn("size-7 sm:size-7", className)}
+      className={cn(
+        "size-[var(--workspace-titlebar-control-size)]! [-webkit-app-region:no-drag]",
+        className,
+      )}
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       aria-pressed={isOpen}

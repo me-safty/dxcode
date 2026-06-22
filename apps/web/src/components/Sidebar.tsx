@@ -2649,12 +2649,12 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron: boolean;
 }) {
   return isElectron ? (
-    <SidebarHeader className="@container/sidebar-header drag-region h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0">
+    <SidebarHeader className="@container/sidebar-header drag-region h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0">
       <SidebarTrigger className="md:hidden" />
       <SidebarBrand />
     </SidebarHeader>
   ) : (
-    <SidebarHeader className="@container/sidebar-header h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0">
+    <SidebarHeader className="@container/sidebar-header h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0">
       <SidebarTrigger className="md:hidden" />
       <SidebarBrand />
     </SidebarHeader>
@@ -2662,18 +2662,33 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 });
 
 function SidebarBrand() {
+  const stageLabel = useSidebarStageLabel();
+
   return (
     <Link
       aria-label="Go to threads"
-      className="sidebar-brand h-full min-w-0 flex-1 items-center gap-1 overflow-hidden pl-[calc(var(--workspace-controls-left)+2.5rem)] text-foreground outline-hidden ring-ring focus-visible:ring-2"
+      className="sidebar-brand ml-[var(--workspace-titlebar-content-left)] h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2"
       to="/"
     >
       <T3Wordmark />
       <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
         Code
       </span>
+      <span className="sidebar-brand-stage shrink-0 items-center whitespace-nowrap rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+        {stageLabel}
+      </span>
     </Link>
   );
+}
+
+function useSidebarStageLabel() {
+  const primaryServerVersion =
+    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
+
+  return resolveSidebarStageBadgeLabel({
+    primaryServerVersion,
+    fallbackStageLabel: APP_STAGE_LABEL,
+  });
 }
 
 function T3Wordmark() {
@@ -2695,12 +2710,6 @@ function T3Wordmark() {
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
-  const primaryServerVersion =
-    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
-  const stageLabel = resolveSidebarStageBadgeLabel({
-    primaryServerVersion,
-    fallbackStageLabel: APP_STAGE_LABEL,
-  });
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -2721,9 +2730,6 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           >
             <SettingsIcon className="size-3.5" />
             <span className="text-xs">Settings</span>
-            <span className="ml-auto font-mono text-[10px] text-muted-foreground/45">
-              {stageLabel}
-            </span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

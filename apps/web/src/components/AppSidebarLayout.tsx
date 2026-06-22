@@ -35,9 +35,16 @@ function SidebarControl() {
   }, [keybindings, toggleSidebar]);
 
   return (
-    <div className="fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 flex h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag]">
+    <div
+      className="pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 flex h-[var(--workspace-topbar-height)] items-center"
+      data-sidebar-control=""
+    >
       <Tooltip>
-        <TooltipTrigger render={<SidebarTrigger aria-label="Toggle main sidebar" />} />
+        <TooltipTrigger
+          render={
+            <SidebarTrigger className="pointer-events-auto" aria-label="Toggle main sidebar" />
+          }
+        />
         <TooltipPopup side="bottom">
           Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
         </TooltipPopup>
@@ -72,7 +79,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={macosWindowControlsStyle}>
-      <SidebarControl />
       <Sidebar
         side="left"
         collapsible="offcanvas"
@@ -88,6 +94,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarRail />
       </Sidebar>
       {children}
+      <SidebarControl />
     </SidebarProvider>
   );
 }

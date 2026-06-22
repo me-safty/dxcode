@@ -4,11 +4,12 @@ import { LinkIcon, PlusIcon } from "lucide-react";
 import { NoActiveThreadState } from "../components/NoActiveThreadState";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
-import { SidebarInset, useSidebarVisibility } from "../components/ui/sidebar";
+import { SidebarInset } from "../components/ui/sidebar";
 import { useEnvironments } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { cn } from "~/lib/utils";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
@@ -27,7 +28,6 @@ export const Route = createFileRoute("/_chat/")({
 
 function HostedStaticOnboardingState() {
   const cloudEnabled = hasCloudPublicConfig();
-  const sidebarOpen = useSidebarVisibility();
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -35,8 +35,7 @@ function HostedStaticOnboardingState() {
         <header
           className={cn(
             "border-b border-border px-3 py-2 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5 sm:py-3",
-            !sidebarOpen &&
-              "pl-[calc(var(--workspace-controls-left)+2.5rem)] sm:pl-[calc(var(--workspace-controls-left)+2.5rem)]",
+            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
           <div className="flex items-center gap-2">
