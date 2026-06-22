@@ -2,8 +2,7 @@
 
 T3 Code is a minimal web/desktop GUI for coding agents — it gives you a single
 interface in front of CLI agents like Codex, Claude, Cursor, and OpenCode, with
-threaded conversations, a sidebar of projects, git/worktree integration, and a
-GitHub PR workflow.
+threaded conversations, a sidebar of projects, and git/worktree integration.
 
 This is my fork. It tracks upstream but adds the features below.
 
