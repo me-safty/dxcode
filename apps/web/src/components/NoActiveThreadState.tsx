@@ -12,7 +12,8 @@ export function NoActiveThreadState() {
           className={cn(
             "border-b border-border px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
             isElectron ? "workspace-topbar drag-region" : "workspace-topbar",
-            !sidebarOpen && "pl-[calc(var(--workspace-controls-left)+2.5rem)]",
+            !sidebarOpen &&
+              "pl-[calc(var(--workspace-controls-left)+2.5rem)] sm:pl-[calc(var(--workspace-controls-left)+2.5rem)]",
           )}
         >
           {isElectron ? (

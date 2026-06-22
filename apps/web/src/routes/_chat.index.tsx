@@ -35,7 +35,8 @@ function HostedStaticOnboardingState() {
         <header
           className={cn(
             "border-b border-border px-3 py-2 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5 sm:py-3",
-            !sidebarOpen && "pl-[calc(var(--workspace-controls-left)+2.5rem)]",
+            !sidebarOpen &&
+              "pl-[calc(var(--workspace-controls-left)+2.5rem)] sm:pl-[calc(var(--workspace-controls-left)+2.5rem)]",
           )}
         >
           <div className="flex items-center gap-2">
