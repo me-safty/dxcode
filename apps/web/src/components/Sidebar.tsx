@@ -1711,6 +1711,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             : null;
       const seedContext = resolveSidebarNewThreadSeedContext({
         projectId: member.id,
+        ...(member.kind ? { projectKind: member.kind } : {}),
         defaultEnvMode: resolveSidebarNewThreadEnvMode({
           defaultEnvMode: defaultThreadEnvMode,
         }),
@@ -1741,6 +1742,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           ? { worktreePath: seedContext.worktreePath }
           : {}),
         envMode: seedContext.envMode,
+        ...(member.kind ? { projectKind: member.kind } : {}),
       });
     },
     [defaultThreadEnvMode, handleNewThread, isMobile, router, setOpenMobile],
@@ -3341,7 +3343,10 @@ export default function Sidebar() {
       setSectionCredentialUsername("");
       setSectionCredentialPassword("");
       setSectionCredentialSecretKey("");
-      await handleNewThread(scopeProjectRef(primaryEnvironmentId, projectId), { envMode: "local" });
+      await handleNewThread(scopeProjectRef(primaryEnvironmentId, projectId), {
+        envMode: "local",
+        projectKind: "section",
+      });
     } catch (error) {
       toastManager.add({
         type: "error",

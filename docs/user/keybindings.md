@@ -52,7 +52,7 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `terminal.new`: create new terminal (in focused terminal context by default)
 - `terminal.close`: close/kill the focused terminal (in focused terminal context by default)
 - `commandPalette.toggle`: open or close the global command palette
-- `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
+- `chat.new`: create a new chat thread preserving the active thread's branch/worktree state for regular projects; sections receive a fresh server-managed worktree
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
 - `editor.openFavorite`: open current project/worktree in the last-used editor
 - `script.{id}.run`: run a project script by id (for example `script.test.run`)

@@ -3,6 +3,7 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -20,6 +21,7 @@ import {
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
+import { sectionThreadBranch } from "./SectionWorkspaces.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -62,9 +64,11 @@ type DecideOrchestrationCommandResult =
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   commands,
   readModel,
+  sectionWorktreeReferenceExclusions,
 }: {
   readonly commands: ReadonlyArray<OrchestrationCommand>;
   readonly readModel: OrchestrationReadModel;
+  readonly sectionWorktreeReferenceExclusions?: ReadonlySet<ThreadId>;
 }): Effect.fn.Return<
   ReadonlyArray<PlannedOrchestrationEvent>,
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
@@ -78,6 +82,7 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
     const decided = yield* decideOrchestrationCommand({
       command: nextCommand,
       readModel: nextReadModel,
+      ...(sectionWorktreeReferenceExclusions ? { sectionWorktreeReferenceExclusions } : {}),
     });
     const nextEvents = Array.isArray(decided) ? decided : [decided];
     for (const nextEvent of nextEvents) {
@@ -96,9 +101,11 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
+  sectionWorktreeReferenceExclusions,
 }: {
   readonly command: OrchestrationCommand;
   readonly readModel: OrchestrationReadModel;
+  readonly sectionWorktreeReferenceExclusions?: ReadonlySet<ThreadId>;
 }): Effect.fn.Return<
   DecideOrchestrationCommandResult,
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
@@ -187,6 +194,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (activeThreads.length > 0) {
         return yield* decideCommandSequence({
           readModel,
+          sectionWorktreeReferenceExclusions: new Set(activeThreads.map((thread) => thread.id)),
           commands: [
             ...activeThreads.map(
               (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
@@ -274,6 +282,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: thread.projectId,
       });
+      if (project.kind === "section") {
+        const ownedBranch = sectionThreadBranch(thread.id);
+        const ownedWorktreePath = thread.branch === ownedBranch ? thread.worktreePath : null;
+        const linkedThreads = listThreadsByProjectId(readModel, thread.projectId).filter(
+          (candidate) =>
+            candidate.id !== thread.id &&
+            candidate.deletedAt === null &&
+            !sectionWorktreeReferenceExclusions?.has(candidate.id) &&
+            (candidate.branch === ownedBranch ||
+              (ownedWorktreePath !== null && candidate.worktreePath === ownedWorktreePath)),
+        );
+        if (linkedThreads.length > 0) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Section worktree '${ownedBranch}' is still used by ${linkedThreads.length} other thread(s). Switch those threads before deleting '${thread.id}'.`,
+          });
+        }
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -286,10 +312,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           deletedAt: occurredAt,
-          ...(project.kind === "section" && thread.worktreePath
+          ...(project.kind === "section"
             ? {
                 sectionWorkspaceRoot: project.workspaceRoot,
-                worktreePath: thread.worktreePath,
+                ...(thread.worktreePath ? { worktreePath: thread.worktreePath } : {}),
               }
             : {}),
         },
@@ -342,11 +368,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.meta.update": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const changesWorkspace =
+        (command.branch !== undefined && command.branch !== thread.branch) ||
+        (command.worktreePath !== undefined && command.worktreePath !== thread.worktreePath);
+      if (changesWorkspace) {
+        const project = yield* requireProject({
+          readModel,
+          command,
+          projectId: thread.projectId,
+        });
+        if (project.kind === "section") {
+          const targetBranch = command.branch ?? thread.branch;
+          const targetWorktreePath = command.worktreePath ?? thread.worktreePath;
+          const targetOwner = targetBranch
+            ? listThreadsByProjectId(readModel, thread.projectId).find(
+                (candidate) =>
+                  candidate.deletedAt === null &&
+                  sectionThreadBranch(candidate.id) === targetBranch,
+              )
+            : null;
+          if (!targetOwner || !targetWorktreePath) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "Section threads can only switch to a live managed section worktree.",
+            });
+          }
+        }
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({

@@ -96,10 +96,45 @@ it.layer(TestLayer)("SectionWorkspaces", (it) => {
 
       yield* removeSectionThreadWorktree({
         sectionWorkspaceRoot: root,
-        worktreePath: first.worktreePath,
+        threadId: input.threadId,
       });
       assert.isFalse(yield* fileSystem.exists(first.worktreePath));
       assert.equal(yield* git(root, ["branch", "--list", first.branch]), "");
+    }),
+  );
+
+  it.effect("removes only the deleting thread's owned worktree after switching", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "section-root-" });
+      const worktreesDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "section-worktrees-",
+      });
+      const projectId = ProjectId.make("section-project");
+      const firstThreadId = ThreadId.make("thread-first");
+      const secondThreadId = ThreadId.make("thread-second");
+      const first = yield* ensureSectionThreadWorktree({
+        sectionWorkspaceRoot: root,
+        worktreesDir,
+        projectId,
+        threadId: firstThreadId,
+      });
+      const second = yield* ensureSectionThreadWorktree({
+        sectionWorkspaceRoot: root,
+        worktreesDir,
+        projectId,
+        threadId: secondThreadId,
+      });
+
+      yield* removeSectionThreadWorktree({
+        sectionWorkspaceRoot: root,
+        threadId: firstThreadId,
+      });
+
+      assert.isFalse(yield* fileSystem.exists(first.worktreePath));
+      assert.isTrue(yield* fileSystem.exists(second.worktreePath));
+      assert.equal(yield* git(root, ["branch", "--list", first.branch]), "");
+      assert.include(yield* git(root, ["branch", "--list", second.branch]), second.branch);
     }),
   );
 });

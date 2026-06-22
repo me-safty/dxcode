@@ -116,6 +116,32 @@ export function resolveBranchPresentation(input: {
   };
 }
 
+export function canSelectBranchForWorkspace(input: {
+  readonly managedSectionWorkspace: boolean;
+  readonly refName: Pick<VcsRef, "name" | "worktreePath">;
+}): boolean {
+  return (
+    !input.managedSectionWorkspace ||
+    (input.refName.worktreePath !== null && isSectionThreadBranch(input.refName.name))
+  );
+}
+
+export async function applyThreadWorkspaceChange(input: {
+  readonly workspaceChanged: boolean;
+  readonly hasActiveSession: boolean;
+  readonly stopSession: () => Promise<void>;
+  readonly closeTerminals: () => Promise<void>;
+  readonly updateThread: () => Promise<void>;
+}): Promise<void> {
+  if (input.workspaceChanged && input.hasActiveSession) {
+    await input.stopSession();
+  }
+  if (input.workspaceChanged) {
+    await input.closeTerminals();
+  }
+  await input.updateThread();
+}
+
 export function resolveBranchSelectionTarget(input: {
   activeProjectCwd: string;
   activeWorktreePath: string | null;

@@ -194,6 +194,8 @@ import {
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import { isThreadWorkspaceReady } from "../sectionWorkspacePolicy";
+import { useThreadWorkspaceSwitchStore } from "../threadWorkspaceSwitchStore";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import {
@@ -612,6 +614,12 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         : {},
     [effectiveWorktreePath, project],
   );
+  const workspaceReady = isThreadWorkspaceReady({
+    hasProject: project !== undefined,
+    hasServerThread: serverThread !== undefined,
+    projectKind: project?.kind,
+    worktreePath,
+  });
 
   const bumpFocusRequestId = useCallback(() => {
     if (!visible) {
@@ -738,7 +746,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     [onAddTerminalContext, visible],
   );
 
-  if (!project || !terminalUiState.terminalOpen || !cwd) {
+  if (!project || !workspaceReady || !terminalUiState.terminalOpen || !cwd) {
     return null;
   }
 
@@ -1571,7 +1579,7 @@ export default function ChatView(props: ChatViewProps) {
     resetLocalDispatch,
     localDispatchStartedAt,
     isPreparingWorktree,
-    isSendBusy,
+    isSendBusy: isLocalDispatchBusy,
   } = useLocalDispatchState({
     activeThread,
     activeLatestTurn,
@@ -1580,6 +1588,10 @@ export default function ChatView(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
+  const isWorkspaceSwitching = useThreadWorkspaceSwitchStore((state) =>
+    activeThreadKey ? state.switchingThreadKeys.has(activeThreadKey) : false,
+  );
+  const isSendBusy = isLocalDispatchBusy || isWorkspaceSwitching;
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const canQueueMessages =
     isServerThread && !isConnecting && !activeEnvironmentUnavailable && !activePendingProgress;
@@ -1914,6 +1926,12 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
+  const activeWorkspaceReady = isThreadWorkspaceReady({
+    hasProject: activeProject !== undefined,
+    hasServerThread: isServerThread,
+    projectKind: activeProject?.kind,
+    worktreePath: activeThreadWorktreePath,
+  });
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
@@ -2057,11 +2075,17 @@ export default function ChatView(props: ChatViewProps) {
     [activeThreadRef, storeSetTerminalOpen],
   );
   const toggleTerminalVisibility = useCallback(() => {
-    if (!activeThreadRef) return;
+    if (!activeThreadRef || !activeWorkspaceReady) return;
     setTerminalOpen(!terminalUiState.terminalOpen);
-  }, [activeThreadRef, setTerminalOpen, terminalUiState.terminalOpen]);
+  }, [activeThreadRef, activeWorkspaceReady, setTerminalOpen, terminalUiState.terminalOpen]);
   const splitTerminal = useCallback(() => {
-    if (!activeThreadRef || hasReachedSplitLimit || !activeThreadId || !activeProject) {
+    if (
+      !activeThreadRef ||
+      !activeWorkspaceReady ||
+      hasReachedSplitLimit ||
+      !activeThreadId ||
+      !activeProject
+    ) {
       return;
     }
     const cwdForOpen = gitCwd ?? activeProject.cwd;
@@ -2093,6 +2117,7 @@ export default function ChatView(props: ChatViewProps) {
     })();
   }, [
     activeProject,
+    activeWorkspaceReady,
     activeKnownTerminalIds,
     activeThreadId,
     activeThreadRef,
@@ -2103,7 +2128,7 @@ export default function ChatView(props: ChatViewProps) {
     storeSplitTerminal,
   ]);
   const createNewTerminal = useCallback(() => {
-    if (!activeThreadRef || !activeThreadId || !activeProject) {
+    if (!activeThreadRef || !activeWorkspaceReady || !activeThreadId || !activeProject) {
       return;
     }
     const cwdForOpen = gitCwd ?? activeProject.cwd;
@@ -2135,6 +2160,7 @@ export default function ChatView(props: ChatViewProps) {
     })();
   }, [
     activeProject,
+    activeWorkspaceReady,
     activeKnownTerminalIds,
     activeThreadId,
     activeThreadRef,
@@ -2185,7 +2211,9 @@ export default function ChatView(props: ChatViewProps) {
       },
     ) => {
       const api = readEnvironmentApi(environmentId);
-      if (!api || !activeThreadId || !activeProject || !activeThread) return;
+      if (!api || !activeThreadId || !activeProject || !activeThread || !activeWorkspaceReady) {
+        return;
+      }
       if (options?.rememberAsLastInvoked !== false) {
         setLastInvokedScriptByProjectId((current) => {
           if (current[activeProject.id] === script.id) return current;
@@ -2262,6 +2290,7 @@ export default function ChatView(props: ChatViewProps) {
     [
       activeProject,
       activeThread,
+      activeWorkspaceReady,
       activeThreadId,
       activeThreadRef,
       gitCwd,
@@ -3931,13 +3960,13 @@ export default function ChatView(props: ChatViewProps) {
           activeProjectIsSection={activeProject?.kind === "section"}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
+          activeProjectScripts={activeWorkspaceReady ? activeProject?.scripts : undefined}
           preferredScriptId={
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
           }
           keybindings={keybindings}
           availableEditors={availableEditors}
-          terminalAvailable={activeProject !== undefined}
+          terminalAvailable={activeWorkspaceReady}
           terminalOpen={terminalUiState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}

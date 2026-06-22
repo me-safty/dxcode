@@ -17,6 +17,7 @@ import { parseBase64DataUrl } from "../imageMime.ts";
 import {
   ensureSectionRepository,
   ensureSectionThreadWorktree,
+  isSectionWorktreeTarget,
   sectionWorkspacePath,
 } from "./SectionWorkspaces.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -141,6 +142,43 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             worktreePath: sectionThread.worktreePath,
           } satisfies OrchestrationCommand)
         : (command as OrchestrationCommand);
+    }
+
+    if (
+      command.type === "thread.meta.update" &&
+      (command.branch !== undefined || command.worktreePath !== undefined)
+    ) {
+      const thread = yield* projectionSnapshotQuery
+        .getThreadDetailById(command.threadId)
+        .pipe(Effect.map(Option.getOrNull));
+      const project = thread
+        ? yield* projectionSnapshotQuery
+            .getProjectShellById(thread.projectId)
+            .pipe(Effect.map(Option.getOrNull))
+        : null;
+      const changesManagedWorkspace =
+        project?.kind === "section" &&
+        ((command.branch !== undefined && command.branch !== thread?.branch) ||
+          (command.worktreePath !== undefined && command.worktreePath !== thread?.worktreePath));
+      if (changesManagedWorkspace) {
+        const targetBranch = command.branch ?? thread?.branch ?? null;
+        const targetWorktreePath = command.worktreePath ?? thread?.worktreePath ?? null;
+        const validTarget =
+          project && targetBranch && targetWorktreePath
+            ? yield* prepareSectionWorkspace(
+                isSectionWorktreeTarget({
+                  sectionWorkspaceRoot: project.workspaceRoot,
+                  branch: targetBranch,
+                  worktreePath: targetWorktreePath,
+                }),
+              )
+            : false;
+        if (!validTarget) {
+          return yield* new OrchestrationDispatchCommandError({
+            message: "Section threads can only switch to another managed section worktree.",
+          });
+        }
+      }
     }
 
     if (command.type !== "thread.turn.start") {

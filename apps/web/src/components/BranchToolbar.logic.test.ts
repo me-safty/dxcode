@@ -1,6 +1,8 @@
 import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  applyThreadWorkspaceChange,
+  canSelectBranchForWorkspace,
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   resolveEnvironmentOptionLabel,
@@ -14,6 +16,70 @@ import {
   resolveLockedWorkspaceLabel,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
+
+describe("applyThreadWorkspaceChange", () => {
+  it("stops the session and terminals before updating the workspace", async () => {
+    const calls: string[] = [];
+
+    await applyThreadWorkspaceChange({
+      workspaceChanged: true,
+      hasActiveSession: true,
+      stopSession: async () => {
+        calls.push("stop-session");
+      },
+      closeTerminals: async () => {
+        calls.push("close-terminals");
+      },
+      updateThread: async () => {
+        calls.push("update-thread");
+      },
+    });
+
+    expect(calls).toEqual(["stop-session", "close-terminals", "update-thread"]);
+  });
+
+  it("does not update the workspace when terminal shutdown fails", async () => {
+    const calls: string[] = [];
+
+    await expect(
+      applyThreadWorkspaceChange({
+        workspaceChanged: true,
+        hasActiveSession: false,
+        stopSession: async () => {
+          calls.push("stop-session");
+        },
+        closeTerminals: async () => {
+          calls.push("close-terminals");
+          throw new Error("close failed");
+        },
+        updateThread: async () => {
+          calls.push("update-thread");
+        },
+      }),
+    ).rejects.toThrow("close failed");
+    expect(calls).toEqual(["close-terminals"]);
+  });
+});
+
+describe("canSelectBranchForWorkspace", () => {
+  it("limits section switching to managed worktrees", () => {
+    expect(
+      canSelectBranchForWorkspace({
+        managedSectionWorkspace: true,
+        refName: {
+          name: "section-thread/thread-2",
+          worktreePath: "/tmp/sections/thread-2",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      canSelectBranchForWorkspace({
+        managedSectionWorkspace: true,
+        refName: { name: "main", worktreePath: null },
+      }),
+    ).toBe(false);
+  });
+});
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");

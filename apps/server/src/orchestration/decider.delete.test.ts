@@ -14,6 +14,7 @@ import { expect, it } from "@effect/vitest";
 
 import { decideOrchestrationCommand } from "./decider.ts";
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
+import { sectionThreadBranch } from "./SectionWorkspaces.ts";
 
 const asCommandId = (value: string): CommandId => CommandId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
@@ -96,6 +97,92 @@ const seedReadModel = Effect.gen(function* () {
       runtimeMode: "approval-required",
       branch: null,
       worktreePath: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+});
+
+const seedLinkedSectionReadModel = Effect.gen(function* () {
+  const now = "2026-01-01T00:00:00.000Z";
+  const projectId = asProjectId("section-delete");
+  const linkedThreadId = asThreadId("thread-linked");
+  const ownerThreadId = asThreadId("thread-owner");
+  const ownerBranch = sectionThreadBranch(ownerThreadId);
+  const initial = createEmptyReadModel(now);
+  const withProject = yield* projectEvent(initial, {
+    sequence: 1,
+    eventId: asEventId("evt-section-create"),
+    aggregateKind: "project",
+    aggregateId: projectId,
+    type: "project.created",
+    occurredAt: now,
+    commandId: asCommandId("cmd-section-create"),
+    causationEventId: null,
+    correlationId: asCommandId("cmd-section-create"),
+    metadata: {},
+    payload: {
+      projectId,
+      title: "Section Delete",
+      workspaceRoot: "/tmp/section-delete",
+      kind: "section",
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  const withLinkedThread = yield* projectEvent(withProject, {
+    sequence: 2,
+    eventId: asEventId("evt-linked-thread-create"),
+    aggregateKind: "thread",
+    aggregateId: linkedThreadId,
+    type: "thread.created",
+    occurredAt: now,
+    commandId: asCommandId("cmd-linked-thread-create"),
+    causationEventId: null,
+    correlationId: asCommandId("cmd-linked-thread-create"),
+    metadata: {},
+    payload: {
+      threadId: linkedThreadId,
+      projectId,
+      title: "Linked Thread",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      branch: ownerBranch,
+      worktreePath: "/tmp/section-delete/owner",
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+
+  return yield* projectEvent(withLinkedThread, {
+    sequence: 3,
+    eventId: asEventId("evt-owner-thread-create"),
+    aggregateKind: "thread",
+    aggregateId: ownerThreadId,
+    type: "thread.created",
+    occurredAt: now,
+    commandId: asCommandId("cmd-owner-thread-create"),
+    causationEventId: null,
+    correlationId: asCommandId("cmd-owner-thread-create"),
+    metadata: {},
+    payload: {
+      threadId: ownerThreadId,
+      projectId,
+      title: "Owner Thread",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      branch: ownerBranch,
+      worktreePath: "/tmp/section-delete/owner",
       createdAt: now,
       updatedAt: now,
     },
@@ -212,6 +299,136 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
       }
 
       expect(normalizeDeleteEvent(forcedResult)).toEqual(normalizeDeleteEvent(sequentialEvents));
+    }),
+  );
+
+  it.effect("keeps a section worktree owner while another thread is linked", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedLinkedSectionReadModel;
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.delete",
+          commandId: asCommandId("cmd-delete-linked-owner"),
+          threadId: asThreadId("thread-owner"),
+        },
+        readModel,
+      }).pipe(Effect.flip);
+
+      expect(error.message).toContain("is still used by 1 other thread");
+    }),
+  );
+
+  it.effect("detects legacy links that share only the owner's worktree path", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedLinkedSectionReadModel;
+      const now = "2026-01-01T00:00:01.000Z";
+      const legacyReadModel = yield* projectEvent(readModel, {
+        sequence: readModel.snapshotSequence + 1,
+        eventId: asEventId("evt-legacy-linked-thread-meta"),
+        aggregateKind: "thread",
+        aggregateId: asThreadId("thread-linked"),
+        type: "thread.meta-updated",
+        occurredAt: now,
+        commandId: asCommandId("cmd-legacy-linked-thread-meta"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-legacy-linked-thread-meta"),
+        metadata: {},
+        payload: {
+          threadId: asThreadId("thread-linked"),
+          branch: sectionThreadBranch(asThreadId("thread-linked")),
+          updatedAt: now,
+        },
+      });
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.delete",
+          commandId: asCommandId("cmd-delete-legacy-linked-owner"),
+          threadId: asThreadId("thread-owner"),
+        },
+        readModel: legacyReadModel,
+      }).pipe(Effect.flip);
+
+      expect(error.message).toContain("is still used by 1 other thread");
+    }),
+  );
+
+  it.effect("allows force-deleting a section and all linked threads together", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedLinkedSectionReadModel;
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "project.delete",
+          commandId: asCommandId("cmd-force-delete-linked-section"),
+          projectId: asProjectId("section-delete"),
+          force: true,
+        },
+        readModel,
+      });
+      const events = Array.isArray(result) ? result : [result];
+
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.deleted",
+        "thread.deleted",
+        "project.deleted",
+      ]);
+    }),
+  );
+
+  it.effect("rejects switching to a worktree whose owner was deleted concurrently", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedLinkedSectionReadModel;
+      const ownerThreadId = asThreadId("thread-owner");
+      const linkedThreadId = asThreadId("thread-linked");
+      const now = "2026-01-01T00:00:02.000Z";
+      const unlinkedReadModel = yield* projectEvent(readModel, {
+        sequence: readModel.snapshotSequence + 1,
+        eventId: asEventId("evt-unlink-before-owner-delete"),
+        aggregateKind: "thread",
+        aggregateId: linkedThreadId,
+        type: "thread.meta-updated",
+        occurredAt: now,
+        commandId: asCommandId("cmd-unlink-before-owner-delete"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-unlink-before-owner-delete"),
+        metadata: {},
+        payload: {
+          threadId: linkedThreadId,
+          branch: sectionThreadBranch(linkedThreadId),
+          worktreePath: "/tmp/section-delete/linked",
+          updatedAt: now,
+        },
+      });
+      const ownerDeletedReadModel = yield* projectEvent(unlinkedReadModel, {
+        sequence: unlinkedReadModel.snapshotSequence + 1,
+        eventId: asEventId("evt-owner-deleted-before-link"),
+        aggregateKind: "thread",
+        aggregateId: ownerThreadId,
+        type: "thread.deleted",
+        occurredAt: now,
+        commandId: asCommandId("cmd-owner-deleted-before-link"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-owner-deleted-before-link"),
+        metadata: {},
+        payload: {
+          threadId: ownerThreadId,
+          deletedAt: now,
+          sectionWorkspaceRoot: "/tmp/section-delete",
+          worktreePath: "/tmp/section-delete/owner",
+        },
+      });
+
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.meta.update",
+          commandId: asCommandId("cmd-link-after-owner-delete"),
+          threadId: linkedThreadId,
+          branch: sectionThreadBranch(ownerThreadId),
+          worktreePath: "/tmp/section-delete/owner",
+        },
+        readModel: ownerDeletedReadModel,
+      }).pipe(Effect.flip);
+
+      expect(error.message).toContain("live managed section worktree");
     }),
   );
 });

@@ -62,11 +62,11 @@ const make = Effect.gen(function* () {
     const { threadId } = event.payload;
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
-    if (event.payload.sectionWorkspaceRoot && event.payload.worktreePath) {
+    if (event.payload.sectionWorkspaceRoot) {
       yield* logCleanupCauseUnlessInterrupted({
         effect: removeSectionThreadWorktree({
           sectionWorkspaceRoot: event.payload.sectionWorkspaceRoot,
-          worktreePath: event.payload.worktreePath,
+          threadId,
         }),
         message: "thread deletion cleanup skipped section worktree removal",
         threadId,

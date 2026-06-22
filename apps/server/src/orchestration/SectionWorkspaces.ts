@@ -1,5 +1,5 @@
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
-import { isSectionThreadBranch, SECTION_THREAD_BRANCH_PREFIX } from "@t3tools/shared/git";
+import { type ProjectId, ThreadId } from "@t3tools/contracts";
+import { SECTION_THREAD_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
@@ -54,6 +54,24 @@ const resolveWorktreeBranch = Effect.fn("SectionWorkspaces.resolveWorktreeBranch
     allowNonZeroExit: true,
   });
   return result.exitCode === 0 ? result.stdout.trim() || null : null;
+});
+
+export const isSectionWorktreeTarget = Effect.fn("isSectionWorktreeTarget")(function* (input: {
+  readonly sectionWorkspaceRoot: string;
+  readonly branch: string;
+  readonly worktreePath: string;
+}) {
+  if (!input.branch.startsWith(SECTION_THREAD_BRANCH_PREFIX)) {
+    return false;
+  }
+  const registeredPath = yield* findRegisteredWorktree(input.sectionWorkspaceRoot, input.branch);
+  if (registeredPath !== input.worktreePath) {
+    return false;
+  }
+  const actualBranch = yield* resolveWorktreeBranch(input.worktreePath).pipe(
+    Effect.orElseSucceed(() => null),
+  );
+  return actualBranch === input.branch;
 });
 
 const findRegisteredWorktree = Effect.fn("SectionWorkspaces.findRegisteredWorktree")(function* (
@@ -191,21 +209,31 @@ export const ensureSectionThreadWorktree = Effect.fn("ensureSectionThreadWorktre
 );
 
 export const removeSectionThreadWorktree = Effect.fn("removeSectionThreadWorktree")(
-  function* (input: { readonly sectionWorkspaceRoot: string; readonly worktreePath: string }) {
+  function* (input: { readonly sectionWorkspaceRoot: string; readonly threadId: ThreadId }) {
     const git = yield* GitVcsDriver;
-    const branch = yield* resolveWorktreeBranch(input.worktreePath).pipe(
-      Effect.orElseSucceed(() => null),
+    const expectedBranch = sectionThreadBranch(input.threadId);
+    const ownedWorktreePath = yield* findRegisteredWorktree(
+      input.sectionWorkspaceRoot,
+      expectedBranch,
     );
-    yield* git.removeWorktree({
-      cwd: input.sectionWorkspaceRoot,
-      path: input.worktreePath,
-      force: true,
-    });
-    if (branch && isSectionThreadBranch(branch)) {
+    if (ownedWorktreePath) {
+      yield* git.removeWorktree({
+        cwd: input.sectionWorkspaceRoot,
+        path: ownedWorktreePath,
+        force: true,
+      });
+    } else {
+      yield* runGit("SectionWorkspaces.pruneMissingThreadWorktree", input.sectionWorkspaceRoot, [
+        "worktree",
+        "prune",
+      ]);
+    }
+
+    if (yield* gitRefExists(input.sectionWorkspaceRoot, `refs/heads/${expectedBranch}`)) {
       yield* runGit("SectionWorkspaces.removeThreadBranch", input.sectionWorkspaceRoot, [
         "branch",
         "-D",
-        branch,
+        expectedBranch,
       ]);
     }
   },

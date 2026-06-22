@@ -14,6 +14,7 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
+import { isManagedSectionWorkspace } from "../sectionWorkspacePolicy";
 import {
   type EnvMode,
   type EnvironmentOption,
@@ -224,14 +225,19 @@ export const BranchToolbar = memo(function BranchToolbar({
   const activeProject = useStore(activeProjectSelector);
   const hasActiveThread = serverThread !== undefined || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const effectiveEnvMode =
-    effectiveEnvModeOverride ??
-    resolveEffectiveEnvMode({
-      activeWorktreePath,
-      hasServerThread: serverThread !== undefined,
-      draftThreadEnvMode: draftThread?.envMode,
-    });
-  const envModeLocked = envLocked || (serverThread !== undefined && activeWorktreePath !== null);
+  const managedSectionWorkspace = isManagedSectionWorkspace(activeProject?.kind);
+  const effectiveEnvMode = managedSectionWorkspace
+    ? "worktree"
+    : (effectiveEnvModeOverride ??
+      resolveEffectiveEnvMode({
+        activeWorktreePath,
+        hasServerThread: serverThread !== undefined,
+        draftThreadEnvMode: draftThread?.envMode,
+      }));
+  const envModeLocked =
+    managedSectionWorkspace ||
+    envLocked ||
+    (serverThread !== undefined && activeWorktreePath !== null);
 
   const showEnvironmentPicker = Boolean(
     availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
@@ -282,7 +288,11 @@ export const BranchToolbar = memo(function BranchToolbar({
         threadId={threadId}
         {...(draftId ? { draftId } : {})}
         envLocked={envLocked}
-        {...(effectiveEnvModeOverride ? { effectiveEnvModeOverride } : {})}
+        {...(managedSectionWorkspace
+          ? { effectiveEnvModeOverride: "worktree" as const }
+          : effectiveEnvModeOverride
+            ? { effectiveEnvModeOverride }
+            : {})}
         {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
         {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
         {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}

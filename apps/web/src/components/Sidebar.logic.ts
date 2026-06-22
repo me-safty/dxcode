@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { ProjectKind } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -9,6 +10,7 @@ import {
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
+import { isManagedSectionWorkspace } from "../sectionWorkspacePolicy";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -169,6 +171,7 @@ export function resolveSidebarNewThreadEnvMode(input: {
 
 export function resolveSidebarNewThreadSeedContext(input: {
   projectId: string;
+  projectKind?: ProjectKind;
   defaultEnvMode: SidebarNewThreadEnvMode;
   activeThread?: {
     projectId: string;
@@ -186,6 +189,12 @@ export function resolveSidebarNewThreadSeedContext(input: {
   worktreePath?: string | null;
   envMode: SidebarNewThreadEnvMode;
 } {
+  if (isManagedSectionWorkspace(input.projectKind)) {
+    return {
+      envMode: "local",
+    };
+  }
+
   if (input.defaultEnvMode === "worktree") {
     return {
       envMode: "worktree",

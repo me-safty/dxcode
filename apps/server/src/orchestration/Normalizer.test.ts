@@ -85,6 +85,18 @@ it.layer(TestLayer)("normalizeDispatchCommand section workspaces", (it) => {
         assert.equal(directCreate.branch, `section-thread/${directThreadId}`);
         yield* engine.dispatch(directCreate);
 
+        const workspaceMutationError = yield* normalizeDispatchCommand({
+          type: "thread.meta.update",
+          commandId: CommandId.make("mutate-section-workspace"),
+          threadId: directThreadId,
+          branch: "section-thread/another-thread",
+          worktreePath: "/tmp/another-section-worktree",
+        }).pipe(Effect.flip);
+        assert.equal(
+          workspaceMutationError.message,
+          "Section threads can only switch to another managed section worktree.",
+        );
+
         const bootstrapTurn = yield* normalizeDispatchCommand({
           type: "thread.turn.start",
           commandId: CommandId.make("bootstrap-turn"),
@@ -120,6 +132,24 @@ it.layer(TestLayer)("normalizeDispatchCommand section workspaces", (it) => {
           bootstrapTurn.bootstrap?.createThread?.worktreePath,
           directCreate.worktreePath,
         );
+        const switchTargetBranch = bootstrapTurn.bootstrap?.createThread?.branch;
+        const switchTargetWorktreePath = bootstrapTurn.bootstrap?.createThread?.worktreePath;
+        if (!switchTargetBranch || !switchTargetWorktreePath) {
+          return assert.fail("Expected bootstrap section worktree context.");
+        }
+
+        const switchedThread = yield* normalizeDispatchCommand({
+          type: "thread.meta.update",
+          commandId: CommandId.make("switch-section-workspace"),
+          threadId: directThreadId,
+          branch: switchTargetBranch,
+          worktreePath: switchTargetWorktreePath,
+        });
+        if (switchedThread.type !== "thread.meta.update") {
+          return assert.fail(`Expected thread.meta.update, received ${switchedThread.type}`);
+        }
+        assert.equal(switchedThread.branch, switchTargetBranch);
+        assert.equal(switchedThread.worktreePath, switchTargetWorktreePath);
 
         yield* engine.dispatch({
           type: "thread.delete",

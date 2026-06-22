@@ -191,6 +191,24 @@ describe("resolveSidebarNewThreadEnvMode", () => {
 });
 
 describe("resolveSidebarNewThreadSeedContext", () => {
+  it("does not inherit another chat's managed section worktree", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "section-1",
+        projectKind: "section",
+        defaultEnvMode: "local",
+        activeThread: {
+          projectId: "section-1",
+          branch: "section-thread/previous",
+          worktreePath: "/repo/worktrees/sections/previous",
+        },
+        activeDraftThread: null,
+      }),
+    ).toEqual({
+      envMode: "local",
+    });
+  });
+
   it("prefers the default worktree mode over active thread context", () => {
     expect(
       resolveSidebarNewThreadSeedContext({
