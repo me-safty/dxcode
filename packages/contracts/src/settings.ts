@@ -28,6 +28,10 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 ]);
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
+
+export const AgentStopSoundSource = Schema.Literals(["tone", "system"]);
+export type AgentStopSoundSource = typeof AgentStopSoundSource.Type;
+export const DEFAULT_AGENT_STOP_SOUND_SOURCE: AgentStopSoundSource = "tone";
 export const MIN_SIDEBAR_THREAD_PREVIEW_COUNT = 1;
 export const MAX_SIDEBAR_THREAD_PREVIEW_COUNT = 15;
 export const SidebarThreadPreviewCount = Schema.Int.check(
@@ -48,6 +52,11 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  notifyOnAgentStopPopup: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  notifyOnAgentStopSound: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  notifyOnAgentStopSoundSource: AgentStopSoundSource.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_AGENT_STOP_SOUND_SOURCE)),
+  ),
   // Model favorites. Historically keyed by provider kind, now
   // widened to `ProviderInstanceId` so users can favorite a specific model
   // on a custom provider instance (e.g. "Codex Personal · gpt-5") without
@@ -539,6 +548,9 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   diffWordWrap: Schema.optionalKey(Schema.Boolean),
+  notifyOnAgentStopPopup: Schema.optionalKey(Schema.Boolean),
+  notifyOnAgentStopSound: Schema.optionalKey(Schema.Boolean),
+  notifyOnAgentStopSoundSource: Schema.optionalKey(AgentStopSoundSource),
   favorites: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
