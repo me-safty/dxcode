@@ -118,6 +118,11 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
   {
+    shortcut: modShortcut("f"),
+    command: "find.toggle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
     shortcut: modShortcut("m", { shiftKey: true }),
     command: "modelPicker.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
@@ -506,6 +511,23 @@ describe("chat/editor shortcuts", () => {
         context: { terminalFocus: true },
       }),
       "commandPalette.toggle",
+    );
+  });
+
+  it("matches find.toggle on mod+f outside terminal focus and gates inside it", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "f", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "find.toggle",
+    );
+    assert.notStrictEqual(
+      resolveShortcutCommand(event({ key: "f", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Win32",
+        context: { terminalFocus: true },
+      }),
+      "find.toggle",
     );
   });
 
