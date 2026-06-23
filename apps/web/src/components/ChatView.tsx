@@ -4755,6 +4755,7 @@ function ChatViewContent(props: ChatViewProps) {
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                 onIsAtEndChange={onIsAtEndChange}
+                activeFindMatch={chatFind.activeMatch}
               />
 
               {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}

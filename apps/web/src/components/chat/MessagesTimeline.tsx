@@ -106,6 +106,8 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+import { locateRowForEntry, findTurnIdForEntry } from "./messagesTimelineReveal";
+import type { Match } from "./chatSearch";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -127,6 +129,7 @@ interface TimelineRowSharedState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
+  findRevealEntryId: string | null;
 }
 
 interface TimelineRowActivityState {
@@ -166,6 +169,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  activeFindMatch?: Match | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +197,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  activeFindMatch,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
 
@@ -285,6 +290,52 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
 
+  const pendingScrollEntryRef = useRef<{
+    entryId: string;
+    kind: "message" | "work" | "proposed-plan";
+  } | null>(null);
+
+  useEffect(() => {
+    if (!activeFindMatch) {
+      pendingScrollEntryRef.current = null;
+      return;
+    }
+    const kind = activeFindMatch.entryKind;
+    const located = locateRowForEntry(rows, activeFindMatch.entryId, kind);
+    if (located === null) {
+      // Folded: expand its turn, defer the scroll until rows settle.
+      const turnId = findTurnIdForEntry(timelineEntries, activeFindMatch.entryId);
+      if (turnId) {
+        pendingScrollEntryRef.current = { entryId: activeFindMatch.entryId, kind };
+        setExpandedTurnIds((existing) => {
+          if (existing.has(turnId)) return existing;
+          const next = new Set(existing);
+          next.add(turnId);
+          return next;
+        });
+      }
+      return;
+    }
+    pendingScrollEntryRef.current = null;
+    const item = rows[located];
+    if (item) void listRef.current?.scrollToItem?.({ item, animated: true, viewPosition: 0.3 });
+  }, [activeFindMatch, rows, timelineEntries, listRef]);
+
+  // Resolve a pending scroll after a fold expansion materializes the row.
+  useEffect(() => {
+    const pending = pendingScrollEntryRef.current;
+    if (!pending) return;
+    const located = locateRowForEntry(rows, pending.entryId, pending.kind);
+    if (located === null) return;
+    pendingScrollEntryRef.current = null;
+    const item = rows[located];
+    if (item) {
+      window.requestAnimationFrame(() => {
+        void listRef.current?.scrollToItem?.({ item, animated: true, viewPosition: 0.3 });
+      });
+    }
+  }, [rows, listRef]);
+
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     if (state) {
@@ -324,6 +375,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      findRevealEntryId: activeFindMatch?.entryId ?? null,
     }),
     [
       timestampFormat,
@@ -337,6 +389,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      activeFindMatch?.entryId,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -512,7 +565,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           markdownCwd={ctx.markdownCwd}
         />
       </div>
-      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+      <div
+        className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100"
+        data-find-skip="true"
+      >
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>
             <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
@@ -564,7 +620,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    <div className="border-b border-border/60 pb-2 pt-1" data-find-skip="true">
       <button
         type="button"
         aria-expanded={row.expanded}
@@ -585,7 +641,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div className="relative min-w-0 px-1 py-0.5" data-find-content="true">
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}
@@ -600,7 +656,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          <div
+            className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100"
+            data-find-skip="true"
+          >
             <AssistantCopyButton row={row} />
             {!row.message.streaming && (
               <Tooltip>
@@ -643,7 +702,7 @@ function ProposedPlanTimelineRow({
   const ctx = use(TimelineRowCtx);
 
   return (
-    <div className="min-w-0 px-1 py-0.5">
+    <div className="min-w-0 px-1 py-0.5" data-find-content="true">
       <ProposedPlanCard
         planMarkdown={row.proposedPlan.planMarkdown}
         environmentId={ctx.activeThreadEnvironmentId}
@@ -700,7 +759,7 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
   }, [createdAt]);
 
   return (
-    <span ref={textRef} className="tabular-nums">
+    <span ref={textRef} className="tabular-nums" data-find-skip="true">
       {initialText}
     </span>
   );
@@ -717,7 +776,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
 }) {
-  const { workspaceRoot } = use(TimelineRowCtx);
+  const { workspaceRoot, findRevealEntryId } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const anchorBottomBeforeToggleRef = useRef<number | null>(null);
@@ -725,9 +784,12 @@ const WorkGroupSection = memo(function WorkGroupSection({
     () => groupedEntries.filter((entry) => !workEntryIndicatesToolNeutralStatus(entry)),
     [groupedEntries],
   );
+  const groupHoldsRevealTarget =
+    findRevealEntryId !== null && nonEmptyEntries.some((entry) => entry.id === findRevealEntryId);
+  const expanded = isExpanded || groupHoldsRevealTarget;
   const hasOverflow = nonEmptyEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
   const visibleEntries =
-    hasOverflow && !isExpanded
+    hasOverflow && !expanded
       ? nonEmptyEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
       : nonEmptyEntries;
   const hiddenCount = nonEmptyEntries.length - visibleEntries.length;
@@ -762,7 +824,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
     } else {
       window.scrollBy(0, delta);
     }
-  }, [isExpanded]);
+  }, [expanded]);
 
   const toggleExpanded = () => {
     anchorBottomBeforeToggleRef.current =
@@ -795,13 +857,13 @@ const WorkGroupSection = memo(function WorkGroupSection({
           onClick={toggleExpanded}
         >
           <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
-            {isExpanded ? (
+            {expanded ? (
               <ChevronUpIcon className="size-3.5 shrink-0 opacity-70" />
             ) : (
               <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
             )}
           </span>
-          {isExpanded ? (
+          {expanded ? (
             <span className="font-medium text-foreground/82">Show fewer tool calls</span>
           ) : (
             <span className="font-medium text-foreground/82">
@@ -1606,6 +1668,8 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         canExpand &&
           "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
       )}
+      data-find-content="true"
+      data-find-entry-id={workEntry.id}
       {...rowToggleProps}
     >
       <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
