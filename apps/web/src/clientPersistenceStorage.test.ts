@@ -1,5 +1,22 @@
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
+import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+const testEnvironmentId = EnvironmentId.make("environment-1");
+
+const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
+  environmentId: testEnvironmentId,
+  label: "Remote environment",
+  httpBaseUrl: "https://remote.example.com/",
+  wsBaseUrl: "wss://remote.example.com/",
+  createdAt: "2026-04-09T00:00:00.000Z",
+  lastConnectedAt: null,
+  desktopSsh: {
+    alias: "devbox",
+    hostname: "devbox.example.com",
+    username: "julius",
+    port: 22,
+  },
+};
 
 function createLocalStorageStub(): Storage {
   const store = new Map<string, string>();
@@ -38,17 +55,32 @@ afterEach(() => {
 });
 
 describe("clientPersistenceStorage", () => {
-  it("persists client settings in browser storage", async () => {
-    getTestWindow();
-    const { readBrowserClientSettings, writeBrowserClientSettings } =
-      await import("./clientPersistenceStorage");
-    const settings = {
-      ...DEFAULT_CLIENT_SETTINGS,
-      timestampFormat: "24-hour" as const,
-    };
+  it("stores browser secrets inline with the saved environment record", async () => {
+    const testWindow = getTestWindow();
+    const {
+      SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
+      readBrowserSavedEnvironmentRegistry,
+      readBrowserSavedEnvironmentSecret,
+      writeBrowserSavedEnvironmentRegistry,
+      writeBrowserSavedEnvironmentSecret,
+    } = await import("./clientPersistenceStorage");
 
-    writeBrowserClientSettings(settings);
+    writeBrowserSavedEnvironmentRegistry([savedRegistryRecord]);
+    expect(writeBrowserSavedEnvironmentSecret(testEnvironmentId, "bearer-token")).toBe(true);
+    writeBrowserSavedEnvironmentRegistry([savedRegistryRecord]);
 
-    expect(readBrowserClientSettings()).toEqual(settings);
+    expect(readBrowserSavedEnvironmentRegistry()).toEqual([savedRegistryRecord]);
+    expect(readBrowserSavedEnvironmentSecret(testEnvironmentId)).toBe("bearer-token");
+    expect(
+      JSON.parse(testWindow.localStorage.getItem(SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY)!),
+    ).toEqual({
+      version: 1,
+      records: [
+        {
+          ...savedRegistryRecord,
+          bearerToken: "bearer-token",
+        },
+      ],
+    });
   });
 });

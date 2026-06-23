@@ -41,8 +41,8 @@ function target(deviceId: string): LiveActivities.TargetRow {
 }
 
 function makeLiveActivities(
-  overrides: Partial<LiveActivities.LiveActivities["Service"]> = {},
-): LiveActivities.LiveActivities["Service"] {
+  overrides: Partial<LiveActivities.LiveActivitiesShape> = {},
+): LiveActivities.LiveActivitiesShape {
   return {
     register: () => Effect.void,
     listTargets: () => Effect.succeed([]),
@@ -55,8 +55,8 @@ function makeLiveActivities(
 }
 
 function makeAgentActivityRows(
-  overrides: Partial<AgentActivityRows.AgentActivityRows["Service"]> = {},
-): AgentActivityRows.AgentActivityRows["Service"] {
+  overrides: Partial<AgentActivityRows.AgentActivityRowsShape> = {},
+): AgentActivityRows.AgentActivityRowsShape {
   return {
     upsert: () => Effect.void,
     remove: () => Effect.void,
@@ -66,8 +66,8 @@ function makeAgentActivityRows(
 }
 
 function makeEnvironmentLinks(
-  overrides: Partial<EnvironmentLinks.EnvironmentLinks["Service"]> = {},
-): EnvironmentLinks.EnvironmentLinks["Service"] {
+  overrides: Partial<EnvironmentLinks.EnvironmentLinksShape> = {},
+): EnvironmentLinks.EnvironmentLinksShape {
   return {
     upsert: () => Effect.void,
     listUsersForEnvironment: () => Effect.succeed(["dev:julius"]),
@@ -88,8 +88,8 @@ function makeEnvironmentLinks(
 }
 
 function makeApnsDeliveries(
-  overrides: Partial<ApnsDeliveries.ApnsDeliveries["Service"]> = {},
-): ApnsDeliveries.ApnsDeliveries["Service"] {
+  overrides: Partial<ApnsDeliveries.ApnsDeliveriesShape> = {},
+): ApnsDeliveries.ApnsDeliveriesShape {
   return {
     sendForTarget: () => Effect.succeed(null),
     sendPushNotificationForTarget: () => Effect.succeed(null),
@@ -133,8 +133,7 @@ describe("AgentActivityPublisher", () => {
       remote_start_queued_at: null,
       remote_started_at: "1970-01-01T00:00:01.000Z",
     };
-    const sent: Array<Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendForTarget"]>[0]> =
-      [];
+    const sent: Array<Parameters<ApnsDeliveries.ApnsDeliveriesShape["sendForTarget"]>[0]> = [];
     const deliveryResult: RelayDeliveryResult = {
       deviceId: "device-1",
       kind: "live_activity_update",
@@ -212,8 +211,7 @@ describe("AgentActivityPublisher", () => {
       readonly environmentId: string;
       readonly environmentPublicKey: string;
     }> = [];
-    const upserts: Array<Parameters<AgentActivityRows.AgentActivityRows["Service"]["upsert"]>[0]> =
-      [];
+    const upserts: Array<Parameters<AgentActivityRows.AgentActivityRowsShape["upsert"]>[0]> = [];
 
     return Effect.gen(function* () {
       const result = yield* Effect.gen(function* () {
@@ -304,10 +302,9 @@ describe("AgentActivityPublisher", () => {
       updatedAt: "1970-01-01T00:00:10.000Z",
     };
     const sentAggregates: Array<
-      Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendForTarget"]>[0]
+      Parameters<ApnsDeliveries.ApnsDeliveriesShape["sendForTarget"]>[0]
     > = [];
-    const removals: Array<Parameters<AgentActivityRows.AgentActivityRows["Service"]["remove"]>[0]> =
-      [];
+    const removals: Array<Parameters<AgentActivityRows.AgentActivityRowsShape["remove"]>[0]> = [];
 
     return Effect.gen(function* () {
       const result = yield* Effect.gen(function* () {
@@ -408,10 +405,10 @@ describe("AgentActivityPublisher", () => {
       headline: "Needs input",
     };
     const liveAggregates: Array<
-      Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendForTarget"]>[0]
+      Parameters<ApnsDeliveries.ApnsDeliveriesShape["sendForTarget"]>[0]
     > = [];
     const pushAggregates: Array<
-      Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendPushNotificationForTarget"]>[0]
+      Parameters<ApnsDeliveries.ApnsDeliveriesShape["sendPushNotificationForTarget"]>[0]
     > = [];
 
     return Effect.gen(function* () {
@@ -520,10 +517,10 @@ describe("AgentActivityPublisher", () => {
         headline: "Needs approval",
       };
       const liveAggregates: Array<
-        Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendForTarget"]>[0]
+        Parameters<ApnsDeliveries.ApnsDeliveriesShape["sendForTarget"]>[0]
       > = [];
       const pushAggregates: Array<
-        Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendPushNotificationForTarget"]>[0]
+        Parameters<ApnsDeliveries.ApnsDeliveriesShape["sendPushNotificationForTarget"]>[0]
       > = [];
 
       return Effect.gen(function* () {

@@ -30,7 +30,7 @@ vi.mock("@clerk/backend", () => ({
   verifyToken: vi.fn(),
 }));
 
-const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
+const relaySettings: RelayConfiguration.RelayConfigurationShape = {
   relayIssuer: "https://relay.example.test",
   apns: {
     teamId: "apns-team",
@@ -110,7 +110,7 @@ describe("relay environment authentication", () => {
     const failure = new EnvironmentCredentials.EnvironmentCredentialAuthenticatePersistenceError({
       cause: "database unavailable",
     });
-    const credentials: EnvironmentCredentials.EnvironmentCredentials["Service"] = {
+    const credentials: EnvironmentCredentials.EnvironmentCredentialsShape = {
       create: () => Effect.die("unused create"),
       authenticate: () => Effect.fail(failure),
       revokeForEnvironmentPublicKey: () => Effect.die("unused revoke"),

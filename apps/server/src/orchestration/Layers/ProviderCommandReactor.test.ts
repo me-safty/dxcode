@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   ModelSelection,
@@ -42,7 +42,7 @@ import {
 } from "../../provider/Services/ProviderService.ts";
 import type { ProviderSessionModelSwitchMode } from "../../provider/Services/ProviderAdapter.ts";
 import { TextGeneration, type TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
-import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -58,7 +58,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
-import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import { GitWorkflowService, type GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -70,7 +70,7 @@ const deriveServerPathsSync = (baseDir: string, devUrl: URL | undefined) =>
 
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 10_000,
+  timeoutMs = 2000,
 ): Promise<void> {
   const deadline = (await Effect.runPromise(Clock.currentTimeMillis)) + timeoutMs;
   const poll = async (): Promise<void> => {
@@ -106,11 +106,11 @@ describe("ProviderCommandReactor", () => {
     }
     runtime = null;
     for (const stateDir of createdStateDirs) {
-      NodeFS.rmSync(stateDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true });
     }
     createdStateDirs.clear();
     for (const baseDir of createdBaseDirs) {
-      NodeFS.rmSync(baseDir, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
     }
     createdBaseDirs.clear();
   });
@@ -146,8 +146,7 @@ describe("ProviderCommandReactor", () => {
     readonly sectionContext?: string;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
-    const baseDir =
-      input?.baseDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-reactor-"));
+    const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3code-reactor-"));
     createdBaseDirs.add(baseDir);
     const { stateDir } = deriveServerPathsSync(baseDir, undefined);
     createdStateDirs.add(stateDir);
@@ -327,11 +326,11 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-      Layer.provide(RepositoryIdentityResolver.layer),
+      Layer.provide(RepositoryIdentityResolverLive),
       Layer.provide(SqlitePersistenceMemory),
     );
     const projectionSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
-      Layer.provide(RepositoryIdentityResolver.layer),
+      Layer.provide(RepositoryIdentityResolverLive),
       Layer.provide(SqlitePersistenceMemory),
     );
     const layer = ProviderCommandReactorLive.pipe(
@@ -339,9 +338,9 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(
-        Layer.mock(GitWorkflowService.GitWorkflowService)({
+        Layer.mock(GitWorkflowService)({
           renameBranch,
-        } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
+        } satisfies Partial<GitWorkflowServiceShape>),
       ),
       Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {

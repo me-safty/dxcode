@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect } from "react";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -31,7 +30,7 @@ export const composerDraftsAtom = Atom.make<Record<string, ComposerDraft>>({}).p
   Atom.withLabel("mobile:composer-drafts"),
 );
 
-let loadPromise: Promise<void> | null = null;
+let loadStarted = false;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function normalizeDraft(draft: ComposerDraft | undefined): ComposerDraft {
@@ -80,24 +79,20 @@ async function loadPersistedComposerDrafts(): Promise<Record<string, ComposerDra
   }
 }
 
-async function writePersistedComposerDrafts(drafts: Record<string, ComposerDraft>): Promise<void> {
-  const file = await getComposerDraftsFile();
-  const nonEmptyDrafts = Object.fromEntries(
-    Object.entries(drafts).filter(([, draft]) => !isEmptyDraft(draft)),
-  );
-  const document: PersistedComposerDrafts = {
-    schemaVersion: COMPOSER_DRAFTS_SCHEMA_VERSION,
-    drafts: nonEmptyDrafts,
-  };
-  if (!file.exists) {
-    file.create({ intermediates: true, overwrite: true });
-  }
-  file.write(JSON.stringify(document));
-}
-
 async function savePersistedComposerDrafts(drafts: Record<string, ComposerDraft>): Promise<void> {
   try {
-    await writePersistedComposerDrafts(drafts);
+    const file = await getComposerDraftsFile();
+    const nonEmptyDrafts = Object.fromEntries(
+      Object.entries(drafts).filter(([, draft]) => !isEmptyDraft(draft)),
+    );
+    const document: PersistedComposerDrafts = {
+      schemaVersion: COMPOSER_DRAFTS_SCHEMA_VERSION,
+      drafts: nonEmptyDrafts,
+    };
+    if (!file.exists) {
+      file.create({ intermediates: true, overwrite: true });
+    }
+    file.write(JSON.stringify(document));
   } catch {
     // Draft persistence is best-effort; in-memory drafts still keep working.
   }
@@ -114,23 +109,20 @@ function schedulePersistComposerDrafts(drafts: Record<string, ComposerDraft>): v
 }
 
 export function ensureComposerDraftsLoaded(): void {
-  if (loadPromise !== null) {
+  if (loadStarted) {
     return;
   }
-  loadPromise = loadPersistedComposerDrafts()
-    .then((persistedDrafts) => {
-      if (Object.keys(persistedDrafts).length === 0) {
-        return;
-      }
-      const current = appAtomRegistry.get(composerDraftsAtom);
-      appAtomRegistry.set(composerDraftsAtom, {
-        ...persistedDrafts,
-        ...current,
-      });
-    })
-    .catch(() => {
-      // Draft loading is best-effort; in-memory drafts still keep working.
+  loadStarted = true;
+  void loadPersistedComposerDrafts().then((persistedDrafts) => {
+    if (Object.keys(persistedDrafts).length === 0) {
+      return;
+    }
+    const current = appAtomRegistry.get(composerDraftsAtom);
+    appAtomRegistry.set(composerDraftsAtom, {
+      ...persistedDrafts,
+      ...current,
     });
+  });
 }
 
 function updateComposerDrafts(
@@ -240,35 +232,6 @@ export function clearComposerDraft(draftKey: string): void {
     delete next[draftKey];
     return next;
   });
-}
-
-export function removeComposerDraftsForEnvironment(
-  drafts: Record<string, ComposerDraft>,
-  environmentId: EnvironmentId,
-): Record<string, ComposerDraft> {
-  const environmentPrefix = `${environmentId}:`;
-  return Object.fromEntries(
-    Object.entries(drafts).filter(([draftKey]) => !draftKey.startsWith(environmentPrefix)),
-  );
-}
-
-export async function clearComposerDraftsEnvironment(environmentId: EnvironmentId): Promise<void> {
-  ensureComposerDraftsLoaded();
-  if (loadPromise !== null) {
-    await loadPromise;
-  }
-
-  const next = removeComposerDraftsForEnvironment(
-    appAtomRegistry.get(composerDraftsAtom),
-    environmentId,
-  );
-
-  if (persistTimer !== null) {
-    clearTimeout(persistTimer);
-    persistTimer = null;
-  }
-  appAtomRegistry.set(composerDraftsAtom, next);
-  await writePersistedComposerDrafts(next);
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft {

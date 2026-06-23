@@ -7,9 +7,7 @@ import * as GitWorkflowService from "./GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
-function makeLayer(input: {
-  readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
-}) {
+function makeLayer(input: { readonly detect: VcsDriverRegistry.VcsDriverRegistryShape["detect"] }) {
   return GitWorkflowService.layer.pipe(
     Layer.provide(
       Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({

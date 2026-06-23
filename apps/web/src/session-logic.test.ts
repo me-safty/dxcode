@@ -1277,8 +1277,6 @@ describe("deriveTimelineEntries", () => {
           role: "assistant",
           text: "hello",
           createdAt: "2026-02-23T00:00:01.000Z",
-          turnId: null,
-          updatedAt: "2026-02-23T00:00:01.000Z",
           streaming: false,
         },
       ],
@@ -1422,7 +1420,7 @@ describe("isLatestTurnSettled", () => {
   it("returns false while the same turn is still active in a running session", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
-        status: "running",
+        orchestrationStatus: "running",
         activeTurnId: TurnId.make("turn-1"),
       }),
     ).toBe(false);
@@ -1431,7 +1429,7 @@ describe("isLatestTurnSettled", () => {
   it("returns false while any turn is running to avoid stale latest-turn banners", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
-        status: "running",
+        orchestrationStatus: "running",
         activeTurnId: TurnId.make("turn-2"),
       }),
     ).toBe(false);
@@ -1440,8 +1438,8 @@ describe("isLatestTurnSettled", () => {
   it("returns true once the session is no longer running that turn", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
-        status: "ready",
-        activeTurnId: null,
+        orchestrationStatus: "ready",
+        activeTurnId: undefined,
       }),
     ).toBe(true);
   });
@@ -1472,7 +1470,7 @@ describe("deriveActiveWorkStartedAt", () => {
       deriveActiveWorkStartedAt(
         latestTurn,
         {
-          status: "running",
+          orchestrationStatus: "running",
           activeTurnId: TurnId.make("turn-1"),
         },
         "2026-02-27T21:11:00.000Z",
@@ -1485,7 +1483,7 @@ describe("deriveActiveWorkStartedAt", () => {
       deriveActiveWorkStartedAt(
         latestTurn,
         {
-          status: "running",
+          orchestrationStatus: "running",
           activeTurnId: TurnId.make("turn-2"),
         },
         "2026-02-27T21:11:00.000Z",
@@ -1498,8 +1496,8 @@ describe("deriveActiveWorkStartedAt", () => {
       deriveActiveWorkStartedAt(
         latestTurn,
         {
-          status: "ready",
-          activeTurnId: null,
+          orchestrationStatus: "ready",
+          activeTurnId: undefined,
         },
         "2026-02-27T21:11:00.000Z",
       ),

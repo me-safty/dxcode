@@ -125,8 +125,6 @@ export const VcsListRefsInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   query: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(256))),
   cursor: Schema.optional(NonNegativeInt),
-  includeMatchingRemoteRefs: Schema.optional(Schema.Boolean),
-  refKind: Schema.optional(Schema.Literals(["all", "local", "remote"])),
   limit: Schema.optional(
     PositiveInt.check(Schema.isLessThanOrEqualTo(GIT_LIST_BRANCHES_MAX_LIMIT)),
   ),
@@ -137,7 +135,6 @@ export const VcsCreateWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
   newRefName: Schema.optional(TrimmedNonEmptyStringSchema),
-  baseRefName: Schema.optional(TrimmedNonEmptyStringSchema),
   path: Schema.NullOr(TrimmedNonEmptyStringSchema),
 });
 export type VcsCreateWorktreeInput = typeof VcsCreateWorktreeInput.Type;

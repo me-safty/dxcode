@@ -24,7 +24,7 @@ import {
   checkpointRefForThreadTurn,
   resolveThreadWorkspaceCwd,
 } from "../../checkpointing/Utils.ts";
-import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { CheckpointReactor, type CheckpointReactorShape } from "../Services/CheckpointReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -34,7 +34,7 @@ import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
-import { WorkspaceEntries } from "../../workspace/WorkspaceEntries.ts";
+import { WorkspaceEntries } from "../../workspace/Services/WorkspaceEntries.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -81,7 +81,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
-  const checkpointStore = yield* CheckpointStore.CheckpointStore;
+  const checkpointStore = yield* CheckpointStore;
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;

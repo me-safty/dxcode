@@ -2,12 +2,10 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import { VcsDriverKind, type VcsDriverKind as VcsDriverKindType } from "@t3tools/contracts";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
 
 const ProjectVcsConfig = Schema.Struct({
   vcs: Schema.optional(
@@ -17,33 +15,46 @@ const ProjectVcsConfig = Schema.Struct({
   ),
   vcsKind: Schema.optional(VcsDriverKind),
 });
-const ProjectVcsConfigJson = fromLenientJson(ProjectVcsConfig);
-const decodeProjectVcsConfigJson = Schema.decodeUnknownOption(ProjectVcsConfigJson);
+const isProjectVcsConfig = Schema.is(ProjectVcsConfig);
 
-type ProjectVcsConfigFile = typeof ProjectVcsConfig.Type;
+interface ProjectVcsConfigFile {
+  readonly vcs?:
+    | {
+        readonly kind?: VcsDriverKindType | undefined;
+      }
+    | undefined;
+  readonly vcsKind?: VcsDriverKindType | undefined;
+}
 
 export interface VcsProjectConfigResolveInput {
   readonly cwd: string;
   readonly requestedKind?: VcsDriverKindType | "auto";
 }
 
-export class VcsProjectConfig extends Context.Service<
-  VcsProjectConfig,
-  {
-    readonly resolveKind: (
-      input: VcsProjectConfigResolveInput,
-    ) => Effect.Effect<VcsDriverKindType | "auto">;
-  }
->()("t3/vcs/VcsProjectConfig") {}
+export interface VcsProjectConfigShape {
+  readonly resolveKind: (
+    input: VcsProjectConfigResolveInput,
+  ) => Effect.Effect<VcsDriverKindType | "auto">;
+}
+
+export class VcsProjectConfig extends Context.Service<VcsProjectConfig, VcsProjectConfigShape>()(
+  "t3/vcs/VcsProjectConfig",
+) {}
 
 function configuredKind(config: ProjectVcsConfigFile): VcsDriverKindType | "auto" {
   return config.vcs?.kind ?? config.vcsKind ?? "auto";
 }
 
-const parseConfig = (raw: string): Option.Option<ProjectVcsConfigFile> =>
-  decodeProjectVcsConfigJson(raw);
+function parseConfig(raw: string): ProjectVcsConfigFile | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isProjectVcsConfig(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
-export const make = Effect.gen(function* () {
+export const make = Effect.fn("makeVcsProjectConfig")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -52,12 +63,12 @@ export const make = Effect.gen(function* () {
     while (true) {
       const candidate = path.join(current, ".t3code", "vcs.json");
       if (yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
-        return Option.some(candidate);
+        return candidate;
       }
 
       const parent = path.dirname(current);
       if (parent === current) {
-        return Option.none();
+        return null;
       }
       current = parent;
     }
@@ -67,30 +78,29 @@ export const make = Effect.gen(function* () {
     configPath: string,
   ) {
     const raw = yield* fileSystem.readFileString(configPath).pipe(
-      Effect.map(Option.some),
       Effect.catch((error) =>
         Effect.logWarning("failed to read VCS project config", {
           configPath,
           error,
-        }).pipe(Effect.as(Option.none())),
+        }).pipe(Effect.as(null)),
       ),
     );
-    if (Option.isNone(raw)) {
+    if (raw === null) {
       return "auto" as const;
     }
 
-    const parsed = parseConfig(raw.value);
-    if (Option.isNone(parsed)) {
+    const parsed = parseConfig(raw);
+    if (parsed === null) {
       yield* Effect.logWarning("invalid VCS project config", {
         configPath,
       });
       return "auto" as const;
     }
 
-    return configuredKind(parsed.value);
+    return configuredKind(parsed);
   });
 
-  const resolveKind: VcsProjectConfig["Service"]["resolveKind"] = Effect.fn(
+  const resolveKind: VcsProjectConfigShape["resolveKind"] = Effect.fn(
     "VcsProjectConfig.resolveKind",
   )(function* (input) {
     if (input.requestedKind !== undefined && input.requestedKind !== "auto") {
@@ -98,10 +108,11 @@ export const make = Effect.gen(function* () {
     }
 
     const configPath = yield* findConfigPath(input.cwd);
-    return yield* Option.match(configPath, {
-      onNone: () => Effect.succeed("auto" as const),
-      onSome: readConfiguredKind,
-    });
+    if (configPath === null) {
+      return "auto";
+    }
+
+    return yield* readConfiguredKind(configPath);
   });
 
   return VcsProjectConfig.of({
@@ -109,4 +120,4 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(VcsProjectConfig, make);
+export const layer = Layer.effect(VcsProjectConfig, make());

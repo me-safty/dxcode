@@ -26,18 +26,19 @@ import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 
-import * as ServerConfig from "../config.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ServerConfig, type ServerConfigShape } from "../config.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationLayerLive } from "../orchestration/runtimeLayer.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "../persistence/Layers/Sqlite.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
+import { RepositoryIdentityResolverLive } from "../project/Layers/RepositoryIdentityResolver.ts";
+import { getAutoBootstrapDefaultModelSelection } from "../serverRuntimeStartup.ts";
 import {
   clearPersistedServerRuntimeState,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
-import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import { WorkspacePathsLive } from "../workspace/Layers/WorkspacePaths.ts";
+import { WorkspacePaths } from "../workspace/Services/WorkspacePaths.ts";
 import { type CliAuthLocationFlags, projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 type ProjectMutationTarget = {
@@ -67,9 +68,9 @@ const projectCommandUuid = Crypto.Crypto.pipe(
 );
 
 const ProjectCliRuntimeLive = Layer.mergeAll(
-  WorkspacePaths.layer,
+  WorkspacePathsLive,
   OrchestrationLayerLive.pipe(
-    Layer.provideMerge(RepositoryIdentityResolver.layer),
+    Layer.provideMerge(RepositoryIdentityResolverLive),
     Layer.provideMerge(SqlitePersistenceLayerLive),
   ),
 );
@@ -77,7 +78,7 @@ const ProjectCliRuntimeLive = Layer.mergeAll(
 const PROJECT_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(1);
 const isEnvironmentHttpCommonError = Schema.is(EnvironmentHttpCommonError);
 const withProjectCliSessionToken = <A, E, R>(
-  environmentAuth: EnvironmentAuth.EnvironmentAuth["Service"],
+  environmentAuth: EnvironmentAuth.EnvironmentAuthShape,
   run: (token: string) => Effect.Effect<A, E, R>,
 ) =>
   Effect.acquireUseRelease(
@@ -122,7 +123,7 @@ const makeLiveServerClient = (origin: string) =>
 const normalizeWorkspaceRootForProjectCommand = Effect.fn(
   "normalizeWorkspaceRootForProjectCommand",
 )(function* (workspaceRoot: string) {
-  const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
+  const workspacePaths = yield* WorkspacePaths;
   return yield* workspacePaths.normalizeWorkspaceRoot(workspaceRoot);
 });
 
@@ -210,15 +211,12 @@ const dispatchLiveOrchestrationCommand = (
   }).pipe(withProjectCliLiveServerTimeout, Effect.catch(failLiveServerRequest));
 
 const getOfflineSnapshot = Effect.fn("getOfflineSnapshot")(function* () {
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   return yield* projectionSnapshotQuery.getSnapshot();
 });
 
 const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecutionMode")(
-  function* (
-    environmentAuth: EnvironmentAuth.EnvironmentAuth["Service"],
-    config: ServerConfig.ServerConfig["Service"],
-  ) {
+  function* (environmentAuth: EnvironmentAuth.EnvironmentAuthShape, config: ServerConfigShape) {
     const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
     if (Option.isNone(runtimeState)) {
       return Option.none<{ readonly origin: string }>();
@@ -253,11 +251,7 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
   }) => Effect.Effect<
     string,
     Error,
-    | Crypto.Crypto
-    | FileSystem.FileSystem
-    | HttpClient.HttpClient
-    | Path.Path
-    | WorkspacePaths.WorkspacePaths
+    Crypto.Crypto | FileSystem.FileSystem | HttpClient.HttpClient | Path.Path | WorkspacePaths
   >,
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
@@ -284,13 +278,13 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
     }
 
     const offlineRuntimeLayer = ProjectCliRuntimeLive.pipe(
-      Layer.provide(ServerConfig.layer(config)),
+      Layer.provide(Layer.succeed(ServerConfig, config)),
       Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
     );
 
     return yield* Effect.gen(function* () {
       const snapshot = yield* getOfflineSnapshot();
-      const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const orchestrationEngine = yield* OrchestrationEngineService;
       const output = yield* run({
         snapshot,
         dispatch: (command) => orchestrationEngine.dispatch(command),
@@ -300,9 +294,9 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
     }).pipe(Effect.provide(offlineRuntimeLayer));
   }).pipe(
     Effect.provide(
-      Layer.mergeAll(EnvironmentAuth.runtimeLayer, WorkspacePaths.layer).pipe(
+      Layer.mergeAll(EnvironmentAuth.runtimeLayer, WorkspacePathsLive).pipe(
         Layer.provideMerge(FetchHttpClient.layer),
-        Layer.provide(ServerConfig.layer(config)),
+        Layer.provide(Layer.succeed(ServerConfig, config)),
         Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
       ),
     ),
@@ -347,7 +341,7 @@ const projectAddCommand = Command.make("add", {
           projectId,
           title,
           workspaceRoot,
-          defaultModelSelection: ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
+          defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
           createdAt: DateTime.formatIso(yield* DateTime.now),
         });
         return `Added project ${projectId} (${title}) at ${workspaceRoot}.`;

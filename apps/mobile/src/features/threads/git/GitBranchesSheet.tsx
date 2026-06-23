@@ -6,12 +6,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useThemeColor } from "../../../lib/useThemeColor";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../../components/AppText";
-import { useEnvironmentQuery } from "../../../state/query";
+import { useVcsStatus } from "../../../state/use-vcs-status";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
-import { vcsEnvironment } from "../../../state/vcs";
 import { SheetActionButton } from "./gitSheetComponents";
 
 export function GitBranchesSheet() {
@@ -28,14 +27,10 @@ export function GitBranchesSheet() {
   const foregroundColor = useThemeColor("--color-foreground");
   const subtleStrongColor = useThemeColor("--color-subtle-strong");
 
-  const gitStatus = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
-        })
-      : null,
-  );
+  const gitStatus = useVcsStatus({
+    environmentId: selectedThread?.environmentId ?? null,
+    cwd: selectedThreadCwd,
+  });
 
   const currentBranchLabel = gitStatus.data?.refName ?? selectedThread?.branch ?? "Detached HEAD";
   const currentWorktreePath = selectedThreadWorktreePath;

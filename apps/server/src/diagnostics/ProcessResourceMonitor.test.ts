@@ -3,13 +3,16 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import * as ProcessResourceMonitor from "./ProcessResourceMonitor.ts";
+import {
+  aggregateProcessResourceHistory,
+  collectMonitoredSamples,
+} from "./ProcessResourceMonitor.ts";
 
 describe("ProcessResourceMonitor", () => {
   it.effect("samples the server root process and descendants", () =>
     Effect.sync(() => {
       const sampledAt = DateTime.makeUnsafe("2026-05-05T10:00:00.000Z");
-      const samples = ProcessResourceMonitor.collectMonitoredSamples({
+      const samples = collectMonitoredSamples({
         serverPid: 100,
         sampledAt,
         sampledAtMs: DateTime.toEpochMillis(sampledAt),
@@ -69,7 +72,7 @@ describe("ProcessResourceMonitor", () => {
       const firstAt = DateTime.makeUnsafe("2026-05-05T10:00:00.000Z");
       const secondAt = DateTime.makeUnsafe("2026-05-05T10:00:05.000Z");
       const samples = [
-        ...ProcessResourceMonitor.collectMonitoredSamples({
+        ...collectMonitoredSamples({
           serverPid: 100,
           sampledAt: firstAt,
           sampledAtMs: DateTime.toEpochMillis(firstAt),
@@ -86,7 +89,7 @@ describe("ProcessResourceMonitor", () => {
             },
           ],
         }),
-        ...ProcessResourceMonitor.collectMonitoredSamples({
+        ...collectMonitoredSamples({
           serverPid: 100,
           sampledAt: secondAt,
           sampledAtMs: DateTime.toEpochMillis(secondAt),
@@ -105,7 +108,7 @@ describe("ProcessResourceMonitor", () => {
         }),
       ];
 
-      const result = ProcessResourceMonitor.aggregateProcessResourceHistory({
+      const result = aggregateProcessResourceHistory({
         samples,
         readAt: secondAt,
         readAtMs: DateTime.toEpochMillis(secondAt),
@@ -129,7 +132,7 @@ describe("ProcessResourceMonitor", () => {
       const firstAt = DateTime.makeUnsafe("2026-05-05T10:00:00.400Z");
       const secondAt = DateTime.makeUnsafe("2026-05-05T10:00:05.900Z");
       const samples = [
-        ...ProcessResourceMonitor.collectMonitoredSamples({
+        ...collectMonitoredSamples({
           serverPid: 100,
           sampledAt: firstAt,
           sampledAtMs: DateTime.toEpochMillis(firstAt),
@@ -146,7 +149,7 @@ describe("ProcessResourceMonitor", () => {
             },
           ],
         }),
-        ...ProcessResourceMonitor.collectMonitoredSamples({
+        ...collectMonitoredSamples({
           serverPid: 100,
           sampledAt: secondAt,
           sampledAtMs: DateTime.toEpochMillis(secondAt),
@@ -165,7 +168,7 @@ describe("ProcessResourceMonitor", () => {
         }),
       ];
 
-      const result = ProcessResourceMonitor.aggregateProcessResourceHistory({
+      const result = aggregateProcessResourceHistory({
         samples,
         readAt: secondAt,
         readAtMs: DateTime.toEpochMillis(secondAt),
@@ -184,7 +187,7 @@ describe("ProcessResourceMonitor", () => {
   it.effect("returns all process summaries in the selected window", () =>
     Effect.sync(() => {
       const sampledAt = DateTime.makeUnsafe("2026-05-05T10:00:00.000Z");
-      const samples = ProcessResourceMonitor.collectMonitoredSamples({
+      const samples = collectMonitoredSamples({
         serverPid: 100,
         sampledAt,
         sampledAtMs: DateTime.toEpochMillis(sampledAt),
@@ -212,7 +215,7 @@ describe("ProcessResourceMonitor", () => {
         ],
       });
 
-      const result = ProcessResourceMonitor.aggregateProcessResourceHistory({
+      const result = aggregateProcessResourceHistory({
         samples,
         readAt: sampledAt,
         readAtMs: DateTime.toEpochMillis(sampledAt),

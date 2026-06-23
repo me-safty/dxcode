@@ -5,15 +5,17 @@ import { NoActiveThreadState } from "../components/NoActiveThreadState";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
-import { useEnvironments } from "../state/environments";
+import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
-  const { environments } = useEnvironments();
+  const savedEnvironmentCount = useSavedEnvironmentRegistryStore(
+    (state) => Object.keys(state.byId).length,
+  );
 
-  if (authGateState.status === "hosted-static" && environments.length === 0) {
+  if (authGateState.status === "hosted-static" && savedEnvironmentCount === 0) {
     return <HostedStaticOnboardingState />;
   }
 

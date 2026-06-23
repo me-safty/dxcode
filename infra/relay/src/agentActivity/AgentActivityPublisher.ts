@@ -23,23 +23,25 @@ export type AgentActivityPublishError =
   | LiveActivities.LiveActivityTargetListPersistenceError
   | ApnsDeliveries.ApnsDeliveryError;
 
+export interface AgentActivityPublisherShape {
+  readonly publish: (input: {
+    readonly environmentId: string;
+    readonly environmentPublicKey: string;
+    readonly threadId: string;
+    readonly state: RelayAgentActivityState | null;
+  }) => Effect.Effect<RelayPublishResponse, AgentActivityPublishError>;
+  readonly replayForLiveActivityRegistration: (input: {
+    readonly userId: string;
+    readonly deviceId: string;
+  }) => Effect.Effect<RelayDeliveryResult | null, AgentActivityPublishError>;
+}
+
 export class AgentActivityPublisher extends Context.Service<
   AgentActivityPublisher,
-  {
-    readonly publish: (input: {
-      readonly environmentId: string;
-      readonly environmentPublicKey: string;
-      readonly threadId: string;
-      readonly state: RelayAgentActivityState | null;
-    }) => Effect.Effect<RelayPublishResponse, AgentActivityPublishError>;
-    readonly replayForLiveActivityRegistration: (input: {
-      readonly userId: string;
-      readonly deviceId: string;
-    }) => Effect.Effect<RelayDeliveryResult | null, AgentActivityPublishError>;
-  }
+  AgentActivityPublisherShape
 >()("t3code-relay/agentActivity/AgentActivityPublisher") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const rows = yield* AgentActivityRows.AgentActivityRows;
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const liveActivities = yield* LiveActivities.LiveActivities;

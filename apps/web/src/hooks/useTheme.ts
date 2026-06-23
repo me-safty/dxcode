@@ -22,7 +22,6 @@ const DYNAMIC_THEME_COLOR_SELECTOR = `meta[name="${THEME_COLOR_META_NAME}"][data
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
 let lastDesktopTheme: Theme | null = null;
-let lastAppliedTheme: ThemeSnapshot | null = null;
 
 function emitChange() {
   for (const listener of listeners) listener();
@@ -33,11 +32,7 @@ function hasThemeStorage() {
 }
 
 function getSystemDark() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia(MEDIA_QUERY).matches
-  );
+  return typeof window !== "undefined" && window.matchMedia(MEDIA_QUERY).matches;
 }
 
 function getStored(): Theme {
@@ -107,23 +102,12 @@ function applyTheme(theme: Theme, palette: ThemePalette, suppressTransitions = f
   if (typeof document === "undefined" || typeof window === "undefined") return;
   const root = document.documentElement;
   if (!root || !root.dataset) return;
-  const systemDark = theme === "system" ? getSystemDark() : false;
-  if (
-    lastAppliedTheme?.theme === theme &&
-    lastAppliedTheme.palette === palette &&
-    lastAppliedTheme.systemDark === systemDark
-  ) {
-    syncDesktopTheme(theme);
-    return;
-  }
-
   if (suppressTransitions) {
     root.classList.add("no-transitions");
   }
-  const isDark = theme === "dark" || (theme === "system" && systemDark);
+  const isDark = theme === "dark" || (theme === "system" && getSystemDark());
   root.classList.toggle("dark", isDark);
   root.dataset.themePalette = palette;
-  lastAppliedTheme = { theme, palette, systemDark };
   syncBrowserChromeTheme();
   syncDesktopTheme(theme);
   if (suppressTransitions) {
@@ -184,12 +168,12 @@ function subscribe(listener: () => void): () => void {
   listeners.push(listener);
 
   // Listen for system preference changes
-  const mq = typeof window.matchMedia === "function" ? window.matchMedia(MEDIA_QUERY) : null;
+  const mq = window.matchMedia(MEDIA_QUERY);
   const handleChange = () => {
     if (getStored() === "system") applyTheme("system", getStoredPalette(), true);
     emitChange();
   };
-  mq?.addEventListener("change", handleChange);
+  mq.addEventListener("change", handleChange);
 
   // Listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) => {
@@ -202,7 +186,7 @@ function subscribe(listener: () => void): () => void {
 
   return () => {
     listeners = listeners.filter((l) => l !== listener);
-    mq?.removeEventListener("change", handleChange);
+    mq.removeEventListener("change", handleChange);
     window.removeEventListener("storage", handleStorage);
   };
 }

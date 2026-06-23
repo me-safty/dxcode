@@ -15,7 +15,7 @@ import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shar
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
-import * as ServerConfig from "../config.ts";
+import { ServerConfig } from "../config.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import {
   buildBranchNamePrompt,
@@ -23,13 +23,20 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
-import * as TextGeneration from "./TextGeneration.ts";
+import { type TextGenerationShape } from "./TextGeneration.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
-import * as OpenCodeRuntime from "../provider/opencodeRuntime.ts";
+import {
+  OpenCodeRuntime,
+  type OpenCodeServerConnection,
+  type OpenCodeServerProcess,
+  openCodeRuntimeErrorDetail,
+  parseOpenCodeModelSlug,
+  toOpenCodeFileParts,
+} from "../provider/opencodeRuntime.ts";
 
 const OPENCODE_TEXT_GENERATION_IDLE_TTL = "30 seconds";
 
@@ -77,7 +84,7 @@ function getOpenCodeTextResponse(parts: ReadonlyArray<unknown> | undefined): str
 }
 
 interface SharedOpenCodeTextGenerationServerState {
-  server: OpenCodeRuntime.OpenCodeServerProcess | null;
+  server: OpenCodeServerProcess | null;
   /**
    * The scope that owns the shared server's lifetime. Closing this scope
    * terminates the OpenCode child process and interrupts any fibers the
@@ -92,11 +99,10 @@ interface SharedOpenCodeTextGenerationServerState {
 
 export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration")(function* (
   openCodeSettings: OpenCodeSettings,
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = process.env,
 ) {
-  const serverConfig = yield* ServerConfig.ServerConfig;
-  const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
-  const resolvedEnvironment = environment ?? process.env;
+  const serverConfig = yield* ServerConfig;
+  const openCodeRuntime = yield* OpenCodeRuntime;
   const idleFiberScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
     Scope.close(scope, Exit.void),
   );
@@ -128,7 +134,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
   });
 
   const scheduleIdleClose = Effect.fn("scheduleIdleClose")(function* (
-    server: OpenCodeRuntime.OpenCodeServerProcess,
+    server: OpenCodeServerProcess,
   ) {
     yield* cancelIdleCloseFiber();
     const fiber = yield* Effect.sleep(OPENCODE_TEXT_GENERATION_IDLE_TTL).pipe(
@@ -202,7 +208,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                 openCodeRuntime
                   .startOpenCodeServerProcess({
                     binaryPath: input.binaryPath,
-                    environment: resolvedEnvironment,
+                    environment,
                   })
                   .pipe(
                     Effect.provideService(Scope.Scope, serverScope),
@@ -210,7 +216,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                       (cause) =>
                         new TextGenerationError({
                           operation: input.operation,
-                          detail: OpenCodeRuntime.openCodeRuntimeErrorDetail(cause),
+                          detail: openCodeRuntimeErrorDetail(cause),
                           cause,
                         }),
                     ),
@@ -233,7 +239,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
-  const releaseSharedServer = (server: OpenCodeRuntime.OpenCodeServerProcess) =>
+  const releaseSharedServer = (server: OpenCodeServerProcess) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* () {
         if (sharedServerState.server !== server) {
@@ -271,7 +277,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     readonly modelSelection: ModelSelection;
     readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
   }) {
-    const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(input.modelSelection.model);
+    const parsedModel = parseOpenCodeModelSlug(input.modelSelection.model);
     if (!parsedModel) {
       return yield* new TextGenerationError({
         operation: input.operation,
@@ -279,13 +285,13 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       });
     }
 
-    const fileParts = OpenCodeRuntime.toOpenCodeFileParts({
+    const fileParts = toOpenCodeFileParts({
       attachments: input.attachments,
       resolveAttachmentPath: (attachment) =>
         resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
     });
 
-    const runAgainstServer = (server: Pick<OpenCodeRuntime.OpenCodeServerConnection, "url">) =>
+    const runAgainstServer = (server: Pick<OpenCodeServerConnection, "url">) =>
       Effect.tryPromise({
         try: async () => {
           const client = openCodeRuntime.createOpenCodeSdkClient({
@@ -329,7 +335,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         catch: (cause) =>
           new TextGenerationError({
             operation: input.operation,
-            detail: OpenCodeRuntime.openCodeRuntimeErrorDetail(cause),
+            detail: openCodeRuntimeErrorDetail(cause),
             cause,
           }),
       });
@@ -360,98 +366,102 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     );
   });
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("OpenCodeTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
+  const generateCommitMessage: TextGenerationShape["generateCommitMessage"] = Effect.fn(
+    "OpenCodeTextGeneration.generateCommitMessage",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildCommitMessagePrompt({
+      branch: input.branch,
+      stagedSummary: input.stagedSummary,
+      stagedPatch: input.stagedPatch,
+      includeBranch: input.includeBranch === true,
+    });
+    const generated = yield* runOpenCodeJson({
+      operation: "generateCommitMessage",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
     });
 
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("OpenCodeTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
+    return {
+      subject: sanitizeCommitSubject(generated.subject),
+      body: generated.body.trim(),
+      ...("branch" in generated && typeof generated.branch === "string"
+        ? { branch: sanitizeFeatureBranchName(generated.branch) }
+        : {}),
+    };
+  });
 
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
+  const generatePrContent: TextGenerationShape["generatePrContent"] = Effect.fn(
+    "OpenCodeTextGeneration.generatePrContent",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPrContentPrompt({
+      baseBranch: input.baseBranch,
+      headBranch: input.headBranch,
+      commitSummary: input.commitSummary,
+      diffSummary: input.diffSummary,
+      diffPatch: input.diffPatch,
+    });
+    const generated = yield* runOpenCodeJson({
+      operation: "generatePrContent",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
     });
 
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("OpenCodeTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        attachments: input.attachments,
-      });
+    return {
+      title: sanitizePrTitle(generated.title),
+      body: generated.body.trim(),
+    };
+  });
 
-      return {
-        branch: sanitizeBranchFragment(generated.branch),
-      };
+  const generateBranchName: TextGenerationShape["generateBranchName"] = Effect.fn(
+    "OpenCodeTextGeneration.generateBranchName",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildBranchNamePrompt({
+      message: input.message,
+      attachments: input.attachments,
+    });
+    const generated = yield* runOpenCodeJson({
+      operation: "generateBranchName",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+      attachments: input.attachments,
     });
 
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("OpenCodeTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        attachments: input.attachments,
-      });
+    return {
+      branch: sanitizeBranchFragment(generated.branch),
+    };
+  });
 
-      return {
-        title: sanitizeThreadTitle(generated.title),
-      };
+  const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = Effect.fn(
+    "OpenCodeTextGeneration.generateThreadTitle",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildThreadTitlePrompt({
+      message: input.message,
+      attachments: input.attachments,
     });
+    const generated = yield* runOpenCodeJson({
+      operation: "generateThreadTitle",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+      attachments: input.attachments,
+    });
+
+    return {
+      title: sanitizeThreadTitle(generated.title),
+    };
+  });
 
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-  } satisfies TextGeneration.TextGeneration["Service"];
+  } satisfies TextGenerationShape;
 });

@@ -59,16 +59,18 @@ export type EnvironmentPublishSignatureError =
   | EnvironmentPublishPublicKeyMissing
   | DpopProofs.DpopProofReplayPersistenceError;
 
+export interface EnvironmentPublishSignaturesShape {
+  readonly verify: (input: {
+    readonly environmentId: string;
+    readonly environmentPublicKey: string;
+    readonly threadId: string;
+    readonly request: RelayAgentActivityPublishRequest;
+  }) => Effect.Effect<void, EnvironmentPublishSignatureError>;
+}
+
 export class EnvironmentPublishSignatures extends Context.Service<
   EnvironmentPublishSignatures,
-  {
-    readonly verify: (input: {
-      readonly environmentId: string;
-      readonly environmentPublicKey: string;
-      readonly threadId: string;
-      readonly request: RelayAgentActivityPublishRequest;
-    }) => Effect.Effect<void, EnvironmentPublishSignatureError>;
-  }
+  EnvironmentPublishSignaturesShape
 >()("t3code-relay/environments/EnvironmentPublishSignatures") {}
 
 const decodeProof = Schema.decodeUnknownEffect(RelayAgentActivityPublishProofPayload);

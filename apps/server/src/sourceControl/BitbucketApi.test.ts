@@ -53,41 +53,41 @@ const repositoryJson = {
 
 function makeLayer(input: {
   readonly response: (request: HttpClientRequest.HttpClientRequest) => Response;
-  readonly git?: Partial<GitVcsDriver.GitVcsDriver["Service"]>;
+  readonly git?: Partial<GitVcsDriver.GitVcsDriverShape>;
 }) {
   const execute = vi.fn((request: HttpClientRequest.HttpClientRequest) =>
     Effect.succeed(HttpClientResponse.fromWeb(request, input.response(request))),
   );
   const gitMock = {
-    readConfigValue: vi.fn<GitVcsDriver.GitVcsDriver["Service"]["readConfigValue"]>(() =>
+    readConfigValue: vi.fn<GitVcsDriver.GitVcsDriverShape["readConfigValue"]>(() =>
       Effect.succeed<string | null>("git@bitbucket.org:pingdotgg/t3code.git"),
     ),
-    resolvePrimaryRemoteName: vi.fn<
-      GitVcsDriver.GitVcsDriver["Service"]["resolvePrimaryRemoteName"]
-    >(() => Effect.succeed("origin")),
-    ensureRemote: vi.fn<GitVcsDriver.GitVcsDriver["Service"]["ensureRemote"]>(() =>
+    resolvePrimaryRemoteName: vi.fn<GitVcsDriver.GitVcsDriverShape["resolvePrimaryRemoteName"]>(
+      () => Effect.succeed("origin"),
+    ),
+    ensureRemote: vi.fn<GitVcsDriver.GitVcsDriverShape["ensureRemote"]>(() =>
       Effect.succeed("octocat"),
     ),
-    fetchRemoteBranch: vi.fn<GitVcsDriver.GitVcsDriver["Service"]["fetchRemoteBranch"]>(
+    fetchRemoteBranch: vi.fn<GitVcsDriver.GitVcsDriverShape["fetchRemoteBranch"]>(
       () => Effect.void,
     ),
-    fetchRemoteTrackingBranch: vi.fn<
-      GitVcsDriver.GitVcsDriver["Service"]["fetchRemoteTrackingBranch"]
-    >(() => Effect.void),
-    setBranchUpstream: vi.fn<GitVcsDriver.GitVcsDriver["Service"]["setBranchUpstream"]>(
+    fetchRemoteTrackingBranch: vi.fn<GitVcsDriver.GitVcsDriverShape["fetchRemoteTrackingBranch"]>(
       () => Effect.void,
     ),
-    switchRef: vi.fn<GitVcsDriver.GitVcsDriver["Service"]["switchRef"]>((request) =>
+    setBranchUpstream: vi.fn<GitVcsDriver.GitVcsDriverShape["setBranchUpstream"]>(
+      () => Effect.void,
+    ),
+    switchRef: vi.fn<GitVcsDriver.GitVcsDriverShape["switchRef"]>((request) =>
       Effect.succeed({ refName: request.refName }),
     ),
-    listLocalBranchNames: vi.fn<GitVcsDriver.GitVcsDriver["Service"]["listLocalBranchNames"]>(() =>
+    listLocalBranchNames: vi.fn<GitVcsDriver.GitVcsDriverShape["listLocalBranchNames"]>(() =>
       Effect.succeed([]),
     ),
   };
   const git = {
     ...gitMock,
     ...input.git,
-  } satisfies Partial<GitVcsDriver.GitVcsDriver["Service"]>;
+  } satisfies Partial<GitVcsDriver.GitVcsDriverShape>;
 
   const driver = {
     listRemotes: () =>
@@ -106,7 +106,7 @@ function makeLayer(input: {
           expiresAt: Option.none(),
         },
       }),
-  } satisfies Partial<VcsDriver.VcsDriver["Service"]>;
+  } satisfies Partial<VcsDriver.VcsDriverShape>;
 
   const layer = BitbucketApi.layer.pipe(
     Layer.provide(
@@ -130,7 +130,7 @@ function makeLayer(input: {
                 expiresAt: Option.none(),
               },
             },
-            driver: driver as unknown as VcsDriver.VcsDriver["Service"],
+            driver: driver as unknown as VcsDriver.VcsDriverShape,
           }),
       }),
     ),

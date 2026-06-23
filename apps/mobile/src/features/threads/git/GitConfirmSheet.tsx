@@ -1,4 +1,4 @@
-import { resolveDefaultBranchActionDialogCopy } from "@t3tools/client-runtime/state/vcs";
+import { resolveDefaultBranchActionDialogCopy } from "@t3tools/client-runtime";
 import { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";

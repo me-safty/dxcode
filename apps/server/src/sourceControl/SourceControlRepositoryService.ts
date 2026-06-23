@@ -24,19 +24,21 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 const isSourceControlRepositoryError = Schema.is(SourceControlRepositoryError);
 
+export interface SourceControlRepositoryServiceShape {
+  readonly lookupRepository: (
+    input: SourceControlRepositoryLookupInput,
+  ) => Effect.Effect<SourceControlRepositoryInfo, SourceControlRepositoryError>;
+  readonly cloneRepository: (
+    input: SourceControlCloneRepositoryInput,
+  ) => Effect.Effect<SourceControlCloneRepositoryResult, SourceControlRepositoryError>;
+  readonly publishRepository: (
+    input: SourceControlPublishRepositoryInput,
+  ) => Effect.Effect<SourceControlPublishRepositoryResult, SourceControlRepositoryError>;
+}
+
 export class SourceControlRepositoryService extends Context.Service<
   SourceControlRepositoryService,
-  {
-    readonly lookupRepository: (
-      input: SourceControlRepositoryLookupInput,
-    ) => Effect.Effect<SourceControlRepositoryInfo, SourceControlRepositoryError>;
-    readonly cloneRepository: (
-      input: SourceControlCloneRepositoryInput,
-    ) => Effect.Effect<SourceControlCloneRepositoryResult, SourceControlRepositoryError>;
-    readonly publishRepository: (
-      input: SourceControlPublishRepositoryInput,
-    ) => Effect.Effect<SourceControlPublishRepositoryResult, SourceControlRepositoryError>;
-  }
+  SourceControlRepositoryServiceShape
 >()("t3/sourceControl/SourceControlRepositoryService") {}
 
 function detailFromUnknown(cause: unknown): string {
@@ -114,7 +116,7 @@ function expandHomePath(input: string, path: Path.Path): string {
   return input;
 }
 
-export const make = Effect.gen(function* () {
+export const make = Effect.fn("makeSourceControlRepositoryService")(function* () {
   const config = yield* ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const git = yield* GitVcsDriver.GitVcsDriver;
@@ -313,4 +315,4 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(SourceControlRepositoryService, make);
+export const layer = Layer.effect(SourceControlRepositoryService, make());

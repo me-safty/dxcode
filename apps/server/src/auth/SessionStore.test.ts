@@ -5,29 +5,30 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 
-import * as ServerConfig from "../config.ts";
+import type { ServerConfigShape } from "../config.ts";
+import { ServerConfig } from "../config.ts";
 import { PersistenceSqlError } from "../persistence/Errors.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import * as AuthSessions from "../persistence/AuthSessions.ts";
+import { AuthSessionRepository } from "../persistence/Services/AuthSessions.ts";
 import * as SessionStore from "./SessionStore.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 
 const makeServerConfigLayer = (
-  overrides?: Partial<Pick<ServerConfig.ServerConfig["Service"], "desktopBootstrapToken">>,
+  overrides?: Partial<Pick<ServerConfigShape, "desktopBootstrapToken">>,
 ) =>
   Layer.effect(
-    ServerConfig.ServerConfig,
+    ServerConfig,
     Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
+      const config = yield* ServerConfig;
       return {
         ...config,
         ...overrides,
-      } satisfies ServerConfig.ServerConfig["Service"];
+      } satisfies ServerConfigShape;
     }),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-session-test-" })));
 
 const makeSessionStoreLayer = (
-  overrides?: Partial<Pick<ServerConfig.ServerConfig["Service"], "desktopBootstrapToken">>,
+  overrides?: Partial<Pick<ServerConfigShape, "desktopBootstrapToken">>,
 ) =>
   SessionStore.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
@@ -40,7 +41,7 @@ const repositoryFailure = new PersistenceSqlError({
   detail: "sqlite is unavailable",
 });
 
-const failingSessionLookupRepositoryLayer = Layer.succeed(AuthSessions.AuthSessionRepository, {
+const failingSessionLookupRepositoryLayer = Layer.succeed(AuthSessionRepository, {
   create: () => Effect.void,
   getById: () => Effect.fail(repositoryFailure),
   listActive: () => Effect.succeed([]),
@@ -51,7 +52,7 @@ const failingSessionLookupRepositoryLayer = Layer.succeed(AuthSessions.AuthSessi
 
 const failingSessionLookupCredentialLayer = Layer.effect(
   SessionStore.SessionStore,
-  SessionStore.make,
+  SessionStore.make(),
 ).pipe(
   Layer.provide(failingSessionLookupRepositoryLayer),
   Layer.provide(ServerSecretStore.layer),
@@ -89,7 +90,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       const sessions = yield* SessionStore.SessionStore;
       const error = yield* Effect.flip(sessions.verify("not-a-session-token"));
 
-      expect(error._tag).toBe("MalformedSessionTokenError");
+      expect(error._tag).toBe("SessionCredentialInvalidError");
       expect(error.message).toContain("Malformed session token");
     }).pipe(Effect.provide(makeSessionStoreLayer())),
   );
@@ -105,8 +106,8 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       const sessionError = yield* Effect.flip(sessions.verify(issued.token));
       const websocketError = yield* Effect.flip(sessions.verifyWebSocketToken(websocket.token));
 
-      expect(sessionError._tag).toBe("SessionCredentialVerificationError");
-      expect(websocketError._tag).toBe("WebSocketTokenVerificationError");
+      expect(sessionError._tag).toBe("SessionCredentialInternalError");
+      expect(websocketError._tag).toBe("SessionCredentialInternalError");
       expect(sessionError.cause).toBe(repositoryFailure);
       expect(websocketError.cause).toBe(repositoryFailure);
     }).pipe(Effect.provide(failingSessionLookupCredentialLayer)),

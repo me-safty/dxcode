@@ -12,7 +12,7 @@ import {
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
-import * as TextGeneration from "./TextGeneration.ts";
+import { type ThreadTitleGenerationResult, type TextGenerationShape } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
@@ -195,7 +195,7 @@ export const makeGrokBuildTextGeneration = Effect.fn("makeGrokBuildTextGeneratio
       Effect.scoped,
     );
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] = Effect.fn(
+  const generateCommitMessage: TextGenerationShape["generateCommitMessage"] = Effect.fn(
     "GrokBuildTextGeneration.generateCommitMessage",
   )(function* (input) {
     const { prompt, outputSchema } = buildCommitMessagePrompt({
@@ -222,7 +222,7 @@ export const makeGrokBuildTextGeneration = Effect.fn("makeGrokBuildTextGeneratio
     };
   });
 
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] = Effect.fn(
+  const generatePrContent: TextGenerationShape["generatePrContent"] = Effect.fn(
     "GrokBuildTextGeneration.generatePrContent",
   )(function* (input) {
     const { prompt, outputSchema } = buildPrContentPrompt({
@@ -247,7 +247,7 @@ export const makeGrokBuildTextGeneration = Effect.fn("makeGrokBuildTextGeneratio
     };
   });
 
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] = Effect.fn(
+  const generateBranchName: TextGenerationShape["generateBranchName"] = Effect.fn(
     "GrokBuildTextGeneration.generateBranchName",
   )(function* (input) {
     const { prompt, outputSchema } = buildBranchNamePrompt({
@@ -268,7 +268,7 @@ export const makeGrokBuildTextGeneration = Effect.fn("makeGrokBuildTextGeneratio
     };
   });
 
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] = Effect.fn(
+  const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = Effect.fn(
     "GrokBuildTextGeneration.generateThreadTitle",
   )(function* (input) {
     const { prompt, outputSchema } = buildThreadTitlePrompt({
@@ -286,7 +286,7 @@ export const makeGrokBuildTextGeneration = Effect.fn("makeGrokBuildTextGeneratio
 
     return {
       title: sanitizeThreadTitle(generated.title),
-    } satisfies TextGeneration.ThreadTitleGenerationResult;
+    } satisfies ThreadTitleGenerationResult;
   });
 
   return {
@@ -294,5 +294,5 @@ export const makeGrokBuildTextGeneration = Effect.fn("makeGrokBuildTextGeneratio
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-  } satisfies TextGeneration.TextGeneration["Service"];
+  } satisfies TextGenerationShape;
 });

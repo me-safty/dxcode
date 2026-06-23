@@ -7,8 +7,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Types from "effect/Types";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexSchema from "effect-codex-app-server/schema";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -24,7 +23,6 @@ import type {
 import { ServerSettingsError } from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
@@ -33,8 +31,6 @@ import {
 import { expandHomePath } from "../../pathExpansion.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
-
-const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -222,7 +218,7 @@ function parseCodexSkillsListResponse(
 }
 
 const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
-  client: CodexClient.CodexAppServerClient["Service"],
+  client: CodexClient.CodexAppServerClientShape,
 ) {
   const models: ServerProviderModel[] = [];
   let cursor: string | null | undefined = undefined;
@@ -264,35 +260,17 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   // "CODEX_HOME points to '~/.codex_work', but that path does not exist".
   // Expand here for parity with `CodexTextGeneration`/`CodexSessionRuntime`.
   const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const environment = {
-    ...input.environment,
-    ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
-  };
-  const spawnCommand = yield* resolveSpawnCommand(input.binaryPath, ["app-server"], {
-    env: environment,
-    extendEnv: true,
-  });
-  const child = yield* spawner
-    .spawn(
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        cwd: input.cwd,
-        env: environment,
-        extendEnv: true,
-        forceKillAfter: CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER,
-        shell: spawnCommand.shell,
-      }),
-    )
-    .pipe(
-      Effect.mapError(
-        (cause) =>
-          new CodexErrors.CodexAppServerSpawnError({
-            command: `${input.binaryPath} app-server`,
-            cause,
-          }),
-      ),
-    );
-  const clientContext = yield* Layer.build(CodexClient.layerChildProcess(child));
+  const clientContext = yield* Layer.build(
+    CodexClient.layerCommand({
+      command: input.binaryPath,
+      args: ["app-server"],
+      cwd: input.cwd,
+      env: {
+        ...(input.environment ?? process.env),
+        ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
+      },
+    }),
+  );
   const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
     Effect.provide(clientContext),
   );
@@ -439,13 +417,12 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     CodexErrors.CodexAppServerError,
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   > = probeCodexAppServerProvider,
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
   ChildProcessSpawner.ChildProcessSpawner
 > {
-  const resolvedEnvironment = environment ?? process.env;
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const emptyModels = emptyCodexModelsFromSettings(codexSettings);
 
@@ -471,7 +448,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     homePath: codexSettings.homePath,
     cwd: process.cwd(),
     customModels: codexSettings.customModels,
-    environment: resolvedEnvironment,
+    environment,
   }).pipe(
     Effect.scoped,
     Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)),

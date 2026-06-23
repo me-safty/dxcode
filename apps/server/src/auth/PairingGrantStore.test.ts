@@ -5,28 +5,29 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 
-import * as ServerConfig from "../config.ts";
+import type { ServerConfigShape } from "../config.ts";
+import { ServerConfig } from "../config.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 
 const makeServerConfigLayer = (
-  overrides?: Partial<Pick<ServerConfig.ServerConfig["Service"], "desktopBootstrapToken">>,
+  overrides?: Partial<Pick<ServerConfigShape, "desktopBootstrapToken">>,
 ) =>
   Layer.effect(
-    ServerConfig.ServerConfig,
+    ServerConfig,
     Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
+      const config = yield* ServerConfig;
       return {
         ...config,
         ...overrides,
-      } satisfies ServerConfig.ServerConfig["Service"];
+      } satisfies ServerConfigShape;
     }),
   ).pipe(
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-bootstrap-test-" })),
   );
 
 const makePairingGrantStoreLayer = (
-  overrides?: Partial<Pick<ServerConfig.ServerConfig["Service"], "desktopBootstrapToken">>,
+  overrides?: Partial<Pick<ServerConfigShape, "desktopBootstrapToken">>,
 ) =>
   PairingGrantStore.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
@@ -61,7 +62,7 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
       expect(first.subject).toBe("one-time-token");
       expect(first.label).toBe("Julius iPhone");
       expect(issued.label).toBe("Julius iPhone");
-      expect(second._tag).toBe("UnknownBootstrapCredentialError");
+      expect(second._tag).toBe("BootstrapCredentialInvalidError");
       expect(second.message).toContain("Unknown bootstrap credential");
     }).pipe(Effect.provide(makePairingGrantStoreLayer())),
   );
@@ -85,7 +86,7 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
       expect(successes).toHaveLength(1);
       expect(failures).toHaveLength(7);
       for (const failure of failures) {
-        expect(failure.failure._tag).toBe("UnknownBootstrapCredentialError");
+        expect(failure.failure._tag).toBe("BootstrapCredentialInvalidError");
         expect(failure.failure.message).toContain("Unknown bootstrap credential");
       }
     }).pipe(Effect.provide(makePairingGrantStoreLayer())),
@@ -132,7 +133,7 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
         "relay:write",
       ]);
       expect(first.subject).toBe("desktop-bootstrap");
-      expect(second._tag).toBe("UnknownBootstrapCredentialError");
+      expect(second._tag).toBe("BootstrapCredentialInvalidError");
     }).pipe(
       Effect.provide(
         makePairingGrantStoreLayer({
@@ -149,7 +150,7 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
       yield* TestClock.adjust(Duration.minutes(6));
       const expired = yield* Effect.flip(bootstrapCredentials.consume("desktop-bootstrap-token"));
 
-      expect(expired._tag).toBe("ExpiredBootstrapCredentialError");
+      expect(expired._tag).toBe("BootstrapCredentialInvalidError");
       expect(expired.message).toContain("Bootstrap credential expired");
     }).pipe(
       Effect.provide(
@@ -183,7 +184,7 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
       expect(activeAfterRevoke.map((entry) => entry.id)).not.toContain(first.id);
       expect(activeAfterRevoke.map((entry) => entry.id)).toContain(second.id);
       expect(revokedConsume.message).toContain("no longer available");
-      expect(revokedConsume._tag).toBe("UnavailableBootstrapCredentialError");
+      expect(revokedConsume._tag).toBe("BootstrapCredentialInvalidError");
     }).pipe(Effect.provide(makePairingGrantStoreLayer())),
   );
 });

@@ -22,19 +22,20 @@ export interface VcsDriverResolveInput {
 export interface VcsDriverHandle {
   readonly kind: VcsDriverKind;
   readonly repository: VcsRepositoryIdentity;
-  readonly driver: VcsDriver.VcsDriver["Service"];
+  readonly driver: VcsDriver.VcsDriverShape;
 }
 
-export class VcsDriverRegistry extends Context.Service<
-  VcsDriverRegistry,
-  {
-    readonly get: (kind: VcsDriverKind) => Effect.Effect<VcsDriver.VcsDriver["Service"], VcsError>;
-    readonly detect: (
-      input: VcsDriverResolveInput,
-    ) => Effect.Effect<VcsDriverHandle | null, VcsError>;
-    readonly resolve: (input: VcsDriverResolveInput) => Effect.Effect<VcsDriverHandle, VcsError>;
-  }
->()("t3/vcs/VcsDriverRegistry") {}
+export interface VcsDriverRegistryShape {
+  readonly get: (kind: VcsDriverKind) => Effect.Effect<VcsDriver.VcsDriverShape, VcsError>;
+  readonly detect: (
+    input: VcsDriverResolveInput,
+  ) => Effect.Effect<VcsDriverHandle | null, VcsError>;
+  readonly resolve: (input: VcsDriverResolveInput) => Effect.Effect<VcsDriverHandle, VcsError>;
+}
+
+export class VcsDriverRegistry extends Context.Service<VcsDriverRegistry, VcsDriverRegistryShape>()(
+  "t3/vcs/VcsDriverRegistry",
+) {}
 
 const unsupported = (operation: string, kind: VcsDriverKind, detail: string) =>
   new VcsUnsupportedOperationError({
@@ -67,14 +68,14 @@ function parseDetectionCacheKey(key: string): {
   };
 }
 
-export const make = Effect.gen(function* () {
+export const make = Effect.fn("makeVcsDriverRegistry")(function* () {
   const projectConfig = yield* VcsProjectConfig.VcsProjectConfig;
-  const git = yield* GitVcsDriver.makeVcsDriver;
-  const drivers: Partial<Record<VcsDriverKind, VcsDriver.VcsDriver["Service"]>> = {
+  const git = yield* GitVcsDriver.makeVcsDriverShape();
+  const drivers: Partial<Record<VcsDriverKind, VcsDriver.VcsDriverShape>> = {
     git,
   };
 
-  const get: VcsDriverRegistry["Service"]["get"] = (kind) => {
+  const get: VcsDriverRegistryShape["get"] = (kind) => {
     const driver = drivers[kind];
     if (!driver) {
       return Effect.fail(
@@ -86,7 +87,7 @@ export const make = Effect.gen(function* () {
 
   const detectWithDriver = Effect.fn("VcsDriverRegistry.detectWithDriver")(function* (
     kind: VcsDriverKind,
-    driver: VcsDriver.VcsDriver["Service"],
+    driver: VcsDriver.VcsDriverShape,
     cwd: string,
   ) {
     const repository = yield* driver.detectRepository(cwd);
@@ -122,14 +123,14 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const detect: VcsDriverRegistry["Service"]["detect"] = Effect.fn("VcsDriverRegistry.detect")(
+  const detect: VcsDriverRegistryShape["detect"] = Effect.fn("VcsDriverRegistry.detect")(
     function* (input) {
       const requestedKind = yield* projectConfig.resolveKind(input);
       return yield* Cache.get(detectionCache, detectionCacheKey({ cwd: input.cwd, requestedKind }));
     },
   );
 
-  const resolve: VcsDriverRegistry["Service"]["resolve"] = Effect.fn("VcsDriverRegistry.resolve")(
+  const resolve: VcsDriverRegistryShape["resolve"] = Effect.fn("VcsDriverRegistry.resolve")(
     function* (input) {
       const detected = yield* detect(input);
       if (detected) {
@@ -154,6 +155,6 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(VcsDriverRegistry, make).pipe(
+export const layer = Layer.effect(VcsDriverRegistry, make()).pipe(
   Layer.provide(VcsProjectConfig.layer),
 );

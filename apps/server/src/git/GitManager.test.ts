@@ -20,16 +20,27 @@ import type {
 } from "@t3tools/contracts";
 
 import { GitCommandError, TextGenerationError } from "@t3tools/contracts";
-import * as GitHubCli from "../sourceControl/GitHubCli.ts";
-import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import { type GitManagerShape } from "./GitManager.ts";
+import {
+  GitHubCliError,
+  type GitHubCliShape,
+  type GitHubPullRequestSummary,
+  GitHubCli,
+} from "../sourceControl/GitHubCli.ts";
+import { type TextGenerationShape, TextGeneration } from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import * as ServerConfig from "../config.ts";
-import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
-import * as ServerSettings from "../serverSettings.ts";
-import * as GitManager from "./GitManager.ts";
+import { makeGitManager } from "./GitManager.ts";
+import { ServerConfig } from "../config.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import {
+  ProjectSetupScriptRunner,
+  ProjectSetupScriptRunnerError,
+  type ProjectSetupScriptRunnerInput,
+  type ProjectSetupScriptRunnerShape,
+} from "../project/Services/ProjectSetupScriptRunner.ts";
 
 interface FakeGhScenario {
   prListSequence?: string[];
@@ -49,7 +60,7 @@ interface FakeGhScenario {
     headRepositoryOwnerLogin?: string | null;
   };
   repositoryCloneUrls?: Record<string, { url: string; sshUrl: string }>;
-  failWith?: GitHubCli.GitHubCliError;
+  failWith?: GitHubCliError;
 }
 
 function fakeGhOutput(stdout: string): VcsProcess.VcsProcessOutput {
@@ -97,7 +108,7 @@ interface FakeGitTextGeneration {
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
 
-function normalizeFakePullRequestSummary(raw: unknown): GitHubCli.GitHubPullRequestSummary | null {
+function normalizeFakePullRequestSummary(raw: unknown): GitHubPullRequestSummary | null {
   if (!raw || typeof raw !== "object") {
     return null;
   }
@@ -171,13 +182,13 @@ function runGitSyncForFakeGh(cwd: string, args: readonly string[]): void {
   if (result.status === 0) {
     return;
   }
-  throw new GitHubCli.GitHubCliError({
+  throw new GitHubCliError({
     operation: "execute",
     detail: `Failed to simulate gh checkout with git ${args.join(" ")}: ${result.stderr?.trim() || "unknown error"}`,
   });
 }
 
-function isGitHubCliError(error: unknown): error is GitHubCli.GitHubCliError {
+function isGitHubCliError(error: unknown): error is GitHubCliError {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -301,9 +312,7 @@ function configureVisibleRemoteUrlWithLocalRewrite(
   });
 }
 
-function createTextGeneration(
-  overrides: Partial<FakeGitTextGeneration> = {},
-): TextGeneration.TextGeneration["Service"] {
+function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): TextGenerationShape {
   const implementation: FakeGitTextGeneration = {
     generateCommitMessage: (input) =>
       Effect.succeed({
@@ -376,7 +385,7 @@ function createTextGeneration(
 }
 
 function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
-  service: GitHubCli.GitHubCli["Service"];
+  service: GitHubCliShape;
   ghCalls: string[];
 } {
   const prListQueue = [...(scenario.prListSequence ?? [])];
@@ -388,7 +397,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
   );
   const ghCalls: string[] = [];
 
-  const execute: GitHubCli.GitHubCli["Service"]["execute"] = (input) => {
+  const execute: GitHubCliShape["execute"] = (input) => {
     const args = [...input.args];
     ghCalls.push(args.join(" "));
 
@@ -478,7 +487,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         catch: (error) =>
           isGitHubCliError(error)
             ? error
-            : new GitHubCli.GitHubCliError({
+            : new GitHubCliError({
                 operation: "execute",
                 detail:
                   error instanceof Error
@@ -494,7 +503,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         const cloneUrls = scenario.repositoryCloneUrls?.[repository];
         if (!cloneUrls) {
           return Effect.fail(
-            new GitHubCli.GitHubCliError({
+            new GitHubCliError({
               operation: "execute",
               detail: `Unexpected repository lookup: ${repository}`,
             }),
@@ -514,7 +523,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     }
 
     return Effect.fail(
-      new GitHubCli.GitHubCliError({
+      new GitHubCliError({
         operation: "execute",
         detail: `Unexpected gh command: ${args.join(" ")}`,
       }),
@@ -544,7 +553,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           Effect.map((raw) =>
             raw
               .map((entry) => normalizeFakePullRequestSummary(entry))
-              .filter((entry): entry is GitHubCli.GitHubPullRequestSummary => entry !== null),
+              .filter((entry): entry is GitHubPullRequestSummary => entry !== null),
           ),
         ),
       createPullRequest: (input) =>
@@ -583,9 +592,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "--json",
             "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
           ],
-        }).pipe(
-          Effect.map((result) => JSON.parse(result.stdout) as GitHubCli.GitHubPullRequestSummary),
-        ),
+        }).pipe(Effect.map((result) => JSON.parse(result.stdout) as GitHubPullRequestSummary)),
       getRepositoryCloneUrls: (input) =>
         execute({
           cwd: input.cwd,
@@ -593,7 +600,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         }).pipe(Effect.map((result) => JSON.parse(result.stdout))),
       createRepository: (input) =>
         Effect.fail(
-          new GitHubCli.GitHubCliError({
+          new GitHubCliError({
             operation: "createRepository",
             detail: `Unexpected repository create: ${input.repository}`,
           }),
@@ -609,7 +616,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
 }
 
 function runStackedAction(
-  manager: GitManager.GitManager["Service"],
+  manager: GitManagerShape,
   input: {
     cwd: string;
     action: "commit" | "push" | "create_pr" | "commit_push" | "commit_push_pr";
@@ -618,7 +625,7 @@ function runStackedAction(
     featureBranch?: boolean;
     filePaths?: readonly string[];
   },
-  options?: Parameters<GitManager.GitManager["Service"]["runStackedAction"]>[1],
+  options?: Parameters<GitManagerShape["runStackedAction"]>[1],
 ) {
   return manager.runStackedAction(
     {
@@ -629,15 +636,12 @@ function runStackedAction(
   );
 }
 
-function resolvePullRequest(
-  manager: GitManager.GitManager["Service"],
-  input: { cwd: string; reference: string },
-) {
+function resolvePullRequest(manager: GitManagerShape, input: { cwd: string; reference: string }) {
   return manager.resolvePullRequest(input);
 }
 
 function preparePullRequestThread(
-  manager: GitManager.GitManager["Service"],
+  manager: GitManagerShape,
   input: GitPreparePullRequestThreadInput,
 ) {
   return manager.preparePullRequestThread(input);
@@ -646,24 +650,24 @@ function preparePullRequestThread(
 function makeManager(input?: {
   ghScenario?: FakeGhScenario;
   textGeneration?: Partial<FakeGitTextGeneration>;
-  setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
+  setupScriptRunner?: ProjectSetupScriptRunnerShape;
 }) {
   const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(input?.ghScenario);
   const textGeneration = createTextGeneration(input?.textGeneration);
-  const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
+  const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "t3-git-manager-test-",
   });
 
-  const serverSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
+  const serverSettingsLayer = ServerSettingsService.layerTest();
 
   const vcsDriverLayer = GitVcsDriver.layer.pipe(
     Layer.provideMerge(VcsProcess.layer),
     Layer.provideMerge(NodeServices.layer),
-    Layer.provideMerge(serverConfigLayer),
+    Layer.provideMerge(ServerConfigLayer),
   );
   const sourceControlRegistryLayer = Layer.effect(
     SourceControlProviderRegistry.SourceControlProviderRegistry,
-    GitHubSourceControlProvider.make.pipe(
+    GitHubSourceControlProvider.make().pipe(
       Effect.map((provider) =>
         SourceControlProviderRegistry.SourceControlProviderRegistry.of({
           get: () => Effect.succeed(provider),
@@ -672,14 +676,14 @@ function makeManager(input?: {
           discover: Effect.succeed([]),
         }),
       ),
-      Effect.provide(Layer.succeed(GitHubCli.GitHubCli, gitHubCli)),
+      Effect.provide(Layer.succeed(GitHubCli, gitHubCli)),
     ),
   );
 
   const managerLayer = Layer.mergeAll(
-    Layer.succeed(TextGeneration.TextGeneration, textGeneration),
+    Layer.succeed(TextGeneration, textGeneration),
     Layer.succeed(
-      ProjectSetupScriptRunner.ProjectSetupScriptRunner,
+      ProjectSetupScriptRunner,
       input?.setupScriptRunner ?? {
         runForThread: () => Effect.succeed({ status: "no-script" as const }),
       },
@@ -688,7 +692,7 @@ function makeManager(input?: {
     serverSettingsLayer,
   ).pipe(Layer.provideMerge(sourceControlRegistryLayer), Layer.provideMerge(NodeServices.layer));
 
-  return GitManager.make.pipe(
+  return makeGitManager().pipe(
     Effect.provide(managerLayer),
     Effect.map((manager) => ({ manager, ghCalls })),
   );
@@ -1331,7 +1335,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         ghScenario: {
-          failWith: new GitHubCli.GitHubCliError({
+          failWith: new GitHubCliError({
             operation: "execute",
             detail: "GitHub CLI (`gh`) is required but not available on PATH.",
           }),
@@ -2239,62 +2243,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("generates PR content against the remote base when the local base is stale", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
-      yield* runGit(remoteDir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
-
-      const peerDir = yield* makeTempDir("t3code-git-peer-");
-      yield* runGit(peerDir, ["clone", remoteDir, "."]);
-      yield* runGit(peerDir, ["config", "user.email", "peer@example.com"]);
-      yield* runGit(peerDir, ["config", "user.name", "Peer User"]);
-      fs.writeFileSync(path.join(peerDir, "remote.txt"), "remote\n");
-      yield* runGit(peerDir, ["add", "remote.txt"]);
-      yield* runGit(peerDir, ["commit", "-m", "Remote base commit"]);
-      yield* runGit(peerDir, ["push", "origin", "main"]);
-
-      yield* runGit(repoDir, ["fetch", "origin"]);
-      yield* runGit(repoDir, [
-        "checkout",
-        "--no-track",
-        "-b",
-        "feature/remote-base",
-        "origin/main",
-      ]);
-      fs.writeFileSync(path.join(repoDir, "feature.txt"), "feature\n");
-      yield* runGit(repoDir, ["add", "feature.txt"]);
-      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "feature/remote-base"]);
-      yield* runGit(repoDir, ["config", "branch.feature/remote-base.gh-merge-base", "main"]);
-
-      let generatedCommitSummary = "";
-      const { manager } = yield* makeManager({
-        ghScenario: {
-          prListSequence: ["[]", "[]"],
-        },
-        textGeneration: {
-          generatePrContent: (input) => {
-            generatedCommitSummary = input.commitSummary;
-            return Effect.succeed({ title: "Feature PR", body: "Feature body" });
-          },
-        },
-      });
-
-      const result = yield* runStackedAction(manager, {
-        cwd: repoDir,
-        action: "create_pr",
-      });
-
-      expect(result.pr.status).toBe("created");
-      expect(generatedCommitSummary).toContain("Feature commit");
-      expect(generatedCommitSummary).not.toContain("Remote base commit");
-    }),
-  );
-
   it.effect(
     "creates a new PR instead of reusing an unrelated fork PR with the same head branch",
     () =>
@@ -2469,7 +2417,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         ghScenario: {
-          failWith: new GitHubCli.GitHubCliError({
+          failWith: new GitHubCliError({
             operation: "execute",
             detail: "GitHub CLI (`gh`) is required but not available on PATH.",
           }),
@@ -2498,7 +2446,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         ghScenario: {
-          failWith: new GitHubCli.GitHubCliError({
+          failWith: new GitHubCliError({
             operation: "execute",
             detail: "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
           }),
@@ -2754,7 +2702,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["push", "origin", "HEAD:refs/pull/177/head"]);
       yield* runGit(repoDir, ["checkout", "main"]);
 
-      const setupCalls: ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput[] = [];
+      const setupCalls: ProjectSetupScriptRunnerInput[] = [];
       const { manager } = yield* makeManager({
         ghScenario: {
           pullRequest: {
@@ -2976,7 +2924,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const worktreePath = path.join(repoDir, "..", `pr-existing-${path.basename(repoDir)}`);
       yield* runGit(repoDir, ["worktree", "add", worktreePath, "feature/pr-existing-worktree"]);
 
-      const setupCalls: ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput[] = [];
+      const setupCalls: ProjectSetupScriptRunnerInput[] = [];
       const { manager } = yield* makeManager({
         ghScenario: {
           pullRequest: {
@@ -3215,15 +3163,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           },
         },
         setupScriptRunner: {
-          runForThread: (input) =>
-            Effect.fail(
-              new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
-                threadId: input.threadId,
-                worktreePath: input.worktreePath,
-                operation: "openTerminal",
-                cause: new Error("terminal start failed"),
-              }),
-            ),
+          runForThread: () =>
+            Effect.fail(new ProjectSetupScriptRunnerError({ message: "terminal start failed" })),
         },
       });
 

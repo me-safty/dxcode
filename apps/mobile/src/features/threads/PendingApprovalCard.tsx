@@ -10,7 +10,7 @@ export interface PendingApprovalCardProps {
   readonly onRespond: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
-  ) => Promise<unknown>;
+  ) => Promise<void>;
 }
 
 export function PendingApprovalCard(props: PendingApprovalCardProps) {

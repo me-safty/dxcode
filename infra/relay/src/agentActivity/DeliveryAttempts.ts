@@ -7,7 +7,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 
-import * as RelayDb from "../db.ts";
+import { RelayDb } from "../db.ts";
 import { relayDeliveryAttempts } from "../persistence/schema.ts";
 
 export class DeliveryAttemptRecordPersistenceError extends Schema.TaggedErrorClass<DeliveryAttemptRecordPersistenceError>()(
@@ -43,20 +43,21 @@ export interface DeliveryAttemptCompletionInput {
 
 export type DeliverySourceJobClaimResult = "claimed" | "completed" | "in_flight";
 
-export class DeliveryAttempts extends Context.Service<
-  DeliveryAttempts,
-  {
-    readonly record: (
-      input: DeliveryAttemptInput,
-    ) => Effect.Effect<void, DeliveryAttemptRecordPersistenceError>;
-    readonly claimSourceJob: (
-      input: DeliveryAttemptInput & { readonly sourceJobId: string },
-    ) => Effect.Effect<DeliverySourceJobClaimResult, DeliveryAttemptRecordPersistenceError>;
-    readonly completeSourceJob: (
-      input: DeliveryAttemptCompletionInput,
-    ) => Effect.Effect<void, DeliveryAttemptRecordPersistenceError>;
-  }
->()("t3code-relay/agentActivity/DeliveryAttempts") {}
+export interface DeliveryAttemptsShape {
+  readonly record: (
+    input: DeliveryAttemptInput,
+  ) => Effect.Effect<void, DeliveryAttemptRecordPersistenceError>;
+  readonly claimSourceJob: (
+    input: DeliveryAttemptInput & { readonly sourceJobId: string },
+  ) => Effect.Effect<DeliverySourceJobClaimResult, DeliveryAttemptRecordPersistenceError>;
+  readonly completeSourceJob: (
+    input: DeliveryAttemptCompletionInput,
+  ) => Effect.Effect<void, DeliveryAttemptRecordPersistenceError>;
+}
+
+export class DeliveryAttempts extends Context.Service<DeliveryAttempts, DeliveryAttemptsShape>()(
+  "t3code-relay/agentActivity/DeliveryAttempts",
+) {}
 
 const SOURCE_JOB_CLAIM_LEASE_MINUTES = 10;
 
@@ -82,8 +83,8 @@ function insertValues(
   };
 }
 
-export const make = Effect.gen(function* () {
-  const db = yield* RelayDb.RelayDb;
+const make = Effect.gen(function* () {
+  const db = yield* RelayDb;
   const crypto = yield* Crypto.Crypto;
 
   const isExpiredClaim = (claimedAt: string | null, now: DateTime.DateTime) => {

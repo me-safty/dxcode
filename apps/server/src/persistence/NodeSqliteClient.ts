@@ -4,7 +4,7 @@
  *
  * @module SqliteClient
  */
-import * as NodeSqlite from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
@@ -28,6 +28,11 @@ const ATTR_DB_SYSTEM_NAME = "db.system.name";
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
 export type TypeId = "~local/sqlite-node/SqliteClient";
+
+/**
+ * SqliteClient - Effect service tag for the sqlite SQL client.
+ */
+export const SqliteClient = Context.Service<Client.SqlClient>("t3/persistence/NodeSqliteClient");
 
 export interface SqliteClientConfig {
   readonly filename: string;
@@ -69,7 +74,7 @@ const checkNodeSqliteCompat = () => {
 
 const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   options: SqliteClientConfig,
-  openDatabase: () => NodeSqlite.DatabaseSync,
+  openDatabase: () => DatabaseSync,
 ): Effect.fn.Return<Client.SqlClient, never, Scope.Scope | Reactivity.Reactivity> {
   yield* checkNodeSqliteCompat();
 
@@ -86,8 +91,8 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
       Effect.sync(() => db.close()),
     );
 
-    const statementReaderCache = new WeakMap<NodeSqlite.StatementSync, boolean>();
-    const hasRows = (statement: NodeSqlite.StatementSync): boolean => {
+    const statementReaderCache = new WeakMap<StatementSync, boolean>();
+    const hasRows = (statement: StatementSync): boolean => {
       const cached = statementReaderCache.get(statement);
       if (cached !== undefined) {
         return cached;
@@ -113,11 +118,7 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
         }),
     });
 
-    const runStatement = (
-      statement: NodeSqlite.StatementSync,
-      params: ReadonlyArray<unknown>,
-      raw: boolean,
-    ) =>
+    const runStatement = (statement: StatementSync, params: ReadonlyArray<unknown>, raw: boolean) =>
       Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
         statement.setReadBigInts(Boolean(Context.get(fiber.context, Client.SafeIntegers)));
         try {
@@ -224,7 +225,7 @@ const make = (
   makeWithDatabase(
     options,
     () =>
-      new NodeSqlite.DatabaseSync(options.filename, {
+      new DatabaseSync(options.filename, {
         readOnly: options.readonly ?? false,
         allowExtension: options.allowExtension ?? false,
       }),
@@ -240,7 +241,7 @@ const makeMemory = (
       readonly: false,
     },
     () => {
-      const database = new NodeSqlite.DatabaseSync(":memory:", {
+      const database = new DatabaseSync(":memory:", {
         allowExtension: config.allowExtension ?? false,
       });
       return database;
@@ -250,12 +251,25 @@ const makeMemory = (
 export const layerConfig = (
   config: Config.Wrap<SqliteClientConfig>,
 ): Layer.Layer<Client.SqlClient, Config.ConfigError> =>
-  Layer.effect(Client.SqlClient, Config.unwrap(config).pipe(Effect.flatMap(make))).pipe(
-    Layer.provide(Reactivity.layer),
-  );
+  Layer.effectContext(
+    Config.unwrap(config).pipe(
+      Effect.flatMap(make),
+      Effect.map((client) =>
+        Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
+      ),
+    ),
+  ).pipe(Layer.provide(Reactivity.layer));
 
 export const layer = (config: SqliteClientConfig): Layer.Layer<Client.SqlClient> =>
-  Layer.effect(Client.SqlClient, make(config)).pipe(Layer.provide(Reactivity.layer));
+  Layer.effectContext(
+    Effect.map(make(config), (client) =>
+      Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
+    ),
+  ).pipe(Layer.provide(Reactivity.layer));
 
 export const layerMemory = (config: SqliteMemoryClientConfig = {}): Layer.Layer<Client.SqlClient> =>
-  Layer.effect(Client.SqlClient, makeMemory(config)).pipe(Layer.provide(Reactivity.layer));
+  Layer.effectContext(
+    Effect.map(makeMemory(config), (client) =>
+      Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
+    ),
+  ).pipe(Layer.provide(Reactivity.layer));

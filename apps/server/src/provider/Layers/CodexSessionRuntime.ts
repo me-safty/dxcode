@@ -16,7 +16,6 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -720,23 +719,16 @@ export const makeCodexSessionRuntime = (
     // `CODEX_HOME=~/.codex_work` reach codex as an absolute path.
     const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined;
     const env = {
-      ...options.environment,
+      ...(options.environment ?? process.env),
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
-    const extendEnv = options.environment === undefined;
-    const spawnCommand = yield* resolveSpawnCommand(
-      options.binaryPath,
-      ["app-server", ...(options.appServerArgs ?? [])],
-      { env, extendEnv },
-    );
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        ChildProcess.make(options.binaryPath, ["app-server"], {
           cwd: options.cwd,
           env,
-          extendEnv,
           forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
-          shell: spawnCommand.shell,
+          shell: process.platform === "win32",
         }),
       )
       .pipe(

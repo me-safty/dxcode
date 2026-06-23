@@ -1,6 +1,6 @@
 import type { RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 
-import type { Preferences } from "../../lib/storage";
+import type { MobilePreferences } from "../../lib/storage";
 
 export function makeRelayDeviceRegistrationRequest(input: {
   readonly deviceId: string;
@@ -10,7 +10,7 @@ export function makeRelayDeviceRegistrationRequest(input: {
   readonly pushToken?: string;
   readonly pushToStartToken?: string;
   readonly notificationsEnabled: boolean;
-  readonly preferences: Preferences;
+  readonly preferences: MobilePreferences;
 }): RelayDeviceRegistrationRequest {
   const liveActivitiesEnabled = input.preferences.liveActivitiesEnabled !== false;
   return {

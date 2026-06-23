@@ -1,6 +1,5 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -112,12 +111,12 @@ export default function ConnectionsNewRouteScreen() {
   const handleSubmit = useCallback(async () => {
     setIsSubmitting(true);
 
-    const pairingUrl = buildPairingUrl(hostInput, codeInput);
-    onChangeConnectionPairingUrl(pairingUrl);
-    const result = await onConnectPress(pairingUrl);
-    if (AsyncResult.isSuccess(result)) {
+    try {
+      const pairingUrl = buildPairingUrl(hostInput, codeInput);
+      onChangeConnectionPairingUrl(pairingUrl);
+      await onConnectPress(pairingUrl);
       dismissRoute(router);
-    } else {
+    } catch {
       setIsSubmitting(false);
     }
   }, [codeInput, hostInput, onChangeConnectionPairingUrl, onConnectPress, router]);

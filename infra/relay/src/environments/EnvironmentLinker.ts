@@ -53,25 +53,26 @@ export type EnvironmentLinkError =
   | EnvironmentCredentials.EnvironmentCredentialCreatePersistenceError
   | ManagedEndpointProvider.ManagedEndpointProviderError;
 
-export class EnvironmentLinker extends Context.Service<
-  EnvironmentLinker,
-  {
-    readonly link: (input: {
-      readonly userId: string;
-      readonly request: RelayEnvironmentLinkRequest;
-    }) => Effect.Effect<
-      {
-        readonly environmentId: RelayEnvironmentLinkProofPayload["environmentId"];
-        readonly endpoint: RelayEnvironmentLinkProofPayload["endpoint"];
-        readonly endpointRuntime:
-          | ManagedEndpointProvider.ManagedEndpointProvisioningResult["runtime"]
-          | null;
-        readonly environmentCredential: string;
-      },
-      EnvironmentLinkError
-    >;
-  }
->()("t3code-relay/environments/EnvironmentLinker") {}
+export interface EnvironmentLinkerShape {
+  readonly link: (input: {
+    readonly userId: string;
+    readonly request: RelayEnvironmentLinkRequest;
+  }) => Effect.Effect<
+    {
+      readonly environmentId: RelayEnvironmentLinkProofPayload["environmentId"];
+      readonly endpoint: RelayEnvironmentLinkProofPayload["endpoint"];
+      readonly endpointRuntime:
+        | ManagedEndpointProvider.ManagedEndpointProvisioningResult["runtime"]
+        | null;
+      readonly environmentCredential: string;
+    },
+    EnvironmentLinkError
+  >;
+}
+
+export class EnvironmentLinker extends Context.Service<EnvironmentLinker, EnvironmentLinkerShape>()(
+  "t3code-relay/environments/EnvironmentLinker",
+) {}
 
 const decodeProof = Schema.decodeUnknownEffect(RelayEnvironmentLinkProofPayload);
 

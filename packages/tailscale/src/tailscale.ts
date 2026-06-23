@@ -1,6 +1,4 @@
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Data from "effect/Data";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -9,14 +7,10 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 export const DEFAULT_TAILSCALE_SERVE_PORT = 443;
-export const TAILSCALE_STATUS_TIMEOUT = Duration.millis(1_500);
-export const TAILSCALE_SERVE_TIMEOUT = Duration.seconds(10);
-export const TAILSCALE_PROBE_TIMEOUT = Duration.millis(2_500);
-
-// tailscale is a real executable everywhere (`tailscale.exe` on Windows), so
-// it is always spawned directly rather than through cmd.exe shell mode.
-const tailscaleCommandForPlatform = (platform: NodeJS.Platform): string =>
-  platform === "win32" ? "tailscale.exe" : "tailscale";
+export const TAILSCALE_STATUS_TIMEOUT_MS = 1_500;
+export const TAILSCALE_SERVE_TIMEOUT_MS = 10_000;
+export const TAILSCALE_PROBE_TIMEOUT_MS = 2_500;
+const TAILSCALE_COMMAND = process.platform === "win32" ? "tailscale.exe" : "tailscale";
 
 export class TailscaleCommandError extends Data.TaggedError("TailscaleCommandError")<{
   readonly command: readonly string[];
@@ -135,12 +129,15 @@ export const parseTailscaleStatus = (
     }),
   );
 
-export const readTailscaleStatus = Effect.gen(function* () {
+export const readTailscaleStatus: Effect.Effect<
+  TailscaleStatus,
+  TailscaleCommandError | TailscaleStatusParseError,
+  ChildProcessSpawner.ChildProcessSpawner
+> = Effect.gen(function* () {
   const args = ["status", "--json"];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const hostPlatform = yield* HostProcessPlatform;
   const child = yield* spawner
-    .spawn(ChildProcess.make(tailscaleCommandForPlatform(hostPlatform), args))
+    .spawn(ChildProcess.make(TAILSCALE_COMMAND, args))
     .pipe(
       Effect.mapError((cause) =>
         tailscaleCommandError(
@@ -177,7 +174,7 @@ export const readTailscaleStatus = Effect.gen(function* () {
   return yield* parseTailscaleStatus(stdout);
 }).pipe(
   Effect.scoped,
-  Effect.timeoutOption(TAILSCALE_STATUS_TIMEOUT),
+  Effect.timeoutOption(TAILSCALE_STATUS_TIMEOUT_MS),
   Effect.flatMap((result) =>
     Option.match(result, {
       onNone: () =>
@@ -209,14 +206,13 @@ const runTailscaleCommand = (
     readonly runMessage: string;
     readonly exitMessage: (exitCode: number) => string;
     readonly timeoutMessage: string;
-    readonly timeout: Duration.Input;
+    readonly timeoutMs: number;
   },
 ): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const hostPlatform = yield* HostProcessPlatform;
     const child = yield* spawner
-      .spawn(ChildProcess.make(tailscaleCommandForPlatform(hostPlatform), args))
+      .spawn(ChildProcess.make(TAILSCALE_COMMAND, args))
       .pipe(
         Effect.mapError((cause) =>
           tailscaleCommandError(
@@ -243,7 +239,7 @@ const runTailscaleCommand = (
     }
   }).pipe(
     Effect.scoped,
-    Effect.timeoutOption(input.timeout),
+    Effect.timeoutOption(input.timeoutMs),
     Effect.flatMap((result) =>
       Option.match(result, {
         onNone: () => Effect.fail(tailscaleCommandError(args, input.timeoutMessage, null)),
@@ -265,7 +261,7 @@ export const ensureTailscaleServe = (input: {
     runMessage: "Failed to run tailscale serve.",
     exitMessage: (exitCode) => `Tailscale serve exited with code ${exitCode}.`,
     timeoutMessage: "Tailscale serve timed out.",
-    timeout: TAILSCALE_SERVE_TIMEOUT,
+    timeoutMs: TAILSCALE_SERVE_TIMEOUT_MS,
   });
 };
 
@@ -281,13 +277,13 @@ export const disableTailscaleServe = (
       runMessage: "Failed to run tailscale serve off.",
       exitMessage: (exitCode) => `Tailscale serve off exited with code ${exitCode}.`,
       timeoutMessage: "Tailscale serve off timed out.",
-      timeout: TAILSCALE_SERVE_TIMEOUT,
+      timeoutMs: TAILSCALE_SERVE_TIMEOUT_MS,
     });
   });
 
 export const probeTailscaleHttpsEndpoint = (input: {
   readonly baseUrl: string;
-  readonly timeout?: Duration.Input;
+  readonly timeoutMs?: number;
 }): Effect.Effect<boolean, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
@@ -295,7 +291,7 @@ export const probeTailscaleHttpsEndpoint = (input: {
       const url = new URL("/.well-known/t3/environment", input.baseUrl);
       const request = HttpClientRequest.get(url.toString());
       return yield* client.execute(request);
-    }).pipe(Effect.timeoutOption(input.timeout ?? TAILSCALE_PROBE_TIMEOUT));
+    }).pipe(Effect.timeoutOption(input.timeoutMs ?? TAILSCALE_PROBE_TIMEOUT_MS));
 
     return Option.match(response, {
       onNone: () => false,

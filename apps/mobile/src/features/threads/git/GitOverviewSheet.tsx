@@ -3,7 +3,7 @@ import {
   buildMenuItems,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
-} from "@t3tools/client-runtime/state/vcs";
+} from "@t3tools/client-runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -14,12 +14,11 @@ import { useThemeColor } from "../../../lib/useThemeColor";
 
 import { AppText as Text } from "../../../components/AppText";
 import { buildThreadReviewRoutePath } from "../../../lib/routes";
-import { useEnvironmentQuery } from "../../../state/query";
+import { useVcsStatus } from "../../../state/use-vcs-status";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
-import { vcsEnvironment } from "../../../state/vcs";
 import { MetaCard, SheetListRow, menuItemIconName, statusSummary } from "./gitSheetComponents";
 
 export function GitOverviewSheet() {
@@ -37,14 +36,10 @@ export function GitOverviewSheet() {
   const iconColor = useThemeColor("--color-icon");
   const borderColor = useThemeColor("--color-border");
 
-  const gitStatus = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
-        })
-      : null,
-  );
+  const gitStatus = useVcsStatus({
+    environmentId: selectedThread?.environmentId ?? null,
+    cwd: selectedThreadCwd,
+  });
 
   const currentBranchLabel = gitStatus.data?.refName ?? selectedThread?.branch ?? "Detached HEAD";
   const currentWorktreePath = selectedThreadWorktreePath;

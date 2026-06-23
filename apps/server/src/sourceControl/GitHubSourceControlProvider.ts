@@ -11,15 +11,9 @@ import {
 
 import * as GitHubCli from "./GitHubCli.ts";
 import { findAuthenticatedGitHubAccount, parseGitHubAuthStatus } from "./gitHubAuthStatus.ts";
-import { decodeGitHubPullRequestListJson } from "./gitHubPullRequests.ts";
+import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
-import {
-  combinedAuthOutput,
-  firstSafeAuthLine,
-  providerAuth,
-  type SourceControlAuthProbeInput,
-  type SourceControlCliDiscoverySpec,
-} from "./SourceControlProviderDiscovery.ts";
+import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
 const isSourceControlProviderError = Schema.is(SourceControlProviderError);
 
 function providerError(
@@ -56,14 +50,14 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
   };
 }
 
-function parseGitHubAuth(input: SourceControlAuthProbeInput) {
-  const output = combinedAuthOutput(input);
+function parseGitHubAuth(input: SourceControlProviderDiscovery.SourceControlAuthProbeInput) {
+  const output = SourceControlProviderDiscovery.combinedAuthOutput(input);
   const authStatus = parseGitHubAuthStatus(input.stdout);
   const authenticatedAccount = findAuthenticatedGitHubAccount(authStatus.accounts);
   const host = authenticatedAccount?.host;
 
   if (authenticatedAccount) {
-    return providerAuth({
+    return SourceControlProviderDiscovery.providerAuth({
       status: "authenticated",
       account: authenticatedAccount.account,
       host,
@@ -72,7 +66,7 @@ function parseGitHubAuth(input: SourceControlAuthProbeInput) {
 
   const failedAccount = authStatus.accounts.find((entry) => entry.active) ?? authStatus.accounts[0];
   if (authStatus.parsed) {
-    return providerAuth({
+    return SourceControlProviderDiscovery.providerAuth({
       status: "unauthenticated",
       host: failedAccount?.host,
       detail:
@@ -82,17 +76,21 @@ function parseGitHubAuth(input: SourceControlAuthProbeInput) {
   }
 
   if (input.exitCode !== 0) {
-    return providerAuth({
+    return SourceControlProviderDiscovery.providerAuth({
       status: "unauthenticated",
       host,
-      detail: firstSafeAuthLine(output) ?? "Run `gh auth login` to authenticate GitHub CLI.",
+      detail:
+        SourceControlProviderDiscovery.firstSafeAuthLine(output) ??
+        "Run `gh auth login` to authenticate GitHub CLI.",
     });
   }
 
-  return providerAuth({
+  return SourceControlProviderDiscovery.providerAuth({
     status: "unknown",
     host,
-    detail: firstSafeAuthLine(output) ?? "GitHub CLI auth status could not be parsed.",
+    detail:
+      SourceControlProviderDiscovery.firstSafeAuthLine(output) ??
+      "GitHub CLI auth status could not be parsed.",
   });
 }
 
@@ -106,12 +104,12 @@ export const discovery = {
   parseAuth: parseGitHubAuth,
   installHint:
     "Install the GitHub command-line tool (`gh`) via https://cli.github.com/ or your package manager (for example `brew install gh`).",
-} satisfies SourceControlCliDiscoverySpec;
+} satisfies SourceControlProviderDiscovery.SourceControlCliDiscoverySpec;
 
-export const make = Effect.gen(function* () {
+export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
   const github = yield* GitHubCli.GitHubCli;
 
-  const listChangeRequests: SourceControlProvider.SourceControlProvider["Service"]["listChangeRequests"] =
+  const listChangeRequests: SourceControlProvider.SourceControlProviderShape["listChangeRequests"] =
     (input) => {
       if (input.state === "open") {
         return github
@@ -149,7 +147,7 @@ export const make = Effect.gen(function* () {
             if (raw.length === 0) {
               return Effect.succeed([]);
             }
-            return Effect.sync(() => decodeGitHubPullRequestListJson(raw)).pipe(
+            return Effect.sync(() => GitHubPullRequests.decodeGitHubPullRequestListJson(raw)).pipe(
               Effect.flatMap((decoded) =>
                 Result.isSuccess(decoded)
                   ? Effect.succeed(
@@ -214,4 +212,4 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make);
+export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make());

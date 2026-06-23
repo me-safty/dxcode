@@ -1,11 +1,6 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import {
-  isAtomCommandInterrupted,
-  settlePromise,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import {
   DEFAULT_MODEL,
   type EnvironmentId,
@@ -16,6 +11,7 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
 } from "@t3tools/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
@@ -36,25 +32,26 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { useAtomValue } from "@effect/atom-react";
-import { OpenAddProjectCommandPaletteProvider } from "../commandPaletteContext";
+import { useShallow } from "zustand/react/shallow";
+import { useCommandPaletteStore } from "../commandPaletteStore";
+import { readEnvironmentApi } from "../environmentApi";
+import { readPrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
+import {
+  useSavedEnvironmentRegistryStore,
+  useSavedEnvironmentRuntimeStore,
+} from "../environments/runtime";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useClientSettings } from "../hooks/useSettings";
+import { useSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
-import { filesystemEnvironment } from "../state/filesystem";
-import { projectEnvironment } from "../state/projects";
-import { useEnvironmentQuery } from "../state/query";
-import { sourceControlEnvironment } from "../state/sourceControl";
-import { useAtomCommand } from "../state/use-atom-command";
-import { useAtomQueryRunner } from "../state/use-atom-query-runner";
-import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import {
+  getSourceControlDiscoverySnapshot,
+  refreshSourceControlDiscovery,
+} from "../lib/sourceControlDiscoveryState";
 import {
   startNewThreadInProjectFromContext,
   startNewThreadFromContext,
@@ -76,7 +73,12 @@ import {
 } from "../lib/projectPaths";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { getLatestThreadForProject } from "../lib/threadSort";
-import { cn, isMacPlatform, isWindowsPlatform, newProjectId } from "../lib/utils";
+import { cn, isMacPlatform, isWindowsPlatform, newCommandId, newProjectId } from "../lib/utils";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  useStore,
+} from "../store";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import {
@@ -100,7 +102,7 @@ import { CommandPaletteResults } from "./CommandPaletteResults";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
-import { primaryServerKeybindingsAtom } from "../state/server";
+import { useServerKeybindings } from "../rpc/serverState";
 import { resolveShortcutCommand } from "../keybindings";
 import {
   Command,
@@ -118,6 +120,7 @@ import { ComposerHandleContext, useComposerHandleContext } from "../composerHand
 import type { ChatComposerHandle } from "./chat/ChatComposer";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
+const BROWSE_STALE_TIME_MS = 30_000;
 
 function getLocalFileManagerName(platform: string): string {
   if (isMacPlatform(platform)) {
@@ -323,50 +326,11 @@ function errorMessage(error: unknown): string {
   return "An error occurred.";
 }
 
-interface CommandPaletteOpenIntent {
-  readonly kind: "add-project";
-}
-
-interface CommandPaletteUiState {
-  readonly open: boolean;
-  readonly openIntent: CommandPaletteOpenIntent | null;
-}
-
-type CommandPaletteUiAction =
-  | { readonly _tag: "SetOpen"; readonly open: boolean }
-  | { readonly _tag: "Toggle" }
-  | { readonly _tag: "OpenAddProject" }
-  | { readonly _tag: "ClearOpenIntent" };
-
-function reduceCommandPaletteUiState(
-  state: CommandPaletteUiState,
-  action: CommandPaletteUiAction,
-): CommandPaletteUiState {
-  switch (action._tag) {
-    case "SetOpen":
-      return {
-        open: action.open,
-        openIntent: action.open ? state.openIntent : null,
-      };
-    case "Toggle":
-      return { open: !state.open, openIntent: null };
-    case "OpenAddProject":
-      return { open: true, openIntent: { kind: "add-project" } };
-    case "ClearOpenIntent":
-      return state.openIntent ? { ...state, openIntent: null } : state;
-  }
-}
-
 export function CommandPalette({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reduceCommandPaletteUiState, {
-    open: false,
-    openIntent: null,
-  });
-  const setOpen = useCallback((open: boolean) => dispatch({ _tag: "SetOpen", open }), []);
-  const toggleOpen = useCallback(() => dispatch({ _tag: "Toggle" }), []);
-  const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
-  const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const open = useCommandPaletteStore((store) => store.open);
+  const setOpen = useCommandPaletteStore((store) => store.setOpen);
+  const toggleOpen = useCommandPaletteStore((store) => store.toggleOpen);
+  const keybindings = useServerKeybindings();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
   const routeTarget = useParams({
     strict: false,
@@ -400,70 +364,49 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   }, [keybindings, terminalOpen, toggleOpen]);
 
   return (
-    <OpenAddProjectCommandPaletteProvider openAddProject={openAddProject}>
-      <ComposerHandleContext value={composerHandleRef}>
-        <CommandDialog open={state.open} onOpenChange={setOpen}>
-          {children}
-          <CommandPaletteDialog
-            open={state.open}
-            openIntent={state.openIntent}
-            setOpen={setOpen}
-            clearOpenIntent={clearOpenIntent}
-          />
-        </CommandDialog>
-      </ComposerHandleContext>
-    </OpenAddProjectCommandPaletteProvider>
+    <ComposerHandleContext value={composerHandleRef}>
+      <CommandDialog open={open} onOpenChange={setOpen}>
+        {children}
+        <CommandPaletteDialog />
+      </CommandDialog>
+    </ComposerHandleContext>
   );
 }
 
-function CommandPaletteDialog(props: {
-  readonly open: boolean;
-  readonly openIntent: CommandPaletteOpenIntent | null;
-  readonly setOpen: (open: boolean) => void;
-  readonly clearOpenIntent: () => void;
-}) {
-  if (!props.open) {
+function CommandPaletteDialog() {
+  const open = useCommandPaletteStore((store) => store.open);
+  const setOpen = useCommandPaletteStore((store) => store.setOpen);
+
+  useEffect(() => {
+    return () => {
+      setOpen(false);
+    };
+  }, [setOpen]);
+
+  if (!open) {
     return null;
   }
 
-  return (
-    <OpenCommandPaletteDialog
-      openIntent={props.openIntent}
-      setOpen={props.setOpen}
-      clearOpenIntent={props.clearOpenIntent}
-    />
-  );
+  return <OpenCommandPaletteDialog />;
 }
 
-function OpenCommandPaletteDialog(props: {
-  readonly openIntent: CommandPaletteOpenIntent | null;
-  readonly setOpen: (open: boolean) => void;
-  readonly clearOpenIntent: () => void;
-}) {
+function OpenCommandPaletteDialog() {
   const navigate = useNavigate();
-  const { clearOpenIntent, openIntent, setOpen } = props;
+  const setOpen = useCommandPaletteStore((store) => store.setOpen);
+  const openIntent = useCommandPaletteStore((store) => store.openIntent);
+  const clearOpenIntent = useCommandPaletteStore((store) => store.clearOpenIntent);
   const composerHandleRef = useComposerHandleContext();
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
+  const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
-  const clientSettings = useClientSettings();
-  const createProject = useAtomCommand(projectEnvironment.create, {
-    reportFailure: false,
-  });
-  const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
-    reportFailure: false,
-  });
-  const cloneRepository = useAtomCommand(sourceControlEnvironment.cloneRepository, {
-    reportFailure: false,
-  });
-  const { environments } = useEnvironments();
-  const primaryEnvironment = usePrimaryEnvironment();
+  const settings = useSettings();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
-  const projects = useProjects();
-  const threads = useThreadShells();
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const keybindings = useServerKeybindings();
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
   const [browseGeneration, setBrowseGeneration] = useState(0);
@@ -474,21 +417,45 @@ function OpenCommandPaletteDialog(props: {
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [isRemoteProjectLookingUp, setIsRemoteProjectLookingUp] = useState(false);
   const [isRemoteProjectCloning, setIsRemoteProjectCloning] = useState(false);
-  const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryEnvironmentLabel = readPrimaryEnvironmentDescriptor()?.label ?? null;
+  const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
+  const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
 
   const addProjectEnvironmentOptions = useMemo(() => {
-    const options = environments.map((environment): AddProjectEnvironmentOption => {
-      const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
-      return {
-        environmentId: environment.environmentId,
+    const options: AddProjectEnvironmentOption[] = [];
+    const seenEnvironmentIds = new Set<EnvironmentId>();
+
+    if (primaryEnvironmentId) {
+      seenEnvironmentIds.add(primaryEnvironmentId);
+      options.push({
+        environmentId: primaryEnvironmentId,
         label: resolveEnvironmentOptionLabel({
-          isPrimary,
-          environmentId: environment.environmentId,
-          runtimeLabel: environment.label,
+          isPrimary: true,
+          environmentId: primaryEnvironmentId,
+          runtimeLabel: primaryEnvironmentLabel,
         }),
-        isPrimary,
-      };
-    });
+        isPrimary: true,
+      });
+    }
+
+    for (const record of Object.values(savedEnvironmentRegistry)) {
+      if (seenEnvironmentIds.has(record.environmentId)) {
+        continue;
+      }
+
+      const runtimeState = savedEnvironmentRuntimeById[record.environmentId];
+      options.push({
+        environmentId: record.environmentId,
+        label: resolveEnvironmentOptionLabel({
+          isPrimary: false,
+          environmentId: record.environmentId,
+          runtimeLabel: runtimeState?.descriptor?.label ?? null,
+          savedLabel: record.label,
+        }),
+        isPrimary: false,
+      });
+    }
 
     options.sort((left, right) => {
       if (left.isPrimary !== right.isPrimary) {
@@ -498,22 +465,26 @@ function OpenCommandPaletteDialog(props: {
     });
 
     return options;
-  }, [environments]);
+  }, [
+    primaryEnvironmentId,
+    primaryEnvironmentLabel,
+    savedEnvironmentRegistry,
+    savedEnvironmentRuntimeById,
+  ]);
   const defaultAddProjectEnvironmentId = addProjectEnvironmentOptions[0]?.environmentId ?? null;
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
-  const browseEnvironment =
-    environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
-  const sourceControlDiscovery = useEnvironmentQuery(
-    browseEnvironmentId === null
-      ? null
-      : sourceControlEnvironment.discovery({
-          environmentId: browseEnvironmentId,
-          input: {},
-        }),
-  );
-  const browseEnvironmentPlatform = getEnvironmentBrowsePlatform(
-    browseEnvironment?.serverConfig?.environment.platform.os,
-  );
+  const browseEnvironmentPlatform = useMemo(() => {
+    const os =
+      browseEnvironmentId && primaryEnvironmentId && browseEnvironmentId === primaryEnvironmentId
+        ? (readPrimaryEnvironmentDescriptor()?.platform.os ?? null)
+        : browseEnvironmentId
+          ? (savedEnvironmentRuntimeById[browseEnvironmentId]?.descriptor?.platform.os ??
+            savedEnvironmentRuntimeById[browseEnvironmentId]?.serverConfig?.environment.platform
+              .os ??
+            null)
+          : null;
+    return getEnvironmentBrowsePlatform(os);
+  }, [browseEnvironmentId, primaryEnvironmentId, savedEnvironmentRuntimeById]);
   const isRemoteProjectCloneFlow = addProjectCloneFlow !== null;
   const isRemoteProjectRepositoryStep = addProjectCloneFlow?.step === "repository";
   const isBrowsing =
@@ -521,26 +492,27 @@ function OpenCommandPaletteDialog(props: {
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
   const getAddProjectInitialQueryForEnvironment = useCallback(
     (environmentId: EnvironmentId | null): string => {
-      const environment = environments.find(
-        (candidate) => candidate.environmentId === environmentId,
-      );
-      const environmentSettings = environment?.serverConfig?.settings ?? null;
+      const environmentSettings =
+        environmentId && primaryEnvironmentId && environmentId === primaryEnvironmentId
+          ? settings
+          : environmentId
+            ? savedEnvironmentRuntimeById[environmentId]?.serverConfig?.settings
+            : null;
       const baseDirectory = environmentSettings?.addProjectBaseDirectory?.trim() ?? "";
       if (baseDirectory.length === 0) {
         return "~/";
       }
       return ensureBrowseDirectoryPath(baseDirectory);
     },
-    [environments],
+    [primaryEnvironmentId, savedEnvironmentRuntimeById, settings],
   );
 
   const projectCwdById = useMemo(
-    () =>
-      new Map<ProjectId, string>(projects.map((project) => [project.id, project.workspaceRoot])),
+    () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.cwd])),
     [projects],
   );
   const projectTitleById = useMemo(
-    () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.title])),
+    () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.name])),
     [projects],
   );
 
@@ -560,34 +532,75 @@ function OpenCommandPaletteDialog(props: {
   const browseDirectoryPath = isBrowsing ? getBrowseDirectoryPath(query) : "";
   const browseFilterQuery =
     isBrowsing && !hasTrailingPathSeparator(query) ? getBrowseLeafPathSegment(query) : "";
-  const browseQuery = useEnvironmentQuery(
-    isBrowsing &&
+
+  const fetchBrowseResult = useCallback(
+    async (partialPath: string): Promise<FilesystemBrowseResult | null> => {
+      if (!browseEnvironmentId) return null;
+      const api = readEnvironmentApi(browseEnvironmentId);
+      if (!api) return null;
+      return api.filesystem.browse({
+        partialPath,
+        ...(currentProjectCwdForBrowse ? { cwd: currentProjectCwdForBrowse } : {}),
+      });
+    },
+    [browseEnvironmentId, currentProjectCwdForBrowse],
+  );
+
+  const { data: browseResult, isPending: isBrowsePending } = useQuery({
+    queryKey: [
+      "filesystemBrowse",
+      browseEnvironmentId,
+      browseDirectoryPath,
+      currentProjectCwdForBrowse,
+    ],
+    queryFn: () => fetchBrowseResult(browseDirectoryPath),
+    staleTime: BROWSE_STALE_TIME_MS,
+    enabled:
+      isBrowsing &&
       browseDirectoryPath.length > 0 &&
       browseEnvironmentId !== null &&
-      !relativePathNeedsActiveProject
-      ? filesystemEnvironment.browse({
-          environmentId: browseEnvironmentId,
-          input: {
-            partialPath: browseDirectoryPath,
-            ...(currentProjectCwdForBrowse ? { cwd: currentProjectCwdForBrowse } : {}),
-          },
-        })
-      : null,
-  );
-  const browseResult = browseQuery.data;
-  const isBrowsePending = browseQuery.isPending;
+      !relativePathNeedsActiveProject,
+  });
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
   const { filteredEntries: filteredBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
     () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
     [browseEntries, browseFilterQuery, highlightedItemValue],
   );
 
+  const prefetchBrowsePath = useCallback(
+    (partialPath: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: [
+          "filesystemBrowse",
+          browseEnvironmentId,
+          partialPath,
+          currentProjectCwdForBrowse,
+        ],
+        queryFn: () => fetchBrowseResult(partialPath),
+        staleTime: BROWSE_STALE_TIME_MS,
+      });
+    },
+    [browseEnvironmentId, currentProjectCwdForBrowse, fetchBrowseResult, queryClient],
+  );
+
+  // Prefetch only the parent (for back-navigation). Prefetching the
+  // highlighted child on every arrow-key press triggers a macOS TCC prompt
+  // whenever the highlighted entry is a permission-gated home dir (Music,
+  // Documents, Downloads, Desktop, etc.), so we wait for explicit navigation.
+  useEffect(() => {
+    if (!isBrowsing || filteredBrowseEntries.length === 0) return;
+
+    if (canNavigateUp(query)) {
+      prefetchBrowsePath(getBrowseParentPath(query)!);
+    }
+  }, [filteredBrowseEntries.length, isBrowsing, prefetchBrowsePath, query]);
+
   const openProjectFromSearch = useMemo(
     () => async (project: (typeof projects)[number]) => {
       const latestThread = getLatestThreadForProject(
         threads.filter((thread) => thread.environmentId === project.environmentId),
         project.id,
-        clientSettings.sidebarThreadSortOrder,
+        settings.sidebarThreadSortOrder,
       );
       if (latestThread) {
         await navigate({
@@ -599,9 +612,17 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      await handleNewThread(scopeProjectRef(project.environmentId, project.id));
+      await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+        envMode: settings.defaultThreadEnvMode,
+      });
     },
-    [handleNewThread, navigate, clientSettings.sidebarThreadSortOrder, threads],
+    [
+      handleNewThread,
+      navigate,
+      settings.defaultThreadEnvMode,
+      settings.sidebarThreadSortOrder,
+      threads,
+    ],
   );
 
   const projectSearchItems = useMemo(
@@ -612,7 +633,7 @@ function OpenCommandPaletteDialog(props: {
         icon: (project) => (
           <ProjectFavicon
             environmentId={project.environmentId}
-            cwd={project.workspaceRoot}
+            cwd={project.cwd}
             className={ITEM_ICON_CLASS}
           />
         ),
@@ -630,7 +651,7 @@ function OpenCommandPaletteDialog(props: {
         icon: (project) => (
           <ProjectFavicon
             environmentId={project.environmentId}
-            cwd={project.workspaceRoot}
+            cwd={project.cwd}
             className={ITEM_ICON_CLASS}
           />
         ),
@@ -638,15 +659,23 @@ function OpenCommandPaletteDialog(props: {
           await startNewThreadInProjectFromContext(
             {
               activeDraftThread,
-              activeThread: activeThread ?? undefined,
+              activeThread,
               defaultProjectRef,
+              defaultThreadEnvMode: settings.defaultThreadEnvMode,
               handleNewThread,
             },
             scopeProjectRef(project.environmentId, project.id),
           );
         },
       }),
-    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread, projects],
+    [
+      activeDraftThread,
+      activeThread,
+      defaultProjectRef,
+      handleNewThread,
+      projects,
+      settings.defaultThreadEnvMode,
+    ],
   );
 
   const allThreadItems = useMemo(
@@ -655,7 +684,7 @@ function OpenCommandPaletteDialog(props: {
         threads,
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
-        sortOrder: clientSettings.sidebarThreadSortOrder,
+        sortOrder: settings.sidebarThreadSortOrder,
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
         renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
@@ -666,7 +695,7 @@ function OpenCommandPaletteDialog(props: {
           });
         },
       }),
-    [activeThreadId, clientSettings.sidebarThreadSortOrder, navigate, projectTitleById, threads],
+    [activeThreadId, navigate, projectTitleById, settings.sidebarThreadSortOrder, threads],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
@@ -838,17 +867,40 @@ function OpenCommandPaletteDialog(props: {
     (environmentId: EnvironmentId): void => {
       setAddProjectEnvironmentId(environmentId);
       setAddProjectCloneFlow(null);
+      const target = { environmentId };
+      const initialDiscovery = getSourceControlDiscoverySnapshot(target).data;
       pushPaletteView({
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
         groups: buildAddProjectSourceGroups(
           environmentId,
-          buildAddProjectRemoteSourceReadiness(
-            browseEnvironmentId === environmentId ? sourceControlDiscovery.data : null,
-          ),
+          buildAddProjectRemoteSourceReadiness(initialDiscovery),
         ),
       });
+
+      if (initialDiscovery) {
+        return;
+      }
+
+      void refreshSourceControlDiscovery(target).then((discovery) => {
+        setViewStack((previousViews) => {
+          const currentTopView = previousViews.at(-1);
+          if (currentTopView?.groups[0]?.value !== `sources:${environmentId}`) {
+            return previousViews;
+          }
+          return [
+            ...previousViews.slice(0, -1),
+            {
+              addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
+              groups: buildAddProjectSourceGroups(
+                environmentId,
+                buildAddProjectRemoteSourceReadiness(discovery),
+              ),
+            },
+          ];
+        });
+      });
     },
-    [browseEnvironmentId, buildAddProjectSourceGroups, sourceControlDiscovery.data],
+    [buildAddProjectSourceGroups],
   );
 
   const addProjectEnvironmentItems: CommandPaletteActionItem[] = addProjectEnvironmentOptions.map(
@@ -936,8 +988,9 @@ function OpenCommandPaletteDialog(props: {
         run: async () => {
           await startNewThreadFromContext({
             activeDraftThread,
-            activeThread: activeThread ?? undefined,
+            activeThread,
             defaultProjectRef,
+            defaultThreadEnvMode: settings.defaultThreadEnvMode,
             handleNewThread,
           });
         },
@@ -996,17 +1049,7 @@ function OpenCommandPaletteDialog(props: {
   });
 
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
-  const sourceSelectionViewValue =
-    addProjectEnvironmentId === null ? null : `sources:${addProjectEnvironmentId}`;
-  const activeGroups =
-    addProjectEnvironmentId !== null &&
-    currentView !== null &&
-    currentView.groups[0]?.value === sourceSelectionViewValue
-      ? buildAddProjectSourceGroups(
-          addProjectEnvironmentId,
-          buildAddProjectRemoteSourceReadiness(sourceControlDiscovery.data),
-        )
-      : (currentView?.groups ?? rootGroups);
+  const activeGroups = currentView ? currentView.groups : rootGroups;
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
@@ -1019,6 +1062,8 @@ function OpenCommandPaletteDialog(props: {
   const handleAddProject = useCallback(
     async (rawCwd: string) => {
       if (!browseEnvironmentId) return;
+      const api = readEnvironmentApi(browseEnvironmentId);
+      if (!api) return;
 
       if (isUnsupportedWindowsProjectPath(rawCwd.trim(), browseEnvironmentPlatform)) {
         toastManager.add(
@@ -1053,7 +1098,7 @@ function OpenCommandPaletteDialog(props: {
         const latestThread = getLatestThreadForProject(
           threads.filter((thread) => thread.environmentId === existing.environmentId),
           existing.id,
-          clientSettings.sidebarThreadSortOrder,
+          settings.sidebarThreadSortOrder,
         );
         if (latestThread) {
           await navigate({
@@ -1063,29 +1108,19 @@ function OpenCommandPaletteDialog(props: {
             ),
           });
         } else {
-          const navigationResult = await settlePromise(() =>
-            handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
-          );
-          if (navigationResult._tag === "Failure") {
-            const error = squashAtomCommandFailure(navigationResult);
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Failed to open project",
-                description: error instanceof Error ? error.message : "An error occurred.",
-              }),
-            );
-            return;
-          }
+          await handleNewThread(scopeProjectRef(existing.environmentId, existing.id), {
+            envMode: settings.defaultThreadEnvMode,
+          }).catch(() => undefined);
         }
         setOpen(false);
         return;
       }
 
-      const projectId = newProjectId();
-      const createResult = await createProject({
-        environmentId: browseEnvironmentId,
-        input: {
+      try {
+        const projectId = newProjectId();
+        await api.orchestration.dispatchCommand({
+          type: "project.create",
+          commandId: newCommandId(),
           projectId,
           title: inferProjectTitleFromPath(cwd),
           workspaceRoot: cwd,
@@ -1094,27 +1129,13 @@ function OpenCommandPaletteDialog(props: {
             instanceId: ProviderInstanceId.make("codex"),
             model: DEFAULT_MODEL,
           },
-        },
-      });
-      if (createResult._tag === "Failure") {
-        if (!isAtomCommandInterrupted(createResult)) {
-          const error = squashAtomCommandFailure(createResult);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to add project",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-        return;
-      }
-
-      const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(browseEnvironmentId, projectId)),
-      );
-      if (navigationResult._tag === "Failure") {
-        const error = squashAtomCommandFailure(navigationResult);
+          createdAt: new Date().toISOString(),
+        });
+        await handleNewThread(scopeProjectRef(browseEnvironmentId, projectId), {
+          envMode: settings.defaultThreadEnvMode,
+        }).catch(() => undefined);
+        setOpen(false);
+      } catch (error) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
@@ -1122,20 +1143,18 @@ function OpenCommandPaletteDialog(props: {
             description: error instanceof Error ? error.message : "An error occurred.",
           }),
         );
-        return;
       }
-      setOpen(false);
     },
     [
       browseEnvironmentId,
       browseEnvironmentPlatform,
       currentProjectCwdForBrowse,
       handleNewThread,
-      createProject,
       navigate,
       projects,
       setOpen,
-      clientSettings.sidebarThreadSortOrder,
+      settings.defaultThreadEnvMode,
+      settings.sidebarThreadSortOrder,
       threads,
     ],
   );
@@ -1146,6 +1165,18 @@ function OpenCommandPaletteDialog(props: {
 
   async function submitAddProjectCloneFlow(destinationPathInput?: string): Promise<void> {
     if (!addProjectCloneFlow) {
+      return;
+    }
+
+    const api = readEnvironmentApi(addProjectCloneFlow.environmentId);
+    if (!api) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Unable to clone project",
+          description: "Environment API is not available.",
+        }),
+      );
       return;
     }
 
@@ -1173,39 +1204,34 @@ function OpenCommandPaletteDialog(props: {
       }
 
       setIsRemoteProjectLookingUp(true);
-      const lookupResult = await lookupRepository({
-        environmentId: addProjectCloneFlow.environmentId,
-        input: {
+      try {
+        const repository = await api.sourceControl.lookupRepository({
           provider,
           repository: rawRepository,
-        },
-      });
-      setIsRemoteProjectLookingUp(false);
-      if (lookupResult._tag === "Failure") {
-        if (!isAtomCommandInterrupted(lookupResult)) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Repository lookup failed",
-              description: errorMessage(squashAtomCommandFailure(lookupResult)),
-            }),
-          );
-        }
-        return;
+        });
+        const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
+        setAddProjectCloneFlow({
+          step: "confirm",
+          environmentId: addProjectCloneFlow.environmentId,
+          source: addProjectCloneFlow.source,
+          repositoryInput: rawRepository,
+          repository,
+          remoteUrl: repository.sshUrl,
+        });
+        setHighlightedItemValue(null);
+        setQuery(destinationPath);
+        setBrowseGeneration((generation) => generation + 1);
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Repository lookup failed",
+            description: errorMessage(error),
+          }),
+        );
+      } finally {
+        setIsRemoteProjectLookingUp(false);
       }
-      const repository = lookupResult.value;
-      const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
-      setAddProjectCloneFlow({
-        step: "confirm",
-        environmentId: addProjectCloneFlow.environmentId,
-        source: addProjectCloneFlow.source,
-        repositoryInput: rawRepository,
-        repository,
-        remoteUrl: repository.sshUrl,
-      });
-      setHighlightedItemValue(null);
-      setQuery(destinationPath);
-      setBrowseGeneration((generation) => generation + 1);
       return;
     }
 
@@ -1245,27 +1271,23 @@ function OpenCommandPaletteDialog(props: {
     }
 
     setIsRemoteProjectCloning(true);
-    const cloneResult = await cloneRepository({
-      environmentId: addProjectCloneFlow.environmentId,
-      input: {
+    try {
+      const result = await api.sourceControl.cloneRepository({
         remoteUrl: addProjectCloneFlow.remoteUrl,
         destinationPath,
-      },
-    });
-    setIsRemoteProjectCloning(false);
-    if (cloneResult._tag === "Failure") {
-      if (!isAtomCommandInterrupted(cloneResult)) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Clone failed",
-            description: errorMessage(squashAtomCommandFailure(cloneResult)),
-          }),
-        );
-      }
-      return;
+      });
+      await handleAddProject(result.cwd);
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Clone failed",
+          description: errorMessage(error),
+        }),
+      );
+    } finally {
+      setIsRemoteProjectCloning(false);
     }
-    await handleAddProject(cloneResult.value.cwd);
   }
 
   function browseTo(name: string): void {
@@ -1493,7 +1515,6 @@ function OpenCommandPaletteDialog(props: {
     <CommandDialogPopup
       aria-label="Command palette"
       className="overflow-hidden p-0"
-      data-command-palette="true"
       data-testid="command-palette"
       finalFocus={() => {
         composerHandleRef?.current?.focusAtEnd();

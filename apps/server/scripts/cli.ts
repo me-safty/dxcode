@@ -18,7 +18,6 @@ import {
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import serverPackageJson from "../package.json" with { type: "json" };
 
 interface PackageJson {
@@ -176,7 +175,6 @@ const buildCmd = Command.make(
           cwd: serverDir,
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",
-          shell: false,
         }),
       );
 
@@ -292,15 +290,15 @@ const publishCmd = Command.make(
         () =>
           Effect.gen(function* () {
             const args = createVpPmPublishArgs(config);
-            const spawnCommand = yield* resolveSpawnCommand("vp", ["pm", ...args]);
 
             yield* Effect.log(`[cli] Running: vp pm ${args.join(" ")}`);
             yield* runCommand(
-              ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+              ChildProcess.make("vp", ["pm", ...args], {
                 cwd: repoRoot,
                 stdout: config.verbose ? "inherit" : "ignore",
                 stderr: "inherit",
-                shell: spawnCommand.shell,
+                // Windows needs shell mode to resolve .cmd shims.
+                shell: process.platform === "win32",
               }),
             );
           }),

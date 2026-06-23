@@ -15,25 +15,27 @@ export type MobileRegistrationError =
   | Devices.DeviceUnregistrationPersistenceError
   | LiveActivities.LiveActivityRegistrationPersistenceError;
 
+export interface MobileRegistrationsShape {
+  readonly registerDevice: (input: {
+    readonly userId: string;
+    readonly payload: RelayDeviceRegistrationRequest;
+  }) => Effect.Effect<{ readonly ok: true }, MobileRegistrationError>;
+  readonly registerLiveActivity: (input: {
+    readonly userId: string;
+    readonly payload: RelayLiveActivityRegistrationRequest;
+  }) => Effect.Effect<{ readonly ok: true }, MobileRegistrationError>;
+  readonly unregisterDevice: (input: {
+    readonly userId: string;
+    readonly deviceId: string;
+  }) => Effect.Effect<{ readonly ok: true }, MobileRegistrationError>;
+}
+
 export class MobileRegistrations extends Context.Service<
   MobileRegistrations,
-  {
-    readonly registerDevice: (input: {
-      readonly userId: string;
-      readonly payload: RelayDeviceRegistrationRequest;
-    }) => Effect.Effect<{ readonly ok: true }, MobileRegistrationError>;
-    readonly registerLiveActivity: (input: {
-      readonly userId: string;
-      readonly payload: RelayLiveActivityRegistrationRequest;
-    }) => Effect.Effect<{ readonly ok: true }, MobileRegistrationError>;
-    readonly unregisterDevice: (input: {
-      readonly userId: string;
-      readonly deviceId: string;
-    }) => Effect.Effect<{ readonly ok: true }, MobileRegistrationError>;
-  }
+  MobileRegistrationsShape
 >()("t3code-relay/agentActivity/MobileRegistrations") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const devices = yield* Devices.Devices;
   const liveActivities = yield* LiveActivities.LiveActivities;
   const publisher = yield* AgentActivityPublisher.AgentActivityPublisher;

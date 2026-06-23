@@ -1,4 +1,4 @@
-import * as NodeOS from "node:os";
+import * as NodeOs from "node:os";
 import type {
   CursorSettings,
   ModelCapabilities,
@@ -21,14 +21,12 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   createModelCapabilities,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
 } from "@t3tools/shared/model";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
   buildBooleanOptionDescriptor,
@@ -44,7 +42,7 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
-import * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
+import { AcpSessionRuntime } from "../acp/AcpSessionRuntime.ts";
 import { CursorListAvailableModelsResponse } from "../acp/CursorAcpExtension.ts";
 
 const decodeCursorListAvailableModelsResponse = Schema.decodeUnknownEffect(
@@ -396,7 +394,7 @@ function buildCursorDiscoveredModelsFromAvailableModelsResponse(
 
 const makeCursorAcpProbeRuntime = (
   cursorSettings: CursorSettings,
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = process.env,
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -409,7 +407,7 @@ const makeCursorAcpProbeRuntime = (
             "acp",
           ],
           cwd: process.cwd(),
-          ...(environment ? { env: environment } : {}),
+          env: environment,
         },
         cwd: process.cwd(),
         clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
@@ -417,15 +415,13 @@ const makeCursorAcpProbeRuntime = (
         clientCapabilities: CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES,
       }).pipe(Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner))),
     );
-    return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
-      Effect.provide(acpContext),
-    );
+    return yield* Effect.service(AcpSessionRuntime).pipe(Effect.provide(acpContext));
   });
 
 const withCursorAcpProbeRuntime = <A, E, R>(
   cursorSettings: CursorSettings,
-  useRuntime: (acp: AcpSessionRuntime.AcpSessionRuntime["Service"]) => Effect.Effect<A, E, R>,
-  environment?: NodeJS.ProcessEnv,
+  useRuntime: (acp: AcpSessionRuntime["Service"]) => Effect.Effect<A, E, R>,
+  environment: NodeJS.ProcessEnv = process.env,
 ) =>
   makeCursorAcpProbeRuntime(cursorSettings, environment).pipe(
     Effect.flatMap(useRuntime),
@@ -546,7 +542,7 @@ export function resolveCursorAcpConfigUpdates(
 
 const discoverCursorModelsViaListAvailableModels = (
   cursorSettings: CursorSettings,
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = process.env,
 ) =>
   withCursorAcpProbeRuntime(
     cursorSettings,
@@ -562,7 +558,7 @@ const discoverCursorModelsViaListAvailableModels = (
 
 export const discoverCursorModelsViaAcp = (
   cursorSettings: CursorSettings,
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = process.env,
 ) => discoverCursorModelsViaListAvailableModels(cursorSettings, environment);
 
 export function getCursorFallbackModels(
@@ -746,7 +742,7 @@ function isCursorAboutJsonFormatUnsupported(result: CommandResult): boolean {
 const readCursorCliConfigChannel = Effect.fn("readCursorCliConfigChannel")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const configPath = path.join(NodeOS.homedir(), ".cursor", "cli-config.json");
+  const configPath = path.join(NodeOs.homedir(), ".cursor", "cli-config.json");
   const raw = yield* fileSystem.readFileString(configPath).pipe(Effect.orElseSucceed(() => ""));
   return parseCursorCliConfigChannel(raw);
 });
@@ -931,18 +927,13 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
 const runCursorCommand = (
   cursorSettings: CursorSettings,
   args: ReadonlyArray<string>,
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = process.env,
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const spawnCommand = yield* resolveSpawnCommand(
-      cursorSettings.binaryPath,
-      args,
-      environment ? { env: environment } : {},
-    );
-    const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-      ...(environment ? { env: environment } : { extendEnv: true }),
-      shell: spawnCommand.shell,
+    const command = ChildProcess.make(cursorSettings.binaryPath, [...args], {
+      env: environment,
+      shell: process.platform === "win32",
     });
 
     const child = yield* spawner.spawn(command);
@@ -958,7 +949,10 @@ const runCursorCommand = (
     return { stdout, stderr, code: exitCode } satisfies CommandResult;
   }).pipe(Effect.scoped);
 
-const runCursorAboutCommand = (cursorSettings: CursorSettings, environment?: NodeJS.ProcessEnv) =>
+const runCursorAboutCommand = (
+  cursorSettings: CursorSettings,
+  environment: NodeJS.ProcessEnv = process.env,
+) =>
   Effect.gen(function* () {
     const jsonResult = yield* runCursorCommand(
       cursorSettings,
@@ -973,7 +967,7 @@ const runCursorAboutCommand = (cursorSettings: CursorSettings, environment?: Nod
 
 export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(function* (
   cursorSettings: CursorSettings,
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -1109,7 +1103,6 @@ export const enrichCursorSnapshot = (input: {
   readonly settings: CursorSettings;
   readonly snapshot: ServerProvider;
   readonly maintenanceCapabilities: ProviderMaintenanceCapabilities;
-  readonly enableProviderUpdateChecks?: boolean;
   readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   readonly stampIdentity?: (snapshot: ServerProvider) => ServerProvider;
   readonly httpClient: HttpClient.HttpClient;
@@ -1121,9 +1114,7 @@ export const enrichCursorSnapshot = (input: {
     return Effect.void;
   }
 
-  return enrichProviderSnapshotWithVersionAdvisory(snapshot, input.maintenanceCapabilities, {
-    enableProviderUpdateChecks: input.enableProviderUpdateChecks,
-  }).pipe(
+  return enrichProviderSnapshotWithVersionAdvisory(snapshot, input.maintenanceCapabilities).pipe(
     Effect.provideService(HttpClient.HttpClient, input.httpClient),
     Effect.flatMap((enrichedSnapshot) =>
       publishSnapshot(stampIdentity(enrichedSnapshot)).pipe(Effect.as(enrichedSnapshot)),

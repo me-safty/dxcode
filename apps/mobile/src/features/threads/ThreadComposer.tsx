@@ -2,7 +2,7 @@ import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass
 import type {
   EnvironmentId,
   ModelSelection,
-  OrchestrationThreadShell,
+  OrchestrationThread,
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
@@ -13,14 +13,17 @@ import {
   serializeComposerFileLink,
   type ComposerTrigger,
 } from "@t3tools/shared/composerTrigger";
+import { TextInputWrapper } from "expo-paste-input";
 import type { ReactNode } from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Image,
   Pressable,
+  TextInput as RNTextInput,
   useColorScheme,
   View,
+  type NativeSyntheticEvent,
+  type TextInputSelectionChangeEventData,
   type ViewStyle,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
@@ -28,11 +31,6 @@ import { useThemeColor } from "../../lib/useThemeColor";
 
 import { AppText as Text } from "../../components/AppText";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
-import {
-  ComposerEditor,
-  type ComposerEditorHandle,
-  type ComposerEditorSelection,
-} from "../../components/ComposerEditor";
 import {
   ComposerToolbarButton,
   ComposerToolbarRow,
@@ -44,25 +42,25 @@ import { ProviderIcon } from "../../components/ProviderIcon";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
 import type { RemoteClientConnectionState } from "../../lib/connection";
+import { useNativePaste } from "../../lib/useNativePaste";
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
 } from "@t3tools/shared/searchRanking";
 import {
-  applyProviderOptionMenuEvent,
-  buildProviderOptionMenuActions,
-  providerOptionsConfigurationLabel,
-  resolveProviderOptionDescriptors,
-} from "../../lib/providerOptions";
+  getModelSelectionBooleanOptionValue,
+  getModelSelectionStringOptionValue,
+} from "@t3tools/shared/model";
 import { useComposerPathSearch } from "../../state/use-composer-path-search";
+import { CLAUDE_AGENT_EFFORT_OPTIONS } from "./claudeEffortOptions";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
  * Exported so the parent can compute feed overlap / content insets.
  */
-export const COMPOSER_COLLAPSED_CHROME = 60;
+export const COMPOSER_COLLAPSED_CHROME = 68;
 
 /**
  * Height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
@@ -70,31 +68,34 @@ export const COMPOSER_COLLAPSED_CHROME = 60;
  */
 export const COMPOSER_EXPANDED_CHROME = 174;
 
+/**
+ * Height of the expanded-only toolbar below the text surface.
+ * Used by the feed inset because KeyboardAvoidingLegendList only accounts for
+ * keyboard height; the floating toolbar remains an additional overlay.
+ */
+export const COMPOSER_EXPANDED_TOOLBAR_CHROME = 60;
+
 export interface ThreadComposerProps {
   readonly draftMessage: string;
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly placeholder: string;
   readonly bottomInset?: number;
   readonly connectionState: RemoteClientConnectionState;
-  readonly connectionError: string | null;
-  readonly environmentLabel: string | null;
-  readonly selectedThread: OrchestrationThreadShell;
+  readonly selectedThread: OrchestrationThread;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
   readonly activeThreadBusy: boolean;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
-  readonly editorRef?: RefObject<ComposerEditorHandle | null>;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftImages: () => Promise<void>;
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
-  readonly onStopThread: () => void;
-  readonly onSendMessage: () => Promise<void>;
-  readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
-  readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void;
-  readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void;
-  readonly onReconnectEnvironment: () => void;
+  readonly onStopThread: () => Promise<void>;
+  readonly onSendMessage: () => void;
+  readonly onUpdateModelSelection: (modelSelection: ModelSelection) => Promise<void>;
+  readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => Promise<void>;
+  readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => Promise<void>;
   readonly onExpandedChange?: (expanded: boolean) => void;
 }
 
@@ -137,73 +138,28 @@ function ComposerSurface(props: {
   );
 }
 
-function composerConnectionStatus(input: {
-  readonly connectionError: string | null;
-  readonly connectionState: RemoteClientConnectionState;
-  readonly environmentLabel: string | null;
-}): { readonly kind: "unavailable" | "reconnecting"; readonly label: string } | null {
-  const environmentLabel = input.environmentLabel ?? "Environment";
-
-  switch (input.connectionState) {
-    case "connecting":
-    case "reconnecting":
-      return {
-        kind: "reconnecting",
-        label:
-          input.connectionError === null
-            ? `Reconnecting to ${environmentLabel}...`
-            : `Failed to connect. Retrying ${environmentLabel}...`,
-      };
-    case "offline":
-      return { kind: "unavailable", label: "You are offline" };
-    case "error":
-      return {
-        kind: "unavailable",
-        label: input.connectionError
-          ? `Failed to connect to ${environmentLabel}: ${input.connectionError}`
-          : `Failed to connect to ${environmentLabel}`,
-      };
-    case "available":
-      return { kind: "unavailable", label: `${environmentLabel} is not connected` };
-    case "connected":
-      return null;
-  }
+function withModelSelectionOption(
+  selection: ModelSelection,
+  id: string,
+  value: string | boolean | undefined,
+): ModelSelection {
+  const options = (selection.options ?? []).filter((option) => option.id !== id);
+  return {
+    ...selection,
+    options: value === undefined ? options : [...options, { id, value }],
+  };
 }
 
-const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(props: {
-  readonly onPress: () => void;
-  readonly status: { readonly kind: "unavailable" | "reconnecting"; readonly label: string };
-}) {
-  const isReconnecting = props.status.kind === "reconnecting";
-
-  return (
-    <View className="items-center pb-2">
-      <Pressable
-        accessibilityRole="button"
-        onPress={props.onPress}
-        className="max-w-full flex-row items-center gap-2 rounded-full bg-white/90 px-3 py-2 shadow-sm active:opacity-70 dark:bg-neutral-900/90"
-      >
-        {isReconnecting ? (
-          <ActivityIndicator size="small" color="#8e8e93" />
-        ) : (
-          <View className="h-2 w-2 rounded-full bg-red-500" />
-        )}
-        <Text
-          className="max-w-[260px] text-[13px] font-t3-bold leading-[17px] text-foreground"
-          numberOfLines={1}
-        >
-          {props.status.label}
-        </Text>
-      </Pressable>
-    </View>
-  );
-});
+function formatTitleCase(value: string): string {
+  return value.length === 0 ? value : `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
 
 export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposerProps) {
   const isDarkMode = useColorScheme() === "dark";
+  const themePlaceholderColor = useThemeColor("--color-placeholder");
+  const placeholderColor = isDarkMode ? "#a1a1aa" : themePlaceholderColor;
   const foregroundColor = useThemeColor("--color-foreground");
-  const fallbackInputRef = useRef<ComposerEditorHandle>(null);
-  const inputRef = props.editorRef ?? fallbackInputRef;
+  const inputRef = useRef<RNTextInput>(null);
   const [isFocused, setIsFocused] = useState(false);
   const wasExpandedBeforePreviewRef = useRef(false);
   const { onExpandedChange } = props;
@@ -211,7 +167,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
   const isExpanded = isFocused;
-  const canSend = hasContent;
+  const canSend = props.connectionState === "ready" && hasContent;
 
   const onPressImage = useCallback(
     (uri: string) => {
@@ -226,33 +182,20 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     if (wasExpandedBeforePreviewRef.current) {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [inputRef]);
+  }, []);
 
-  const handleFocus = useCallback(() => {
-    setIsFocused(true);
-    onExpandedChange?.(true);
-  }, [onExpandedChange]);
-
-  const handleBlur = useCallback(() => {
-    setIsFocused(false);
-    onExpandedChange?.(false);
-  }, [onExpandedChange]);
+  useEffect(() => {
+    onExpandedChange?.(isExpanded);
+  }, [isExpanded, onExpandedChange]);
   const showStopAction =
     props.selectedThread.session?.status === "running" ||
-    props.selectedThread.session?.status === "starting";
+    props.selectedThread.session?.status === "starting" ||
+    props.queueCount > 0;
 
-  const sendLabel =
-    props.connectionState !== "connected" || props.activeThreadBusy || props.queueCount > 0
-      ? "Queue"
-      : "Send";
+  const sendLabel = props.activeThreadBusy || props.queueCount > 0 ? "Queue" : "Send";
   const currentModelSelection = props.selectedThread.modelSelection;
   const currentRuntimeMode = props.selectedThread.runtimeMode;
   const currentInteractionMode = props.selectedThread.interactionMode ?? "default";
-  const connectionStatus = composerConnectionStatus({
-    connectionError: props.connectionError,
-    connectionState: props.connectionState,
-    environmentLabel: props.environmentLabel,
-  });
   const toolbarFadeOpaque = isDarkMode ? "rgba(0,0,0,0.95)" : "rgba(255,255,255,0.95)";
   const toolbarFadeTransparent = isDarkMode ? "rgba(0,0,0,0)" : "rgba(255,255,255,0)";
   const selectedProviderStatus = useMemo(() => {
@@ -264,33 +207,38 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     );
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId]);
 
+  // Extract current model options (effort, fastMode, contextWindow)
+  const selectedProviderDriver = selectedProviderStatus?.driver ?? null;
+  const currentEffort =
+    selectedProviderDriver === "claudeAgent"
+      ? (getModelSelectionStringOptionValue(currentModelSelection, "effort") ?? "high")
+      : "high";
+  const currentFastMode =
+    getModelSelectionBooleanOptionValue(currentModelSelection, "fastMode") ?? false;
+  const currentContextWindow =
+    selectedProviderDriver === "claudeAgent"
+      ? (getModelSelectionStringOptionValue(currentModelSelection, "contextWindow") ?? "1M")
+      : "1M";
+
+  const handleNativePaste = useNativePaste((uris) => {
+    void props.onNativePasteImages(uris);
+  });
+
   // ── Trigger detection ────────────────────────────────────
-  const [composerSelection, setComposerSelection] = useState(() => ({
-    start: props.draftMessage.length,
-    end: props.draftMessage.length,
-  }));
+  const [cursorPosition, setCursorPosition] = useState(0);
 
-  const handleSelectionChange = useCallback((selection: ComposerEditorSelection) => {
-    setComposerSelection(selection);
-  }, []);
-  useEffect(() => {
-    const end = props.draftMessage.length;
-    setComposerSelection((selection) => {
-      const start = Math.min(selection.start, end);
-      const selectionEnd = Math.min(selection.end, end);
-      if (start === selection.start && selectionEnd === selection.end) {
-        return selection;
-      }
-      return { start, end: selectionEnd };
-    });
-  }, [props.draftMessage.length]);
+  const handleSelectionChange = useCallback(
+    (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
+      const { start } = event.nativeEvent.selection;
+      setCursorPosition(start);
+    },
+    [],
+  );
 
-  const composerTrigger = useMemo<ComposerTrigger | null>(() => {
-    if (composerSelection.start !== composerSelection.end) {
-      return null;
-    }
-    return detectComposerTrigger(props.draftMessage, composerSelection.end);
-  }, [composerSelection, props.draftMessage]);
+  const composerTrigger = useMemo<ComposerTrigger | null>(
+    () => detectComposerTrigger(props.draftMessage, cursorPosition),
+    [cursorPosition, props.draftMessage],
+  );
   const pathSearch = useComposerPathSearch({
     environmentId: props.environmentId,
     cwd: composerTrigger?.kind === "path" ? props.projectCwd : null,
@@ -446,9 +394,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props;
 
   const handleSend = useCallback(() => {
-    void onSendMessage().then(() => {
-      inputRef.current?.blur();
-    });
+    onSendMessage();
+    inputRef.current?.blur();
   }, [onSendMessage]);
   const handleCommandSelect = useCallback(
     (item: ComposerCommandItem) => {
@@ -464,9 +411,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           composerTrigger.rangeEnd,
           "",
         );
-        setComposerSelection({ start: result.cursor, end: result.cursor });
+        setCursorPosition(result.cursor);
         onChangeDraftMessage(result.text);
-        onUpdateInteractionMode(item.command);
+        void onUpdateInteractionMode(item.command);
         return;
       }
 
@@ -487,7 +434,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         composerTrigger.rangeEnd,
         replacement,
       );
-      setComposerSelection({ start: result.cursor, end: result.cursor });
+      setCursorPosition(result.cursor);
       onChangeDraftMessage(result.text);
     },
     [composerTrigger, draftMessage, onChangeDraftMessage, onUpdateInteractionMode],
@@ -505,18 +452,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
     ) ?? null;
-  const providerOptionDescriptors = useMemo(
-    () =>
-      resolveProviderOptionDescriptors({
-        capabilities: currentModelOption?.capabilities,
-        selections: currentModelSelection.options,
-      }),
-    [currentModelOption?.capabilities, currentModelSelection.options],
-  );
-  const configurationLabel = useMemo(
-    () => providerOptionsConfigurationLabel(providerOptionDescriptors),
-    [providerOptionDescriptors],
-  );
+  const configurationLabel = useMemo(() => {
+    const parts = [
+      formatTitleCase(currentEffort),
+      currentFastMode ? "Fast" : null,
+      currentContextWindow !== "1M" ? currentContextWindow : null,
+    ].filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? parts.join(" · ") : "Configuration";
+  }, [currentContextWindow, currentEffort, currentFastMode]);
   const modelMenuActions = useMemo(
     () =>
       providerGroups.map((group) => ({
@@ -543,7 +486,36 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   // ── Options menu ─────────────────────────────────────────
   const optionsMenuActions = useMemo(
     () => [
-      ...buildProviderOptionMenuActions(providerOptionDescriptors),
+      {
+        id: "options-effort",
+        title: "Effort",
+        subtitle: `${currentEffort.charAt(0).toUpperCase()}${currentEffort.slice(1)}`,
+        subactions: CLAUDE_AGENT_EFFORT_OPTIONS.map((level) => ({
+          id: `options:effort:${level}`,
+          title: `${level}${level === "high" ? " (default)" : ""}`,
+          state: currentEffort === level ? ("on" as const) : undefined,
+        })),
+      },
+      {
+        id: "options-fast-mode",
+        title: "Fast Mode",
+        subtitle: currentFastMode ? "On" : "Off",
+        subactions: ([false, true] as const).map((value) => ({
+          id: `options:fast-mode:${value ? "on" : "off"}`,
+          title: value ? "On" : "Off",
+          state: currentFastMode === value ? ("on" as const) : undefined,
+        })),
+      },
+      {
+        id: "options-context-window",
+        title: "Context Window",
+        subtitle: currentContextWindow,
+        subactions: (["200k", "1M"] as const).map((value) => ({
+          id: `options:context-window:${value}`,
+          title: `${value}${value === "1M" ? " (default)" : ""}`,
+          state: currentContextWindow === value ? ("on" as const) : undefined,
+        })),
+      },
       {
         id: "options-runtime",
         title: "Runtime",
@@ -552,10 +524,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             ? "Approve actions"
             : currentRuntimeMode === "auto-accept-edits"
               ? "Auto-accept edits"
-              : "Full access",
+              : currentRuntimeMode === "semi-sandboxed"
+                ? "Semi-Sandboxed"
+                : "Full access",
         subactions: [
           { id: "options:runtime:approval-required", title: "Approve actions" },
           { id: "options:runtime:auto-accept-edits", title: "Auto-accept edits" },
+          { id: "options:runtime:semi-sandboxed", title: "Semi-Sandboxed" },
           { id: "options:runtime:full-access", title: "Full access" },
         ].map((option) => {
           const value = option.id.replace("options:runtime:", "");
@@ -583,7 +558,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         }),
       },
     ],
-    [currentInteractionMode, currentRuntimeMode, providerOptionDescriptors],
+    [
+      currentEffort,
+      currentFastMode,
+      currentContextWindow,
+      currentRuntimeMode,
+      currentInteractionMode,
+    ],
   );
 
   // ── Menu handlers ────────────────────────────────────────
@@ -594,27 +575,51 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     const modelKey = event.slice("model:".length);
     const option = modelOptions.find((o) => o.key === modelKey);
     if (option) {
-      props.onUpdateModelSelection(option.selection);
+      void props.onUpdateModelSelection(option.selection);
     }
   }
 
   function handleOptionsMenuAction(event: string) {
-    const providerOptions = applyProviderOptionMenuEvent(providerOptionDescriptors, event);
-    if (providerOptions) {
-      props.onUpdateModelSelection({
-        ...currentModelSelection,
-        options: providerOptions,
-      });
+    if (event.startsWith("options:effort:")) {
+      const effort = event.slice("options:effort:".length);
+      const updated: ModelSelection =
+        selectedProviderDriver === "claudeAgent"
+          ? withModelSelectionOption(
+              currentModelSelection,
+              "effort",
+              effort as typeof currentEffort,
+            )
+          : currentModelSelection;
+      void props.onUpdateModelSelection(updated);
+      return;
+    }
+    if (event.startsWith("options:fast-mode:")) {
+      const fastMode = event.endsWith(":on");
+      const nextFast = fastMode || undefined;
+      if (selectedProviderDriver === "opencode") {
+        return;
+      }
+      const updated = withModelSelectionOption(currentModelSelection, "fastMode", nextFast);
+      void props.onUpdateModelSelection(updated);
+      return;
+    }
+    if (event.startsWith("options:context-window:")) {
+      const contextWindow = event.slice("options:context-window:".length);
+      const updated: ModelSelection =
+        selectedProviderDriver === "claudeAgent"
+          ? withModelSelectionOption(currentModelSelection, "contextWindow", contextWindow)
+          : currentModelSelection;
+      void props.onUpdateModelSelection(updated);
       return;
     }
     if (event.startsWith("options:runtime:")) {
       const runtimeMode = event.slice("options:runtime:".length) as RuntimeMode;
-      props.onUpdateRuntimeMode(runtimeMode);
+      void props.onUpdateRuntimeMode(runtimeMode);
       return;
     }
     if (event.startsWith("options:interaction:")) {
       const interactionMode = event.slice("options:interaction:".length) as ProviderInteractionMode;
-      props.onUpdateInteractionMode(interactionMode);
+      void props.onUpdateInteractionMode(interactionMode);
     }
   }
 
@@ -622,8 +627,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     <View
       style={{
         paddingHorizontal: 16,
-        paddingTop: isExpanded ? 8 : 6,
-        paddingBottom: (props.bottomInset ?? 0) + (isExpanded ? 8 : 6),
+        paddingTop: isExpanded ? 12 : 10,
+        paddingBottom: (props.bottomInset ?? 0) + (isExpanded ? 4 : 10),
         experimental_backgroundImage: isDarkMode
           ? "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.95) 100%)"
           : "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 40%, rgba(255,255,255,0.95) 100%)",
@@ -648,13 +653,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               onSelect={handleCommandSelect}
             />
           </View>
-        ) : null}
-
-        {connectionStatus ? (
-          <ComposerConnectionStatusPill
-            status={connectionStatus}
-            onPress={props.onReconnectEnvironment}
-          />
         ) : null}
 
         <ComposerSurface
@@ -690,39 +688,42 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           ) : null}
 
           <View style={isExpanded ? undefined : { flex: 1, minWidth: 0 }}>
-            <ComposerEditor
-              ref={inputRef}
-              multiline
-              value={props.draftMessage}
-              skills={selectedProviderStatus?.skills ?? []}
-              selection={composerSelection}
-              onChangeText={props.onChangeDraftMessage}
-              onSelectionChange={handleSelectionChange}
-              onPasteImages={(uris) => void props.onNativePasteImages(uris)}
-              placeholder={props.placeholder}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-              scrollEnabled={isExpanded}
-              contentInsetVertical={isExpanded ? 0 : 6}
-              style={
-                isExpanded
-                  ? {
-                      minHeight: 80,
-                      maxHeight: 160,
-                      paddingHorizontal: 4,
-                      paddingVertical: 4,
-                    }
-                  : {
-                      height: 36,
-                    }
-              }
-              textStyle={{
-                fontSize: 15,
-                lineHeight: isExpanded ? 22 : 20,
-                color: foregroundColor,
-                fontFamily: "DMSans_400Regular",
-              }}
-            />
+            <TextInputWrapper onPaste={handleNativePaste}>
+              <RNTextInput
+                ref={inputRef}
+                multiline
+                value={props.draftMessage}
+                onChangeText={props.onChangeDraftMessage}
+                onSelectionChange={handleSelectionChange}
+                placeholder={props.placeholder}
+                placeholderTextColor={placeholderColor}
+                editable={props.connectionState === "ready"}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                textAlignVertical={isExpanded ? "top" : "center"}
+                style={
+                  isExpanded
+                    ? {
+                        minHeight: 80,
+                        maxHeight: 160,
+                        paddingHorizontal: 4,
+                        paddingVertical: 4,
+                        fontSize: 15,
+                        lineHeight: 22,
+                        color: foregroundColor,
+                        fontFamily: "DMSans_400Regular",
+                      }
+                    : {
+                        maxHeight: 36,
+                        paddingVertical: 6,
+                        fontSize: 15,
+                        lineHeight: 20,
+                        color: foregroundColor,
+                        fontFamily: "DMSans_400Regular",
+                      }
+                }
+              />
+            </TextInputWrapper>
           </View>
           {!isExpanded && props.draftAttachments.length > 0 ? (
             <View style={{ flexDirection: "row", gap: 4, paddingLeft: 4 }}>
@@ -760,7 +761,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           ) : null}
           {!isExpanded ? (
             showStopAction ? (
-              <ControlPill icon="stop.fill" variant="danger" onPress={props.onStopThread} />
+              <ControlPill
+                icon="stop.fill"
+                variant="danger"
+                onPress={() => void props.onStopThread()}
+              />
             ) : (
               <ControlPill
                 icon="arrow.up"
@@ -810,7 +815,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 <ComposerToolbarButton
                   icon="stop.fill"
                   variant="danger"
-                  onPress={props.onStopThread}
+                  onPress={() => void props.onStopThread()}
                   showChevron={false}
                 />
               ) : null}

@@ -6,8 +6,8 @@
  * single effect-style text line in a thread-scoped file. Failures are
  * downgraded to warnings so provider runtime behavior is unaffected.
  */
-import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
+import fs from "node:fs";
+import path from "node:path";
 
 import type { ThreadId } from "@t3tools/contracts";
 import { RotatingFileSink } from "@t3tools/shared/logging";
@@ -178,7 +178,7 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
 
   const directoryReady = yield* Effect.sync(() => {
     try {
-      NodeFS.mkdirSync(NodePath.dirname(filePath), { recursive: true });
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
       return true;
     } catch (error) {
       return { ok: false as const, error };
@@ -211,7 +211,7 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
       }
 
       return makeThreadWriter({
-        filePath: NodePath.join(NodePath.dirname(filePath), `${threadSegment}.log`),
+        filePath: path.join(path.dirname(filePath), `${threadSegment}.log`),
         maxBytes,
         maxFiles,
         batchWindowMs,

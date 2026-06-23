@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - CLI integration exercises Node HTTP and filesystem boundaries.
-import { createServer } from "node:http";
+import * as NodeHttp from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,17 +20,17 @@ import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/unstable/cli";
 
 import { cli, makeCli } from "./bin.ts";
-import * as ServerConfig from "./config.ts";
-import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config.ts";
+import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
-import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
 import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
-import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
+import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { environmentAuthenticatedAuthLayer } from "./auth/http.ts";
@@ -58,7 +58,7 @@ const captureStdout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 const makeCliTestServerConfig = (baseDir: string) =>
   Effect.gen(function* () {
-    const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
+    const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
     return {
       logLevel: "Info",
       traceMinLevel: "Info",
@@ -85,23 +85,26 @@ const makeCliTestServerConfig = (baseDir: string) =>
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
-    } satisfies ServerConfig.ServerConfig["Service"];
+    } satisfies ServerConfigShape;
   });
 
-const makeProjectPersistenceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
+const makeProjectPersistenceLayer = (config: ServerConfigShape) =>
   Layer.mergeAll(
     OrchestrationLayerLive.pipe(
-      Layer.provideMerge(RepositoryIdentityResolver.layer),
+      Layer.provideMerge(RepositoryIdentityResolverLive),
       Layer.provideMerge(SqlitePersistenceLayerLive),
     ),
-    WorkspacePaths.layer,
-  ).pipe(Layer.provideMerge(NodeServices.layer), Layer.provide(ServerConfig.layer(config)));
+    WorkspacePathsLive,
+  ).pipe(
+    Layer.provideMerge(NodeServices.layer),
+    Layer.provide(Layer.succeed(ServerConfig, config)),
+  );
 
 const readPersistedSnapshot = (baseDir: string) =>
   Effect.gen(function* () {
     const config = yield* makeCliTestServerConfig(baseDir);
     return yield* Effect.gen(function* () {
-      const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+      const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       return yield* projectionSnapshotQuery.getSnapshot();
     }).pipe(Effect.provide(makeProjectPersistenceLayer(config)));
   });
@@ -126,13 +129,13 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
       Layer.provideMerge(makeProjectPersistenceLayer(config)),
       Layer.provideMerge(GitVcsDriver.layer),
       Layer.provideMerge(
-        NodeHttpServer.layer(createServer, {
+        NodeHttpServer.layer(NodeHttp.createServer, {
           host: "127.0.0.1",
           port: 0,
         }),
       ),
       Layer.provideMerge(NodeServices.layer),
-      Layer.provide(ServerConfig.layer(config)),
+      Layer.provide(Layer.succeed(ServerConfig, config)),
     );
 
     return yield* Effect.scoped(
@@ -237,7 +240,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("logs in to headless cloud without enabling exposure", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-login-test-"));
-      const { secretsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
+      const { secretsDir } = yield* deriveServerPaths(baseDir, undefined);
       mkdirSync(secretsDir, { recursive: true });
       writeFileSync(
         join(secretsDir, "cloud-cli-oauth-token.bin"),
@@ -279,7 +282,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("logs out of headless cloud and removes the stored CLI authorization", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-logout-test-"));
-      const { secretsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
+      const { secretsDir } = yield* deriveServerPaths(baseDir, undefined);
       const tokenPath = join(secretsDir, "cloud-cli-oauth-token.bin");
       mkdirSync(secretsDir, { recursive: true });
       writeFileSync(tokenPath, "invalid persisted token");
@@ -458,7 +461,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
             "--base-dir",
             baseDir,
           ]);
-          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
           const readModel = yield* projectionSnapshotQuery.getSnapshot();
           const addedProject = readModel.projects.find(
             (project) => project.workspaceRoot === workspaceRoot && project.deletedAt === null,
