@@ -23,7 +23,7 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
-import { formatRelativeTime } from "../../timestampFormat";
+import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { useEnvironmentQuery } from "../../state/query";
 import {
   primaryServerAvailableEditorsAtom,
@@ -65,8 +65,7 @@ function formatBytes(value: number): string {
 
 function formatRelative(value: DateTime.Utc | null): string {
   if (!value) return "No trace records";
-  const relative = formatRelativeTime(DateTime.formatIso(value));
-  return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
+  return formatRelativeTimeLabel(DateTime.formatIso(value));
 }
 
 function formatRelativeNoWrap(value: DateTime.Utc | null): string {

@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   formatElapsedDurationLabel,
   formatExpiresInLabel,
+  formatRelativeTime,
   formatRelativeTimeLabel,
+  formatRelativeTimeUntil,
   formatRelativeTimeUntilLabel,
   formatShortTimestamp,
   formatTimestamp,
@@ -105,6 +107,7 @@ describe("invalid timestamp inputs", () => {
   });
 
   it("returns an empty relative time label instead of a NaN label", () => {
+    expect(formatRelativeTime("not-a-date")).toBeNull();
     expect(formatRelativeTimeLabel("not-a-date")).toBe("");
   });
 
@@ -113,6 +116,7 @@ describe("invalid timestamp inputs", () => {
   });
 
   it("returns an empty relative time until label instead of a NaN label", () => {
+    expect(formatRelativeTimeUntil("not-a-date")).toBeNull();
     expect(formatRelativeTimeUntilLabel("not-a-date")).toBe("");
   });
 

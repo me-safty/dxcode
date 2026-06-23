@@ -96,9 +96,11 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
  * Returns `{ value: "20s", suffix: "ago" }` or `{ value: "just now", suffix: null }`
  * so callers can style the numeric portion independently.
  */
-export function formatRelativeTime(isoDate: string): { value: string; suffix: string | null } {
+type RelativeTimeParts = { value: string; suffix: string | null };
+
+export function formatRelativeTime(isoDate: string): RelativeTimeParts | null {
   const date = parseTimestampDate(isoDate);
-  if (!date) return { value: "", suffix: null };
+  if (!date) return null;
   const diffMs = Date.now() - date.getTime();
   if (diffMs < 0) return { value: "just now", suffix: null };
   const seconds = Math.floor(diffMs / 1000);
@@ -113,6 +115,7 @@ export function formatRelativeTime(isoDate: string): { value: string; suffix: st
 
 export function formatRelativeTimeLabel(isoDate: string) {
   const relative = formatRelativeTime(isoDate);
+  if (!relative) return "";
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
 }
 
@@ -143,9 +146,9 @@ export function formatElapsedDurationLabel(isoDate: string, nowMs: number = Date
 /**
  * Relative time until an ISO instant (e.g. expiry). Mirrors {@link formatRelativeTime} but for future times.
  */
-export function formatRelativeTimeUntil(isoDate: string): { value: string; suffix: string | null } {
+export function formatRelativeTimeUntil(isoDate: string): RelativeTimeParts | null {
   const date = parseTimestampDate(isoDate);
-  if (!date) return { value: "", suffix: null };
+  if (!date) return null;
   const diffMs = date.getTime() - Date.now();
   if (diffMs <= 0) return { value: "Expired", suffix: null };
   const seconds = Math.floor(diffMs / 1000);
@@ -161,6 +164,7 @@ export function formatRelativeTimeUntil(isoDate: string): { value: string; suffi
 
 export function formatRelativeTimeUntilLabel(isoDate: string): string {
   const relative = formatRelativeTimeUntil(isoDate);
+  if (!relative) return "";
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
 }
 
