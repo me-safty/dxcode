@@ -200,6 +200,8 @@ import { resolveEffectiveEnvMode } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { ChatFindBar } from "./chat/ChatFindBar";
+import { useChatFind } from "./chat/useChatFind";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -2080,6 +2082,12 @@ function ChatViewContent(props: ChatViewProps) {
         }),
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const chatFind = useChatFind({
+    timelineEntries,
+    keybindings,
+    isTerminalFocused: () => getTerminalFocusOwner() !== null,
+    terminalOpen: Boolean(terminalUiState.terminalOpen),
+  });
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   // Prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
@@ -4723,6 +4731,7 @@ function ChatViewContent(props: ChatViewProps) {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col">
+              <ChatFindBar controller={chatFind} />
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 key={activeThread.id}
