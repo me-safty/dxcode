@@ -13,7 +13,7 @@ export function ChatFindBar({ controller }: { controller: ChatFindController }) 
       inputRef.current?.focus();
       inputRef.current?.select();
     }
-  }, [open]);
+  }, [open, controller.openNonce]);
 
   if (!open) return null;
 

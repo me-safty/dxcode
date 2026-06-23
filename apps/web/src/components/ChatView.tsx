@@ -202,6 +202,7 @@ import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ChatFindBar } from "./chat/ChatFindBar";
 import { useChatFind } from "./chat/useChatFind";
+import { applyFindHighlights, clearFindHighlights } from "./chat/chatFindHighlight";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -1138,6 +1139,7 @@ function ChatViewContent(props: ChatViewProps) {
     LastInvokedScriptByProjectSchema,
   );
   const legendListRef = useRef<LegendListRef | null>(null);
+  const timelineContainerRef = useRef<HTMLDivElement>(null);
   const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
@@ -2088,6 +2090,48 @@ function ChatViewContent(props: ChatViewProps) {
     isTerminalFocused: () => getTerminalFocusOwner() !== null,
     terminalOpen: Boolean(terminalUiState.terminalOpen),
   });
+
+  // Close find bar and clear highlights when the user switches threads.
+  useEffect(() => {
+    chatFind.close();
+  }, [activeThread?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally reacts to thread id only
+
+  // Re-apply CSS Custom Highlight ranges whenever find state or the rendered
+  // DOM changes; also observe DOM mutations so highlights survive streaming.
+  useEffect(() => {
+    const container = timelineContainerRef.current;
+    if (!container || !chatFind.open) {
+      clearFindHighlights();
+      return;
+    }
+    let frame = 0;
+    const reapply = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() =>
+        applyFindHighlights(
+          container,
+          chatFind.query,
+          { caseSensitive: chatFind.caseSensitive },
+          chatFind.matches,
+          chatFind.activeMatch,
+        ),
+      );
+    };
+    reapply();
+    const observer = new MutationObserver(reapply);
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [
+    chatFind.open,
+    chatFind.query,
+    chatFind.caseSensitive,
+    chatFind.matches,
+    chatFind.activeMatch,
+  ]);
+
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   // Prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
@@ -4730,7 +4774,7 @@ function ChatViewContent(props: ChatViewProps) {
           {/* Chat column */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {/* Messages Wrapper */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div ref={timelineContainerRef} className="relative flex min-h-0 flex-1 flex-col">
               <ChatFindBar controller={chatFind} />
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline

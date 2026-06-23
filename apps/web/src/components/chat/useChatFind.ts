@@ -7,6 +7,7 @@ import type { TimelineEntry } from "../../session-logic";
 
 export interface ChatFindController {
   open: boolean;
+  openNonce: number;
   query: string;
   caseSensitive: boolean;
   matches: ReadonlyArray<Match>;
@@ -29,6 +30,7 @@ export function useChatFind(params: {
   const { timelineEntries, keybindings, isTerminalFocused, terminalOpen } = params;
 
   const [open, setOpen] = useState(false);
+  const [openNonce, setOpenNonce] = useState(0);
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -89,6 +91,7 @@ export function useChatFind(params: {
       event.preventDefault();
       event.stopPropagation();
       setOpen(true);
+      setOpenNonce((n) => n + 1);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -96,6 +99,7 @@ export function useChatFind(params: {
 
   return {
     open,
+    openNonce,
     query,
     caseSensitive,
     matches,

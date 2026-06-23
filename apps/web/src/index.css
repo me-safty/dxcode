@@ -167,6 +167,8 @@
   --success-foreground: var(--color-emerald-700);
   --warning: var(--color-amber-500);
   --warning-foreground: var(--color-amber-700);
+  --find-match: --alpha(var(--color-amber-400) / 38%);
+  --find-match-current: --alpha(var(--color-orange-500) / 55%);
 
   @variant dark {
     color-scheme: dark;
@@ -196,6 +198,8 @@
     --success-foreground: var(--color-emerald-400);
     --warning: var(--color-amber-500);
     --warning-foreground: var(--color-amber-400);
+    --find-match: --alpha(var(--color-amber-400) / 30%);
+    --find-match-current: --alpha(var(--color-orange-500) / 50%);
   }
 }
 
@@ -781,4 +785,24 @@ label:has(> select#reasoning-effort) select {
 
 .dark .model-picker-list::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+/* CSS Custom Highlight API — find-in-chat */
+::highlight(t3-find-match) {
+  background-color: var(--find-match);
+}
+::highlight(t3-find-current) {
+  background-color: var(--find-match-current);
+}
+
+.t3-find-flash {
+  animation: t3-find-flash 0.6s ease-out;
+}
+@keyframes t3-find-flash {
+  0% {
+    background-color: var(--find-match-current);
+  }
+  100% {
+    background-color: transparent;
+  }
 }
