@@ -290,21 +290,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
 
+  // "Latest value" refs so PRIMARY effect can read rows/timelineEntries without
+  // depending on them (standard pattern — avoids re-firing on every streaming update).
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const timelineEntriesRef = useRef(timelineEntries);
+  timelineEntriesRef.current = timelineEntries;
+
   const pendingScrollEntryRef = useRef<{
     entryId: string;
     kind: "message" | "work" | "proposed-plan";
   } | null>(null);
 
+  // PRIMARY: fires only when the active match changes (not on every streaming rows update).
   useEffect(() => {
     if (!activeFindMatch) {
       pendingScrollEntryRef.current = null;
       return;
     }
     const kind = activeFindMatch.entryKind;
-    const located = locateRowForEntry(rows, activeFindMatch.entryId, kind);
+    const located = locateRowForEntry(rowsRef.current, activeFindMatch.entryId, kind);
     if (located === null) {
-      // Folded: expand its turn, defer the scroll until rows settle.
-      const turnId = findTurnIdForEntry(timelineEntries, activeFindMatch.entryId);
+      // Folded: expand its turn; SECONDARY resolves the scroll once rows reflect it.
+      const turnId = findTurnIdForEntry(timelineEntriesRef.current, activeFindMatch.entryId);
       if (turnId) {
         pendingScrollEntryRef.current = { entryId: activeFindMatch.entryId, kind };
         setExpandedTurnIds((existing) => {
@@ -317,11 +325,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return;
     }
     pendingScrollEntryRef.current = null;
-    const item = rows[located];
+    const item = rowsRef.current[located];
     if (item) void listRef.current?.scrollToItem?.({ item, animated: true, viewPosition: 0.3 });
-  }, [activeFindMatch, rows, timelineEntries, listRef]);
+  }, [activeFindMatch]); // eslint-disable-line react-hooks/exhaustive-deps -- read rows/timelineEntries via refs so streaming row updates don't re-scroll
 
-  // Resolve a pending scroll after a fold expansion materializes the row.
+  // SECONDARY: resolve a pending scroll after a fold expansion materializes the row.
   useEffect(() => {
     const pending = pendingScrollEntryRef.current;
     if (!pending) return;
