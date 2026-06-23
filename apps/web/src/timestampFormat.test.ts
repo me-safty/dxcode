@@ -9,6 +9,7 @@ import {
   formatRelativeTimeUntilLabel,
   formatShortTimestamp,
   formatTimestamp,
+  getRelativeTimeState,
   getTimestampFormatOptions,
 } from "./timestampFormat";
 
@@ -111,6 +112,11 @@ describe("invalid timestamp inputs", () => {
     expect(formatRelativeTimeLabel("not-a-date")).toBe("");
   });
 
+  it("distinguishes missing and invalid relative time state", () => {
+    expect(getRelativeTimeState(null)).toEqual({ status: "missing" });
+    expect(getRelativeTimeState("not-a-date")).toEqual({ status: "invalid" });
+  });
+
   it("returns an empty elapsed duration instead of a NaN label", () => {
     expect(formatElapsedDurationLabel("not-a-date")).toBe("");
   });
@@ -122,6 +128,25 @@ describe("invalid timestamp inputs", () => {
 
   it("returns an empty expires-in label instead of a NaN label", () => {
     expect(formatExpiresInLabel("not-a-date")).toBe("");
+  });
+});
+
+describe("getRelativeTimeState", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns relative parts for valid timestamps", () => {
+    expect(getRelativeTimeState("2026-04-07T11:45:00.000Z")).toEqual({
+      status: "relative",
+      value: "15m",
+      suffix: "ago",
+    });
   });
 });
 

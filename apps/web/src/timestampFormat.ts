@@ -97,6 +97,10 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
  * so callers can style the numeric portion independently.
  */
 type RelativeTimeParts = { value: string; suffix: string | null };
+export type RelativeTimeState =
+  | { status: "missing" }
+  | { status: "invalid" }
+  | { status: "relative"; value: string; suffix: string | null };
 
 export function formatRelativeTime(isoDate: string): RelativeTimeParts | null {
   const date = parseTimestampDate(isoDate);
@@ -117,6 +121,13 @@ export function formatRelativeTimeLabel(isoDate: string) {
   const relative = formatRelativeTime(isoDate);
   if (!relative) return "";
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
+}
+
+export function getRelativeTimeState(isoDate: string | null): RelativeTimeState {
+  if (!isoDate) return { status: "missing" };
+  const relative = formatRelativeTime(isoDate);
+  if (!relative) return { status: "invalid" };
+  return { status: "relative", ...relative };
 }
 
 /**
