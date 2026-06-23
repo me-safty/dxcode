@@ -200,25 +200,6 @@ describe("resolveInitialServerAuthGateState", () => {
     );
   });
 
-  it("uses the vite proxy for configured loopback auth requests during local dev", async () => {
-    await installAuthApi({ session: () => unauthenticatedSession(LOOPBACK_AUTH) });
-    vi.stubEnv("VITE_HTTP_URL", "http://localhost:13773");
-    vi.stubEnv("VITE_WS_URL", "ws://localhost:13773");
-    vi.stubEnv("VITE_DEV_SERVER_URL", "http://localhost:5733");
-    installTestBrowser("http://localhost:5733/");
-
-    const { resolveInitialServerAuthGateState, resolvePrimaryEnvironmentHttpUrl } =
-      await import("./environments/primary");
-
-    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
-      status: "requires-auth",
-      auth: LOOPBACK_AUTH,
-    });
-    expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
-      "http://localhost:5733/api/auth/session",
-    );
-  });
-
   it("uses the vite proxy for desktop-managed loopback auth requests during local dev", async () => {
     await installAuthApi({ session: () => unauthenticatedSession(DESKTOP_AUTH) });
     vi.stubEnv("VITE_DEV_SERVER_URL", "http://127.0.0.1:5733");
@@ -244,23 +225,6 @@ describe("resolveInitialServerAuthGateState", () => {
     });
     expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
       "http://127.0.0.1:5733/api/auth/session",
-    );
-  });
-
-  it("uses the desktop custom scheme proxy for desktop-managed auth requests", async () => {
-    const testWindow = installTestBrowser("t3code-dev://app/");
-    testWindow.desktopBridge = {
-      getLocalEnvironmentBootstrap: () => ({
-        label: "Local environment",
-        httpBaseUrl: "http://127.0.0.1:3773",
-        wsBaseUrl: "ws://127.0.0.1:3773",
-      }),
-    } as DesktopBridge;
-
-    const { resolvePrimaryEnvironmentHttpUrl } = await import("./environments/primary");
-
-    expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
-      "t3code-dev://app/api/auth/session",
     );
   });
 
@@ -412,28 +376,6 @@ describe("resolveInitialServerAuthGateState", () => {
       "Primary environment request failed during list-pairing-links (HTTP 500).",
     );
     expect(error.message).not.toContain(cause.message);
-  });
-
-  it("accepts an already-established session after a duplicate one-time token submit", async () => {
-    const testWindow = installTestBrowser("http://localhost/pair#token=already-used-token");
-    const testApi = await installAuthApi({
-      session: () => authenticatedSession(LOOPBACK_AUTH),
-      browserSession: () =>
-        Effect.fail(
-          new EnvironmentAuthInvalidError({
-            code: "auth_invalid",
-            reason: "invalid_credential",
-            traceId: "trace-invalid-credential",
-          }),
-        ),
-    });
-
-    const { submitServerAuthCredential } = await import("./environments/primary");
-
-    await expect(submitServerAuthCredential("already-used-token")).resolves.toBeUndefined();
-    expect(testWindow.location.hash).toBe("");
-    expect(testApi.calls.browserSession).toEqual([{ credential: "already-used-token" }]);
-    expect(testApi.calls.session).toBe(1);
   });
 
   it("waits for the authenticated session to become observable after silent desktop bootstrap", async () => {

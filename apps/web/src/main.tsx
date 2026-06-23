@@ -1,6 +1,9 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
 import { createHashHistory, createBrowserHistory, RouterProvider } from "@tanstack/react-router";
+import { ClerkProvider } from "@clerk/react";
+import { passkeys } from "@clerk/electron/passkeys";
+import { ClerkProvider as ElectronClerkProvider } from "@clerk/electron/react";
 
 import "@fontsource-variable/dm-sans/index.css";
 import "@fontsource/jetbrains-mono/400.css";
@@ -9,7 +12,8 @@ import "@xterm/xterm/css/xterm.css";
 import "./index.css";
 
 import { isElectron } from "./env";
-import { hasCloudPublicConfig, resolveCloudPublicConfig } from "./cloud/publicConfig";
+import { ManagedRelayAuthProvider } from "./cloud/managedAuth";
+import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
@@ -24,31 +28,32 @@ if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
 
-const clerkPublishableKey = resolveCloudPublicConfig().clerkPublishableKey;
-const T3ConnectClerkProvider = React.lazy(() =>
-  isElectron
-    ? import("./components/connect/T3ConnectClerkProvider.electron")
-    : import("./components/connect/T3ConnectClerkProvider.web"),
+const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+
+const app = (
+  <AppAtomRegistryProvider>
+    <RouterProvider router={router} />
+    <ElectronBrowserHost />
+  </AppAtomRegistryProvider>
 );
 
 const AuthWrapper = (props: { children: React.ReactNode }) =>
   clerkPublishableKey && hasCloudPublicConfig() ? (
-    <React.Suspense fallback={null}>
-      <T3ConnectClerkProvider publishableKey={clerkPublishableKey}>
-        {props.children}
-      </T3ConnectClerkProvider>
-    </React.Suspense>
+    isElectron ? (
+      <ElectronClerkProvider publishableKey={clerkPublishableKey} passkeys={passkeys}>
+        <ManagedRelayAuthProvider>{props.children}</ManagedRelayAuthProvider>
+      </ElectronClerkProvider>
+    ) : (
+      <ClerkProvider publishableKey={clerkPublishableKey}>
+        <ManagedRelayAuthProvider>{props.children}</ManagedRelayAuthProvider>
+      </ClerkProvider>
+    )
   ) : (
     props.children
   );
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <AuthWrapper>
-      <AppAtomRegistryProvider>
-        <RouterProvider router={router} />
-        <ElectronBrowserHost />
-      </AppAtomRegistryProvider>
-    </AuthWrapper>
+    <AuthWrapper>{app}</AuthWrapper>
   </React.StrictMode>,
 );

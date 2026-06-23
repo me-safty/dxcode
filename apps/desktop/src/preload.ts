@@ -4,12 +4,23 @@ import type {
   DesktopPreviewRecordingFrame,
   DesktopPreviewTabState,
 } from "@t3tools/contracts";
-import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
 
-exposeClerkBridge({ passkeys: true });
+declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
+
+const desktopClerkPreloadEnabled = Boolean(
+  typeof __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
+    ? undefined
+    : __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__.trim(),
+);
+
+if (desktopClerkPreloadEnabled) {
+  const { exposeClerkBridge } =
+    require("@clerk/electron/preload") as typeof import("@clerk/electron/preload");
+  exposeClerkBridge({ passkeys: true });
+}
 
 function unwrapEnsureSshEnvironmentResult(result: unknown) {
   if (

@@ -102,10 +102,6 @@ function parseTargetUrl(input: {
   }
 }
 
-function currentWindowBaseUrl(): string {
-  return window.location.origin === "null" ? window.location.href : window.location.origin;
-}
-
 function normalizeBaseUrl(
   rawValue: string,
   source: PrimaryEnvironmentTargetSource,
@@ -113,7 +109,7 @@ function normalizeBaseUrl(
 ): string {
   return parseTargetUrl({
     rawValue,
-    baseUrl: currentWindowBaseUrl(),
+    baseUrl: window.location.origin,
     source,
     urlKind,
   }).toString();
@@ -145,16 +141,13 @@ export function isLoopbackHostname(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(normalizeHostname(hostname));
 }
 
-function effectiveUrlOrigin(url: URL): string {
-  return url.origin === "null" ? `${url.protocol}//${url.host}` : url.origin;
-}
-
-function originBaseUrl(origin: string): string {
-  return origin.endsWith("/") ? origin : `${origin}/`;
-}
-
 function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): string {
   const httpBaseUrl = primaryTarget.target.httpBaseUrl;
+  const configuredDevServerUrl = import.meta.env.VITE_DEV_SERVER_URL?.trim();
+  if (!configuredDevServerUrl) {
+    return httpBaseUrl;
+  }
+
   const currentUrl = parseTargetUrl({
     rawValue: window.location.href,
     source: "window-origin",
@@ -165,38 +158,27 @@ function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): str
     source: primaryTarget.source,
     urlKind: "http-base-url",
   });
-  const currentOrigin = effectiveUrlOrigin(currentUrl);
-  const isCurrentOriginDesktopDevApp =
-    currentUrl.protocol === "t3code-dev:" && currentUrl.host === "app";
-
-  if (currentOrigin === targetUrl.origin || !isLoopbackHostname(targetUrl.hostname)) {
-    return httpBaseUrl;
-  }
-
-  if (isCurrentOriginDesktopDevApp) {
-    return originBaseUrl(currentOrigin);
-  }
-
-  const configuredDevServerUrl = import.meta.env.VITE_DEV_SERVER_URL?.trim();
-  if (!configuredDevServerUrl) {
-    return httpBaseUrl;
-  }
-
   const devServerUrl = parseTargetUrl({
     rawValue: configuredDevServerUrl,
-    baseUrl: originBaseUrl(currentOrigin),
+    baseUrl: currentUrl.origin,
     source: "configured",
     urlKind: "development-server-url",
   });
 
   const isCurrentOriginDevServer =
     (currentUrl.protocol === "http:" || currentUrl.protocol === "https:") &&
-    currentOrigin === devServerUrl.origin;
-  if (!isCurrentOriginDevServer || !isLoopbackHostname(currentUrl.hostname)) {
+    currentUrl.origin === devServerUrl.origin;
+
+  if (
+    !isCurrentOriginDevServer ||
+    currentUrl.origin === targetUrl.origin ||
+    !isLoopbackHostname(currentUrl.hostname) ||
+    !isLoopbackHostname(targetUrl.hostname)
+  ) {
     return httpBaseUrl;
   }
 
-  return originBaseUrl(currentOrigin);
+  return currentUrl.origin;
 }
 
 function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
@@ -221,13 +203,7 @@ function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
   return {
     source: "configured",
     target: {
-      httpBaseUrl: resolveHttpRequestBaseUrl({
-        source: "configured",
-        target: {
-          httpBaseUrl: normalizeBaseUrl(resolvedHttpBaseUrl, "configured", "http-base-url"),
-          wsBaseUrl: normalizeBaseUrl(resolvedWsBaseUrl, "configured", "websocket-base-url"),
-        },
-      }),
+      httpBaseUrl: normalizeBaseUrl(resolvedHttpBaseUrl, "configured", "http-base-url"),
       wsBaseUrl: normalizeBaseUrl(resolvedWsBaseUrl, "configured", "websocket-base-url"),
     },
   };
@@ -277,21 +253,11 @@ function resolveDesktopPrimaryTarget(): PrimaryEnvironmentTarget | null {
   return {
     source: "desktop-managed",
     target: {
-      httpBaseUrl: resolveHttpRequestBaseUrl({
-        source: "desktop-managed",
-        target: {
-          httpBaseUrl: normalizeBaseUrl(
-            desktopBootstrap.httpBaseUrl,
-            "desktop-managed",
-            "http-base-url",
-          ),
-          wsBaseUrl: normalizeBaseUrl(
-            desktopBootstrap.wsBaseUrl,
-            "desktop-managed",
-            "websocket-base-url",
-          ),
-        },
-      }),
+      httpBaseUrl: normalizeBaseUrl(
+        desktopBootstrap.httpBaseUrl,
+        "desktop-managed",
+        "http-base-url",
+      ),
       wsBaseUrl: normalizeBaseUrl(
         desktopBootstrap.wsBaseUrl,
         "desktop-managed",

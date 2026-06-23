@@ -14,7 +14,6 @@ Object.assign(process.env, repoEnv);
 
 const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
-const configuredDevServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
 const configuredRelayUrl = repoEnv.VITE_T3CODE_RELAY_URL?.trim() || "";
 const configuredClerkPublishableKey = repoEnv.VITE_CLERK_PUBLISHABLE_KEY?.trim() || "";
@@ -104,6 +103,7 @@ export default defineConfig(() => {
         "@pierre/diffs",
         "@pierre/diffs/editor",
         "@pierre/diffs/react",
+        "@pierre/diffs/worker/worker.js",
         "effect/Array",
         "effect/Order",
         "react-dom/client",
@@ -111,7 +111,6 @@ export default defineConfig(() => {
     },
     define: {
       // In dev mode, tell the web app where the WebSocket server lives
-      "import.meta.env.VITE_DEV_SERVER_URL": JSON.stringify(configuredDevServerUrl ?? ""),
       "import.meta.env.VITE_WS_URL": JSON.stringify(configuredWsUrl ?? ""),
       "import.meta.env.VITE_T3CODE_RELAY_URL": JSON.stringify(configuredRelayUrl),
       "import.meta.env.VITE_CLERK_PUBLISHABLE_KEY": JSON.stringify(configuredClerkPublishableKey),
@@ -157,7 +156,6 @@ export default defineConfig(() => {
         // connection logs — enable "Verbose" in DevTools to see them.
         protocol: "ws",
         host,
-        clientPort: port,
       },
     },
     build: {
