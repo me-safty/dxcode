@@ -48,7 +48,23 @@ export interface AgentStopDecisionResult {
   readonly nextStatuses: Map<string, OrchestrationSessionStatus>;
 }
 
-// Statuses that count as "stopped working" (vs. user-initiated stopped/interrupted).
+// Statuses that count as an agent finishing/erroring (vs. a user-initiated
+// stop/interrupt, which surfaces as "stopped"/"interrupted" and is excluded here).
+//
+// KNOWN LIMITATION: a user *turn interrupt* (the chat stop button) does NOT
+// surface as "interrupted" in the shell snapshot. The provider-ingestion layer
+// maps an interrupted `turn.completed` to session status "ready" (only "failed"
+// is special-cased — see apps/server/.../ProviderRuntimeIngestion.ts), and the
+// projector derives latestTurn.state "completed" from that "ready". So an
+// interrupted turn is indistinguishable from a natural completion here, and the
+// observer fires a false "finished" notification when a user interrupts a thread
+// they are NOT currently viewing (foreground + focused interrupts are suppressed
+// by the active-thread check). The correct fix is upstream: record interrupted/
+// cancelled turns as session status "interrupted" (or surface the real turn
+// outcome in the shell), then gate on it here. Tracked as a follow-up.
+//
+// Do NOT "fix" this by removing "ready" from this set: natural completions also
+// land on "ready", so dropping it would suppress the legitimate notification.
 const STOP_STATUSES: ReadonlySet<OrchestrationSessionStatus> = new Set([
   "idle",
   "ready",
