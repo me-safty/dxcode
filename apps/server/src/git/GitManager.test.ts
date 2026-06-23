@@ -607,6 +607,8 @@ function runStackedAction(
     actionId?: string;
     commitMessage?: string;
     featureBranch?: boolean;
+    baseBranch?: string;
+    rememberBaseBranch?: boolean;
     filePaths?: readonly string[];
   },
   options?: Parameters<GitManager.GitManager["Service"]["runStackedAction"]>[1],
@@ -615,6 +617,8 @@ function runStackedAction(
     {
       ...input,
       actionId: input.actionId ?? "test-action-id",
+      ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
+      ...(input.rememberBaseBranch ? { rememberBaseBranch: true } : {}),
     },
     options,
   );
@@ -2230,6 +2234,107 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
       ).toBe(true);
       expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
+    }),
+  );
+
+  it.effect("create_pr uses an explicitly selected base branch", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["branch", "dev"]);
+      yield* runGit(repoDir, ["push", "origin", "dev"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature-selected-pr-base"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "selected-pr-base.txt"), "change\n");
+      yield* runGit(repoDir, ["add", "selected-pr-base.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature-selected-pr-base"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          defaultBranch: "main",
+          prListSequence: [
+            "[]",
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 89,
+                title: "Add selected PR base",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/89",
+                baseRefName: "dev",
+                headRefName: "feature-selected-pr-base",
+              },
+            ]),
+          ],
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+        baseBranch: "dev",
+      });
+
+      expect(result.pr.status).toBe("created");
+      expect(result.pr.baseBranch).toBe("dev");
+      expect(
+        ghCalls.some((call) =>
+          call.includes("pr create --base dev --head feature-selected-pr-base"),
+        ),
+      ).toBe(true);
+    }),
+  );
+
+  it.effect("create_pr can remember the selected base branch for the repository", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["branch", "dev"]);
+      yield* runGit(repoDir, ["push", "origin", "dev"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature-remember-pr-base"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "remember-pr-base.txt"), "change\n");
+      yield* runGit(repoDir, ["add", "remember-pr-base.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature-remember-pr-base"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          defaultBranch: "main",
+          prListSequence: [
+            "[]",
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 90,
+                title: "Remember selected PR base",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/90",
+                baseRefName: "dev",
+                headRefName: "feature-remember-pr-base",
+              },
+            ]),
+          ],
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+        baseBranch: "dev",
+        rememberBaseBranch: true,
+      });
+
+      expect(result.pr.status).toBe("created");
+      expect(result.pr.baseBranch).toBe("dev");
+      const remembered = yield* runGit(repoDir, ["config", "--get", "t3code.default-pr-base"]);
+      expect(remembered.stdout.trim()).toBe("dev");
+      expect(
+        ghCalls.some((call) =>
+          call.includes("pr create --base dev --head feature-remember-pr-base"),
+        ),
+      ).toBe(true);
     }),
   );
 

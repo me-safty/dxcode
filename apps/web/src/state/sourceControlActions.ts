@@ -217,6 +217,8 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
       action: GitStackedAction;
       commitMessage?: string;
       featureBranch?: boolean;
+      baseBranch?: string;
+      rememberBaseBranch?: boolean;
       filePaths?: string[];
       onProgress?: (event: GitActionProgressEvent) => void;
     }) => {
@@ -236,6 +238,8 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
         action: input.action,
         ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
         ...(input.featureBranch ? { featureBranch: true } : {}),
+        ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
+        ...(input.rememberBaseBranch ? { rememberBaseBranch: true } : {}),
         ...(input.filePaths?.length ? { filePaths: input.filePaths } : {}),
         ...(input.onProgress ? { onProgress: input.onProgress } : {}),
       });

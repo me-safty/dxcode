@@ -1091,9 +1091,15 @@ export const make = Effect.gen(function* () {
     branch: string,
     upstreamRef: string | null,
     headContext: Pick<BranchHeadContext, "isCrossRepository" | "remoteName">,
+    explicitBaseBranch?: string,
   ) {
+    if (explicitBaseBranch) return explicitBaseBranch;
+
     const configured = yield* gitCore.readConfigValue(cwd, `branch.${branch}.gh-merge-base`);
     if (configured) return configured;
+
+    const repoDefault = yield* gitCore.readConfigValue(cwd, "t3code.default-pr-base");
+    if (repoDefault) return repoDefault;
 
     if (upstreamRef && !headContext.isCrossRepository) {
       const upstreamBranch = extractBranchNameFromRemoteRef(upstreamRef, {
@@ -1301,6 +1307,10 @@ export const make = Effect.gen(function* () {
     cwd: string,
     fallbackBranch: string | null,
     emit: GitActionProgressEmitter,
+    options?: {
+      readonly baseBranch?: string;
+      readonly rememberBaseBranch?: boolean;
+    },
   ) {
     const provider = yield* sourceControlProvider(cwd);
     const terms = getChangeRequestTerminologyForKind(provider.kind);
@@ -1338,7 +1348,16 @@ export const make = Effect.gen(function* () {
       };
     }
 
-    const baseBranch = yield* resolveBaseBranch(cwd, branch, details.upstreamRef, headContext);
+    const baseBranch = yield* resolveBaseBranch(
+      cwd,
+      branch,
+      details.upstreamRef,
+      headContext,
+      options?.baseBranch,
+    );
+    if (options?.rememberBaseBranch === true) {
+      yield* gitCore.setConfigValue(cwd, "t3code.default-pr-base", baseBranch);
+    }
     yield* emit({
       kind: "phase_started",
       phase: "pr",
@@ -1815,7 +1834,10 @@ export const make = Effect.gen(function* () {
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
                 Effect.flatMap(() =>
-                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit),
+                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit, {
+                    ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
+                    ...(input.rememberBaseBranch ? { rememberBaseBranch: true } : {}),
+                  }),
                 ),
               )
           : { status: "skipped_not_requested" as const };

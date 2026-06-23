@@ -1980,6 +1980,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.map((trimmed) => (trimmed.length > 0 ? trimmed : null)),
     );
 
+  const setConfigValue: GitVcsDriver.GitVcsDriver["Service"]["setConfigValue"] = (
+    cwd,
+    key,
+    value,
+  ) => runGit("GitVcsDriver.setConfigValue", cwd, ["config", key, value]);
+
   const listRefs: GitVcsDriver.GitVcsDriver["Service"]["listRefs"] = Effect.fn("listRefs")(
     function* (input) {
       const branchRecencyPromise = readBranchRecency(input.cwd).pipe(
@@ -2542,6 +2548,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     readRangeContext,
     getReviewDiffPreview,
     readConfigValue,
+    setConfigValue,
     listRefs,
     createWorktree,
     fetchPullRequestBranch,

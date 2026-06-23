@@ -65,6 +65,13 @@ import { Input } from "~/components/ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
 import { stackedThreadToast, toastManager, type ThreadToastData } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -131,6 +138,8 @@ interface RunGitActionWithToastInput {
   skipDefaultBranchPrompt?: boolean;
   statusOverride?: VcsStatusResult | null;
   featureBranch?: boolean;
+  baseBranch?: string;
+  rememberBaseBranch?: boolean;
   progressToastId?: GitActionToastId;
   filePaths?: string[];
 }
@@ -999,6 +1008,12 @@ export default function GitActionsControl({
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const [isCreatePrDialogOpen, setIsCreatePrDialogOpen] = useState(false);
+  const [createPrDialogAction, setCreatePrDialogAction] = useState<"create_pr" | "commit_push_pr">(
+    "create_pr",
+  );
+  const [selectedPrBaseBranch, setSelectedPrBaseBranch] = useState("");
+  const [rememberPrBaseBranch, setRememberPrBaseBranch] = useState(false);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
@@ -1099,6 +1114,40 @@ export default function GitActionsControl({
   const isRepo = gitStatus?.isRepo ?? true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const gitStatusForActions = gitStatus;
+  const remoteBranchesQuery = useEnvironmentQuery(
+    activeEnvironmentId !== null && gitCwd !== null && hasPrimaryRemote
+      ? vcsEnvironment.listRefs({
+          environmentId: activeEnvironmentId,
+          input: {
+            cwd: gitCwd,
+            includeMatchingRemoteRefs: true,
+            refKind: "remote",
+            limit: 200,
+          },
+        })
+      : null,
+  );
+  const remoteBaseBranches = useMemo(() => {
+    const refs = remoteBranchesQuery.data?.refs ?? [];
+    const names = new Set<string>();
+    for (const ref of refs) {
+      if (!ref.isRemote || ref.remoteName !== "origin") {
+        continue;
+      }
+      const branchName = ref.name.startsWith("origin/")
+        ? ref.name.slice("origin/".length)
+        : ref.name;
+      if (branchName.length > 0 && branchName !== "HEAD") {
+        names.add(branchName);
+      }
+    }
+    return [...names].toSorted((left, right) => {
+      const score = (value: string) =>
+        value === "dev" ? 0 : value === "main" ? 1 : value === "master" ? 2 : 3;
+      const scoreDelta = score(left) - score(right);
+      return scoreDelta === 0 ? left.localeCompare(right) : scoreDelta;
+    });
+  }, [remoteBranchesQuery.data?.refs]);
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
@@ -1243,6 +1292,32 @@ export default function GitActionsControl({
     });
   }, [gitStatusForActions, threadToastData]);
 
+  const openCreatePrDialog = useCallback(
+    (action: "create_pr" | "commit_push_pr") => {
+      const fallbackBranch =
+        selectedPrBaseBranch ||
+        remoteBaseBranches.find((branch) => branch === "dev") ||
+        remoteBaseBranches.find((branch) => branch === "main") ||
+        remoteBaseBranches[0] ||
+        "";
+      setCreatePrDialogAction(action);
+      setSelectedPrBaseBranch(fallbackBranch);
+      setRememberPrBaseBranch(false);
+      setIsCreatePrDialogOpen(true);
+    },
+    [remoteBaseBranches, selectedPrBaseBranch],
+  );
+
+  const runCreatePrFromDialog = () => {
+    const baseBranch = selectedPrBaseBranch.trim();
+    setIsCreatePrDialogOpen(false);
+    void runGitActionWithToast({
+      action: createPrDialogAction,
+      ...(baseBranch ? { baseBranch } : {}),
+      ...(rememberPrBaseBranch ? { rememberBaseBranch: true } : {}),
+    });
+  };
+
   runGitActionWithToast = useEffectEvent(
     async ({
       action,
@@ -1253,6 +1328,8 @@ export default function GitActionsControl({
       featureBranch = false,
       progressToastId,
       filePaths,
+      baseBranch,
+      rememberBaseBranch,
     }: RunGitActionWithToastInput) => {
       const actionStatus = statusOverride ?? gitStatusForActions;
       const actionBranch = actionStatus?.refName ?? null;
@@ -1392,6 +1469,8 @@ export default function GitActionsControl({
         action,
         ...(commitMessage ? { commitMessage } : {}),
         ...(featureBranch ? { featureBranch } : {}),
+        ...(baseBranch ? { baseBranch } : {}),
+        ...(rememberBaseBranch ? { rememberBaseBranch } : {}),
         ...(filePaths ? { filePaths } : {}),
         onProgress: applyProgressEvent,
       });
@@ -1582,6 +1661,10 @@ export default function GitActionsControl({
       return;
     }
     if (quickAction.action) {
+      if (quickAction.action === "create_pr" || quickAction.action === "commit_push_pr") {
+        openCreatePrDialog(quickAction.action);
+        return;
+      }
       void runGitActionWithToast({ action: quickAction.action });
     }
   };
@@ -1597,7 +1680,7 @@ export default function GitActionsControl({
       return;
     }
     if (item.dialogAction === "create_pr") {
-      void runGitActionWithToast({ action: "create_pr" });
+      openCreatePrDialog("create_pr");
       return;
     }
     setExcludedFiles(new Set());
@@ -1814,6 +1897,79 @@ export default function GitActionsControl({
           </Menu>
         </Group>
       )}
+
+      <Dialog
+        open={isCreatePrDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsCreatePrDialogOpen(false);
+          }
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>{changeRequestTerminology.shortLabel}</DialogTitle>
+            <DialogDescription>
+              Choose the target branch for this {changeRequestTerminology.singular}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-foreground" htmlFor="create-pr-base">
+                Create {changeRequestTerminology.shortLabel} to
+              </label>
+              <Select
+                value={selectedPrBaseBranch}
+                onValueChange={(value) => {
+                  if (value !== null) {
+                    setSelectedPrBaseBranch(value);
+                  }
+                }}
+              >
+                <SelectTrigger
+                  id="create-pr-base"
+                  className="w-full"
+                  aria-label={`${changeRequestTerminology.shortLabel} base branch`}
+                >
+                  <SelectValue>{selectedPrBaseBranch || "Select origin branch"}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  {remoteBaseBranches.map((branch) => (
+                    <SelectItem key={branch} value={branch}>
+                      {branch}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+              {remoteBranchesQuery.isPending ? (
+                <p className="text-xs text-muted-foreground">Loading origin branches...</p>
+              ) : remoteBaseBranches.length === 0 ? (
+                <p className="text-xs text-warning">No origin branches were found.</p>
+              ) : null}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Checkbox
+                checked={rememberPrBaseBranch}
+                onCheckedChange={(checked) => setRememberPrBaseBranch(Boolean(checked))}
+                aria-label={`Use selected ${changeRequestTerminology.shortLabel} base as the default for this repo`}
+              />
+              Use as default for this repo
+            </label>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsCreatePrDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={runCreatePrFromDialog}
+              disabled={!selectedPrBaseBranch.trim() || remoteBaseBranches.length === 0}
+            >
+              Create {changeRequestTerminology.shortLabel}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <Dialog
         open={isCommitDialogOpen}
