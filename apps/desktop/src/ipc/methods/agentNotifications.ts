@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import * as Electron from "electron";
 
 import { AgentNotificationRequestSchema } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { ElectronWindow } from "../../electron/ElectronWindow.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -19,6 +20,7 @@ export const showAgentNotification = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.agentNotifications.show")(function* (request) {
     const electronWindow = yield* ElectronWindow;
     const targetWindow = Option.getOrNull(yield* electronWindow.currentMainOrFirst);
+    const isDarwin = (yield* HostProcessPlatform) === "darwin";
 
     yield* Effect.sync(() => {
       const notification = new Electron.Notification({
@@ -34,7 +36,7 @@ export const showAgentNotification = DesktopIpc.makeIpcMethod({
           if (targetWindow === null || targetWindow.isDestroyed()) return;
           if (targetWindow.isMinimized()) targetWindow.restore();
           if (!targetWindow.isVisible()) targetWindow.show();
-          if (process.platform === "darwin") Electron.app.focus({ steal: true });
+          if (isDarwin) Electron.app.focus({ steal: true });
           targetWindow.focus();
           targetWindow.webContents.send(IpcChannels.AGENT_NOTIFICATION_CLICKED_CHANNEL, {
             threadId: request.threadId,

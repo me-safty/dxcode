@@ -13,6 +13,7 @@ import {
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
+const decodeClientSettings = Schema.decodeSync(ClientSettingsSchema);
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
@@ -172,7 +173,7 @@ describe("ServerSettingsPatch string normalization", () => {
 
 describe("agent-stop notification settings", () => {
   it("defaults popup + sound on and source to tone when decoding an empty object", () => {
-    const decoded = Schema.decodeSync(ClientSettingsSchema)({});
+    const decoded = decodeClientSettings({});
     expect(decoded.notifyOnAgentStopPopup).toBe(true);
     expect(decoded.notifyOnAgentStopSound).toBe(true);
     expect(decoded.notifyOnAgentStopSoundSource).toBe("tone");
@@ -185,7 +186,7 @@ describe("agent-stop notification settings", () => {
   });
 
   it("accepts an explicit system sound source", () => {
-    const decoded = Schema.decodeSync(ClientSettingsSchema)({
+    const decoded = decodeClientSettings({
       notifyOnAgentStopSoundSource: "system",
     });
     expect(decoded.notifyOnAgentStopSoundSource).toBe("system");

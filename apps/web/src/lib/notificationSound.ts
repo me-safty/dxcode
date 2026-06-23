@@ -26,9 +26,13 @@ export function playNotificationTone(): void {
     osc.connect(gain);
     osc.start(now);
     osc.stop(now + 0.46);
-    osc.onended = () => {
-      void ctx.close();
-    };
+    osc.addEventListener(
+      "ended",
+      () => {
+        void ctx.close();
+      },
+      { once: true },
+    );
   } catch (error) {
     // Audio is best-effort; never let it break the notification flow.
     console.warn("playNotificationTone failed", error);
