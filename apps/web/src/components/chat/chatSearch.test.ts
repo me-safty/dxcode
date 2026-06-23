@@ -84,7 +84,7 @@ describe("buildMatches", () => {
     const [m] = buildMatches([msg("a", "straße", "2026-01-01T00:00:00.000Z")], "STRASSE", {
       caseSensitive: false,
     });
-    // 'ß' lowercases to 'ss' (length-changing) but offsets index the original text.
+    // 'ß' upper-cases to 'SS' (length-changing) but offsets index the original text.
     expect(m).toMatchObject({ start: 0, end: 6 });
   });
 });
@@ -108,6 +108,10 @@ describe("reconcileActiveMatch", () => {
 
   it("clamps when the anchored match vanished", () => {
     expect(reconcileActiveMatch([mk("x")], "gone", 5)).toBe(0);
+  });
+
+  it("clamps negative prevIndex to 0", () => {
+    expect(reconcileActiveMatch([mk("x")], "gone", -3)).toBe(0);
   });
 
   it("returns 0 for an empty set", () => {

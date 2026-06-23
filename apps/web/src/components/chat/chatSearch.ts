@@ -75,9 +75,10 @@ function turnIdForEntry(entry: TimelineEntry): TurnId | null {
 /**
  * Non-overlapping left-to-right scan; returns [start, end) offsets into the ORIGINAL `text`.
  *
- * For case-insensitive matching we build an uppercased shadow of `text` with a position map
- * so that offsets always index the original string, even when toUpperCase() changes length
- * (e.g. ß → SS expands the shadow but the returned spans reference the original char indices).
+ * For case-insensitive matching we build an uppercased shadow of `text` and a `shadowToOrig`
+ * array so that every shadow position resolves to its original-string index in O(1).
+ * Each original char `i` contributes one entry per code unit its toUpperCase() produces,
+ * so even length-changing folds (e.g. ß → SS) are handled without while-loop restarts.
  */
 function scanOccurrences(
   text: string,
@@ -97,15 +98,18 @@ function scanOccurrences(
     return spans;
   }
 
-  // Build an uppercased shadow + a map: origToShadow[i] = start index of char i in the shadow.
-  // This stays correct even when a single char uppercases to multiple chars (e.g. ß → SS).
-  const origToShadow: number[] = [];
+  // Build uppercased shadow + shadowToOrig[j] = original-string index for shadow position j.
+  // For each original char i, push i once per code unit its toUpperCase() produces so every
+  // shadow offset resolves to its source in O(1) — no while-loop restarts per match.
+  const shadowToOrig: number[] = [];
   let shadow = "";
   for (let i = 0; i < text.length; i++) {
-    origToShadow.push(shadow.length);
-    shadow += (text[i] ?? "").toUpperCase();
+    const upper = (text[i] ?? "").toUpperCase();
+    for (let j = 0; j < upper.length; j++) {
+      shadowToOrig.push(i);
+    }
+    shadow += upper;
   }
-  origToShadow.push(shadow.length); // sentinel
 
   const shadowNeedle = needle.toUpperCase();
   let from = 0;
@@ -113,17 +117,12 @@ function scanOccurrences(
     const at = shadow.indexOf(shadowNeedle, from);
     if (at === -1) break;
 
-    // Map shadow start → original start (find the original char whose shadow starts at `at`).
-    let startO = 0;
-    while (startO < text.length - 1 && (origToShadow[startO + 1] ?? 0) <= at) startO++;
-
-    // Map shadow end → original end (find the last original char consumed by the match).
     const shadowEnd = at + shadowNeedle.length;
-    let endO = startO;
-    while (endO < text.length && (origToShadow[endO + 1] ?? 0) < shadowEnd) endO++;
+    const startO = shadowToOrig[at] ?? 0;
+    const endO = shadowToOrig[shadowEnd] ?? text.length;
 
-    spans.push([startO, endO + 1]);
-    from = at + shadowNeedle.length;
+    spans.push([startO, endO]);
+    from = shadowEnd;
   }
   return spans;
 }
