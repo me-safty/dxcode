@@ -878,12 +878,13 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
-export interface AgentNotificationRequest {
-  readonly title: string;
-  readonly body: string;
-  readonly threadId: string;
-  readonly environmentId: string;
-}
+export const AgentNotificationRequestSchema = Schema.Struct({
+  title: Schema.String,
+  body: Schema.String,
+  threadId: Schema.String,
+  environmentId: Schema.String,
+});
+export type AgentNotificationRequest = typeof AgentNotificationRequestSchema.Type;
 
 export interface AgentNotificationClick {
   readonly threadId: string;

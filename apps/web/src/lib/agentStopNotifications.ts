@@ -44,8 +44,8 @@ export interface AgentStopDecisionInput {
 }
 
 export interface AgentStopDecisionResult {
-  readonly notifications: AgentStopNotification[];
-  readonly nextStatuses: Map<string, OrchestrationSessionStatus>;
+  readonly notifications: readonly AgentStopNotification[];
+  readonly nextStatuses: ReadonlyMap<string, OrchestrationSessionStatus>;
 }
 
 // Statuses that count as an agent finishing/erroring. A user-initiated session

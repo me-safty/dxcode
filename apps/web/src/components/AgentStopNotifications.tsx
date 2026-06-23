@@ -20,7 +20,7 @@ export function AgentStopNotifications(): null {
   const activeThreadId = (useParams({ strict: false }) as { threadId?: string }).threadId ?? null;
   const navigate = useNavigate();
 
-  const prevStatusesRef = useRef<Map<string, OrchestrationSessionStatus>>(new Map());
+  const prevStatusesRef = useRef<ReadonlyMap<string, OrchestrationSessionStatus>>(new Map());
 
   useEffect(() => {
     const isAppFocused = typeof document !== "undefined" ? document.hasFocus() : false;
@@ -36,19 +36,23 @@ export function AgentStopNotifications(): null {
 
     for (const notification of notifications) {
       if (popup) {
-        void window.desktopBridge?.showAgentNotification({
-          title: notification.title,
-          body: notification.body,
-          threadId: notification.threadId,
-          environmentId: notification.environmentId,
-        });
+        void window.desktopBridge
+          ?.showAgentNotification({
+            title: notification.title,
+            body: notification.body,
+            threadId: notification.threadId,
+            environmentId: notification.environmentId,
+          })
+          ?.catch((error: unknown) => console.warn("showAgentNotification failed", error));
       }
-      if (sound) {
-        if (soundSource === "system") {
-          void window.desktopBridge?.playSystemSound();
-        } else {
-          playNotificationTone();
-        }
+    }
+    if (sound && notifications.length > 0) {
+      if (soundSource === "system") {
+        void window.desktopBridge
+          ?.playSystemSound()
+          ?.catch((error: unknown) => console.warn("playSystemSound failed", error));
+      } else {
+        playNotificationTone();
       }
     }
   }, [threads, projects, popup, sound, soundSource, activeThreadId]);

@@ -148,4 +148,23 @@ describe("decideAgentStopNotifications", () => {
     expect(result.notifications).toHaveLength(1);
     expect(result.notifications[0]!.body).toBe("Unknown project · finished");
   });
+
+  it("still fires when on that thread but the window is unfocused", () => {
+    const result = decideAgentStopNotifications({
+      prevStatuses: new Map([["thread-1", "running"]]),
+      threads: [thread("idle")],
+      projects: [project],
+      settings,
+      activeThreadId: "thread-1",
+      isAppFocused: false,
+    });
+    expect(result.notifications).toHaveLength(1);
+  });
+
+  it("labels 'errored' even when pending input is set (error takes precedence)", () => {
+    const result = run(new Map([["thread-1", "running"]]), [
+      thread("error", { hasPendingUserInput: true }),
+    ]);
+    expect(result.notifications[0]).toMatchObject({ status: "errored", body: "Lucentive · errored" });
+  });
 });

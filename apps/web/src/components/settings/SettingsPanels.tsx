@@ -959,102 +959,104 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
-      <SettingsSection title="Notifications">
-        <SettingsRow
-          title="Agent-stop pop-up"
-          description="Show a system notification when an agent finishes or errors."
-          resetAction={
-            settings.notifyOnAgentStopPopup !== DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopPopup ? (
-              <SettingResetButton
-                label="agent-stop pop-up"
-                onClick={() =>
-                  updateSettings({
-                    notifyOnAgentStopPopup: DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopPopup,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.notifyOnAgentStopPopup}
-              onCheckedChange={(checked) =>
-                updateSettings({ notifyOnAgentStopPopup: Boolean(checked) })
-              }
-              aria-label="Show a pop-up when an agent stops"
-            />
-          }
-        />
-        <SettingsRow
-          title="Agent-stop sound"
-          description="Play a sound when an agent finishes or errors."
-          resetAction={
-            settings.notifyOnAgentStopSound !== DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSound ? (
-              <SettingResetButton
-                label="agent-stop sound"
-                onClick={() =>
-                  updateSettings({
-                    notifyOnAgentStopSound: DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSound,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.notifyOnAgentStopSound}
-              onCheckedChange={(checked) =>
-                updateSettings({ notifyOnAgentStopSound: Boolean(checked) })
-              }
-              aria-label="Play a sound when an agent stops"
-            />
-          }
-        />
-        {settings.notifyOnAgentStopSound ? (
+      {isElectron ? (
+        <SettingsSection title="Notifications">
           <SettingsRow
-            title="Sound source"
-            description="Use a generated tone or your operating system's alert sound."
+            title="Agent-stop pop-up"
+            description="Show a system notification when an agent finishes or errors."
             resetAction={
-              settings.notifyOnAgentStopSoundSource !==
-              DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSoundSource ? (
+              settings.notifyOnAgentStopPopup !== DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopPopup ? (
                 <SettingResetButton
-                  label="sound source"
+                  label="agent-stop pop-up"
                   onClick={() =>
                     updateSettings({
-                      notifyOnAgentStopSoundSource:
-                        DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSoundSource,
+                      notifyOnAgentStopPopup: DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopPopup,
                     })
                   }
                 />
               ) : null
             }
             control={
-              <Select
-                value={settings.notifyOnAgentStopSoundSource}
-                onValueChange={(value) => {
-                  if (value === "tone" || value === "system") {
-                    updateSettings({ notifyOnAgentStopSoundSource: value });
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-40" aria-label="Notification sound source">
-                  <SelectValue>
-                    {AGENT_STOP_SOUND_SOURCE_LABELS[settings.notifyOnAgentStopSoundSource]}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="tone">
-                    {AGENT_STOP_SOUND_SOURCE_LABELS.tone}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="system">
-                    {AGENT_STOP_SOUND_SOURCE_LABELS.system}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
+              <Switch
+                checked={settings.notifyOnAgentStopPopup}
+                onCheckedChange={(checked) =>
+                  updateSettings({ notifyOnAgentStopPopup: Boolean(checked) })
+                }
+                aria-label="Show a pop-up when an agent stops"
+              />
             }
           />
-        ) : null}
-      </SettingsSection>
+          <SettingsRow
+            title="Agent-stop sound"
+            description="Play a sound when an agent finishes or errors."
+            resetAction={
+              settings.notifyOnAgentStopSound !== DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSound ? (
+                <SettingResetButton
+                  label="agent-stop sound"
+                  onClick={() =>
+                    updateSettings({
+                      notifyOnAgentStopSound: DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSound,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.notifyOnAgentStopSound}
+                onCheckedChange={(checked) =>
+                  updateSettings({ notifyOnAgentStopSound: Boolean(checked) })
+                }
+                aria-label="Play a sound when an agent stops"
+              />
+            }
+          />
+          {settings.notifyOnAgentStopSound ? (
+            <SettingsRow
+              title="Sound source"
+              description="Use a generated tone or your operating system's alert sound."
+              resetAction={
+                settings.notifyOnAgentStopSoundSource !==
+                DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSoundSource ? (
+                  <SettingResetButton
+                    label="sound source"
+                    onClick={() =>
+                      updateSettings({
+                        notifyOnAgentStopSoundSource:
+                          DEFAULT_UNIFIED_SETTINGS.notifyOnAgentStopSoundSource,
+                      })
+                    }
+                  />
+                ) : null
+              }
+              control={
+                <Select
+                  value={settings.notifyOnAgentStopSoundSource}
+                  onValueChange={(value) => {
+                    if (value === "tone" || value === "system") {
+                      updateSettings({ notifyOnAgentStopSoundSource: value });
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-40" aria-label="Notification sound source">
+                    <SelectValue>
+                      {AGENT_STOP_SOUND_SOURCE_LABELS[settings.notifyOnAgentStopSoundSource]}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    <SelectItem hideIndicator value="tone">
+                      {AGENT_STOP_SOUND_SOURCE_LABELS.tone}
+                    </SelectItem>
+                    <SelectItem hideIndicator value="system">
+                      {AGENT_STOP_SOUND_SOURCE_LABELS.system}
+                    </SelectItem>
+                  </SelectPopup>
+                </Select>
+              }
+            />
+          ) : null}
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (

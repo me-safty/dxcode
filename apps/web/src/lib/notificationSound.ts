@@ -28,7 +28,8 @@ export function playNotificationTone(): void {
     osc.onended = () => {
       void ctx.close();
     };
-  } catch {
+  } catch (error) {
     // Audio is best-effort; never let it break the notification flow.
+    console.warn("playNotificationTone failed", error);
   }
 }
