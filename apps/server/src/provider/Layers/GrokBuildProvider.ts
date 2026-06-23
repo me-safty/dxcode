@@ -15,6 +15,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import {
@@ -219,11 +220,12 @@ const runGrokModelsCliCheck = (
   cliEnv: NodeJS.ProcessEnv,
 ): Effect.Effect<GrokModelsCliResult, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
+    const hostPlatform = yield* HostProcessPlatform;
     const modelsCliCheck = yield* spawnAndCollect(
       command,
       ChildProcess.make(command, ["models"], {
         env: cliEnv,
-        shell: process.platform === "win32",
+        shell: hostPlatform === "win32",
       }),
     ).pipe(Effect.result);
 
@@ -298,6 +300,7 @@ export const checkGrokBuildProviderStatus = (
   env: NodeJS.ProcessEnv,
 ): Effect.Effect<ServerProviderDraft, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
+    const hostPlatform = yield* HostProcessPlatform;
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
     const command = settings.command || "grok";
 
@@ -328,7 +331,7 @@ export const checkGrokBuildProviderStatus = (
       command,
       ChildProcess.make(command, ["--version"], {
         env: cliEnv,
-        shell: process.platform === "win32",
+        shell: hostPlatform === "win32",
       }),
     ).pipe(Effect.result);
 
@@ -425,6 +428,7 @@ export const enrichGrokBuildSnapshot = (input: {
   readonly environment?: NodeJS.ProcessEnv;
 }): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
+    const hostPlatform = yield* HostProcessPlatform;
     const command = input.settings.command || "grok";
     const envOverridesResult = yield* Effect.result(
       Effect.try({
@@ -441,7 +445,7 @@ export const enrichGrokBuildSnapshot = (input: {
       command,
       ChildProcess.make(command, ["update", "--check", "--json"], {
         env: cliEnv,
-        shell: process.platform === "win32",
+        shell: hostPlatform === "win32",
       }),
     ).pipe(Effect.timeoutOption(GROK_UPDATE_CHECK_TIMEOUT_MS), Effect.result);
 

@@ -11,6 +11,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import { Command } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 interface NativeStaticTool {
   readonly command: string;
@@ -59,8 +60,9 @@ const commandOutputOptions = {
 
 const commandExists = Effect.fn("commandExists")(function* (command: string) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const hostPlatform = yield* HostProcessPlatform;
   const lookupCommand =
-    process.platform === "win32"
+    hostPlatform === "win32"
       ? ChildProcess.make("where", [command], {
           stdout: "ignore",
           stderr: "ignore",
@@ -89,11 +91,12 @@ const runCommand = Effect.fn("runCommand")(function* (
 ) {
   yield* Console.log(`$ ${[command, ...args].join(" ")}`);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const hostPlatform = yield* HostProcessPlatform;
   const child = yield* spawner.spawn(
     ChildProcess.make(command, [...args], {
       cwd,
       ...commandOutputOptions,
-      shell: process.platform === "win32",
+      shell: hostPlatform === "win32",
     }),
   );
   const exitCode = Number(yield* child.exitCode);

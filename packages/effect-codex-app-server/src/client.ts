@@ -6,6 +6,7 @@ import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as NodeProcess from "node:process";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
 import * as CodexError from "./errors.ts";
@@ -17,6 +18,8 @@ import {
   runHandler,
 } from "./_internal/shared.ts";
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
+
+const DEFAULT_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
 
 export interface CodexAppServerClientOptions {
   readonly logIncoming?: boolean;
@@ -282,9 +285,9 @@ export const layerCommand = (
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const command = ChildProcess.make(options.command, [...(options.args ?? [])], {
         ...(options.cwd ? { cwd: options.cwd } : {}),
-        ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+        ...(options.env ? { env: { ...NodeProcess.env, ...options.env } } : {}),
         forceKillAfter: DEFAULT_APP_SERVER_FORCE_KILL_AFTER,
-        shell: process.platform === "win32",
+        shell: NodeProcess.platform === "win32",
       });
       return yield* spawner.spawn(command).pipe(
         Effect.mapError(
@@ -295,7 +298,5 @@ export const layerCommand = (
             }),
         ),
       );
-    }).pipe(
-      Effect.flatMap((handle) => makeChildProcessClient(handle, options)),
-    ),
+    }).pipe(Effect.flatMap((handle) => makeChildProcessClient(handle, options))),
   );
