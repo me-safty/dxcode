@@ -248,7 +248,7 @@ export const make = Effect.gen(function* () {
   > {
     yield* previewManager.getBrowserSession();
     const applicationUrl =
-      environment.isDevelopment && !DesktopClerk.desktopClerkBridgeEnabled
+      environment.isDevelopment && !DesktopClerk.isDesktopClerkBridgeEnabled()
         ? Option.getOrThrow(environment.devServerUrl).href
         : getDesktopUrl(environment.isDevelopment);
     const iconPaths = yield* assets.iconPaths;

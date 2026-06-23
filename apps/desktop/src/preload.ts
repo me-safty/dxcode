@@ -6,17 +6,10 @@ import type {
 } from "@t3tools/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
+import { isDesktopClerkBridgeEnabled } from "./app/DesktopClerkConfig.ts";
 import * as IpcChannels from "./ipc/channels.ts";
 
-declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
-
-const desktopClerkPreloadEnabled = Boolean(
-  typeof __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
-    ? undefined
-    : __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__.trim(),
-);
-
-if (desktopClerkPreloadEnabled) {
+if (isDesktopClerkBridgeEnabled()) {
   const { exposeClerkBridge } =
     require("@clerk/electron/preload") as typeof import("@clerk/electron/preload");
   exposeClerkBridge({ passkeys: true });

@@ -7,13 +7,21 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
-import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import {
+  getDesktopClerkFrontendApiHostname,
+  isDesktopClerkBridgeEnabled,
+  resolveDesktopClerkFrontendApiHostname,
+} from "./DesktopClerkConfig.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
+export {
+  getDesktopClerkFrontendApiHostname,
+  isDesktopClerkBridgeEnabled,
+  resolveDesktopClerkFrontendApiHostname,
+} from "./DesktopClerkConfig.ts";
 
 export class DesktopClerkBridgeInitializationError extends Schema.TaggedErrorClass<DesktopClerkBridgeInitializationError>()(
   "DesktopClerkBridgeInitializationError",
@@ -52,27 +60,6 @@ export class DesktopClerk extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopClerk") {}
 
-export function resolveDesktopClerkFrontendApiHostname(
-  publishableKey: string | undefined,
-): string | undefined {
-  const normalizedKey = publishableKey?.trim();
-  if (!normalizedKey) return undefined;
-
-  try {
-    return clerkFrontendApiHostnameFromPublishableKey(normalizedKey);
-  } catch {
-    return undefined;
-  }
-}
-
-export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHostname(
-  typeof __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
-    ? undefined
-    : __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__,
-);
-
-export const desktopClerkBridgeEnabled = Boolean(desktopClerkFrontendApiHostname);
-
 export function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   return createClerkBridge({
     storage: storage({ path: stateDir }),
@@ -84,7 +71,7 @@ export function createDesktopClerkBridge(stateDir: string, isDevelopment: boolea
   });
 }
 
-export function makeDesktopClerkLayer(enabled = desktopClerkBridgeEnabled) {
+export function makeDesktopClerkLayer(enabled = isDesktopClerkBridgeEnabled()) {
   const make = Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     if (enabled) {
