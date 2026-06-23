@@ -24,6 +24,9 @@ import {
   type StartupPresentation,
 } from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
+// EMPOWERRD:start - fork Jira server config
+import { resolveJiraServerConfig } from "../jira/config.ts";
+// EMPOWERRD:end
 
 export const modeFlag = Flag.choice("mode", RuntimeMode.literals).pipe(
   Flag.withDescription("Runtime mode. `desktop` keeps loopback defaults unless overridden."),
@@ -341,6 +344,10 @@ export const resolveServerConfig = (
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
+    // EMPOWERRD:start - resolve fork Jira config from the environment
+    const jira = yield* resolveJiraServerConfig();
+    // EMPOWERRD:end
+
     const config: ServerConfigShape = {
       logLevel,
       traceMinLevel: env.traceMinLevel,
@@ -374,6 +381,9 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      // EMPOWERRD:start
+      jira,
+      // EMPOWERRD:end
     };
 
     return config;

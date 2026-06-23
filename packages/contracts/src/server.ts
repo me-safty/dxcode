@@ -18,6 +18,9 @@ import {
 } from "./keybindings.ts";
 import { EditorId } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
+// EMPOWERRD:start - fork Jira config schema
+import { ServerJiraConfig } from "./jira.ts";
+// EMPOWERRD:end
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerSettings } from "./settings.ts";
 
@@ -406,6 +409,9 @@ export const ServerConfig = Schema.Struct({
   availableEditors: Schema.Array(EditorId),
   observability: ServerObservability,
   settings: ServerSettings,
+  // EMPOWERRD:start - fork Jira settings surfaced to the client
+  jira: Schema.optional(ServerJiraConfig),
+  // EMPOWERRD:end
 });
 export type ServerConfig = typeof ServerConfig.Type;
 

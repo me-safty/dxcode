@@ -13,6 +13,9 @@ import * as LogLevel from "effect/LogLevel";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
+// EMPOWERRD:start - fork Jira server config type
+import type { JiraServerConfig } from "./jira/config.ts";
+// EMPOWERRD:end
 
 export const DEFAULT_PORT = 3773;
 
@@ -73,6 +76,11 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  // EMPOWERRD:start - fork Jira settings (normalized at config assembly).
+  // Optional so upstream test fixtures that build ServerConfigShape inline
+  // don't need editing; production assembly always populates it.
+  readonly jira?: JiraServerConfig;
+  // EMPOWERRD:end
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -175,6 +183,9 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           devUrl,
           noBrowser: false,
           startupPresentation: "browser",
+          // EMPOWERRD:start
+          jira: { domain: null, projectKey: null },
+          // EMPOWERRD:end
         } satisfies ServerConfigShape;
       }),
     );

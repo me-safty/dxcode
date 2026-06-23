@@ -24,6 +24,11 @@ import {
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
+// EMPOWERRD:start - Jira key control
+import { useAtomValue } from "@effect/atom-react";
+import { BranchToolbarJiraKeyControl } from "../jira/BranchToolbarJiraKeyControl";
+import { primaryServerConfigAtom } from "../state/server";
+// EMPOWERRD:end
 import { Button } from "./ui/button";
 import {
   Menu,
@@ -220,6 +225,9 @@ export const BranchToolbar = memo(function BranchToolbar({
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  // EMPOWERRD:start - Jira config for the key control
+  const serverConfig = useAtomValue(primaryServerConfigAtom);
+  // EMPOWERRD:end
   const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const effectiveEnvMode =
@@ -273,6 +281,21 @@ export const BranchToolbar = memo(function BranchToolbar({
           />
         </div>
       )}
+
+      {/* EMPOWERRD:start - Jira key control (server threads only) */}
+      {!isMobile && serverThread && (
+        <BranchToolbarJiraKeyControl
+          environmentId={environmentId}
+          threadId={threadId}
+          projectCwd={activeProject.workspaceRoot}
+          effectiveEnvMode={effectiveEnvMode}
+          jiraProjectKey={serverConfig?.jira?.projectKey ?? null}
+          currentBranch={serverThread.branch ?? null}
+          title={serverThread.title}
+          {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+        />
+      )}
+      {/* EMPOWERRD:end */}
 
       <BranchToolbarBranchSelector
         className="min-w-0 flex-1 justify-end md:ml-auto md:flex-none"

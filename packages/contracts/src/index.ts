@@ -26,3 +26,7 @@ export * from "./review.ts";
 export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./rpc.ts";
+// EMPOWERRD:start - fork-owned Jira contracts
+export * from "./jira.ts";
+export * from "./rpcJira.ts";
+// EMPOWERRD:end

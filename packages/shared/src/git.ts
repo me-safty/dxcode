@@ -10,7 +10,9 @@ import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 
-export const WORKTREE_BRANCH_PREFIX = "t3code";
+// EMPOWERRD:start - default worktree branch prefix renamed from upstream "t3code"
+export const WORKTREE_BRANCH_PREFIX = "empcode";
+// EMPOWERRD:end
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 
 /**

@@ -1,6 +1,9 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
+// EMPOWERRD:start - fork-owned Jira RPC group
+import { ForkWsRpcGroup } from "./rpcJira.ts";
+// EMPOWERRD:end
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
@@ -748,3 +751,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
 );
+
+// EMPOWERRD:start - merge the fork-owned Jira RPC group into the protocol.
+// `WsRpcGroup` above is left untouched (and still used for upstream handlers);
+// `AllWsRpcGroup` is what the server and client wire against.
+export const AllWsRpcGroup = WsRpcGroup.merge(ForkWsRpcGroup);
+// EMPOWERRD:end

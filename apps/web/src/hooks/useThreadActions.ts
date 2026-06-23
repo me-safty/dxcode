@@ -95,6 +95,44 @@ export function useThreadActions() {
         );
       }
 
+      // EMPOWERRD:start - when archiving the last thread linked to a worktree,
+      // prompt to delete the orphaned worktree (mirrors the delete flow's
+      // cleanup helpers + new state-entity reads).
+      const archiveThreads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
+        const shell = readThreadShell(ref);
+        return shell === null ? [] : [shell];
+      });
+      const archiveThreadProject = readProject({
+        environmentId: threadRef.environmentId,
+        projectId: thread.projectId,
+      });
+      const orphanedWorktreePath = getOrphanedWorktreePathForThread(
+        archiveThreads,
+        threadRef.threadId,
+      );
+      const displayWorktreePath = orphanedWorktreePath
+        ? formatWorktreePathForDisplay(orphanedWorktreePath)
+        : null;
+      const archiveLocalApi = readLocalApi();
+      let shouldDeleteWorktree = false;
+      if (orphanedWorktreePath !== null && archiveThreadProject !== null && archiveLocalApi) {
+        const confirmationResult = await settlePromise(() =>
+          archiveLocalApi.dialogs.confirm(
+            [
+              "This thread is the only one linked to this worktree:",
+              displayWorktreePath ?? orphanedWorktreePath,
+              "",
+              "Delete the worktree too?",
+            ].join("\n"),
+          ),
+        );
+        if (confirmationResult._tag === "Failure") {
+          return confirmationResult;
+        }
+        shouldDeleteWorktree = confirmationResult.value;
+      }
+      // EMPOWERRD:end
+
       const currentRouteThreadRef = getCurrentRouteThreadRef();
       const shouldNavigateToDraft =
         currentRouteThreadRef?.threadId === threadRef.threadId &&
@@ -106,6 +144,25 @@ export function useThreadActions() {
       if (archiveResult._tag === "Failure") {
         return archiveResult;
       }
+
+      // EMPOWERRD:start - remove the orphaned worktree once archive succeeds.
+      if (shouldDeleteWorktree && orphanedWorktreePath && archiveThreadProject) {
+        const removeResult = await removeWorktree({
+          environmentId: threadRef.environmentId,
+          input: {
+            cwd: archiveThreadProject.workspaceRoot,
+            path: orphanedWorktreePath,
+            force: true,
+          },
+        });
+        if (removeResult._tag === "Success") {
+          await refreshVcsStatus({
+            environmentId: threadRef.environmentId,
+            input: { cwd: archiveThreadProject.workspaceRoot },
+          });
+        }
+      }
+      // EMPOWERRD:end
 
       if (shouldNavigateToDraft) {
         const navigationResult = await settlePromise(() =>

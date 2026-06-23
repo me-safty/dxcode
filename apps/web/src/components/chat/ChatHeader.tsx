@@ -14,6 +14,9 @@ import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
+// EMPOWERRD:start - Jira ticket deep-link button
+import { JiraTicketButton } from "~/jira/JiraTicketButton";
+// EMPOWERRD:end
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -113,6 +116,9 @@ export const ChatHeader = memo(function ChatHeader({
             onDeleteScript={onDeleteProjectScript}
           />
         )}
+        {/* EMPOWERRD:start - Jira ticket deep-link */}
+        <JiraTicketButton environmentId={activeThreadEnvironmentId} threadId={activeThreadId} />
+        {/* EMPOWERRD:end */}
         {showOpenInPicker && (
           <OpenInPicker
             environmentId={activeThreadEnvironmentId}

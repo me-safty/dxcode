@@ -89,6 +89,9 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+// EMPOWERRD:start - fork Jira side-table repository (mocked in the app harness)
+import { ProjectionThreadJiraRepository } from "./persistence/Services/ProjectionThreadJira.ts";
+// EMPOWERRD:end
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import {
   ProviderRegistry,
@@ -726,7 +729,19 @@ const buildAppUnderTest = (options?: {
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
           getThreadCheckpointContext: () => Effect.succeed(Option.none()),
           ...options?.layers?.projectionSnapshotQuery,
-        }),
+          // EMPOWERRD: merge the fork Jira repo mock into this same provide() to
+          // avoid growing buildAppUnderTest's pipe arity (tsgo widens to unknown
+          // past its variadic-pipe overloads).
+        }).pipe(
+          Layer.merge(
+            Layer.mock(ProjectionThreadJiraRepository)({
+              upsert: () => Effect.void,
+              getByThreadId: () => Effect.succeed(Option.none()),
+              listAll: () => Effect.succeed([]),
+              deleteByThreadId: () => Effect.void,
+            }),
+          ),
+        ),
       ),
       Layer.provide(
         Layer.mock(CheckpointDiffQuery)({

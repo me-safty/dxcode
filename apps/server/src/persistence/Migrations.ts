@@ -45,6 +45,9 @@ import Migration0029 from "./Migrations/029_ProjectionThreadDetailOrderingIndexe
 import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.ts";
 import Migration0031 from "./Migrations/031_AuthAuthorizationScopes.ts";
 import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
+// EMPOWERRD:start - fork-owned migrations run against a separate tracking table
+import { FORK_MIGRATIONS_TABLE, makeForkMigrationLoader } from "./ForkMigrations.ts";
+// EMPOWERRD:end
 
 /**
  * Migration loader with all migrations defined inline.
@@ -129,6 +132,21 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
       : `Running migrations 1 through ${toMigrationInclusive}...`,
   );
   const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  // EMPOWERRD:start - run fork migrations through their own tracking table on a
+  // full migration. Skipped for partial (toMigrationInclusive) runs, which are
+  // upstream-boundary migration tests that should remain unaffected.
+  if (toMigrationInclusive === undefined) {
+    const executedForkMigrations = yield* run({
+      loader: makeForkMigrationLoader(),
+      table: FORK_MIGRATIONS_TABLE,
+    });
+    yield* Effect.log("Fork migrations ran successfully").pipe(
+      Effect.annotateLogs({
+        forkMigrations: executedForkMigrations.map(([id, name]) => `fork_${id}_${name}`),
+      }),
+    );
+  }
+  // EMPOWERRD:end
   yield* Effect.log("Migrations ran successfully").pipe(
     Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
   );

@@ -51,6 +51,9 @@ import {
   type TerminalMetadataStreamEvent,
   WS_METHODS,
   WsRpcGroup,
+  // EMPOWERRD:start - merged protocol incl. fork Jira RPCs
+  AllWsRpcGroup,
+  // EMPOWERRD:end
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -84,6 +87,9 @@ import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePat
 import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "./git/GitWorkflowService.ts";
+// EMPOWERRD:start - fork Jira RPC handler layer
+import { ForkJiraWsRpcLayer } from "./jira/wsHandlers.ts";
+// EMPOWERRD:end
 import { ReviewService } from "./review/ReviewService.ts";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner.ts";
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
@@ -790,6 +796,9 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
           },
           settings,
+          // EMPOWERRD:start - surface fork Jira config to the client
+          jira: config.jira,
+          // EMPOWERRD:end
         };
       });
 
@@ -1653,11 +1662,13 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             ServerAuthInternalError: (error) => failEnvironmentInternal("internal_error", error),
           }),
         );
-        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
+        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(AllWsRpcGroup, {
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session).pipe(
+            // EMPOWERRD:start - merge the fork Jira handler layer into the route
+            Layer.merge(makeWsRpcLayer(session), ForkJiraWsRpcLayer).pipe(
+              // EMPOWERRD:end
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(PreviewAutomationBroker.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
