@@ -571,6 +571,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           terminalContexts={terminalContexts}
           skills={ctx.skills}
           markdownCwd={ctx.markdownCwd}
+          messageId={row.message.id}
         />
       </div>
       <div
@@ -1105,11 +1106,17 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
   footer?: ReactNode;
+  messageId?: string;
 }) {
+  const { findRevealEntryId } = use(TimelineRowCtx);
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0 || props.terminalContexts.length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
-  const isCollapsed = canCollapse && !expanded;
+  const isRevealTarget =
+    findRevealEntryId !== null &&
+    props.messageId !== undefined &&
+    findRevealEntryId === props.messageId;
+  const isCollapsed = canCollapse && !expanded && !isRevealTarget;
 
   return (
     <div>
