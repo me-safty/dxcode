@@ -4,7 +4,9 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as NodeProcess from "node:process";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
 import * as CodexError from "./errors.ts";
@@ -253,11 +255,15 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
 export const layerChildProcess = (
   handle: ChildProcessSpawner.ChildProcessHandle,
   options: CodexAppServerClientOptions = {},
-): Layer.Layer<CodexAppServerClient> => {
-  const stdio = makeChildStdio(handle);
-  const terminationError = makeTerminationError(handle);
-  return Layer.effect(CodexAppServerClient, make(stdio, options, terminationError));
-};
+): Layer.Layer<CodexAppServerClient> =>
+  Layer.effect(CodexAppServerClient, makeChildProcessClient(handle, options));
+
+const makeChildProcessClient = Effect.fn(
+  "effect-codex-app-server/CodexAppServerClient.makeChildProcessClient",
+)(function* (handle: ChildProcessSpawner.ChildProcessHandle, options: CodexAppServerClientOptions) {
+  yield* Stream.runDrain(handle.stderr).pipe(Effect.ignore, Effect.forkScoped);
+  return yield* make(makeChildStdio(handle), options, makeTerminationError(handle));
+});
 
 export interface CodexAppServerCommandLayerOptions extends CodexAppServerClientOptions {
   readonly command: string;
@@ -279,9 +285,9 @@ export const layerCommand = (
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const command = ChildProcess.make(options.command, [...(options.args ?? [])], {
         ...(options.cwd ? { cwd: options.cwd } : {}),
-        ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+        ...(options.env ? { env: { ...NodeProcess.env, ...options.env } } : {}),
         forceKillAfter: DEFAULT_APP_SERVER_FORCE_KILL_AFTER,
-        shell: process.platform === "win32",
+        shell: NodeProcess.platform === "win32",
       });
       return yield* spawner.spawn(command).pipe(
         Effect.mapError(
@@ -292,9 +298,5 @@ export const layerCommand = (
             }),
         ),
       );
-    }).pipe(
-      Effect.flatMap((handle) =>
-        make(makeChildStdio(handle), options, makeTerminationError(handle)),
-      ),
-    ),
+    }).pipe(Effect.flatMap((handle) => makeChildProcessClient(handle, options))),
   );

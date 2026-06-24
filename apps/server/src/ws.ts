@@ -739,7 +739,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers,
-          availableEditors: ExternalLauncher.resolveAvailableEditors(),
+          availableEditors: yield* externalLauncher.resolveAvailableEditors(),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,

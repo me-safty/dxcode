@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import * as NodeProcess from "node:process";
 
 import {
   resolveLinuxPackageArch,
@@ -234,11 +235,11 @@ if (import.meta.main) {
     .map((value) => value.trim())
     .filter((value): value is PackageFormat => value === "deb" || value === "rpm");
   if (formats.length === 0) throw new Error("Choose at least one package format: deb or rpm.");
-  if (process.platform !== "linux") throw new Error("Linux packages must be built on Linux.");
+  if (NodeProcess.platform !== "linux") throw new Error("Linux packages must be built on Linux.");
 
-  const architecture = resolveLinuxPackageArch(process.arch);
+  const architecture = resolveLinuxPackageArch(NodeProcess.arch);
   if (architecture !== "x64" && architecture !== "arm64") {
-    throw new Error(`Unsupported Linux package architecture: ${process.arch}`);
+    throw new Error(`Unsupported Linux package architecture: ${NodeProcess.arch}`);
   }
   if (!values["skip-build"])
     run("corepack", ["pnpm", "exec", "vp", "run", "--filter", "t3", "build"]);

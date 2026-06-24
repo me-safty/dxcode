@@ -31,6 +31,10 @@
       "types": "./src/observability.ts",
       "import": "./src/observability.ts"
     },
+    "./httpObservability": {
+      "types": "./src/httpObservability.ts",
+      "import": "./src/httpObservability.ts"
+    },
     "./shell": {
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"
@@ -146,6 +150,14 @@
     "./relayClient": {
       "types": "./src/relayClient.ts",
       "import": "./src/relayClient.ts"
+    },
+    "./hostProcess": {
+      "types": "./src/hostProcess.ts",
+      "import": "./src/hostProcess.ts"
+    },
+    "./relayTracing": {
+      "types": "./src/relayTracing.ts",
+      "import": "./src/relayTracing.ts"
     }
   },
   "scripts": {
