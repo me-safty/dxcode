@@ -400,6 +400,17 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
+  it.effect("keeps Windows executable resource editing enabled for unsigned builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig("win", "nsis", "1.2.3", false, false, undefined);
+
+      const win = config.win as Record<string, unknown>;
+      assert.deepStrictEqual(win.target, ["nsis"]);
+      assert.equal(win.icon, "icon.ico");
+      assert.notProperty(win, "signAndEditExecutable");
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-darwin-arm64": "0.9.4",
