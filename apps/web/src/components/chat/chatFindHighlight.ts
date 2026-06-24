@@ -93,6 +93,13 @@ export function applyFindHighlights(
   const matchRanges: Range[] = [];
   const currentRanges: Range[] = [];
   const needle = opts.caseSensitive ? query : query.toLowerCase();
+  // At most one range should be classified as the active/current match. When a
+  // work row exposes multiple [data-find-content] containers (label, detail,
+  // command, toolTitle), per-container occurrence counters diverge from
+  // buildMatches' per-field occurrences, causing multiple ranges to appear
+  // active. Track whether we've already assigned a current range so any
+  // subsequent "active" hits are demoted to regular matches.
+  let currentAssigned = false;
 
   for (const row of container.querySelectorAll<HTMLElement>("[data-timeline-row-id]")) {
     for (const content of row.querySelectorAll<HTMLElement>(
@@ -112,7 +119,12 @@ export function applyFindHighlights(
             activeMatch !== null &&
             (rowId === activeMatch.entryId || rowIdHoldsEntry(row, activeMatch.entryId)) &&
             occurrence === activeMatch.occurrence;
-          (isActive ? currentRanges : matchRanges).push(range);
+          if (isActive && !currentAssigned) {
+            currentRanges.push(range);
+            currentAssigned = true;
+          } else {
+            matchRanges.push(range);
+          }
         }
         occurrence += 1;
       }
@@ -139,8 +151,17 @@ export function applyFindHighlights(
         ?.closest<HTMLElement>("[data-timeline-row-id]") ??
       null;
     if (rowEl) {
+      // Clear any pending flash timer so overlapping rAF-driven re-applications
+      // don't stack timeouts and restart the animation mid-way.
+      const prev = Number(rowEl.dataset.findFlashTimer);
+      if (prev) window.clearTimeout(prev);
       rowEl.classList.add("t3-find-flash");
-      window.setTimeout(() => rowEl.classList.remove("t3-find-flash"), 600);
+      rowEl.dataset.findFlashTimer = String(
+        window.setTimeout(() => {
+          rowEl.classList.remove("t3-find-flash");
+          delete rowEl.dataset.findFlashTimer;
+        }, 600),
+      );
     }
   }
 }

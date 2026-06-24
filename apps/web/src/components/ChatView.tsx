@@ -2123,6 +2123,7 @@ function ChatViewContent(props: ChatViewProps) {
     return () => {
       observer.disconnect();
       cancelAnimationFrame(frame);
+      clearFindHighlights();
     };
   }, [
     chatFind.open,
