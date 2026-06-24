@@ -392,6 +392,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Visible threads"]
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+      ...(settings.showThreadCostEstimate !== DEFAULT_UNIFIED_SETTINGS.showThreadCostEstimate
+        ? ["Cost estimate"]
+        : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
@@ -442,6 +445,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.wordWrap,
+      settings.showThreadCostEstimate,
       theme,
     ],
   );
@@ -460,6 +464,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      showThreadCostEstimate: DEFAULT_UNIFIED_SETTINGS.showThreadCostEstimate,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
@@ -616,6 +621,32 @@ export function GeneralSettingsPanel() {
               checked={settings.wordWrap}
               onCheckedChange={(checked) => updateSettings({ wordWrap: Boolean(checked) })}
               aria-label="Wrap code, tables, diffs, and file previews by default"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Show cost estimate"
+          description="Show the estimated API cost next to each thread title. The amount is always tracked, so toggling this only controls whether it's displayed."
+          resetAction={
+            settings.showThreadCostEstimate !== DEFAULT_UNIFIED_SETTINGS.showThreadCostEstimate ? (
+              <SettingResetButton
+                label="cost estimate visibility"
+                onClick={() =>
+                  updateSettings({
+                    showThreadCostEstimate: DEFAULT_UNIFIED_SETTINGS.showThreadCostEstimate,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showThreadCostEstimate}
+              onCheckedChange={(checked) =>
+                updateSettings({ showThreadCostEstimate: Boolean(checked) })
+              }
+              aria-label="Show the estimated API cost next to each thread title"
             />
           }
         />

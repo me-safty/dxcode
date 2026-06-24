@@ -105,6 +105,11 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // Show the per-thread API cost estimate (the gray "(est. $X.XX)" after the
+  // thread title). Default off — the cost is always calculated and tracked
+  // regardless, so turning this on immediately reveals the accumulated amount.
+  // Client-only (device-local), applies to all threads.
+  showThreadCostEstimate: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -583,5 +588,6 @@ export const ClientSettingsPatch = Schema.Struct({
   timestampFormat: Schema.optionalKey(TimestampFormat),
   codeBlockThemeId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   wordWrap: Schema.optionalKey(Schema.Boolean),
+  showThreadCostEstimate: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

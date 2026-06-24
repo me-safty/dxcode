@@ -16,6 +16,7 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useClientSettings } from "../../hooks/useSettings";
 import { cn } from "~/lib/utils";
 
 interface ChatHeaderProps {
@@ -77,6 +78,9 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  // Whether to show the per-thread cost estimate. Off by default; the cost is
+  // still calculated/tracked regardless, so enabling it reveals the real amount.
+  const showThreadCostEstimate = useClientSettings((settings) => settings.showThreadCostEstimate);
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -110,7 +114,7 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
         </Tooltip>
-        {costLabel && (
+        {showThreadCostEstimate && costLabel && (
           <span
             className="shrink-0 text-sm tabular-nums text-muted-foreground"
             aria-label={`API cost ${costLabel}`}

@@ -31,6 +31,7 @@ const clientSettings: ClientSettings = {
   timestampFormat: "24-hour",
   codeBlockThemeId: null,
   wordWrap: true,
+  showThreadCostEstimate: false,
 };
 
 const decodeClientSettingsJson = Schema.decodeEffect(Schema.fromJsonString(ClientSettingsSchema));
