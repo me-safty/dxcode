@@ -100,7 +100,7 @@ export function setPendingUserInputCustomAnswer(
   return {
     ...(answerSource ? { answerSource } : {}),
     customAnswer: storedCustomAnswer,
-    ...(selectedOptionLabels.length > 0 ? { selectedOptionLabels } : {}),
+    ...(selectedOptionLabels && selectedOptionLabels.length > 0 ? { selectedOptionLabels } : {}),
   };
 }
 
