@@ -79,20 +79,17 @@ export function normalizeUsageWindows(
     });
 }
 
-/** Reasons emitted when a probe could not read quota windows, not when the account cannot have them. */
-const TRANSIENT_UNAVAILABLE_USAGE_REASONS = new Set([
-  "No Codex subscription quota windows reported.",
-  "Unable to fetch usage",
-]);
+/** Account or auth shape cannot report subscription quota; refresh must clear stale bars. */
+const AUTHORITATIVE_UNAVAILABLE_USAGE_REASON_PREFIX = "Usage limits unavailable for";
 
-function isTransientUnavailableUsageStub(
+function isAuthoritativeUnavailableUsage(
   usageLimits: ServerProviderUsageLimits | undefined,
 ): boolean {
   if (!usageLimits || usageLimits.available) {
     return false;
   }
-  const reason = usageLimits.reason ?? "Unable to fetch usage";
-  return TRANSIENT_UNAVAILABLE_USAGE_REASONS.has(reason);
+  const reason = usageLimits.reason ?? "";
+  return reason.startsWith(AUTHORITATIVE_UNAVAILABLE_USAGE_REASON_PREFIX);
 }
 
 /**
@@ -109,7 +106,7 @@ export function preserveAvailableUsageLimitsOnRefresh(
   if (next?.available) {
     return next;
   }
-  if (previous?.available && isTransientUnavailableUsageStub(next)) {
+  if (previous?.available && !isAuthoritativeUnavailableUsage(next)) {
     return previous;
   }
   return next;

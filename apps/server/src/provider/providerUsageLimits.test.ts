@@ -101,6 +101,17 @@ describe("providerUsageLimits", () => {
     });
   });
 
+  it("preserves available limits when a refresh omits usageLimits", () => {
+    const previous = makeUsageLimitsSnapshot({
+      source: "codexAppServer",
+      checkedAt: "2026-04-17T10:00:00.000Z",
+      unavailableReason: "missing",
+      windows: [{ label: "Session", usedPercent: 42, windowDurationMins: 300 }],
+    });
+
+    expect(preserveAvailableUsageLimitsOnRefresh(previous, undefined)).toEqual(previous);
+  });
+
   it("preserves available limits when a refresh returns a transient unavailable stub", () => {
     const previous = makeUsageLimitsSnapshot({
       source: "codexAppServer",
@@ -113,6 +124,24 @@ describe("providerUsageLimits", () => {
       available: false as const,
       checkedAt: "2026-04-18T00:00:00.000Z",
       reason: "No Codex subscription quota windows reported.",
+      windows: [] as const,
+    };
+
+    expect(preserveAvailableUsageLimitsOnRefresh(previous, next)).toEqual(previous);
+  });
+
+  it("preserves available limits when a refresh returns an unrecognized unavailable reason", () => {
+    const previous = makeUsageLimitsSnapshot({
+      source: "codexAppServer",
+      checkedAt: "2026-04-17T10:00:00.000Z",
+      unavailableReason: "missing",
+      windows: [{ label: "Session", usedPercent: 42, windowDurationMins: 300 }],
+    });
+    const next = {
+      source: "codexAppServer" as const,
+      available: false as const,
+      checkedAt: "2026-04-18T00:00:00.000Z",
+      reason: "Failed to spawn Claude process for usage probe.",
       windows: [] as const,
     };
 
