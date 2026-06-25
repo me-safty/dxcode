@@ -286,7 +286,7 @@ type RecordingFrameListener = (frame: DesktopPreviewRecordingFrame) => Effect.Ef
 
 type PreviewInputSignal =
   | { readonly kind: "pointer"; readonly x: number; readonly y: number; readonly button: number }
-  | { readonly kind: "key"; readonly key: string; readonly code: string };
+  | { readonly kind: "key"; readonly key: string; readonly code?: string };
 
 interface ManagedListeners {
   readonly scope: Scope.Closeable;
@@ -352,8 +352,7 @@ const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal => {
     value.kind === "key" &&
     "key" in value &&
     typeof value.key === "string" &&
-    "code" in value &&
-    typeof value.code === "string"
+    (!("code" in value) || typeof value.code === "string")
   );
 };
 
@@ -370,8 +369,15 @@ const inputSignalsMatch = (left: PreviewInputSignal, right: PreviewInputSignal):
     left.kind === "key" &&
     right.kind === "key" &&
     left.key === right.key &&
-    left.code === right.code
+    (left.code === undefined || right.code === undefined || left.code === right.code)
   );
+};
+
+const previewAutomationKeyCode = (key: string): string | undefined => {
+  if (/^[a-z]$/i.test(key)) return `Key${key.toUpperCase()}`;
+  if (/^[0-9]$/.test(key)) return `Digit${key}`;
+  if (key === " ") return "Space";
+  return key.length > 1 ? key : undefined;
 };
 
 const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function* (
@@ -1124,7 +1130,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const zoomFactor = yield* attempt(
         { operation: "syncWebContentsState.getZoomFactor", tabId, webContentsId: wc.id },
         () => wc.getZoomFactor(),
-      );
+      ).pipe(Effect.option);
       const computedNavStatus = computeNavStatus(wc);
       const canGoBack = wc.navigationHistory.canGoBack();
       const canGoForward = wc.navigationHistory.canGoForward();
@@ -1144,7 +1150,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           navStatus,
           canGoBack,
           canGoForward,
-          zoomFactor,
+          ...(Option.isSome(zoomFactor) ? { zoomFactor: zoomFactor.value } : {}),
           updatedAt,
         };
         return [
@@ -2182,6 +2188,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const performAutomationPress = Effect.fn("PreviewManager.performAutomationPress")(function* (
     tabId: string,
+    wc: Electron.WebContents,
     input: PreviewAutomationPressInput,
     send: SendCommand,
     sendCleanup: SendCommand,
@@ -2200,16 +2207,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }
     }, 0);
     const key = input.key;
+    const code = previewAutomationKeyCode(key);
     const text = key.length === 1 ? key : undefined;
     const params = {
       key,
-      code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+      ...(code === undefined ? {} : { code }),
       modifiers,
       ...(text ? { text, unmodifiedText: text } : {}),
     };
-    let keyReleased = false;
+    const previouslyFocused = yield* attempt(
+      { operation: "automationPress.getFocusedWebContents", tabId, webContentsId: wc.id },
+      () => webContents.getFocusedWebContents(),
+    );
+    let keyDownAttempted = false;
     const releaseInput = Effect.gen(function* () {
-      if (!keyReleased) {
+      if (keyDownAttempted) {
         yield* sendCleanup("Input.dispatchKeyEvent", { type: "keyUp", ...params }).pipe(
           Effect.ignore,
         );
@@ -2217,17 +2229,36 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       yield* sendCleanup("Emulation.setFocusEmulationEnabled", { enabled: false }).pipe(
         Effect.ignore,
       );
+      if (previouslyFocused && previouslyFocused.id !== wc.id && !previouslyFocused.isDestroyed()) {
+        yield* attempt(
+          {
+            operation: "automationPress.restoreFocusedWebContents",
+            tabId,
+            webContentsId: previouslyFocused.id,
+          },
+          () => previouslyFocused.focus(),
+        ).pipe(Effect.ignore);
+      }
     });
 
-    // Hidden/background guest WebContents do not have document focus until a user
-    // clicks them. CDP focus emulation makes native key dispatch deterministic
-    // without bringing another thread's preview to the foreground.
+    // Focus the guest WebContents itself, not its containing BrowserWindow. This
+    // activates native keyboard behavior for hidden/background previews without
+    // changing which thread is mounted in the UI. Restore the previous renderer
+    // after dispatch so automation never leaves the app's input focus behind.
     yield* Effect.gen(function* () {
+      yield* attempt(
+        { operation: "automationPress.focusWebContents", tabId, webContentsId: wc.id },
+        () => wc.focus(),
+      );
+      yield* send("Page.bringToFront");
       yield* send("Emulation.setFocusEmulationEnabled", { enabled: true });
-      yield* expectAgentInput(tabId, { kind: "key", key, code: params.code });
+      yield* expectAgentInput(tabId, {
+        kind: "key",
+        key,
+        ...(code === undefined ? {} : { code }),
+      });
+      keyDownAttempted = true;
       yield* send("Input.dispatchKeyEvent", { type: "keyDown", ...params });
-      yield* send("Input.dispatchKeyEvent", { type: "keyUp", ...params });
-      keyReleased = true;
     }).pipe(Effect.ensuring(releaseInput));
   });
 
@@ -2237,7 +2268,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   ) {
     const wc = yield* requireWebContents(tabId);
     yield* withControlSession(tabId, wc, "press", (send, sendCleanup) =>
-      performAutomationPress(tabId, input, send, sendCleanup),
+      performAutomationPress(tabId, wc, input, send, sendCleanup),
     );
   });
 

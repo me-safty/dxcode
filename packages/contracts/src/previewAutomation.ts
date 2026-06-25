@@ -721,6 +721,26 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedErrorCla
   }
 }
 
+export class PreviewAutomationTargetNotEditableError extends Schema.TaggedErrorClass<PreviewAutomationTargetNotEditableError>()(
+  "PreviewAutomationTargetNotEditableError",
+  {
+    ...PreviewAutomationRequestErrorFields,
+    ...PreviewAutomationRemoteDiagnosticFields,
+    selectorKind: Schema.optional(Schema.Literals(["focused-element", "locator", "selector"])),
+    selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  },
+) {
+  override get message(): string {
+    if (this.selectorKind === "focused-element") {
+      return `Preview automation ${this.operation} requires an editable focused element.`;
+    }
+    if (this.selectorKind !== undefined && this.selectorLength !== undefined) {
+      return `Preview automation ${this.operation} requires an editable ${this.selectorKind} (${this.selectorLength} characters).`;
+    }
+    return `Preview automation ${this.operation} requires an editable target.`;
+  }
+}
+
 export class PreviewAutomationResultTooLargeError extends Schema.TaggedErrorClass<PreviewAutomationResultTooLargeError>()(
   "PreviewAutomationResultTooLargeError",
   {
@@ -786,6 +806,7 @@ export const PreviewAutomationError = Schema.Union([
   PreviewAutomationControlInterruptedError,
   PreviewAutomationExecutionError,
   PreviewAutomationInvalidSelectorError,
+  PreviewAutomationTargetNotEditableError,
   PreviewAutomationResultTooLargeError,
   PreviewAutomationClientDisconnectedError,
   PreviewAutomationRequestQueueClosedError,

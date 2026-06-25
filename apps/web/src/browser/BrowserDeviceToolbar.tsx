@@ -24,6 +24,7 @@ import {
 import { cn } from "~/lib/utils";
 
 import { BROWSER_DEVICE_TOOLBAR_HEIGHT, resizeFreeformViewport } from "./browserViewportLayout";
+import { commitViewportAndAspectRatio } from "./browserDeviceToolbarState";
 
 const RESPONSIVE_VALUE = "responsive";
 const SELECT_ITEMS = [
@@ -91,9 +92,9 @@ export function BrowserDeviceToolbar({
     customHeight <= PREVIEW_VIEWPORT_MAX_DIMENSION &&
     customWidth * customHeight <= PREVIEW_VIEWPORT_MAX_AREA;
 
-  const apply = (next: PreviewViewportSetting) => {
+  const apply = (next: PreviewViewportSetting, nextAspectRatio = aspectRatio) => {
     setPending(true);
-    void onChange(next).then(
+    void commitViewportAndAspectRatio(next, nextAspectRatio, onChange, onAspectRatioChange).then(
       () => {
         setPending(false);
         setCustomSize(null);
@@ -147,8 +148,10 @@ export function BrowserDeviceToolbar({
     }
     const preset = PREVIEW_VIEWPORT_PRESETS.find((candidate) => candidate.id === value);
     if (!preset) return;
-    if (aspectRatio !== null) onAspectRatioChange(preset.width / preset.height);
-    apply(resolvePreviewViewport({ mode: "preset", preset: preset.id }));
+    apply(
+      resolvePreviewViewport({ mode: "preset", preset: preset.id }),
+      aspectRatio === null ? null : preset.width / preset.height,
+    );
   };
 
   const rotate = () => {
@@ -157,8 +160,10 @@ export function BrowserDeviceToolbar({
     const source = hasCustomSize
       ? ({ _tag: "freeform", width: customWidth, height: customHeight } as const)
       : setting;
-    if (aspectRatio !== null) onAspectRatioChange(1 / aspectRatio);
-    apply({ ...source, width: source.height, height: source.width });
+    apply(
+      { ...source, width: source.height, height: source.width },
+      aspectRatio === null ? null : 1 / aspectRatio,
+    );
   };
 
   const toggleAspectRatio = () => {
@@ -325,8 +330,7 @@ export function BrowserDeviceToolbar({
         className="sticky right-0 ml-auto bg-background/95"
         disabled={pending}
         onClick={() => {
-          onAspectRatioChange(null);
-          apply({ _tag: "fill" });
+          apply({ _tag: "fill" }, null);
         }}
       >
         <X />

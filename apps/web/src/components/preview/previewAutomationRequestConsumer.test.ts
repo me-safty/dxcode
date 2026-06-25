@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   PreviewAutomationRecordingNotActiveError,
   PreviewAutomationTargetUnavailableError,
+  PreviewAutomationViewportTimeoutError,
 } from "./previewAutomationErrors";
 import {
   createPreviewAutomationRequestConsumerAtom,
@@ -264,6 +265,62 @@ describe("previewAutomationRequestConsumer", () => {
     ).toMatchObject({
       _tag: "PreviewAutomationExecutionError",
       detail: { tabId: null },
+    });
+  });
+
+  it("preserves viewport render timeouts as timeout responses", () => {
+    const error = new PreviewAutomationViewportTimeoutError({
+      requestId: "request-resize",
+      environmentId,
+      threadId,
+      tabId,
+      timeoutMs: 2_500,
+    });
+
+    expect(
+      serializePreviewAutomationError(error, {
+        requestId: "request-resize",
+        operation: "resize",
+        environmentId,
+        threadId,
+        tabId,
+      }),
+    ).toMatchObject({
+      _tag: "PreviewAutomationTimeoutError",
+      detail: { tabId: "tab-1", timeoutMs: 2_500 },
+    });
+  });
+
+  it("maps desktop non-editable targets to the public typed response", () => {
+    expect(
+      serializePreviewAutomationError(
+        {
+          _tag: "PreviewAutomationTargetNotEditableError",
+          tabId: "tab-1",
+          selectorKind: "selector",
+          selectorLength: 6,
+        },
+        {
+          requestId: "request-type",
+          operation: "type",
+          environmentId,
+          threadId,
+          tabId,
+        },
+      ),
+    ).toEqual({
+      _tag: "PreviewAutomationTargetNotEditableError",
+      message:
+        "Preview automation type request request-type requires an editable target in tab tab-1.",
+      detail: {
+        requestId: "request-type",
+        operation: "type",
+        environmentId: "environment-1",
+        threadId: "thread-1",
+        tabId: "tab-1",
+        selectorKind: "selector",
+        selectorLength: 6,
+      },
     });
   });
 

@@ -18,16 +18,25 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewManager from "./Manager.ts";
 
-const { createFromPath, fromId, mkdir, showItemInFolder, webviewSend, writeFile, writeImage } =
-  vi.hoisted(() => ({
-    createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
-    fromId: vi.fn(() => null),
-    mkdir: vi.fn((_path: string) => undefined),
-    showItemInFolder: vi.fn(),
-    webviewSend: vi.fn(),
-    writeFile: vi.fn((_path: string, _data: Uint8Array) => undefined),
-    writeImage: vi.fn(),
-  }));
+const {
+  createFromPath,
+  fromId,
+  getFocusedWebContents,
+  mkdir,
+  showItemInFolder,
+  webviewSend,
+  writeFile,
+  writeImage,
+} = vi.hoisted(() => ({
+  createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
+  fromId: vi.fn(() => null),
+  getFocusedWebContents: vi.fn(() => null),
+  mkdir: vi.fn((_path: string) => undefined),
+  showItemInFolder: vi.fn(),
+  webviewSend: vi.fn(),
+  writeFile: vi.fn((_path: string, _data: Uint8Array) => undefined),
+  writeImage: vi.fn(),
+}));
 
 vi.mock("electron", () => ({
   clipboard: {
@@ -44,6 +53,7 @@ vi.mock("electron", () => ({
   },
   webContents: {
     fromId,
+    getFocusedWebContents,
   },
 }));
 
@@ -97,6 +107,8 @@ const withManager = <A>(
 describe("PreviewManager", () => {
   beforeEach(() => {
     fromId.mockClear();
+    getFocusedWebContents.mockReset();
+    getFocusedWebContents.mockReturnValue(null);
     mkdir.mockClear();
     writeFile.mockClear();
     showItemInFolder.mockClear();
@@ -254,16 +266,21 @@ describe("PreviewManager", () => {
     withManager((manager) =>
       Effect.gen(function* () {
         let effectiveZoom = 0.9;
+        let zoomReadable = true;
+        let url = "https://example.com";
         const listeners = new Map<string, (...args: unknown[]) => void>();
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
-          getURL: () => "https://example.com",
+          getURL: () => url,
           getTitle: () => "Example",
           isLoading: () => false,
-          getZoomFactor: () => effectiveZoom,
+          getZoomFactor: () => {
+            if (!zoomReadable) throw new Error("zoom unavailable");
+            return effectiveZoom;
+          },
           setZoomFactor,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
             listeners.set(event, listener);
@@ -281,25 +298,37 @@ describe("PreviewManager", () => {
             off: vi.fn(),
           },
         } as never);
-        const zoomFactors: number[] = [];
+        const states: PreviewManager.PreviewTabState[] = [];
 
         yield* manager.subscribeStateChanges((_tabId, state) =>
           Effect.sync(() => {
-            zoomFactors.push(state.zoomFactor);
+            states.push(state);
           }),
         );
         yield* manager.createTab("tab_zoom");
         yield* manager.registerWebview("tab_zoom", 42);
 
-        expect(zoomFactors.at(-1)).toBe(0.9);
+        expect(states.at(-1)?.zoomFactor).toBe(0.9);
         expect(setZoomFactor).not.toHaveBeenCalled();
 
         effectiveZoom = 1.25;
         listeners.get("did-navigate")?.();
         yield* Effect.yieldNow;
 
-        expect(zoomFactors.at(-1)).toBe(1.25);
+        expect(states.at(-1)?.zoomFactor).toBe(1.25);
         expect(setZoomFactor).not.toHaveBeenCalled();
+
+        zoomReadable = false;
+        url = "https://example.com/after-zoom-read-failed";
+        listeners.get("did-navigate")?.();
+        yield* Effect.yieldNow;
+
+        expect(states.at(-1)?.navStatus).toEqual({
+          kind: "Success",
+          url,
+          title: "Example",
+        });
+        expect(states.at(-1)?.zoomFactor).toBe(1.25);
       }),
     ),
   );
@@ -651,6 +680,7 @@ describe("PreviewManager", () => {
     withManager((manager) =>
       Effect.gen(function* () {
         let failKeyDown = false;
+        let humanInput: ((_event: unknown, signal: unknown) => void) | undefined;
         const sendCommand = vi.fn(async (method: string, params?: Record<string, unknown>) => {
           if (
             failKeyDown &&
@@ -659,8 +689,25 @@ describe("PreviewManager", () => {
           ) {
             throw new Error("key dispatch failed");
           }
+          if (method === "Input.dispatchKeyEvent" && params?.["type"] === "keyDown") {
+            humanInput?.(
+              {},
+              {
+                kind: "key",
+                key: params["key"],
+                code: params["code"] ?? "Digit1",
+              },
+            );
+          }
           return method === "Runtime.evaluate" ? { result: { value: { ok: true } } } : undefined;
         });
+        const restoreFocus = vi.fn();
+        const focus = vi.fn();
+        getFocusedWebContents.mockReturnValue({
+          id: 7,
+          isDestroyed: () => false,
+          focus: restoreFocus,
+        } as never);
         fromId.mockReturnValue({
           id: 42,
           isDestroyed: () => false,
@@ -669,11 +716,17 @@ describe("PreviewManager", () => {
           getTitle: () => "Example",
           isLoading: () => false,
           isDevToolsOpened: () => false,
+          focus,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn(),
           off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
+          ipc: {
+            on: vi.fn((channel: string, listener: typeof humanInput) => {
+              if (channel === "preview:human-input") humanInput = listener;
+            }),
+            off: vi.fn(),
+          },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setWindowOpenHandler: vi.fn(),
@@ -721,10 +774,19 @@ describe("PreviewManager", () => {
         expect(typeEvaluation).toBeDefined();
         expect(methods).not.toContain("Input.insertText");
         expect(enableIndex).toBeGreaterThanOrEqual(0);
+        expect(focus).toHaveBeenCalledOnce();
+        expect(restoreFocus).toHaveBeenCalledOnce();
+        expect(methods).toContain("Page.bringToFront");
         expect(enableIndex).toBeLessThan(focusOnIndex);
         expect(focusOnIndex).toBeLessThan(keyDownIndex);
         expect(keyDownIndex).toBeLessThan(keyUpIndex);
         expect(keyUpIndex).toBeLessThan(focusOffIndex);
+        expect(
+          calls.filter(
+            ([method, params]) =>
+              method === "Input.dispatchKeyEvent" && params?.["type"] === "keyUp",
+          ),
+        ).toHaveLength(1);
         expect(sendCommand).toHaveBeenCalledWith("Input.setIgnoreInputEvents", { ignore: false });
 
         sendCommand.mockClear();
@@ -743,6 +805,25 @@ describe("PreviewManager", () => {
         expect(sendCommand).toHaveBeenCalledWith("Emulation.setFocusEmulationEnabled", {
           enabled: false,
         });
+        expect(restoreFocus).toHaveBeenCalledTimes(2);
+        expect(
+          sendCommand.mock.calls.filter(
+            ([method, params]) =>
+              method === "Input.dispatchKeyEvent" && params?.["type"] === "keyUp",
+          ),
+        ).toHaveLength(1);
+
+        sendCommand.mockClear();
+        failKeyDown = false;
+        yield* manager.automationPress("tab_input", { key: "!" });
+        expect(sendCommand).toHaveBeenCalledWith("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "!",
+          modifiers: 0,
+          text: "!",
+          unmodifiedText: "!",
+        });
+        expect(restoreFocus).toHaveBeenCalledTimes(3);
       }),
     ),
   );

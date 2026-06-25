@@ -6,6 +6,7 @@ import {
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
   PreviewAutomationNoAvailableHostError,
+  PreviewAutomationTargetNotEditableError,
   PreviewTabId,
   ProviderInstanceId,
   ThreadId,
@@ -175,6 +176,49 @@ it.effect("preserves bounded request and remote selector diagnostics", () => {
       expect("selector" in error).toBe(false);
       expect("remoteMessage" in error).toBe(false);
       expect("remoteDetail" in error).toBe(false);
+    }),
+  );
+});
+
+it.effect("classifies a remote non-editable target without collapsing it to execution", () => {
+  const remoteError = {
+    _tag: "PreviewAutomationTargetNotEditableError",
+    message: "remote target details",
+    detail: { selectorKind: "focused-element" },
+  } as const;
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: remoteError,
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const error = yield* broker
+        .invoke<void>({
+          scope,
+          operation: "type",
+          input: { text: "hello" },
+          tabId: PreviewTabId.make("tab-1"),
+        })
+        .pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(PreviewAutomationTargetNotEditableError);
+      expect(error).toMatchObject({
+        operation: "type",
+        tabId: "tab-1",
+        selectorKind: "focused-element",
+        remoteTag: "PreviewAutomationTargetNotEditableError",
+      });
+      expect(error.message).toBe("Preview automation type requires an editable focused element.");
     }),
   );
 });

@@ -56,6 +56,25 @@ export class PreviewAutomationNavigationTimeoutError extends Schema.TaggedErrorC
   }
 }
 
+export class PreviewAutomationViewportTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationViewportTimeoutError>()(
+  "PreviewAutomationViewportTimeoutError",
+  {
+    requestId: TrimmedNonEmptyString,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: PreviewTabId,
+    timeoutMs: Schema.Int,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationTimeoutError" as const;
+  }
+
+  override get message(): string {
+    return `Preview viewport for request ${this.requestId} on environment ${this.environmentId} thread ${this.threadId} tab ${this.tabId} was not rendered within ${this.timeoutMs}ms.`;
+  }
+}
+
 export class PreviewAutomationTargetUnavailableError extends Schema.TaggedErrorClass<PreviewAutomationTargetUnavailableError>()(
   "PreviewAutomationTargetUnavailableError",
   {
@@ -94,6 +113,61 @@ export class PreviewAutomationRecordingNotActiveError extends Schema.TaggedError
   }
 }
 
+export class PreviewAutomationTargetNotEditableHostError extends Schema.TaggedErrorClass<PreviewAutomationTargetNotEditableHostError>()(
+  "PreviewAutomationTargetNotEditableHostError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: Schema.NullOr(PreviewTabId),
+    selectorKind: Schema.optional(Schema.Literals(["focused-element", "locator", "selector"])),
+    selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationTargetNotEditableError" as const;
+  }
+
+  override get message(): string {
+    return `Preview automation ${this.operation} request ${this.requestId} requires an editable target in tab ${this.tabId ?? "unassigned"}.`;
+  }
+}
+
+const targetNotEditableDiagnostics = (
+  cause: unknown,
+): {
+  readonly selectorKind?: "focused-element" | "locator" | "selector";
+  readonly selectorLength?: number;
+} | null => {
+  if (
+    typeof cause !== "object" ||
+    cause === null ||
+    !("_tag" in cause) ||
+    cause._tag !== "PreviewAutomationTargetNotEditableError"
+  ) {
+    return null;
+  }
+  const selectorKind =
+    "selectorKind" in cause &&
+    (cause.selectorKind === "focused-element" ||
+      cause.selectorKind === "locator" ||
+      cause.selectorKind === "selector")
+      ? cause.selectorKind
+      : undefined;
+  const selectorLength =
+    "selectorLength" in cause &&
+    typeof cause.selectorLength === "number" &&
+    Number.isInteger(cause.selectorLength) &&
+    cause.selectorLength >= 0
+      ? cause.selectorLength
+      : undefined;
+  return {
+    ...(selectorKind === undefined ? {} : { selectorKind }),
+    ...(selectorLength === undefined ? {} : { selectorLength }),
+  };
+};
+
 export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<PreviewAutomationOperationError>()(
   "PreviewAutomationOperationError",
   {
@@ -108,8 +182,17 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
   static fromCause(
     input: PreviewAutomationOperationContext & { readonly cause: unknown },
   ): PreviewAutomationHostError {
-    return isPreviewAutomationHostError(input.cause)
-      ? input.cause
+    if (isPreviewAutomationHostError(input.cause)) return input.cause;
+    const diagnostics = targetNotEditableDiagnostics(input.cause);
+    return diagnostics
+      ? new PreviewAutomationTargetNotEditableHostError({
+          requestId: input.requestId,
+          operation: input.operation,
+          environmentId: input.environmentId,
+          threadId: input.threadId,
+          tabId: input.tabId,
+          ...diagnostics,
+        })
       : new PreviewAutomationOperationError(input);
   }
 
@@ -125,8 +208,10 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
 export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationNavigationTimeoutError,
+  PreviewAutomationViewportTimeoutError,
   PreviewAutomationTargetUnavailableError,
   PreviewAutomationRecordingNotActiveError,
+  PreviewAutomationTargetNotEditableHostError,
   PreviewAutomationOperationError,
 ]);
 export type PreviewAutomationHostError = typeof PreviewAutomationHostError.Type;

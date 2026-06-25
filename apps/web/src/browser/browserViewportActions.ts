@@ -15,11 +15,7 @@ export class BrowserViewportCommitTimeoutError extends Error {
 const handlers = new Map<string, BrowserViewportHandler>();
 const commitTails = new Map<string, Promise<void>>();
 
-const runHandlerWithTimeout = (
-  tabId: string,
-  handler: BrowserViewportHandler,
-  setting: PreviewViewportSetting,
-): Promise<void> => {
+const runHandlerWithTimeout = (tabId: string, operation: Promise<void>): Promise<void> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timeoutId = setTimeout(
@@ -27,7 +23,7 @@ const runHandlerWithTimeout = (
       BROWSER_VIEWPORT_COMMIT_TIMEOUT_MS,
     );
   });
-  return Promise.race([Promise.resolve().then(() => handler(setting)), timeout]).finally(() => {
+  return Promise.race([operation, timeout]).finally(() => {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   });
 };
@@ -47,18 +43,24 @@ export function commitBrowserViewportChange(
   setting: PreviewViewportSetting,
 ): Promise<void> {
   const previous = commitTails.get(tabId) ?? Promise.resolve();
-  const commit = previous
+  const started = previous
     .catch(() => undefined)
     .then(() => {
       const handler = handlers.get(tabId);
-      return handler
-        ? runHandlerWithTimeout(tabId, handler, setting)
+      const operation = handler
+        ? Promise.resolve().then(() => handler(setting))
         : Promise.reject(new Error(`No visible browser viewport handler for tab ${tabId}`));
+      return { operation };
     });
-  commitTails.set(tabId, commit);
+  // The queue follows the real handler lifetime, not the caller-facing timeout.
+  // A slow commit therefore cannot time out, release the queue, and overwrite a
+  // newer viewport after that newer request has already completed.
+  const execution = started.then(({ operation }) => operation);
+  const result = started.then(({ operation }) => runHandlerWithTimeout(tabId, operation));
+  commitTails.set(tabId, execution);
   const clear = () => {
-    if (commitTails.get(tabId) === commit) commitTails.delete(tabId);
+    if (commitTails.get(tabId) === execution) commitTails.delete(tabId);
   };
-  void commit.then(clear, clear);
-  return commit;
+  void execution.then(clear, clear);
+  return result;
 }

@@ -71,12 +71,15 @@ describe("browserViewportActions", () => {
     unsubscribe();
   });
 
-  it("releases the per-tab queue when a viewport handler never settles", async () => {
+  it("does not let a timed-out handler overtake a newer viewport commit", async () => {
     vi.useFakeTimers();
     try {
-      const never = new Promise<void>(() => undefined);
+      let releaseFirst: (() => void) | undefined;
+      const delayed = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
       const handler = vi.fn(async (_setting: PreviewViewportSetting): Promise<void> => undefined);
-      handler.mockImplementationOnce(() => never).mockResolvedValueOnce(undefined);
+      handler.mockImplementationOnce(() => delayed).mockResolvedValueOnce(undefined);
       const unsubscribe = subscribeBrowserViewportChange("tab-timeout", handler);
       const first = commitBrowserViewportChange("tab-timeout", {
         _tag: "freeform",
@@ -94,6 +97,9 @@ describe("browserViewportActions", () => {
 
       await vi.advanceTimersByTimeAsync(BROWSER_VIEWPORT_COMMIT_TIMEOUT_MS);
       await firstResult;
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      releaseFirst?.();
       await second;
 
       expect(handler).toHaveBeenCalledTimes(2);

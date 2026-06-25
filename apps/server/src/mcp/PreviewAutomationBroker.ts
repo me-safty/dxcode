@@ -10,6 +10,7 @@ import {
   PreviewAutomationRequestQueueClosedError,
   PreviewAutomationResultTooLargeError,
   PreviewAutomationTabNotFoundError,
+  PreviewAutomationTargetNotEditableError,
   PreviewAutomationTimeoutError,
   PreviewAutomationUnsupportedClientError,
   type PreviewAutomationError,
@@ -181,6 +182,36 @@ const classifyResponseError = (
       return new PreviewAutomationInvalidSelectorError({
         ...context,
         ...remoteDiagnostics,
+      });
+    }
+    case "PreviewAutomationTargetNotEditableError": {
+      const detail =
+        typeof error.detail === "object" && error.detail !== null ? error.detail : undefined;
+      const remoteSelectorKind =
+        detail &&
+        "selectorKind" in detail &&
+        (detail.selectorKind === "focused-element" ||
+          detail.selectorKind === "locator" ||
+          detail.selectorKind === "selector")
+          ? detail.selectorKind
+          : undefined;
+      const remoteSelectorLength =
+        detail &&
+        "selectorLength" in detail &&
+        typeof detail.selectorLength === "number" &&
+        Number.isInteger(detail.selectorLength) &&
+        detail.selectorLength >= 0
+          ? detail.selectorLength
+          : undefined;
+      return new PreviewAutomationTargetNotEditableError({
+        ...context,
+        ...remoteDiagnostics,
+        ...(remoteSelectorKind === undefined && context.selectorKind === undefined
+          ? {}
+          : { selectorKind: remoteSelectorKind ?? context.selectorKind }),
+        ...(remoteSelectorLength === undefined && context.selectorLength === undefined
+          ? {}
+          : { selectorLength: remoteSelectorLength ?? context.selectorLength }),
       });
     }
     case "PreviewAutomationResultTooLargeError": {

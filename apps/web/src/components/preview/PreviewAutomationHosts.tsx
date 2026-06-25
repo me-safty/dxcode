@@ -34,6 +34,7 @@ import {
   startBrowserRecording,
   stopBrowserRecording,
 } from "~/browser/browserRecording";
+import { resolveBrowserRecordingStopTarget } from "~/browser/browserRecordingScope";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { isElectron } from "~/env";
 import { useEnvironments } from "~/state/environments";
@@ -48,6 +49,7 @@ import {
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationRecordingNotActiveError,
   PreviewAutomationTargetUnavailableError,
+  PreviewAutomationViewportTimeoutError,
 } from "./previewAutomationErrors";
 import { createPreviewAutomationRequestConsumerAtom } from "./previewAutomationRequestConsumer";
 import { createPreviewAutomationClientId } from "./previewAutomationClientId";
@@ -159,9 +161,13 @@ const waitForRenderedViewport = async (
   tabId: string,
   setting: PreviewViewportSetting,
   timeoutMs: number,
+  context: {
+    readonly requestId: PreviewAutomationRequest["requestId"];
+    readonly environmentId: EnvironmentId;
+    readonly threadId: PreviewAutomationRequest["threadId"];
+  },
 ): Promise<PreviewRenderedViewportSize> => {
   const deadline = Date.now() + timeoutMs;
-  let lastError: unknown;
   while (Date.now() <= deadline) {
     try {
       const webview = findPreviewWebview(tabId);
@@ -179,15 +185,16 @@ const waitForRenderedViewport = async (
       ) {
         return renderedViewport;
       }
-    } catch (error) {
+    } catch {
       // Registration and navigation can transiently replace the guest while
       // React applies the server snapshot. Retry until the operation deadline.
-      lastError = error;
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
   }
-  throw new Error(`Timed out applying browser viewport for tab ${tabId}`, {
-    cause: lastError,
+  throw new PreviewAutomationViewportTimeoutError({
+    ...context,
+    tabId,
+    timeoutMs,
   });
 };
 
@@ -409,6 +416,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               ready.tabId,
               setting,
               input.timeoutMs ?? request.timeoutMs,
+              {
+                requestId: request.requestId,
+                environmentId,
+                threadId: request.threadId,
+              },
             );
             return {
               tabId: ready.tabId,
@@ -473,13 +485,14 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case "recordingStop": {
             const recordingTabId = readActiveBrowserRecordingTabId();
-            const artifact = recordingTabId ? await stopBrowserRecording(recordingTabId) : null;
+            const stopTabId = resolveBrowserRecordingStopTarget(tabId, recordingTabId);
+            const artifact = stopTabId ? await stopBrowserRecording(stopTabId) : null;
             if (!artifact) {
               throw new PreviewAutomationRecordingNotActiveError({
                 requestId: request.requestId,
                 environmentId,
                 threadId: request.threadId,
-                tabId: recordingTabId ?? tabId,
+                tabId,
               });
             }
             return artifact;
