@@ -74,7 +74,7 @@ const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.Stan
   if (exitCode !== 0) {
     return yield* new ServerCliCommandExitError({
       command: command.command,
-      args: command.args,
+      argumentCount: command.args.length,
       cwd: command.options.cwd,
       exitCode,
     });

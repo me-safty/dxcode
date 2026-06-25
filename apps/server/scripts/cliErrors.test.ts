@@ -6,14 +6,15 @@ describe("server CLI errors", () => {
   it("preserves failed command context without changing its message", () => {
     const error = new ServerCliCommandExitError({
       command: "vp",
-      args: ["pm", "publish"],
+      argumentCount: 2,
       cwd: "/repo",
       exitCode: 17,
     });
 
     assert.equal(error._tag, "ServerCliCommandExitError");
     assert.equal(error.command, "vp");
-    assert.deepEqual(error.args, ["pm", "publish"]);
+    assert.equal(error.argumentCount, 2);
+    assert.notProperty(error, "args");
     assert.equal(error.cwd, "/repo");
     assert.equal(error.exitCode, 17);
     assert.equal(error.message, "Command exited with non-zero exit code (17)");

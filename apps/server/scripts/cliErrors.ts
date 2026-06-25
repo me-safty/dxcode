@@ -4,7 +4,7 @@ export class ServerCliCommandExitError extends Schema.TaggedErrorClass<ServerCli
   "ServerCliCommandExitError",
   {
     command: Schema.String,
-    args: Schema.Array(Schema.String),
+    argumentCount: Schema.Number,
     cwd: Schema.optional(Schema.String),
     exitCode: Schema.Int,
   },
