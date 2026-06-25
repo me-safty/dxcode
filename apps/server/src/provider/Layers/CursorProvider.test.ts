@@ -429,12 +429,15 @@ describe("buildCursorCapabilitiesFromConfigOptions", () => {
 describe("checkCursorProviderStatus", () => {
   it("reports the install docs when the Cursor CLI command is missing", async () => {
     const provider = await runNode(
-      checkCursorProviderStatus({
-        enabled: true,
-        binaryPath: missingCursorBinaryPath,
-        apiEndpoint: "",
-        customModels: [],
-      }),
+      checkCursorProviderStatus(
+        {
+          enabled: true,
+          binaryPath: missingCursorBinaryPath,
+          apiEndpoint: "",
+          customModels: [],
+        },
+        process.cwd(),
+      ),
     );
 
     expect(provider).toMatchObject({
