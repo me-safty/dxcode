@@ -66,7 +66,7 @@ describe("DesktopClerk", () => {
           {
             storage: storageAdapter,
             passkeys: true,
-            renderer: { scheme: "t3code-dev", host: "app" },
+            renderer: { scheme: "t3code-dev", host: "app.t3.codes" },
           },
         ],
       ]);
@@ -139,7 +139,7 @@ describe("DesktopClerk", () => {
         {
           storage: storageAdapter,
           passkeys: true,
-          renderer: { scheme, host: "app" },
+          renderer: { scheme, host: "app.t3.codes" },
         },
       ],
     ]);
