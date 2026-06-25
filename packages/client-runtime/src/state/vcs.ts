@@ -34,6 +34,48 @@ export function createVcsEnvironmentAtoms<R, E>(
           ),
         ),
     }),
+    pull: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:pull",
+      tag: WS_METHODS.vcsPull,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
+    refreshStatus: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:refresh-status",
+      tag: WS_METHODS.vcsRefreshStatus,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
+    createWorktree: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:create-worktree",
+      tag: WS_METHODS.vcsCreateWorktree,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
+    removeWorktree: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:remove-worktree",
+      tag: WS_METHODS.vcsRemoveWorktree,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
+    createRef: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:create-ref",
+      tag: WS_METHODS.vcsCreateRef,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
+    switchRef: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:switch-ref",
+      tag: WS_METHODS.vcsSwitchRef,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
+    init: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:init",
+      tag: WS_METHODS.vcsInit,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
     panelSnapshot: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:vcs:panel:snapshot",
       tag: WS_METHODS.vcsPanelSnapshot,
@@ -54,21 +96,6 @@ export function createVcsEnvironmentAtoms<R, E>(
       tag: WS_METHODS.vcsPanelStashDetails,
       staleTimeMs: 5_000,
     }),
-    panelEnrichWorkingTreeFiles: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:vcs:panel:enrich-working-tree-files",
-      tag: WS_METHODS.vcsPanelEnrichWorkingTreeFiles,
-      staleTimeMs: 5_000,
-    }),
-    panelReadFileDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:vcs:panel:read-file-diff",
-      tag: WS_METHODS.vcsPanelReadFileDiff,
-      staleTimeMs: 5_000,
-    }),
-    panelCompare: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:vcs:panel:compare",
-      tag: WS_METHODS.vcsPanelCompare,
-      staleTimeMs: 5_000,
-    }),
     panelStageFiles: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:vcs:panel:stage-files",
       tag: WS_METHODS.vcsPanelStageFiles,
@@ -86,6 +113,16 @@ export function createVcsEnvironmentAtoms<R, E>(
       tag: WS_METHODS.vcsPanelDiscardFiles,
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
+    }),
+    panelEnrichWorkingTreeFiles: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:vcs:panel:enrich-working-tree-files",
+      tag: WS_METHODS.vcsPanelEnrichWorkingTreeFiles,
+      staleTimeMs: 5_000,
+    }),
+    panelReadFileDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:vcs:panel:read-file-diff",
+      tag: WS_METHODS.vcsPanelReadFileDiff,
+      staleTimeMs: 5_000,
     }),
     panelCommitStaged: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:vcs:panel:commit-staged",
@@ -201,47 +238,10 @@ export function createVcsEnvironmentAtoms<R, E>(
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
     }),
-    pull: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:vcs:pull",
-      tag: WS_METHODS.vcsPull,
-      scheduler: vcsCommandScheduler,
-      concurrency: vcsCommandConcurrency,
-    }),
-    refreshStatus: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:vcs:refresh-status",
-      tag: WS_METHODS.vcsRefreshStatus,
-      scheduler: vcsCommandScheduler,
-      concurrency: vcsCommandConcurrency,
-    }),
-    createWorktree: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:vcs:create-worktree",
-      tag: WS_METHODS.vcsCreateWorktree,
-      scheduler: vcsCommandScheduler,
-      concurrency: vcsCommandConcurrency,
-    }),
-    removeWorktree: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:vcs:remove-worktree",
-      tag: WS_METHODS.vcsRemoveWorktree,
-      scheduler: vcsCommandScheduler,
-      concurrency: vcsCommandConcurrency,
-    }),
-    createRef: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:vcs:create-ref",
-      tag: WS_METHODS.vcsCreateRef,
-      scheduler: vcsCommandScheduler,
-      concurrency: vcsCommandConcurrency,
-    }),
-    switchRef: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:vcs:switch-ref",
-      tag: WS_METHODS.vcsSwitchRef,
-      scheduler: vcsCommandScheduler,
-      concurrency: vcsCommandConcurrency,
-    }),
-    init: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:vcs:init",
-      tag: WS_METHODS.vcsInit,
-      scheduler: vcsCommandScheduler,
-      concurrency: vcsCommandConcurrency,
+    panelCompare: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:vcs:panel:compare",
+      tag: WS_METHODS.vcsPanelCompare,
+      staleTimeMs: 5_000,
     }),
   };
 }
