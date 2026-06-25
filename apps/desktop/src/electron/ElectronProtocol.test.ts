@@ -99,6 +99,34 @@ describe("ElectronProtocol", () => {
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
+  it.effect("retries transient renderer target failures", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      netFetchMock
+        .mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5733"))
+        .mockResolvedValueOnce(new Response("ready"));
+
+      const response = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "t3code-dev",
+            targetOrigin: new URL("http://127.0.0.1:5733/"),
+            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: undefined,
+          });
+          return yield* Effect.promise(() => handler!(new Request("t3code-dev://app/")));
+        }),
+      );
+
+      assert.equal(yield* Effect.promise(() => response.text()), "ready");
+      assert.equal(netFetchMock.mock.calls.length, 2);
+    }).pipe(Effect.provide(ElectronProtocol.layer)),
+  );
+
   it.effect("preserves protocol registration failures", () =>
     Effect.gen(function* () {
       const cause = new Error("protocol registration failed");
