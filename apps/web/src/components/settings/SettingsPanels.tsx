@@ -1975,7 +1975,7 @@ export function ArchivedThreadsPanel() {
           {archivedGroups.map(({ project, threads: projectThreads }) => {
             const projectKey = `${project.environmentId}:${project.id}`;
             const isExpanded = isSearchingArchive || expandedProjectKeys.has(projectKey);
-            const projectBulkScope = isSearchingArchive ? "matching" : "all";
+            const bulkScope = isSearchingArchive ? "matching" : "all";
             return (
               <section
                 key={projectKey}
@@ -1991,15 +1991,10 @@ export function ArchivedThreadsPanel() {
                     event.preventDefault();
                     void (async () => {
                       const result = await settlePromise(() =>
-                        handleArchivedProjectContextMenu(
-                          project.name,
-                          projectThreads,
-                          projectBulkScope,
-                          {
-                            x: event.clientX,
-                            y: event.clientY,
-                          },
-                        ),
+                        handleArchivedProjectContextMenu(project.name, projectThreads, bulkScope, {
+                          x: event.clientX,
+                          y: event.clientY,
+                        }),
                       );
                       if (result._tag === "Failure") {
                         const error = squashAtomCommandFailure(result);
@@ -2017,8 +2012,7 @@ export function ArchivedThreadsPanel() {
                 >
                   <button
                     type="button"
-                    className="group flex min-w-0 items-center gap-2 text-left disabled:cursor-default"
-                    disabled={isSearchingArchive}
+                    className="group flex min-w-0 items-center gap-2 text-left"
                     aria-expanded={isExpanded}
                     onClick={() => toggleProjectExpanded(projectKey)}
                   >
