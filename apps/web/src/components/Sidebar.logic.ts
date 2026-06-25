@@ -24,30 +24,6 @@ type SidebarProject = {
   updatedAt?: string | undefined;
 };
 
-type SidebarThreadParentRelationInput = {
-  readonly parentRelation?: { readonly kind: string } | null | undefined;
-};
-
-type SidebarThreadVisibilityInput = {
-  readonly id: string;
-  readonly parentRelation?:
-    | {
-        readonly kind: string;
-        readonly parentThreadId?: string | undefined;
-        readonly parentActivitySequence?: number | undefined;
-        readonly depth?: number | undefined;
-        readonly status?: string | undefined;
-      }
-    | null
-    | undefined;
-  readonly session?: { readonly status: string } | null | undefined;
-};
-
-export type SidebarThreadRowModel<TThread> = {
-  readonly thread: TThread;
-  readonly indentLevel: number;
-};
-
 export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {
@@ -319,136 +295,6 @@ export function getVisibleSidebarThreadIds<TThreadId>(
   );
 }
 
-export function isRootSidebarThread<T extends SidebarThreadParentRelationInput>(
-  thread: T,
-): boolean {
-  return thread.parentRelation?.kind !== "subagent";
-}
-
-export function isContextualSubagentSidebarThread<T extends SidebarThreadVisibilityInput>(
-  thread: T,
-  activeThreadId: string | null | undefined,
-): boolean {
-  if (thread.parentRelation?.kind !== "subagent") {
-    return false;
-  }
-  if (activeThreadId !== null && activeThreadId !== undefined && thread.id === activeThreadId) {
-    return true;
-  }
-  return thread.parentRelation.status === "running" || thread.session?.status === "running";
-}
-
-function activeSubagentPathThreadIds<T extends SidebarThreadVisibilityInput>(
-  threads: readonly T[],
-  activeThreadId: string | null | undefined,
-): Set<string> {
-  const path = new Set<string>();
-  if (activeThreadId === null || activeThreadId === undefined) {
-    return path;
-  }
-
-  const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
-  let current = threadById.get(activeThreadId) ?? null;
-  while (current) {
-    if (path.has(current.id)) {
-      break;
-    }
-    path.add(current.id);
-    const relation = current.parentRelation;
-    current =
-      relation?.kind === "subagent" && relation.parentThreadId
-        ? (threadById.get(relation.parentThreadId) ?? null)
-        : null;
-  }
-  return path;
-}
-
-function compareSubagentSidebarRows<T extends SidebarThreadVisibilityInput>(
-  left: SidebarThreadRowModel<T>,
-  right: SidebarThreadRowModel<T>,
-): number {
-  const leftRelation =
-    left.thread.parentRelation?.kind === "subagent" ? left.thread.parentRelation : null;
-  const rightRelation =
-    right.thread.parentRelation?.kind === "subagent" ? right.thread.parentRelation : null;
-  const sequence =
-    (leftRelation?.parentActivitySequence ?? 0) - (rightRelation?.parentActivitySequence ?? 0);
-  if (sequence !== 0) {
-    return sequence;
-  }
-  return left.thread.id.localeCompare(right.thread.id);
-}
-
-export function buildSidebarThreadRows<T extends SidebarThreadVisibilityInput>(
-  threads: readonly T[],
-  activeThreadId: string | null | undefined,
-): SidebarThreadRowModel<T>[] {
-  const rootRows: SidebarThreadRowModel<T>[] = [];
-  const childRowsByParentId = new Map<
-    string,
-    { row: SidebarThreadRowModel<T>; visible: boolean }[]
-  >();
-  const orphanChildRows: SidebarThreadRowModel<T>[] = [];
-  const activePathThreadIds = activeSubagentPathThreadIds(threads, activeThreadId);
-
-  for (const thread of threads) {
-    if (isRootSidebarThread(thread)) {
-      rootRows.push({ thread, indentLevel: 0 });
-      continue;
-    }
-    const visible =
-      activePathThreadIds.has(thread.id) ||
-      isContextualSubagentSidebarThread(thread, activeThreadId);
-
-    const indentLevel = Math.max(1, thread.parentRelation?.depth ?? 1);
-    const row = { thread, indentLevel };
-    const parentThreadId = thread.parentRelation?.parentThreadId;
-    if (!parentThreadId) {
-      if (visible) {
-        orphanChildRows.push(row);
-      }
-      continue;
-    }
-    const existing = childRowsByParentId.get(parentThreadId);
-    if (existing) {
-      existing.push({ row, visible });
-    } else {
-      childRowsByParentId.set(parentThreadId, [{ row, visible }]);
-    }
-  }
-  for (const children of childRowsByParentId.values()) {
-    children.sort((left, right) => compareSubagentSidebarRows(left.row, right.row));
-  }
-
-  const rows: SidebarThreadRowModel<T>[] = [];
-  const renderedChildThreadIds = new Set<string>();
-  const appendRow = (row: SidebarThreadRowModel<T>) => {
-    rows.push(row);
-    appendChildren(row);
-  };
-  const appendChildren = (row: SidebarThreadRowModel<T>) => {
-    const childRows = childRowsByParentId.get(row.thread.id) ?? [];
-    for (const child of childRows) {
-      renderedChildThreadIds.add(child.row.thread.id);
-      if (child.visible) {
-        appendRow(child.row);
-      } else {
-        appendChildren(child.row);
-      }
-    }
-  };
-  for (const row of rootRows) {
-    appendRow(row);
-  }
-  for (const child of [...childRowsByParentId.values()].flat()) {
-    if (child.visible && !renderedChildThreadIds.has(child.row.thread.id)) {
-      appendRow(child.row);
-    }
-  }
-  rows.push(...orphanChildRows);
-  return rows;
-}
-
 export function getSidebarThreadIdsToPrewarm<TThreadId>(
   visibleThreadIds: readonly TThreadId[],
   limit = SIDEBAR_THREAD_PREWARM_LIMIT,
@@ -521,26 +367,6 @@ export function resolveThreadRowClassName(input: {
   }
 
   return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
-}
-
-export function resolveThreadRowIndentStyle(input: {
-  indentLevel: number;
-  flattenHierarchyChrome: boolean;
-}): React.CSSProperties | undefined {
-  if (input.flattenHierarchyChrome || input.indentLevel <= 0) {
-    return undefined;
-  }
-
-  return {
-    paddingLeft: `${1.25 + (input.indentLevel - 1) * 0.875}rem`,
-  };
-}
-
-export function resolveThreadListClassName(input: { hideThreadGroupRail: boolean }): string {
-  return cn(
-    "mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5",
-    input.hideThreadGroupRail && "mx-0 border-l-0 px-0 sm:mx-0 sm:px-0",
-  );
 }
 
 export function resolveThreadStatusPill(input: {

@@ -161,8 +161,6 @@ export interface ContextMenuItemSchemaType {
   readonly children?: readonly ContextMenuItemSchemaType[];
 }
 
-export type T3HostBridge = object;
-
 export const ContextMenuItemSchema: Schema.Codec<ContextMenuItemSchemaType> = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
