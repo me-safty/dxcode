@@ -5,6 +5,7 @@ import {
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
+  type TerminalResizeInput,
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
   type TerminalSummary,
@@ -2276,7 +2277,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       });
     });
 
-    const resizeLocked = Effect.fn("terminal.resize")(function* (input) {
+    const resizeLocked = Effect.fn("terminal.resize")(function* (input: TerminalResizeInput) {
       const session = yield* getSession(input.threadId, input.terminalId);
       // ResizeObserver traffic can already be in flight when the UI closes the session.
       if (Option.isNone(session)) {

@@ -251,6 +251,7 @@ describe("ProcessDiagnostics", () => {
         stderrBytes: 21,
         stdoutTruncated: false,
         stderrTruncated: false,
+        stderrExcerpt: "process access denied",
       });
       expect(error.message).toBe(
         `Process diagnostics query 'ps' failed with exit code 17 in '${process.cwd()}'.`,

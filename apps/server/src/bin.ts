@@ -6,6 +6,7 @@ import { Command } from "effect/unstable/cli";
 import * as CliError from "effect/unstable/cli/CliError";
 
 import * as NetService from "@t3tools/shared/Net";
+import { HostProcessPlatformLive } from "@t3tools/shared/hostProcess";
 import packageJson from "../package.json" with { type: "json" };
 import { authCommand } from "./cli/auth.ts";
 import { cloudCommand } from "./cli/cloud.ts";
@@ -14,7 +15,11 @@ import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+const CliRuntimeLayer = Layer.mergeAll(
+  NodeServices.layer,
+  NetService.layer,
+  HostProcessPlatformLive,
+);
 
 const cloudPublicConfigMissingMessage =
   "T3 Cloud commands are unavailable: this build is missing T3 Cloud public configuration.";

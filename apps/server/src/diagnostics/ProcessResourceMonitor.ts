@@ -279,6 +279,14 @@ export const make = Effect.fn("makeProcessResourceMonitor")(function* () {
         cause,
       }),
     }));
+  const recordUnknownSamplingFailure = (cause: unknown) =>
+    Ref.update(state, (current) => ({
+      ...current,
+      lastFailure: new ProcessResourceSamplingError({
+        failureTag: "ProcessResourceSamplingError",
+        cause,
+      }),
+    }));
 
   const sampleOnce = Effect.gen(function* () {
     const sampledAt = yield* DateTime.now;
@@ -304,6 +312,8 @@ export const make = Effect.fn("makeProcessResourceMonitor")(function* () {
       ProcessDiagnosticsNotDescendantError: recordSamplingFailure,
       ProcessDiagnosticsSignalFailedError: recordSamplingFailure,
     }),
+    Effect.catch(recordUnknownSamplingFailure),
+    Effect.catchDefect(recordUnknownSamplingFailure),
   );
 
   yield* Effect.forever(sampleOnce.pipe(Effect.andThen(Effect.sleep(SAMPLE_INTERVAL_MS)))).pipe(

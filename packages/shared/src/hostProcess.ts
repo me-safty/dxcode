@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as NodeOS from "node:os";
 
 export const HostProcessPlatform = Context.Reference<NodeJS.Platform>(
@@ -8,6 +9,7 @@ export const HostProcessPlatform = Context.Reference<NodeJS.Platform>(
     defaultValue: () => process.platform,
   },
 );
+export const HostProcessPlatformLive = Layer.succeed(HostProcessPlatform, process.platform);
 
 export const HostProcessArchitecture = Context.Reference<NodeJS.Architecture>(
   "@t3tools/shared/hostProcess/HostProcessArchitecture",

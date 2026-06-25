@@ -9,9 +9,10 @@ import * as Schema from "effect/Schema";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import { vi } from "vite-plus/test";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform, HostProcessPlatformLive } from "@t3tools/shared/hostProcess";
 
 import {
   BootstrapEnvelopeDecodeError,
@@ -57,8 +58,9 @@ vi.mock("node:fs", async (importOriginal) => {
 
 const TestEnvelopeSchema = Schema.Struct({ mode: Schema.String });
 const encodeTestEnvelopeSchema = Schema.encodeEffect(Schema.fromJsonString(TestEnvelopeSchema));
+const BootstrapTestLayer = Layer.mergeAll(NodeServices.layer, HostProcessPlatformLive);
 
-it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
+it.layer(BootstrapTestLayer)("readBootstrapEnvelope", (it) => {
   it.effect("reads a bootstrap envelope from a provided fd", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

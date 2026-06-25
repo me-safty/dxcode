@@ -30,6 +30,7 @@ export interface ProcessRow {
 const PROCESS_QUERY_TIMEOUT_MS = 1_000;
 const POSIX_PROCESS_QUERY_COMMAND = "pid=,ppid=,pgid=,stat=,pcpu=,rss=,etime=,command=";
 const PROCESS_QUERY_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const PROCESS_QUERY_ERROR_OUTPUT_EXCERPT_CHARS = 2_000;
 
 export interface ProcessDiagnosticsShape {
   readonly read: Effect.Effect<ServerProcessDiagnosticsResult>;
@@ -69,6 +70,7 @@ class ProcessDiagnosticsQueryFailedError extends Schema.TaggedErrorClass<Process
     stderrBytes: Schema.optional(Schema.Number),
     stdoutTruncated: Schema.optional(Schema.Boolean),
     stderrTruncated: Schema.optional(Schema.Boolean),
+    stderrExcerpt: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -121,6 +123,26 @@ const ProcessDiagnosticsError = Schema.Union([
 ]);
 type ProcessDiagnosticsError = typeof ProcessDiagnosticsError.Type;
 const isProcessDiagnosticsError = Schema.is(ProcessDiagnosticsError);
+
+function redactDiagnosticOutput(output: string): string {
+  return output
+    .replace(/([A-Za-z0-9._%+-]+):\/\/([^/\s:@]+):([^@\s/]+)@/g, "$1://$2:[redacted]@")
+    .replace(
+      /\b((?:access[_-]?token|api[_-]?key|auth[_-]?token|credential|password|secret|token)\s*[=:]\s*)([^\s'"`]+)/gi,
+      "$1[redacted]",
+    );
+}
+
+function truncateDiagnosticOutput(output: string): string {
+  const trimmed = output.trim();
+  if (trimmed.length <= PROCESS_QUERY_ERROR_OUTPUT_EXCERPT_CHARS) return trimmed;
+  return `${trimmed.slice(0, PROCESS_QUERY_ERROR_OUTPUT_EXCERPT_CHARS)}\n\n[truncated]`;
+}
+
+function diagnosticStderrExcerpt(stderr: string): string | undefined {
+  const excerpt = truncateDiagnosticOutput(redactDiagnosticOutput(stderr));
+  return excerpt.length > 0 ? excerpt : undefined;
+}
 
 function parsePositiveInt(value: string): number | null {
   const parsed = Number.parseInt(value, 10);
@@ -431,6 +453,7 @@ function readPosixProcessRows(): Effect.Effect<
               stderrBytes: result.stderrBytes,
               stdoutTruncated: result.stdoutTruncated,
               stderrTruncated: result.stderrTruncated,
+              stderrExcerpt: diagnosticStderrExcerpt(result.stderr),
             }),
           )
         : Effect.succeed(parsePosixProcessRows(result.stdout)),
@@ -467,6 +490,7 @@ function readWindowsProcessRows(): Effect.Effect<
               stderrBytes: result.stderrBytes,
               stdoutTruncated: result.stdoutTruncated,
               stderrTruncated: result.stderrTruncated,
+              stderrExcerpt: diagnosticStderrExcerpt(result.stderr),
             }),
           )
         : Effect.succeed(parseWindowsProcessRows(result.stdout)),

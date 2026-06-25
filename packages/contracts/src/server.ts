@@ -365,6 +365,7 @@ export const ServerProcessResourceHistorySummary = Schema.Struct({
 export type ServerProcessResourceHistorySummary = typeof ServerProcessResourceHistorySummary.Type;
 
 export const ServerProcessResourceHistoryFailureTag = Schema.Literals([
+  "ProcessResourceSamplingError",
   "ProcessDiagnosticsQueryTimeoutError",
   "ProcessDiagnosticsQueryFailedError",
   "ProcessDiagnosticsServerProcessSignalError",
