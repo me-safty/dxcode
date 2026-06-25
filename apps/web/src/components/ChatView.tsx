@@ -1126,6 +1126,8 @@ function ChatViewContent(props: ChatViewProps) {
   const [localServerErrorsByThreadKey, setLocalServerErrorsByThreadKey] = useState<
     Record<string, string | null>
   >({});
+  const [sourceControlMetadataErrorsByThreadKey, setSourceControlMetadataErrorsByThreadKey] =
+    useState<Record<string, string | null>>({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
@@ -1249,6 +1251,7 @@ function ChatViewContent(props: ChatViewProps) {
       ? null
       : ((draftId ? localDraftErrorsByDraftId[draftId] : null) ?? null);
   const localServerError = localServerErrorsByThreadKey[routeThreadKey] ?? null;
+  const sourceControlMetadataError = sourceControlMetadataErrorsByThreadKey[routeThreadKey] ?? null;
   const localDraftThread = useMemo(
     () =>
       draftThread
@@ -1274,7 +1277,7 @@ function ChatViewContent(props: ChatViewProps) {
     });
   }, [activeThreadParentRef, navigate]);
   const threadError = isServerThread
-    ? (localServerError ?? serverThread?.session?.lastError ?? null)
+    ? (localServerError ?? sourceControlMetadataError ?? serverThread?.session?.lastError ?? null)
     : localDraftError;
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
@@ -2871,14 +2874,39 @@ function ChatViewContent(props: ChatViewProps) {
     async (input: { readonly branch: string | null; readonly worktreePath: string | null }) => {
       if (!activeThreadRef) return;
       if (isServerThread) {
-        await updateThreadMetadata({
-          environmentId: activeThreadRef.environmentId,
+        const { environmentId, threadId } = activeThreadRef;
+        const result = await updateThreadMetadata({
+          environmentId,
           input: {
-            threadId: activeThreadRef.threadId,
+            threadId,
             branch: input.branch,
             worktreePath: input.worktreePath,
           },
         });
+        if (result._tag === "Success") {
+          setSourceControlMetadataErrorsByThreadKey((existing) => {
+            const threadKey = scopedThreadKey(activeThreadRef);
+            if ((existing[threadKey] ?? null) === null) {
+              return existing;
+            }
+            return {
+              ...existing,
+              [threadKey]: null,
+            };
+          });
+          return;
+        }
+        if (isAtomCommandInterrupted(result)) return;
+        const error = squashAtomCommandFailure(result);
+        setSourceControlMetadataErrorsByThreadKey((existing) => ({
+          ...existing,
+          [scopedThreadKey(activeThreadRef)]:
+            typeof error === "string"
+              ? error
+              : error instanceof Error
+                ? error.message
+                : "Failed to update thread source control.",
+        }));
         return;
       }
       setDraftThreadContext(draftId ?? activeThreadRef, {

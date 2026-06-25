@@ -4,7 +4,7 @@
 
 T3 Code includes a Git-backed Version Control surface in the right panel. The panel is scoped to the active environment and repository cwd, uses server-owned Git operations, and reuses the existing VCS status, source-control provider, and WebSocket RPC infrastructure rather than shelling out from React.
 
-The panel does not require an existing provider session or started server thread. Draft/new conversations can open Version Control as soon as they have project context and a repository cwd. Thread metadata updates caused by branch switching or detached checkout are routed by `ChatView`: server threads persist through `thread.meta.update`, while draft conversations update local draft thread context.
+The panel does not require an existing provider session or started server thread. Draft/new conversations can open Version Control as soon as they have project context and a repository cwd. Thread metadata updates caused by branch switching or detached checkout are routed by `ChatView`: server threads persist through `thread.meta.update`, while draft conversations update local draft thread context. Server-thread metadata failures surface in the chat error banner through source-control-specific per-thread state. Dismissal clears that local metadata error without pretending provider session errors are dismissible, and overlapping metadata updates are sequenced per thread so stale failures cannot overwrite a newer successful checkout.
 
 The panel is intentionally an overview and high-level workflow surface. It focuses on current work, branch sync state, remotes, stashes, selected-file commit/stash flows, and compact branch/commit inspection. It is not a full VS Code SCM replacement and does not implement hunk-level staging.
 
@@ -17,6 +17,7 @@ Primary implementation files:
 - `apps/web/src/components/RightPanelTabs.tsx`
 - `apps/server/src/sourceControl/SourceControlPanelService.ts`
 - `apps/server/src/vcs/VcsStatusBroadcaster.ts`
+- `apps/server/src/vcs/VcsLocalWatch.ts`
 - `apps/server/src/ws.ts`
 - `packages/contracts/src/rpc.ts`
 - `packages/contracts/src/ipc.ts`
@@ -49,7 +50,7 @@ The repository summary shows the current ref, upstream status, changed-file coun
 
 ## Live Updates
 
-The panel refreshes from the VCS status stream, explicit panel operations, window focus, and document visibility changes. `VcsStatusBroadcaster` also maintains ref-counted filesystem watchers per cwd while a repository is subscribed. Internal `.git/` events are ignored before any refresh decision, file events are debounced, remaining paths are checked against Git ignore rules when possible, and only publish a new status when the working-tree fingerprint actually changes.
+The panel refreshes from the VCS status stream, explicit panel operations, window focus, and document visibility changes. `VcsStatusBroadcaster` also maintains ref-counted filesystem watchers per cwd while a repository is subscribed, with local path filtering and debounced refresh signal handling factored into `VcsLocalWatch`. Internal `.git/` events are ignored before any refresh decision, file events are debounced, remaining paths are checked against Git ignore rules when possible, and only publish a new status when the working-tree fingerprint actually changes.
 
 This keeps externally-created changes visible without requiring a window blur/refocus cycle, while avoiding repeated no-op refreshes for gitignored files or unchanged status.
 
@@ -64,15 +65,17 @@ This keeps externally-created changes visible without requiring a window blur/re
 - Stashes.
 - Other checked-out worktree branch labels when available.
 
+Checked-out worktree labels are resolved from `git worktree list --porcelain` first. When that output is unavailable or empty, the service falls back to `git branch --format` worktree placeholders where supported; older Git versions that do not support `%(worktreepath)` fall back to the branch format without paths instead of failing the whole panel snapshot.
+
 Fully synced local branches are omitted from `Actionable`; they remain visible under `Remotes` when they track a same-name remote branch.
 
 Actionable branch sync state is intentionally separate from branch comparison state. A local branch can have a configured Git upstream/base such as `upstream/main` because it was created from that ref, while still being unpublished as `origin/<local-branch-name>` or another remote branch. The panel treats only same-name remote tracking refs as publish/sync upstreams for branch actions. Different-name refs remain valid compare bases and can still make the branch appear in `Actionable`, but they do not make the branch `behind` or `diverged` for sync purposes. In that state the row's sync action is `Publish`, and publishing targets the local branch name on the chosen remote rather than the base ref.
 
 When a repository has multiple remotes, the server checks local branches against same-name branches on other remotes. A same-name remote branch is treated as a likely fork only when the refs share ancestry. The Actionable row is shown only when the local branch is behind that remote branch; a local branch that is only ahead of the other remote branch is omitted because it is rarely meant to push directly to that upstream. These fork rows use the other remote branch as their default `vs. ...` compare base and still show `↑x`/`↓y` counts against that remote branch.
 
-The server also checks open change requests for every local branch across all configured remotes whose fetch URL maps to a supported provider: GitHub, GitLab, Azure DevOps, and Bitbucket. For each matching open PR/MR where the local branch is the head branch, the panel compares the local branch only against the found change request's base branch on that same remote. A PR/MR-derived Actionable row is shown only when the local branch is behind that remote base branch; if the branch is already current with, ahead of, or unrelated to the base branch, no Actionable entry is shown. Provider lookup is best-effort: authentication, CLI/API, or unsupported-remote failures omit PR/MR-derived rows without blocking the Git snapshot.
+The server also checks open change requests for every local branch across all configured remotes whose fetch URL maps to a supported provider: GitHub, GitLab, Azure DevOps, and Bitbucket. For each matching open PR/MR where the local branch is the head branch, the panel compares the local branch only against the found change request's base branch on that same remote. A PR/MR-derived Actionable row is shown only when the local branch is behind that remote base branch; if the branch is already current with, ahead of, or unrelated to the base branch, no Actionable entry is shown. Provider lookup is best-effort: authentication, CLI/API, or unsupported-remote failures omit PR/MR-derived rows without blocking the Git snapshot, but provider-specific errors still preserve structured causes for diagnostics.
 
-Client-side Actionable/Remotes expansion, row selection, and visible-row enrichment state lives in `apps/web/src/state/sourceControlPanel.ts`. Shared workspace scoping helpers in `packages/client-runtime/src/environment/workspaceScope.ts` resolve the active project/thread context used by the panel after the upstream connection-runtime rewrite, so the panel does not duplicate subagent/root-thread filtering logic in the component.
+Client-side Actionable/Remotes expansion, row selection, and working-tree enrichment state is owned by `apps/web/src/components/source-control/SourceControlPanel.tsx`, while `apps/web/src/state/sourceControlPanel.ts` owns the environment-scoped panel RPC wrapper and presentation-state helper. Shared workspace scoping helpers in `packages/client-runtime/src/environment/workspaceScope.ts` resolve the active project/thread context used by the panel after the upstream connection-runtime rewrite, so the panel does not duplicate subagent/root-thread filtering logic in the component.
 
 The `Actionable` header has a `Fetch` action. The panel also periodically fetches remotes every five minutes so local upstream status and same-name fork status stay fresh without requiring a manual refresh while keeping idle network and Git churn conservative.
 
@@ -101,6 +104,8 @@ File rows are compact. They show a one-letter status indicator such as `A`, `D`,
 - Discard changes, with confirmation.
 
 Untracked directories are expanded to file-level rows instead of being shown as a single folder row. Untracked files get `A` rows with line stats computed from a `/dev/null` comparison. The server also runs rename detection for unstaged untracked destinations through a temporary Git index, so staged and unstaged renames both collapse matching old/new paths into a single `R` row when Git can match them. If Git cannot match the similarity threshold, entries remain file-level `A` and `D` rows rather than a folder row.
+
+The working-tree file list is not a nested vertical scroller. Rows render in normal flow inside the `Actionable` section's existing overflow area, so mouse-wheel and mobile swipe gestures over changed-file rows scroll the panel section itself. Working-tree enrichment remains lazy: each rendered row registers with an `IntersectionObserver` and queues enrichment when it enters the viewport or the 600px prefetch margin, with a fallback that queues immediately when the observer API is unavailable.
 
 The `Working tree` context menu includes selected-file commit and stash actions plus a separated destructive `Discard selected changes` action.
 
@@ -133,7 +138,9 @@ Expanding a branch reveals branch details:
 - `History`
 - `Changes`
 
-Every expanded branch shows the `vs. ...` row first. Its default base is the branch's configured upstream/base when available, otherwise the repository default comparison ref. This base can be a different-name ref such as `upstream/main`; in that case it is a comparison base only, not proof that the branch has been published. Actionable same-name fork rows default this base to the other remote branch they are tracking for updates. Actionable PR/MR-derived rows default this base to the found change request's remote base branch. Clicking the row opens a searchable ref picker so the user can choose another compare base. Compare rows do not show count prefixes or extra choose labels. Empty ahead and behind subsections are hidden. Ahead and behind labels include the count directly in the title and use the same colored upload/download icons as branch sync indicators. `History` is collapsed by default and loads commits in pages of 10. When more commits are available, a load-more row appends the next page inline until no more history remains.
+Every expanded branch shows the `vs. ...` row first. Its default base is the branch's configured upstream/base when available, otherwise the repository default comparison ref. The repository default comparison ref remains available even when it is the currently checked-out branch, so current-default-branch rows still have a stable compare target. This base can be a different-name ref such as `upstream/main`; in that case it is a comparison base only, not proof that the branch has been published. Actionable same-name fork rows default this base to the other remote branch they are tracking for updates. Actionable PR/MR-derived rows default this base to the found change request's remote base branch. Clicking the row opens a searchable ref picker so the user can choose another compare base. Compare rows do not show count prefixes or extra choose labels. Empty ahead and behind subsections are hidden. Ahead and behind labels include the count directly in the title and use the same colored upload/download icons as branch sync indicators. `History` is collapsed by default and loads commits in pages of 10. When more commits are available, a load-more row appends the next page inline until no more history remains.
+
+Branch detail loading is keyed by the rendered detail surface, not only by branch name. Canonical branch rows keep the branch `name` and `fullRefName` entries synchronized, while actionable fork rows use an isolated `fork-details:<local>:<remote>` key so paging or loading one comparison base does not overwrite the branch-owned details for another base. Commit pages append in server order and de-duplicate by SHA, which keeps reloads and overlapping pages from duplicating rows.
 
 The branch-level `Changes` row summarizes the selected comparison as file count and line stats before expanding to the changed-file list.
 
@@ -199,11 +206,13 @@ The panel routes all repository mutations through server-side RPC methods and re
 
 Non-current branch fetches are scoped to the selected branch. Operation busy state is keyed per action target so fetching one branch does not disable equivalent actions on other branches or remote entries. Publish/push handling on the server only reuses a configured upstream when that upstream resolves to the same branch name; otherwise it pushes `<local-branch>:refs/heads/<local-branch>` on the selected/default remote so a base ref such as `upstream/main` cannot become the push target.
 
-Selected-file commit, stash, and discard operations preserve rename source paths when needed, so selecting an `R` row sends both the destination path and the original path to the Git operation. Discard operations also split staged and unstaged portions explicitly. Server-side discard handling partitions tracked, untracked, HEAD-backed, and newly added paths before running Git restore/reset/clean commands, so mixed selections such as tracked edits plus untracked files do not cause one path class to prevent the rest of the selected discard from applying.
+Selected-file commit, stash, and discard operations preserve rename source paths when needed, so selecting an `R` row sends both the destination path and the original path to the Git operation. Rename source paths are preserved for normal porcelain status entries and for fallback numstat parsing, including line-based fallback output. Discard operations also split staged and unstaged portions explicitly. Server-side discard handling partitions tracked, untracked, HEAD-backed, and newly added paths before running Git restore/reset/clean commands, so mixed selections such as tracked edits plus untracked files do not cause one path class to prevent the rest of the selected discard from applying. If the tracked unstaged restore step fails, the failure is reported to the panel instead of being swallowed after staged cleanup succeeds.
 
 ## Error Handling
 
 Git action failures surface through the panel error state and existing toast/error paths. Panel errors are capped to a short scrollable block so large Git output cannot consume the full panel, and the error block has a floating copy action for debugging. Destructive actions such as discard selected changes, discard an individual file, delete branch, remove remote, drop stash, force pull, and force push require confirmation or an explicit dialog choice before execution.
+
+Server-side panel errors preserve a sanitized cause diagnostic when wrapping lower-level failures into `GitCommandError`, so diagnostics can still distinguish process failures, provider failures, and command output failures even when the UI receives a normalized panel error. The preserved cause is bounded to a small plain object before it crosses the server contract, and the existing capped panel error block remains the user-facing size guard. Source-control provider adapters keep provider-specific missing-CLI, authentication, not-found, decode, and API details in their typed errors, then wrap common provider failures through `sourceControlProviderError` so GitHub, GitLab, Azure DevOps, and Bitbucket expose aligned `SourceControlProviderError` fields: provider, operation, cwd, sanitized reference/repository, detail, command when available, and original cause. GitLab no longer needs the old fork-local string-normalizer path because upstream typed GitLab CLI errors now own that behavior.
 
 The panel keeps version-control actions server-authoritative across browser, desktop, VS Code, and remote clients. Client code does not directly execute Git commands.
 
@@ -211,11 +220,12 @@ The panel keeps version-control actions server-authoritative across browser, des
 
 The current implementation has been exercised against the throwaway repository at `~/Sites/throwaway` with Playwright for the main panel flows: section resizing/collapse behavior, Actionable selection, selected-file commit and stash dialogs, branch sync indicators, remotes tree expansion, stash expansion, hover-only actions, failure reporting, and live filesystem updates including internal `.git/` event filtering and gitignored-file suppression. Rename coverage includes committing an unstaged `R` row and undoing that commit, verifying that the panel returns to a single `R` row rather than separate `A` and `D` rows.
 
-Focused unit coverage now also covers the sync-vs-compare split: a local branch configured against `upstream/main` is treated as unpublished/publishable instead of diverged, a same-name remote tracking branch remains a normal sync upstream, server-side publishing targets the local branch name even when Git reports a different configured upstream/base ref, the current default branch remains the default compare ref, tracked discard restore failures are surfaced, fallback line-based rename parsing preserves source paths, merged working-tree row stats are summed, and late-month relative dates do not fall through to `0 years ago`.
+Focused unit coverage now also covers the sync-vs-compare split: a local branch configured against `upstream/main` is treated as unpublished/publishable instead of diverged, a same-name remote tracking branch remains a normal sync upstream, server-side publishing targets the local branch name even when Git reports a different configured upstream/base ref, the current default branch remains the default compare ref, branch worktree paths fall back from porcelain worktree output to branch-format placeholders without failing on older Git versions, tracked discard restore failures are surfaced, fallback line-based rename parsing preserves source paths, merged working-tree row stats are summed, late-month relative dates do not fall through to `0 years ago`, panel error wrapping preserves original causes, provider adapter errors preserve sanitized transport context through `sourceControlProviderError`, and upstream typed GitLab CLI errors preserve structured process failures without the retired local string normalizer.
 
 Before considering source-control changes complete, run:
 
 ```sh
+pnpm run test:source-control
 pnpm exec vp check
 pnpm exec vp run typecheck
 ```
