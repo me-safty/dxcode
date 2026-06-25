@@ -685,11 +685,14 @@ describe("PreviewManager", () => {
           if (
             failKeyDown &&
             method === "Input.dispatchKeyEvent" &&
-            params?.["type"] === "keyDown"
+            (params?.["type"] === "keyDown" || params?.["type"] === "rawKeyDown")
           ) {
             throw new Error("key dispatch failed");
           }
-          if (method === "Input.dispatchKeyEvent" && params?.["type"] === "keyDown") {
+          if (
+            method === "Input.dispatchKeyEvent" &&
+            (params?.["type"] === "keyDown" || params?.["type"] === "rawKeyDown")
+          ) {
             humanInput?.(
               {},
               {
@@ -799,8 +802,9 @@ describe("PreviewManager", () => {
           key: "y",
           code: "KeyY",
           modifiers: 0,
-          text: "y",
-          unmodifiedText: "y",
+          windowsVirtualKeyCode: 89,
+          location: 0,
+          isKeypad: false,
         });
         expect(sendCommand).toHaveBeenCalledWith("Emulation.setFocusEmulationEnabled", {
           enabled: false,
@@ -819,7 +823,11 @@ describe("PreviewManager", () => {
         expect(sendCommand).toHaveBeenCalledWith("Input.dispatchKeyEvent", {
           type: "keyDown",
           key: "!",
+          code: "Digit1",
           modifiers: 0,
+          windowsVirtualKeyCode: 49,
+          location: 0,
+          isKeypad: false,
           text: "!",
           unmodifiedText: "!",
         });

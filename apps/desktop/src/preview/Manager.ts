@@ -62,6 +62,7 @@ import {
 } from "./GuestProtocol.ts";
 import { isPreviewAnnotationPayload } from "./PickedElementPayload.ts";
 import { playwrightInjectedRuntimeInstallExpression } from "./PlaywrightInjectedRuntime.ts";
+import { makePreviewAutomationKeySequence } from "./PreviewKeyboard.ts";
 
 export type PreviewNavStatus =
   | { kind: "Idle" }
@@ -371,13 +372,6 @@ const inputSignalsMatch = (left: PreviewInputSignal, right: PreviewInputSignal):
     left.key === right.key &&
     (left.code === undefined || right.code === undefined || left.code === right.code)
   );
-};
-
-const previewAutomationKeyCode = (key: string): string | undefined => {
-  if (/^[a-z]$/i.test(key)) return `Key${key.toUpperCase()}`;
-  if (/^[0-9]$/.test(key)) return `Digit${key}`;
-  if (key === " ") return "Space";
-  return key.length > 1 ? key : undefined;
 };
 
 const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function* (
@@ -2194,27 +2188,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     sendCleanup: SendCommand,
   ) {
     yield* prepareAutomationInput(send, false);
-    const modifiers = (input.modifiers ?? []).reduce((value, modifier) => {
-      switch (modifier) {
-        case "Alt":
-          return value | 1;
-        case "Control":
-          return value | 2;
-        case "Meta":
-          return value | 4;
-        case "Shift":
-          return value | 8;
-      }
-    }, 0);
-    const key = input.key;
-    const code = previewAutomationKeyCode(key);
-    const text = key.length === 1 ? key : undefined;
-    const params = {
-      key,
-      ...(code === undefined ? {} : { code }),
-      modifiers,
-      ...(text ? { text, unmodifiedText: text } : {}),
-    };
+    const keySequence = makePreviewAutomationKeySequence(input);
     const previouslyFocused = yield* attempt(
       { operation: "automationPress.getFocusedWebContents", tabId, webContentsId: wc.id },
       () => webContents.getFocusedWebContents(),
@@ -2222,9 +2196,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     let keyDownAttempted = false;
     const releaseInput = Effect.gen(function* () {
       if (keyDownAttempted) {
-        yield* sendCleanup("Input.dispatchKeyEvent", { type: "keyUp", ...params }).pipe(
-          Effect.ignore,
-        );
+        yield* sendCleanup("Input.dispatchKeyEvent", keySequence.keyUp).pipe(Effect.ignore);
       }
       yield* sendCleanup("Emulation.setFocusEmulationEnabled", { enabled: false }).pipe(
         Effect.ignore,
@@ -2252,13 +2224,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       yield* send("Page.bringToFront");
       yield* send("Emulation.setFocusEmulationEnabled", { enabled: true });
-      yield* expectAgentInput(tabId, {
-        kind: "key",
-        key,
-        ...(code === undefined ? {} : { code }),
-      });
+      yield* expectAgentInput(tabId, keySequence.signal);
       keyDownAttempted = true;
-      yield* send("Input.dispatchKeyEvent", { type: "keyDown", ...params });
+      yield* send("Input.dispatchKeyEvent", keySequence.keyDown);
     }).pipe(Effect.ensuring(releaseInput));
   });
 
