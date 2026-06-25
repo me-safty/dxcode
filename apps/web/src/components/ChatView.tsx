@@ -19,7 +19,6 @@ import {
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
-  TerminalOpenInput,
 } from "@t3tools/contracts";
 import {
   connectionStatusText,
@@ -146,23 +145,18 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import {
-  resolveProjectActionTerminalId,
-  terminalSessionIsReadyForProjectActionInput,
-} from "~/projectScriptTerminals";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useHostDisplayPreferences } from "../hostDisplayPreferences";
 import { useEnvironmentSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
-import { resolveSubagentParentThreadRef } from "../subagentControls";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -184,7 +178,7 @@ import { appendPreviewAnnotationPrompt } from "../lib/previewAnnotation";
 import { appendReviewCommentsToPrompt, type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
+import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import {
@@ -196,7 +190,6 @@ import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
-import { projectActionTerminalEnvironment } from "../state/projectActionTerminal";
 import {
   useProject,
   useProjects,
@@ -226,7 +219,6 @@ import {
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   getStartedThreadModelChangeBlockReason,
-  isTerminalKeybindingCommand,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
@@ -241,7 +233,6 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   shouldApplySourceControlMetadataUpdateResult,
-  terminalThreadRefsToCloseWhenDisabled,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -1013,10 +1004,6 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
-  const waitForProjectActionTerminalReady = useAtomCommand(
-    projectActionTerminalEnvironment.waitForInputReady,
-    "project action terminal readiness",
-  );
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
@@ -1065,7 +1052,7 @@ function ChatViewContent(props: ChatViewProps) {
   const timestampFormat = settings.timestampFormat;
   const autoOpenPlanSidebar = settings.autoOpenPlanSidebar;
   const hostDisplayPreferences = useHostDisplayPreferences();
-  const terminalEnabled = hostDisplayPreferences.enableTerminal;
+  const terminalEnabled = true;
   const sourceControlPanelEnabled = hostDisplayPreferences.enableSourceControlPanel;
   const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
@@ -1217,17 +1204,8 @@ function ChatViewContent(props: ChatViewProps) {
   const storeNewTerminal = useTerminalUiStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
-  const storeClearTerminalUiState = useTerminalUiStateStore((s) => s.clearTerminalUiState);
   const serverThreadRefs = useThreadRefs();
   const serverThreadKeys = useMemo(() => serverThreadRefs.map(scopedThreadKey), [serverThreadRefs]);
-  const disabledTerminalThreadRefsToClose = useMemo(
-    () =>
-      terminalThreadRefsToCloseWhenDisabled({
-        enableTerminal: terminalEnabled,
-        openTerminalThreadKeys,
-      }),
-    [openTerminalThreadKeys, terminalEnabled],
-  );
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const draftThreadKeys = useMemo(
     () =>
@@ -1280,14 +1258,6 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadKey === null
       ? null
       : (sourceControlMetadataErrorsByThreadKey[activeThreadKey] ?? null);
-  const activeThreadParentRef = resolveSubagentParentThreadRef(activeThread);
-  const openActiveThreadParent = useCallback(() => {
-    if (!activeThreadParentRef) return;
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(activeThreadParentRef),
-    });
-  }, [activeThreadParentRef, navigate]);
   const threadError = isServerThread
     ? (localServerError ?? sourceControlMetadataError ?? serverThread?.session?.lastError ?? null)
     : localDraftError;
@@ -1300,10 +1270,6 @@ function ChatViewContent(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
-  const runningTerminalIds = useThreadRunningTerminalIds({
-    environmentId: activeThread?.environmentId ?? null,
-    threadId: activeThreadId,
-  });
   const activeThreadKnownSessionsRaw = useKnownTerminalSessions({
     environmentId: activeThread?.environmentId ?? null,
     threadId: activeThreadId,
@@ -1442,13 +1408,6 @@ function ChatViewContent(props: ChatViewProps) {
         : nextThreadIds;
     });
   }, [activeThreadKey, existingOpenTerminalThreadKeys, terminalUiState.terminalOpen]);
-  useEffect(() => {
-    if (disabledTerminalThreadRefsToClose.length === 0) return;
-    for (const threadRefToClose of disabledTerminalThreadRefsToClose) {
-      storeSetTerminalOpen(threadRefToClose, false);
-      storeClearTerminalUiState(threadRefToClose);
-    }
-  }, [disabledTerminalThreadRefsToClose, storeClearTerminalUiState, storeSetTerminalOpen]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProjectRef = activeThread
     ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
@@ -2567,37 +2526,13 @@ function ChatViewContent(props: ChatViewProps) {
         worktreePath: targetWorktreePath,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
-      const reusableTerminalById = new Map(
-        activeThreadKnownSessions.map((session) => [session.target.terminalId, session] as const),
-      );
-      const effectiveRunningTerminalIds = runningTerminalIds.filter((terminalId) => {
-        const session = reusableTerminalById.get(terminalId);
-        if (!session) return true;
-        return !terminalSessionIsReadyForProjectActionInput({
-          summary: session.state.summary,
-          buffer: session.state.buffer,
-          targetCwd,
-          targetWorktreePath,
-        });
-      });
       const targetTerminalId =
         options?.preferNewTerminal === true
           ? nextTerminalId(activeKnownTerminalIds)
-          : resolveProjectActionTerminalId({
-              scriptId: script.id,
-              terminalIds: activeKnownTerminalIds,
-              runningTerminalIds: effectiveRunningTerminalIds,
-            });
+          : (terminalUiState.activeTerminalId ?? nextTerminalId(activeKnownTerminalIds));
       const isKnownServerTerminal = activeServerOrderedTerminalIds.includes(targetTerminalId);
       const isVisibleTerminal = terminalUiState.terminalIds.includes(targetTerminalId);
-      const targetSession = reusableTerminalById.get(targetTerminalId) ?? null;
-      const canWriteImmediately = terminalSessionIsReadyForProjectActionInput({
-        summary: targetSession?.state.summary ?? null,
-        buffer: targetSession?.state.buffer ?? "",
-        targetCwd,
-        targetWorktreePath,
-      });
-      const openTerminalInput: TerminalOpenInput = {
+      const openTerminalInput = {
         threadId: activeThreadId,
         terminalId: targetTerminalId,
         cwd: targetCwd,
@@ -2624,13 +2559,6 @@ function ChatViewContent(props: ChatViewProps) {
           );
         }
         return;
-      }
-
-      if (!canWriteImmediately) {
-        await waitForProjectActionTerminalReady({
-          environmentId,
-          input: openTerminalInput,
-        });
       }
 
       const writeResult = await writeTerminal({
@@ -2660,15 +2588,13 @@ function ChatViewContent(props: ChatViewProps) {
       storeNewTerminal,
       storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
-      activeThreadKnownSessions,
       activeServerOrderedTerminalIds,
       environmentId,
       openTerminal,
       activeKnownTerminalIds,
-      runningTerminalIds,
       terminalEnabled,
+      terminalUiState.activeTerminalId,
       terminalUiState.terminalIds,
-      waitForProjectActionTerminalReady,
       writeTerminal,
     ],
   );
@@ -3595,9 +3521,6 @@ function ChatViewContent(props: ChatViewProps) {
         context: shortcutContext,
       });
       if (!command) return;
-      if (!terminalEnabled && isTerminalKeybindingCommand(command)) {
-        return;
-      }
 
       if (command === "terminal.toggle") {
         event.preventDefault();
@@ -4135,16 +4058,10 @@ function ChatViewContent(props: ChatViewProps) {
 
   const onInterrupt = async () => {
     if (!activeThread) return;
-    const activeSubagentIsRunning =
-      activeThread.parentRelation?.kind === "subagent" &&
-      activeThread.parentRelation.status === "running";
     const result = await interruptThreadTurn({
       environmentId,
       input: {
         threadId: activeThread.id,
-        ...(activeSubagentIsRunning && activeThread.latestTurn?.turnId
-          ? { turnId: activeThread.latestTurn.turnId }
-          : {}),
       },
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
@@ -4961,7 +4878,6 @@ function ChatViewContent(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
-            {...(activeThreadParentRef ? { onOpenParentThread: openActiveThreadParent } : {})}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -5225,7 +5141,6 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddSourceControl={addSourceControlSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
-          terminalAvailable={terminalEnabled && activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           sourceControlAvailable={sourceControlAvailable}
@@ -5255,7 +5170,6 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddSourceControl={addSourceControlSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
-            terminalAvailable={terminalEnabled && activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             sourceControlAvailable={sourceControlAvailable}

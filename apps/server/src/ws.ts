@@ -49,8 +49,6 @@ import {
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   EnvironmentAuthorizationError,
-  ServerProviderSkillsListError,
-  type ServerProviderSkillsListResult,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -76,10 +74,6 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import {
-  makeProviderSkillsLister,
-  type ProviderSkillsListInput,
-} from "./provider/ProviderSkillsLister.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -291,7 +285,6 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
-  [WS_METHODS.serverListProviderSkills, AuthOrchestrationReadScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpsertKeybinding, AuthOrchestrationOperateScope],
   [WS_METHODS.serverRemoveKeybinding, AuthOrchestrationOperateScope],
@@ -422,12 +415,7 @@ function toAuthAccessStreamEvent(
   }
 }
 
-const makeWsRpcLayer = (
-  currentSession: EnvironmentAuth.AuthenticatedSession,
-  listProviderSkills: (
-    input: ProviderSkillsListInput,
-  ) => Effect.Effect<ServerProviderSkillsListResult, ServerProviderSkillsListError>,
-) =>
+const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
@@ -1241,10 +1229,6 @@ const makeWsRpcLayer = (
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
           ),
-        [WS_METHODS.serverListProviderSkills]: (input) =>
-          observeRpcEffect(WS_METHODS.serverListProviderSkills, listProviderSkills(input), {
-            "rpc.aggregate": "server",
-          }),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateProvider,
@@ -2074,9 +2058,8 @@ const makeWsRpcLayer = (
   );
 
 export const websocketRpcRouteLayer = Layer.unwrap(
-  Effect.gen(function* () {
-    const listProviderSkills = yield* makeProviderSkillsLister();
-    return HttpRouter.add(
+  Effect.succeed(
+    HttpRouter.add(
       "GET",
       "/ws",
       Effect.gen(function* () {
@@ -2095,7 +2078,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, listProviderSkills).pipe(
+            makeWsRpcLayer(session).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(PreviewAutomationBroker.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
@@ -2134,6 +2117,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           EnvironmentInternalError: HttpServerRespondable.toResponse,
         }),
       ),
-    );
-  }),
+    ),
+  ),
 );
