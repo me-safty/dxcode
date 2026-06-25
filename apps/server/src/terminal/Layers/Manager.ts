@@ -5,6 +5,7 @@ import {
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
+  type TerminalResizeInput,
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
   type TerminalSummary,
@@ -35,11 +36,15 @@ import {
 } from "../../observability/Metrics.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import {
-  TerminalCwdError,
+  TerminalCwdNotDirectoryError,
+  TerminalCwdNotFoundError,
+  TerminalCwdStatError,
   TerminalHistoryError,
   TerminalManager,
   TerminalNotRunningError,
+  TerminalResizeError,
   TerminalSessionLookupError,
+  TerminalWriteError,
   type TerminalManagerShape,
 } from "../Services/Manager.ts";
 import {
@@ -95,6 +100,25 @@ interface TerminalSubprocessInspector {
     terminalPid: number,
   ): Effect.Effect<TerminalSubprocessInspectResult, TerminalSubprocessCheckError>;
 }
+
+const resizePtyProcess = (
+  session: TerminalSessionState,
+  process: PtyProcess,
+  cols: number,
+  rows: number,
+) =>
+  Effect.try({
+    try: () => process.resize(cols, rows),
+    catch: (cause) =>
+      new TerminalResizeError({
+        threadId: session.threadId,
+        terminalId: session.terminalId,
+        terminalPid: process.pid,
+        cols,
+        rows,
+        cause,
+      }),
+  });
 
 interface ShellCandidate {
   shell: string;
@@ -1099,7 +1123,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             threadId,
             terminalId,
             signal: "SIGTERM",
-            error: error.message,
+            cause: error,
           }).pipe(Effect.as(false)),
         ),
       );
@@ -1123,7 +1147,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             threadId,
             terminalId,
             signal: "SIGKILL",
-            error: error.message,
+            cause: error,
           }),
         ),
       );
@@ -1321,20 +1345,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const assertValidCwd = Effect.fn("terminal.assertValidCwd")(function* (cwd: string) {
       const stats = yield* fileSystem.stat(cwd).pipe(
-        Effect.mapError(
-          (cause) =>
-            new TerminalCwdError({
-              cwd,
-              reason: cause.reason._tag === "NotFound" ? "notFound" : "statFailed",
-              cause,
-            }),
-        ),
+        Effect.catchTags({
+          PlatformError: (cause) =>
+            cause.reason._tag === "NotFound"
+              ? new TerminalCwdNotFoundError({ cwd })
+              : new TerminalCwdStatError({ cwd, cause }),
+        }),
       );
       if (stats.type !== "Directory") {
-        return yield* new TerminalCwdError({
-          cwd,
-          reason: "notDirectory",
-        });
+        return yield* new TerminalCwdNotDirectoryError({ cwd });
       }
     });
 
@@ -1723,7 +1742,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         yield* Effect.logError("failed to start terminal", {
           threadId: session.threadId,
           terminalId: session.terminalId,
-          error: message,
+          cause: error,
           ...(startedShell ? { shell: startedShell } : {}),
         });
       }
@@ -2004,10 +2023,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       }
 
       if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
+        yield* resizePtyProcess(liveSession, liveSession.process, targetCols, targetRows);
         liveSession.cols = targetCols;
         liveSession.rows = targetRows;
         liveSession.updatedAt = yield* nowIso;
-        liveSession.process.resize(targetCols, targetRows);
       }
 
       return snapshot(liveSession);
@@ -2055,10 +2074,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             session.status === "running" &&
             (session.cols !== targetCols || session.rows !== targetRows)
           ) {
+            const process = session.process;
+            yield* resizePtyProcess(session, process, targetCols, targetRows);
             session.cols = targetCols;
             session.rows = targetRows;
             session.updatedAt = yield* nowIso;
-            yield* Effect.sync(() => session.process?.resize(targetCols, targetRows));
           }
 
           return snapshot(session);
@@ -2245,24 +2265,36 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           terminalId,
         });
       }
-      yield* Effect.sync(() => process.write(input.data));
+      yield* Effect.try({
+        try: () => process.write(input.data),
+        catch: (cause) =>
+          new TerminalWriteError({
+            threadId: input.threadId,
+            terminalId,
+            terminalPid: process.pid,
+            cause,
+          }),
+      });
     });
 
-    const resize: TerminalManagerShape["resize"] = Effect.fn("terminal.resize")(function* (input) {
-      const terminalId = input.terminalId;
-      const session = yield* requireSession(input.threadId, terminalId);
-      const process = session.process;
-      if (!process || session.status !== "running") {
-        return yield* new TerminalNotRunningError({
-          threadId: input.threadId,
-          terminalId,
-        });
+    const resizeLocked = Effect.fn("terminal.resize")(function* (input: TerminalResizeInput) {
+      const session = yield* getSession(input.threadId, input.terminalId);
+      // ResizeObserver traffic can already be in flight when the UI closes the session.
+      if (Option.isNone(session)) {
+        return;
       }
-      session.cols = input.cols;
-      session.rows = input.rows;
-      session.updatedAt = yield* nowIso;
-      yield* Effect.sync(() => process.resize(input.cols, input.rows));
+      const process = session.value.process;
+      if (!process || session.value.status !== "running") {
+        return;
+      }
+      yield* resizePtyProcess(session.value, process, input.cols, input.rows);
+      session.value.cols = input.cols;
+      session.value.rows = input.rows;
+      session.value.updatedAt = yield* nowIso;
     });
+
+    const resize: TerminalManagerShape["resize"] = (input) =>
+      withThreadLock(input.threadId, resizeLocked(input));
 
     const clear: TerminalManagerShape["clear"] = (input) =>
       withThreadLock(

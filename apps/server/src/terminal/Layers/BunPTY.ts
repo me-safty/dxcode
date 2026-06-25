@@ -2,9 +2,33 @@
 
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { PtyAdapter } from "../Services/PTY.ts";
+import { PtyAdapter, PtySpawnError } from "../Services/PTY.ts";
 import type { PtyAdapterShape, PtyExitEvent, PtyProcess } from "../Services/PTY.ts";
+
+export class BunPtyUnsupportedPlatformError extends Schema.TaggedErrorClass<BunPtyUnsupportedPlatformError>()(
+  "BunPtyUnsupportedPlatformError",
+  {
+    platform: Schema.Literal("win32"),
+  },
+) {
+  override get message(): string {
+    return `Bun PTY terminal support is unavailable on ${this.platform}. Please use Node.js (e.g. by running \`npx t3\`) instead.`;
+  }
+}
+
+export class BunPtyOperationUnavailableError extends Schema.TaggedErrorClass<BunPtyOperationUnavailableError>()(
+  "BunPtyOperationUnavailableError",
+  {
+    operation: Schema.Literals(["write", "resize"]),
+    pid: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Bun PTY ${this.operation} is unavailable for process ${this.pid}.`;
+  }
+}
 
 class BunPtyProcess implements PtyProcess {
   private readonly dataListeners = new Set<(data: string) => void>();
@@ -33,14 +57,14 @@ class BunPtyProcess implements PtyProcess {
 
   write(data: string): void {
     if (!this.process.terminal) {
-      throw new Error("Bun PTY terminal handle is unavailable");
+      throw new BunPtyOperationUnavailableError({ operation: "write", pid: this.pid });
     }
     this.process.terminal.write(data);
   }
 
   resize(cols: number, rows: number): void {
     if (!this.process.terminal?.resize) {
-      throw new Error("Bun PTY resize is unavailable");
+      throw new BunPtyOperationUnavailableError({ operation: "resize", pid: this.pid });
     }
     this.process.terminal.resize(cols, rows);
   }
@@ -93,18 +117,15 @@ class BunPtyProcess implements PtyProcess {
   }
 }
 
-export const layer = Layer.effect(
-  PtyAdapter,
-  Effect.gen(function* () {
-    const platform = yield* HostProcessPlatform;
-    if (platform === "win32") {
-      return yield* Effect.die(
-        "Bun PTY terminal support is unavailable on Windows. Please use Node.js (e.g. by running `npx t3`) instead.",
-      );
-    }
-    return {
-      spawn: (input) =>
-        Effect.sync(() => {
+export const make = Effect.fn("BunPtyAdapter.make")(function* () {
+  const platform = yield* HostProcessPlatform;
+  if (platform === "win32") {
+    return yield* Effect.die(new BunPtyUnsupportedPlatformError({ platform }));
+  }
+  return PtyAdapter.of({
+    spawn: (input) =>
+      Effect.try({
+        try: () => {
           let processHandle: BunPtyProcess | null = null;
           const command = [input.shell, ...(input.args ?? [])];
           const subprocess = Bun.spawn(command, {
@@ -120,7 +141,15 @@ export const layer = Layer.effect(
           });
           processHandle = new BunPtyProcess(subprocess);
           return processHandle;
-        }),
-    } satisfies PtyAdapterShape;
-  }),
-);
+        },
+        catch: (cause) =>
+          new PtySpawnError({
+            adapter: "bun",
+            message: cause instanceof Error ? cause.message : "Failed to spawn Bun PTY process",
+            cause,
+          }),
+      }),
+  } satisfies PtyAdapterShape);
+});
+
+export const layer = Layer.effect(PtyAdapter, make());

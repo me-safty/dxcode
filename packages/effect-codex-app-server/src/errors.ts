@@ -24,6 +24,7 @@ export class CodexAppServerProcessExitedError extends Schema.TaggedErrorClass<Co
   "CodexAppServerProcessExitedError",
   {
     code: Schema.optional(Schema.Number),
+    pid: Schema.optionalKey(Schema.Int),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -50,6 +51,7 @@ export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexA
   "CodexAppServerTransportError",
   {
     detail: Schema.String,
+    pid: Schema.optionalKey(Schema.Int),
     cause: Schema.Defect(),
   },
 ) {

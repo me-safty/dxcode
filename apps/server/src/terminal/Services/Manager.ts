@@ -13,6 +13,9 @@ import {
   TerminalCloseInput,
   TerminalEvent,
   TerminalCwdError,
+  TerminalCwdNotDirectoryError,
+  TerminalCwdNotFoundError,
+  TerminalCwdStatError,
   TerminalError,
   TerminalHistoryError,
   TerminalMetadataStreamEvent,
@@ -23,7 +26,9 @@ import {
   TerminalSessionSnapshot,
   TerminalSessionLookupError,
   TerminalSessionStatus,
+  TerminalResizeError,
   TerminalWriteInput,
+  TerminalWriteError,
 } from "@t3tools/contracts";
 import type { PtyProcess } from "./PTY.ts";
 import * as Effect from "effect/Effect";
@@ -31,10 +36,15 @@ import * as Context from "effect/Context";
 
 export {
   TerminalCwdError,
+  TerminalCwdNotDirectoryError,
+  TerminalCwdNotFoundError,
+  TerminalCwdStatError,
   TerminalError,
   TerminalHistoryError,
   TerminalNotRunningError,
+  TerminalResizeError,
   TerminalSessionLookupError,
+  TerminalWriteError,
 };
 
 export interface TerminalSessionState {
