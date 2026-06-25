@@ -50,7 +50,11 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -1585,6 +1589,7 @@ function ArchivedIconButton({
 export function ArchivedThreadsPanel() {
   const projects = useProjects();
   const { unarchiveThread, deleteThread } = useThreadActions();
+  const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
   const [expandedProjectKeys, setExpandedProjectKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -1781,13 +1786,15 @@ export function ArchivedThreadsPanel() {
 
   const handleDeleteArchivedThread = useCallback(
     async (threadRef: ScopedThreadRef, title: string) => {
-      const confirmed = await confirmArchivedAction(
-        [
-          `Delete archived conversation "${title}"?`,
-          "This permanently clears conversation history for this thread.",
-        ].join("\n"),
-      );
-      if (!confirmed) return;
+      if (confirmThreadDelete) {
+        const confirmed = await confirmArchivedAction(
+          [
+            `Delete archived conversation "${title}"?`,
+            "This permanently clears conversation history for this thread.",
+          ].join("\n"),
+        );
+        if (!confirmed) return;
+      }
       const result = await deleteThread(threadRef);
       if (result._tag === "Success") {
         refreshArchivedThreads();
@@ -1795,7 +1802,13 @@ export function ArchivedThreadsPanel() {
       }
       showArchivedActionFailure("Failed to delete thread", result);
     },
-    [confirmArchivedAction, deleteThread, refreshArchivedThreads, showArchivedActionFailure],
+    [
+      confirmArchivedAction,
+      confirmThreadDelete,
+      deleteThread,
+      refreshArchivedThreads,
+      showArchivedActionFailure,
+    ],
   );
 
   const handleUnarchiveProjectThreads = useCallback(
@@ -1816,11 +1829,7 @@ export function ArchivedThreadsPanel() {
         unarchiveThread(scopeThreadRef(thread.environmentId, thread.id)),
       );
       if (failures.length > 0) {
-        showArchivedBulkActionFailure(
-          "Failed to unarchive every archived thread",
-          failures,
-          threads.length,
-        );
+        showArchivedBulkActionFailure("Archived unarchive incomplete", failures, threads.length);
       }
       refreshArchivedThreads();
     },
@@ -1834,26 +1843,30 @@ export function ArchivedThreadsPanel() {
       scope: ArchivedProjectBulkScope,
     ) => {
       const scopeLabel = archivedProjectBulkScopeLabel(scope);
-      const confirmed = await confirmArchivedAction(
-        [
-          `Delete ${scopeLabel} in "${projectName}"?`,
-          `This permanently clears conversation history for ${threads.length} conversation${threads.length === 1 ? "" : "s"}.`,
-        ].join("\n"),
-      );
-      if (!confirmed) return;
+      if (confirmThreadDelete) {
+        const confirmed = await confirmArchivedAction(
+          [
+            `Delete ${scopeLabel} in "${projectName}"?`,
+            `This permanently clears conversation history for ${threads.length} conversation${threads.length === 1 ? "" : "s"}.`,
+          ].join("\n"),
+        );
+        if (!confirmed) return;
+      }
       const failures = await runArchivedProjectThreadActions(threads, (thread) =>
         deleteThread(scopeThreadRef(thread.environmentId, thread.id)),
       );
       if (failures.length > 0) {
-        showArchivedBulkActionFailure(
-          "Failed to delete every archived thread",
-          failures,
-          threads.length,
-        );
+        showArchivedBulkActionFailure("Archived delete incomplete", failures, threads.length);
       }
       refreshArchivedThreads();
     },
-    [confirmArchivedAction, deleteThread, refreshArchivedThreads, showArchivedBulkActionFailure],
+    [
+      confirmArchivedAction,
+      confirmThreadDelete,
+      deleteThread,
+      refreshArchivedThreads,
+      showArchivedBulkActionFailure,
+    ],
   );
 
   const handleArchivedThreadContextMenu = useCallback(
