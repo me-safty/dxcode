@@ -1829,7 +1829,11 @@ export function ArchivedThreadsPanel() {
         unarchiveThread(scopeThreadRef(thread.environmentId, thread.id)),
       );
       if (failures.length > 0) {
-        showArchivedBulkActionFailure("Archived unarchive incomplete", failures, threads.length);
+        showArchivedBulkActionFailure(
+          "Archived threads not fully unarchived",
+          failures,
+          threads.length,
+        );
       }
       refreshArchivedThreads();
     },
@@ -1856,7 +1860,11 @@ export function ArchivedThreadsPanel() {
         deleteThread(scopeThreadRef(thread.environmentId, thread.id)),
       );
       if (failures.length > 0) {
-        showArchivedBulkActionFailure("Archived delete incomplete", failures, threads.length);
+        showArchivedBulkActionFailure(
+          "Archived threads not fully deleted",
+          failures,
+          threads.length,
+        );
       }
       refreshArchivedThreads();
     },
