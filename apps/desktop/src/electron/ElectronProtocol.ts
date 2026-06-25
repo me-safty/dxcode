@@ -10,10 +10,9 @@ import * as Electron from "electron";
 
 export const DESKTOP_HOST = "app";
 export const DESKTOP_PRODUCTION_SCHEME = "t3code";
-export const DESKTOP_DEVELOPMENT_SCHEME = "t3code-dev";
 
-export function getDesktopScheme(isDevelopment: boolean): string {
-  return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;
+export function getDesktopScheme(_isDevelopment: boolean): string {
+  return DESKTOP_PRODUCTION_SCHEME;
 }
 
 export function getDesktopOrigin(isDevelopment: boolean): string {
@@ -115,9 +114,28 @@ async function proxyRequest(
   }
 
   const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, targetOrigin);
+  const headers = new Headers(request.headers);
+  const headersToRemove: string[] = [];
+  for (const name of headers.keys()) {
+    if (
+      name === "host" ||
+      name === "origin" ||
+      name === "referer" ||
+      name === "connection" ||
+      name === "content-length" ||
+      name === "accept-encoding" ||
+      name === "upgrade-insecure-requests" ||
+      name.startsWith("sec-fetch-")
+    ) {
+      headersToRemove.push(name);
+    }
+  }
+  for (const name of headersToRemove) {
+    headers.delete(name);
+  }
   const init: RequestInit = {
     method: request.method,
-    headers: request.headers,
+    headers,
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = request.body;

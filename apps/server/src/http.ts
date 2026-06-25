@@ -44,13 +44,16 @@ import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./ht
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const DESKTOP_RENDERER_ORIGIN = "t3code://app";
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const devOrigin = config.devUrl?.origin;
     return HttpRouter.cors({
-      ...(devOrigin ? { allowedOrigins: [devOrigin], credentials: true } : {}),
+      ...(devOrigin
+        ? { allowedOrigins: [devOrigin, DESKTOP_RENDERER_ORIGIN], credentials: true }
+        : {}),
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
       maxAge: 600,

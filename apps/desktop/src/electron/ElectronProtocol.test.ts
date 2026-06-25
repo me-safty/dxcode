@@ -43,7 +43,16 @@ describe("ElectronProtocol", () => {
           assert.isDefined(handler);
 
           const response = yield* Effect.promise(() =>
-            handler!(new Request("t3code-dev://app/api/health?verbose=1")),
+            handler!(
+              new Request("t3code-dev://app/api/health?verbose=1", {
+                headers: {
+                  accept: "application/json",
+                  origin: "t3code-dev://app",
+                  referer: "t3code-dev://app/",
+                  "sec-fetch-site": "same-origin",
+                },
+              }),
+            ),
           );
           assert.equal(yield* Effect.promise(() => response.text()), "ok");
           assert.include(
@@ -70,6 +79,11 @@ describe("ElectronProtocol", () => {
         ["t3code-dev"],
       );
       assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
+      const forwardedHeaders = new Headers(netFetchMock.mock.calls[0]?.[1]?.headers);
+      assert.equal(forwardedHeaders.get("accept"), "application/json");
+      assert.isNull(forwardedHeaders.get("origin"));
+      assert.isNull(forwardedHeaders.get("referer"));
+      assert.isNull(forwardedHeaders.get("sec-fetch-site"));
       assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
