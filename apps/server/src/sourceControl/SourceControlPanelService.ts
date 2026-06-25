@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { createHash } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
 import {
   GitCommandError,
@@ -45,16 +45,29 @@ import {
 } from "@t3tools/contracts";
 import type { ChangeRequest } from "@t3tools/contracts";
 
+import { sanitizeErrorCause } from "../diagnostics/ErrorCause.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
-import { parseRemoteNames, parseRemoteRefWithRemoteNames } from "../git/remoteRefs.ts";
+import {
+  parseRemoteNames,
+  parseRemoteNamesInGitOrder,
+  parseRemoteRefWithRemoteNames,
+} from "../git/remoteRefs.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
 const isGitCommandError = Schema.is(GitCommandError);
+const LOCAL_BRANCHES_WITH_WORKTREE_PATH_ARGS = [
+  "branch",
+  "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)%09%(committerdate:iso-strict)%09%(upstream:short)%09%(upstream:track)",
+] as const;
+const LOCAL_BRANCHES_WITHOUT_WORKTREE_PATH_ARGS = [
+  "branch",
+  "--format=%(refname:short)%09%(HEAD)%09%09%(committerdate:iso-strict)%09%(upstream:short)%09%(upstream:track)",
+] as const;
 
-export interface SourceControlPanelServiceShape {
+interface SourceControlPanelServiceShape {
   readonly snapshot: (
     input: VcsPanelSnapshotInput,
   ) => Effect.Effect<VcsPanelSnapshotResult, GitCommandError>;
@@ -121,8 +134,20 @@ function commandLabel(args: readonly string[]): string {
   return `git ${args.join(" ")}`;
 }
 
-function gitError(operation: string, cwd: string, args: readonly string[], detail: string) {
-  return new GitCommandError({ operation, command: commandLabel(args), cwd, detail });
+function gitError(
+  operation: string,
+  cwd: string,
+  args: readonly string[],
+  detail: string,
+  cause?: unknown,
+) {
+  return new GitCommandError({
+    operation,
+    command: commandLabel(args),
+    cwd,
+    detail,
+    ...(cause === undefined ? {} : { cause: sanitizeErrorCause(cause) }),
+  });
 }
 
 function detailFromUnknown(cause: unknown): string {
@@ -136,7 +161,14 @@ function detailFromUnknown(cause: unknown): string {
 
 function asGitCommandError(operation: string, cwd: string, args: readonly string[]) {
   return (cause: unknown) =>
-    isGitCommandError(cause) ? cause : gitError(operation, cwd, args, detailFromUnknown(cause));
+    isGitCommandError(cause)
+      ? cause
+      : gitError(operation, cwd, args, detailFromUnknown(cause), cause);
+}
+
+function isUnsupportedWorktreePathFormat(detail: string) {
+  detail = detail.toLowerCase();
+  return detail.includes("worktreepath") && detail.includes("unknown field");
 }
 
 function parseCount(value: string | undefined): number {
@@ -502,25 +534,50 @@ function parseAheadBehindCounts(output: string): {
   };
 }
 
-function parseLocalBranches(output: string): VcsRef[] {
+function parseWorktreeBranchPaths(output: string): Map<string, string> {
+  const paths = new Map<string, string>();
+  let currentPath: string | null = null;
+
+  for (const rawLine of output.split(/\r?\n/u)) {
+    const line = rawLine.trimEnd();
+    if (line.length === 0) {
+      currentPath = null;
+      continue;
+    }
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length);
+      continue;
+    }
+    if (currentPath && line.startsWith("branch refs/heads/")) {
+      paths.set(line.slice("branch refs/heads/".length), currentPath);
+    }
+  }
+
+  return paths;
+}
+
+function parseLocalBranches(
+  output: string,
+  worktreeBranchPaths: ReadonlyMap<string, string> = new Map(),
+): VcsRef[] {
   const rows = output
     .split(/\r?\n/u)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0)
+    .filter((line) => line.trimEnd().length > 0)
     .map((line) => {
-      const [
-        name = "",
-        head = "",
-        worktreePath = "",
-        lastActivityAt = "",
-        upstreamName = "",
-        track = "",
-      ] = line.split("\t");
+      // Preserve trailing tabs so empty upstream track columns stay aligned.
+      const columns = line.split("\t");
+      const [name = "", head = ""] = columns;
+      const hasInlineWorktreePath = columns.length >= 6;
+      const worktreePath = hasInlineWorktreePath ? (columns[2] ?? "") : "";
+      const lastActivityAt = hasInlineWorktreePath ? (columns[3] ?? "") : (columns[2] ?? "");
+      const upstreamName = hasInlineWorktreePath ? (columns[4] ?? "") : (columns[3] ?? "");
+      const track = hasInlineWorktreePath ? (columns[5] ?? "") : (columns[4] ?? "");
       const { aheadCount, behindCount } = parseBranchTrackCounts(track);
+      const resolvedWorktreePath = worktreeBranchPaths.get(name) ?? worktreePath;
       return {
         name,
         current: head.trim() === "*",
-        worktreePath: worktreePath.length > 0 ? worktreePath : null,
+        worktreePath: resolvedWorktreePath.length > 0 ? resolvedWorktreePath : null,
         lastActivityAt: lastActivityAt.length > 0 ? lastActivityAt : null,
         upstreamName: upstreamName.length > 0 ? upstreamName : null,
         aheadCount,
@@ -568,16 +625,8 @@ function compareBranchActivity(
 function avatarUrlForEmail(email: string | null | undefined): string | null {
   const normalized = email?.trim().toLowerCase();
   if (!normalized || !normalized.includes("@")) return null;
-  const hash = createHash("md5").update(normalized).digest("hex");
+  const hash = NodeCrypto.createHash("md5").update(normalized).digest("hex");
   return `https://www.gravatar.com/avatar/${hash}?d=identicon&s=64`;
-}
-
-function parseRefLines(output: string): string[] {
-  return output
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.endsWith("/HEAD") && !line.includes(" -> "))
-    .toSorted((left, right) => left.localeCompare(right));
 }
 
 function parsePathLines(output: string): string[] {
@@ -762,7 +811,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
   );
   const textGeneration = Option.getOrUndefined(Context.getOption(context, TextGeneration));
 
-  const run = (
+  const runResult = (
     operation: string,
     cwd: string,
     args: readonly string[],
@@ -779,17 +828,24 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         maxOutputBytes: 8 * 1024 * 1024,
         appendTruncationMarker: true,
       })
-      .pipe(
-        Effect.flatMap((result) => {
-          if (options?.allowNonZeroExit === true || result.exitCode === 0) {
-            return Effect.succeed(result.stdout);
-          }
-          return Effect.fail(
-            gitError(operation, cwd, args, result.stderr.trim() || result.stdout.trim()),
-          );
-        }),
-        Effect.mapError(asGitCommandError(operation, cwd, args)),
-      );
+      .pipe(Effect.mapError(asGitCommandError(operation, cwd, args)));
+
+  const run = (
+    operation: string,
+    cwd: string,
+    args: readonly string[],
+    options?: { readonly allowNonZeroExit?: boolean; readonly env?: NodeJS.ProcessEnv },
+  ) =>
+    runResult(operation, cwd, args, options).pipe(
+      Effect.flatMap((result) => {
+        if (options?.allowNonZeroExit === true || result.exitCode === 0) {
+          return Effect.succeed(result.stdout);
+        }
+        return Effect.fail(
+          gitError(operation, cwd, args, result.stderr.trim() || result.stdout.trim()),
+        );
+      }),
+    );
 
   const COMMIT_PAGE_SIZE = 10;
 
@@ -1264,6 +1320,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       case "behind":
         return Effect.succeed(baseRef ? `${refName}..${baseRef}` : "");
       case "compare-history":
+        return Effect.succeed(baseRef ? `${baseRef}...${refName}` : refName);
       case "history":
         return Effect.succeed(refName);
     }
@@ -1280,6 +1337,21 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       Effect.orElseSucceed(() => ""),
       Effect.map((value) => (value.length > 0 ? value : null)),
     );
+
+  const refExists = (operation: string, cwd: string, refName: string) =>
+    run(operation, cwd, ["show-ref", "--verify", refName], { allowNonZeroExit: true }).pipe(
+      Effect.map((output) => output.trim().length > 0),
+      Effect.orElseSucceed(() => false),
+    );
+
+  const resolveRemoteBranchRef = (refName: string, remoteNamesByLength: readonly string[]) => {
+    const parsed = parseRemoteRefWithRemoteNames(refName, remoteNamesByLength);
+    if (!parsed) return null;
+    return {
+      remoteName: parsed.remoteName,
+      branchName: parsed.branchName,
+    };
+  };
 
   const createdFromRef = (cwd: string, refName: string) =>
     run("vcs.panel.branchCreatedFrom", cwd, [
@@ -1418,7 +1490,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       );
     }).pipe(Effect.orElseSucceed(() => null));
 
-  const enrichWorkingTreeFiles: SourceControlPanelServiceShape["enrichWorkingTreeFiles"] =
+  const enrichWorkingTreeFiles: SourceControlPanelService["Service"]["enrichWorkingTreeFiles"] =
     Effect.fn("enrichWorkingTreeFiles")(function* (input) {
       const requestedPaths = uniquePaths(input.paths);
       const [porcelain, unstagedNumstat] = yield* Effect.all(
@@ -1515,11 +1587,12 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       };
     });
 
-  const snapshot: SourceControlPanelServiceShape["snapshot"] = Effect.fn("snapshot")(
+  const snapshot: SourceControlPanelService["Service"]["snapshot"] = Effect.fn("snapshot")(
     function* (input) {
       const [
         localStatus,
         localBranchesOutput,
+        worktreeListOutput,
         porcelain,
         unstagedNumstat,
         stagedNumstat,
@@ -1533,10 +1606,31 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
             .pipe(
               Effect.mapError(asGitCommandError("vcs.panel.localStatus", input.cwd, ["status"])),
             ),
-          run("vcs.panel.localBranches", input.cwd, [
-            "branch",
-            "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)%09%(committerdate:iso-strict)%09%(upstream:short)%09%(upstream:track)",
-          ]),
+          runResult("vcs.panel.localBranches", input.cwd, LOCAL_BRANCHES_WITH_WORKTREE_PATH_ARGS, {
+            allowNonZeroExit: true,
+          }).pipe(
+            Effect.flatMap((result) => {
+              if (result.exitCode === 0) return Effect.succeed(result.stdout);
+              const detail = result.stderr.trim() || result.stdout.trim();
+              return isUnsupportedWorktreePathFormat(detail)
+                ? run(
+                    "vcs.panel.localBranches",
+                    input.cwd,
+                    LOCAL_BRANCHES_WITHOUT_WORKTREE_PATH_ARGS,
+                  )
+                : Effect.fail(
+                    gitError(
+                      "vcs.panel.localBranches",
+                      input.cwd,
+                      LOCAL_BRANCHES_WITH_WORKTREE_PATH_ARGS,
+                      detail,
+                    ),
+                  );
+            }),
+          ),
+          run("vcs.panel.worktrees", input.cwd, ["worktree", "list", "--porcelain"], {
+            allowNonZeroExit: true,
+          }),
           run("vcs.panel.statusPorcelain", input.cwd, [
             "status",
             "--porcelain=2",
@@ -1573,7 +1667,10 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         { concurrency: "unbounded" },
       );
 
-      const localBranches = parseLocalBranches(localBranchesOutput);
+      const localBranches = parseLocalBranches(
+        localBranchesOutput,
+        parseWorktreeBranchPaths(worktreeListOutput),
+      );
       const stagedFiles = parseFileChangesFromNumstat({
         numstat: stagedNumstat,
         statuses: parseNameStatus(stagedNameStatus),
@@ -1626,13 +1723,13 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     },
   );
 
-  const stageFiles: SourceControlPanelServiceShape["stageFiles"] = (input) =>
+  const stageFiles: SourceControlPanelService["Service"]["stageFiles"] = (input) =>
     run("vcs.panel.stageFiles", input.cwd, ["add", "-A", "--", ...input.paths]).pipe(Effect.asVoid);
 
-  const unstageFiles: SourceControlPanelServiceShape["unstageFiles"] = (input) =>
+  const unstageFiles: SourceControlPanelService["Service"]["unstageFiles"] = (input) =>
     run("vcs.panel.unstageFiles", input.cwd, ["reset", "--", ...input.paths]).pipe(Effect.asVoid);
 
-  const discardFiles: SourceControlPanelServiceShape["discardFiles"] = (input) =>
+  const discardFiles: SourceControlPanelService["Service"]["discardFiles"] = (input) =>
     Effect.gen(function* () {
       const paths = uniquePaths(input.paths);
       if (paths.length === 0) return;
@@ -1692,65 +1789,65 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       );
     });
 
-  const readFileDiff: SourceControlPanelServiceShape["readFileDiff"] = Effect.fn("readFileDiff")(
-    function* (input) {
-      const source = input.source ?? {
-        kind: "working-tree" as const,
-        staged: input.staged ?? false,
-      };
-      if (source.kind === "commit") {
-        const patch = yield* run("vcs.panel.readCommitFileDiff", input.cwd, [
-          "show",
-          "--format=",
-          "--no-ext-diff",
-          "--patch",
-          "--minimal",
-          source.sha,
-          "--",
-          input.path,
-        ]);
-        return { path: input.path, staged: false, patch };
-      }
-      if (source.kind === "compare") {
-        const patch = yield* run("vcs.panel.readCompareFileDiff", input.cwd, [
-          "diff",
-          "--no-ext-diff",
-          "--patch",
-          "--minimal",
-          `${source.baseRef}...${source.refName}`,
-          "--",
-          input.path,
-        ]);
-        return { path: input.path, staged: false, patch };
-      }
-      if (source.kind === "stash") {
-        const patch = yield* run("vcs.panel.readStashFileDiff", input.cwd, [
-          "stash",
-          "show",
-          "--patch",
-          "--include-untracked",
-          source.stashRef,
-          "--",
-          input.path,
-        ]);
-        return { path: input.path, staged: false, patch };
-      }
+  const readFileDiff: SourceControlPanelService["Service"]["readFileDiff"] = Effect.fn(
+    "readFileDiff",
+  )(function* (input) {
+    const source = input.source ?? {
+      kind: "working-tree" as const,
+      staged: input.staged ?? false,
+    };
+    if (source.kind === "commit") {
+      const patch = yield* run("vcs.panel.readCommitFileDiff", input.cwd, [
+        "show",
+        "--format=",
+        "--no-ext-diff",
+        "--patch",
+        "--minimal",
+        source.sha,
+        "--",
+        input.path,
+      ]);
+      return { path: input.path, staged: false, patch };
+    }
+    if (source.kind === "compare") {
+      const patch = yield* run("vcs.panel.readCompareFileDiff", input.cwd, [
+        "diff",
+        "--no-ext-diff",
+        "--patch",
+        "--minimal",
+        `${source.baseRef}...${source.refName}`,
+        "--",
+        input.path,
+      ]);
+      return { path: input.path, staged: false, patch };
+    }
+    if (source.kind === "stash") {
+      const patch = yield* run("vcs.panel.readStashFileDiff", input.cwd, [
+        "stash",
+        "show",
+        "--patch",
+        "--include-untracked",
+        source.stashRef,
+        "--",
+        input.path,
+      ]);
+      return { path: input.path, staged: false, patch };
+    }
 
-      const args = source.staged
-        ? ["diff", "--cached", "--", input.path]
-        : ["diff", "--", input.path];
-      let patch = yield* run("vcs.panel.readFileDiff", input.cwd, args);
-      if (!source.staged && patch.trim().length === 0) {
-        patch = yield* run(
-          "vcs.panel.readUntrackedFileDiff",
-          input.cwd,
-          ["diff", "--no-index", "--", "/dev/null", input.path],
-          { allowNonZeroExit: true },
-        );
-      }
-      return { path: input.path, staged: source.staged, patch };
-    },
-  );
+    const args = source.staged
+      ? ["diff", "--cached", "--", input.path]
+      : ["diff", "--", input.path];
+    let patch = yield* run("vcs.panel.readFileDiff", input.cwd, args);
+    if (!source.staged && patch.trim().length === 0) {
+      patch = yield* run(
+        "vcs.panel.readUntrackedFileDiff",
+        input.cwd,
+        ["diff", "--no-index", "--", "/dev/null", input.path],
+        { allowNonZeroExit: true },
+      );
+    }
+    return { path: input.path, staged: source.staged, patch };
+  });
 
   const pushBranchDirect = Effect.fn("pushBranchDirect")(function* (
     cwd: string,
@@ -1784,32 +1881,32 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     ]).pipe(Effect.asVoid);
   });
 
-  const commitStaged: SourceControlPanelServiceShape["commitStaged"] = Effect.fn("commitStaged")(
-    function* (input) {
-      const args = ["commit", "-m", input.message.trim()];
-      yield* run("vcs.panel.commitStaged", input.cwd, args).pipe(Effect.asVoid);
-      if (input.push) {
-        const status = yield* workflow
-          .status({ cwd: input.cwd })
-          .pipe(
-            Effect.mapError(
-              asGitCommandError("vcs.panel.commitStaged.status", input.cwd, ["status"]),
-            ),
-          );
-        if (!status.refName) {
-          return yield* gitError(
-            "vcs.panel.commitStaged.push",
-            input.cwd,
-            ["push"],
-            "Cannot push from detached HEAD.",
-          );
-        }
-        yield* pushBranchDirect(input.cwd, status.refName, false);
+  const commitStaged: SourceControlPanelService["Service"]["commitStaged"] = Effect.fn(
+    "commitStaged",
+  )(function* (input) {
+    const args = ["commit", "-m", input.message.trim()];
+    yield* run("vcs.panel.commitStaged", input.cwd, args).pipe(Effect.asVoid);
+    if (input.push) {
+      const status = yield* workflow
+        .status({ cwd: input.cwd })
+        .pipe(
+          Effect.mapError(
+            asGitCommandError("vcs.panel.commitStaged.status", input.cwd, ["status"]),
+          ),
+        );
+      if (!status.refName) {
+        return yield* gitError(
+          "vcs.panel.commitStaged.push",
+          input.cwd,
+          ["push"],
+          "Cannot push from detached HEAD.",
+        );
       }
-    },
-  );
+      yield* pushBranchDirect(input.cwd, status.refName, false);
+    }
+  });
 
-  const pullBranch: SourceControlPanelServiceShape["pullBranch"] = Effect.fn("pullBranch")(
+  const pullBranch: SourceControlPanelService["Service"]["pullBranch"] = Effect.fn("pullBranch")(
     function* (input) {
       const status = yield* workflow
         .status({ cwd: input.cwd })
@@ -1834,9 +1931,9 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
             `Branch ${input.branchName} has no upstream.`,
           );
         }
-        const [remoteName = "origin", ...remoteBranchParts] = upstream.split("/");
-        const remoteBranchName = remoteBranchParts.join("/");
-        if (remoteBranchName.length === 0) {
+        const remoteOutput = yield* run("vcs.panel.pullBranch.remotes", input.cwd, ["remote"]);
+        const resolvedUpstream = resolveRemoteBranchRef(upstream, parseRemoteNames(remoteOutput));
+        if (!resolvedUpstream) {
           return yield* gitError(
             "vcs.panel.pullBranch",
             input.cwd,
@@ -1846,8 +1943,8 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         }
         yield* run("vcs.panel.pullBranch.nonCurrent", input.cwd, [
           "fetch",
-          remoteName,
-          `${input.force ? "+" : ""}refs/heads/${remoteBranchName}:refs/heads/${input.branchName}`,
+          resolvedUpstream.remoteName,
+          `${input.force ? "+" : ""}refs/heads/${resolvedUpstream.branchName}:refs/heads/${input.branchName}`,
         ]).pipe(Effect.asVoid);
         return {
           status: "pulled" as const,
@@ -1896,26 +1993,50 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     },
   );
 
-  const pushBranch: SourceControlPanelServiceShape["pushBranch"] = Effect.fn("pushBranch")(
+  const pushBranch: SourceControlPanelService["Service"]["pushBranch"] = Effect.fn("pushBranch")(
     function* (input) {
       yield* pushBranchDirect(input.cwd, input.branchName, input.force ?? false, input.remoteName);
     },
   );
 
-  const fetchBranch: SourceControlPanelServiceShape["fetchBranch"] = Effect.fn("fetchBranch")(
+  const fetchBranch: SourceControlPanelService["Service"]["fetchBranch"] = Effect.fn("fetchBranch")(
     function* (input) {
-      const remotes = yield* run("vcs.panel.fetchBranch.remotes", input.cwd, ["remote"]).pipe(
-        Effect.map(parseRefLines),
+      const remoteOutput = yield* run("vcs.panel.fetchBranch.remotes", input.cwd, ["remote"]);
+      const gitOrderRemoteNames = parseRemoteNamesInGitOrder(remoteOutput);
+      const sortedRemoteNames = parseRemoteNames(remoteOutput);
+      // Local branches intentionally win over same-named remote refs.
+      const isLocalBranch = yield* refExists(
+        "vcs.panel.fetchBranch.localBranch",
+        input.cwd,
+        `refs/heads/${input.branchName}`,
       );
-      const remotePrefix = remotes.find((remote) => input.branchName.startsWith(`${remote}/`));
-      const upstream = remotePrefix
-        ? `${remotePrefix}/${input.branchName.slice(remotePrefix.length + 1)}`
-        : yield* upstreamForRef(input.cwd, input.branchName);
-      const [remoteNameRaw, ...remoteBranchParts] = upstream
-        ? upstream.split("/")
-        : [remotes[0] ?? "origin", input.branchName];
-      const remoteName = remoteNameRaw ?? "origin";
-      const remoteBranchName = remoteBranchParts.join("/") || input.branchName;
+      const parsedRemoteBranch = isLocalBranch
+        ? null
+        : parseRemoteRefWithRemoteNames(input.branchName, sortedRemoteNames);
+      const isRemoteBranch = parsedRemoteBranch
+        ? yield* refExists(
+            "vcs.panel.fetchBranch.remoteBranch",
+            input.cwd,
+            `refs/remotes/${parsedRemoteBranch.remoteRef}`,
+          )
+        : false;
+      const upstream =
+        isRemoteBranch && parsedRemoteBranch
+          ? parsedRemoteBranch.remoteRef
+          : yield* upstreamForRef(input.cwd, input.branchName);
+      const resolvedUpstream = upstream
+        ? resolveRemoteBranchRef(upstream, sortedRemoteNames)
+        : null;
+      if (upstream && !resolvedUpstream) {
+        return yield* gitError(
+          "vcs.panel.fetchBranch",
+          input.cwd,
+          ["fetch"],
+          `Branch ${input.branchName} has invalid upstream ${upstream}.`,
+        );
+      }
+      const remoteName = resolvedUpstream?.remoteName ?? gitOrderRemoteNames[0] ?? "origin";
+      const remoteBranchName = resolvedUpstream?.branchName ?? input.branchName;
       yield* run("vcs.panel.fetchBranch", input.cwd, [
         "fetch",
         remoteName,
@@ -1924,37 +2045,37 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     },
   );
 
-  const deleteBranch: SourceControlPanelServiceShape["deleteBranch"] = Effect.fn("deleteBranch")(
-    function* (input) {
-      if (input.branch.current) {
-        return yield* gitError(
-          "vcs.panel.deleteBranch",
-          input.cwd,
-          ["branch", "-d", input.branch.name],
-          "Cannot delete the current branch.",
-        );
-      }
-      if (input.branch.isRemote && input.branch.remoteName) {
-        const remoteBranchName = input.branch.name.startsWith(`${input.branch.remoteName}/`)
-          ? input.branch.name.slice(input.branch.remoteName.length + 1)
-          : input.branch.name;
-        yield* run("vcs.panel.deleteRemoteBranch", input.cwd, [
-          "push",
-          input.branch.remoteName,
-          "--delete",
-          remoteBranchName,
-        ]).pipe(Effect.asVoid);
-        return;
-      }
-      yield* run("vcs.panel.deleteLocalBranch", input.cwd, [
-        "branch",
-        input.force ? "-D" : "-d",
-        input.branch.name,
+  const deleteBranch: SourceControlPanelService["Service"]["deleteBranch"] = Effect.fn(
+    "deleteBranch",
+  )(function* (input) {
+    if (input.branch.current) {
+      return yield* gitError(
+        "vcs.panel.deleteBranch",
+        input.cwd,
+        ["branch", "-d", input.branch.name],
+        "Cannot delete the current branch.",
+      );
+    }
+    if (input.branch.isRemote && input.branch.remoteName) {
+      const remoteBranchName = input.branch.name.startsWith(`${input.branch.remoteName}/`)
+        ? input.branch.name.slice(input.branch.remoteName.length + 1)
+        : input.branch.name;
+      yield* run("vcs.panel.deleteRemoteBranch", input.cwd, [
+        "push",
+        input.branch.remoteName,
+        "--delete",
+        remoteBranchName,
       ]).pipe(Effect.asVoid);
-    },
-  );
+      return;
+    }
+    yield* run("vcs.panel.deleteLocalBranch", input.cwd, [
+      "branch",
+      input.force ? "-D" : "-d",
+      input.branch.name,
+    ]).pipe(Effect.asVoid);
+  });
 
-  const undoLatestCommit: SourceControlPanelServiceShape["undoLatestCommit"] = Effect.fn(
+  const undoLatestCommit: SourceControlPanelService["Service"]["undoLatestCommit"] = Effect.fn(
     "undoLatestCommit",
   )(function* (input) {
     const currentBranch = yield* run("vcs.panel.currentBranch", input.cwd, [
@@ -1979,12 +2100,12 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     ]).pipe(Effect.asVoid);
   });
 
-  const revertCommit: SourceControlPanelServiceShape["revertCommit"] = (input) =>
+  const revertCommit: SourceControlPanelService["Service"]["revertCommit"] = (input) =>
     run("vcs.panel.revertCommit", input.cwd, ["revert", "--no-edit", input.sha]).pipe(
       Effect.asVoid,
     );
 
-  const checkoutCommit: SourceControlPanelServiceShape["checkoutCommit"] = Effect.fn(
+  const checkoutCommit: SourceControlPanelService["Service"]["checkoutCommit"] = Effect.fn(
     "checkoutCommit",
   )(function* (input) {
     yield* run("vcs.panel.checkoutCommit", input.cwd, ["checkout", "--detach", input.sha]).pipe(
@@ -1993,7 +2114,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     return { refName: input.sha };
   });
 
-  const createBranchFromCommit: SourceControlPanelServiceShape["createBranchFromCommit"] =
+  const createBranchFromCommit: SourceControlPanelService["Service"]["createBranchFromCommit"] =
     Effect.fn("createBranchFromCommit")(function* (input) {
       const branchName = yield* validateGitPositionalName({
         operation: "vcs.panel.createBranchFromCommit",
@@ -2011,14 +2132,14 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       return { refName: branchName };
     });
 
-  const mergeBranchIntoCurrent: SourceControlPanelServiceShape["mergeBranchIntoCurrent"] = (
+  const mergeBranchIntoCurrent: SourceControlPanelService["Service"]["mergeBranchIntoCurrent"] = (
     input,
   ) =>
     run("vcs.panel.mergeBranchIntoCurrent", input.cwd, ["merge", "--no-edit", input.refName]).pipe(
       Effect.asVoid,
     );
 
-  const rebaseCurrentOnto: SourceControlPanelServiceShape["rebaseCurrentOnto"] = (input) =>
+  const rebaseCurrentOnto: SourceControlPanelService["Service"]["rebaseCurrentOnto"] = (input) =>
     run("vcs.panel.rebaseCurrentOnto", input.cwd, ["rebase", input.refName]).pipe(Effect.asVoid);
 
   return SourceControlPanelService.of({
