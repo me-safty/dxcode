@@ -166,6 +166,42 @@ it.layer(TestLayer)("WorkspacePathsLive", (it) => {
         });
       }),
     );
+
+    it.effect("treats missing post-create roots as verification stat failures", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const workspacePaths = yield* makeWorkspacePaths.pipe(
+          Effect.provideService(FileSystem.FileSystem, {
+            ...fileSystem,
+            stat: (path) =>
+              Effect.fail(
+                PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "FileSystem",
+                  method: "stat",
+                  pathOrDescriptor: String(path),
+                  description: "Test NotFound stat failure.",
+                }),
+              ),
+            makeDirectory: () => Effect.void,
+          }),
+        );
+        const path = yield* Path.Path;
+        const workspaceRoot = " ./created-then-missing ";
+        const normalizedWorkspaceRoot = path.resolve(workspaceRoot.trim());
+
+        const error = yield* workspacePaths
+          .normalizeWorkspaceRoot(workspaceRoot, { createIfMissing: true })
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(WorkspaceRootStatFailedError);
+        expect(error).toMatchObject({
+          workspaceRoot,
+          normalizedWorkspaceRoot,
+          phase: "verify-created",
+        });
+      }),
+    );
   });
 
   describe("resolveRelativePathWithinRoot", () => {

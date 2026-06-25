@@ -15,7 +15,7 @@ import { CheckpointStoreLive } from "./CheckpointStore.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
-import type { VcsError } from "@t3tools/contracts";
+import { VcsUnsupportedOperationError, type VcsError } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
 import { ThreadId } from "@t3tools/contracts";
 
@@ -112,6 +112,47 @@ it.layer(TestLayer)("CheckpointStoreLive", (it) => {
         const checkpointStore = yield* CheckpointStore;
 
         expect(yield* checkpointStore.isGitRepository(tmp)).toBe(true);
+      }),
+    );
+
+    it.effect("returns false when Git repository detection fails", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const failingRegistry: VcsDriverRegistry.VcsDriverRegistryShape = {
+          get: () =>
+            Effect.fail(
+              new VcsUnsupportedOperationError({
+                operation: "test.get",
+                kind: "git",
+                detail: "unavailable",
+              }),
+            ),
+          detect: () =>
+            Effect.fail(
+              new VcsUnsupportedOperationError({
+                operation: "test.detect",
+                kind: "git",
+                detail: "unavailable",
+              }),
+            ),
+          resolve: () =>
+            Effect.fail(
+              new VcsUnsupportedOperationError({
+                operation: "test.resolve",
+                kind: "git",
+                detail: "unavailable",
+              }),
+            ),
+        };
+        const checkpointStore = yield* Effect.service(CheckpointStore).pipe(
+          Effect.provide(
+            CheckpointStoreLive.pipe(
+              Layer.provide(Layer.succeed(VcsDriverRegistry.VcsDriverRegistry, failingRegistry)),
+            ),
+          ),
+        );
+
+        expect(yield* checkpointStore.isGitRepository(tmp)).toBe(false);
       }),
     );
   });

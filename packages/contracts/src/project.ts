@@ -34,6 +34,7 @@ export const ProjectEntriesFailure = Schema.Literals([
   "workspace_root_not_directory",
   "search_index_create_failed",
   "search_index_scan_timed_out",
+  "search_index_scan_failed",
   "search_index_search_failed",
 ]);
 export type ProjectEntriesFailure = typeof ProjectEntriesFailure.Type;

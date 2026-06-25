@@ -96,6 +96,20 @@ export class WorkspaceSearchIndexScanTimedOut extends Schema.TaggedErrorClass<Wo
   }
 }
 
+export class WorkspaceSearchIndexScanFailed extends Schema.TaggedErrorClass<WorkspaceSearchIndexScanFailed>()(
+  "WorkspaceSearchIndexScanFailed",
+  {
+    cwd: Schema.String,
+    directory: Schema.String,
+    reason: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Failed to scan workspace directory '${this.directory}' for '${this.cwd}'.`;
+  }
+}
+
 export class WorkspaceSearchIndexSearchFailed extends Schema.TaggedErrorClass<WorkspaceSearchIndexSearchFailed>()(
   "WorkspaceSearchIndexSearchFailed",
   {
@@ -143,6 +157,7 @@ export const WorkspaceEntriesError = Schema.Union([
   WorkspaceRootNotDirectoryError,
   WorkspaceSearchIndexCreateFailed,
   WorkspaceSearchIndexScanTimedOut,
+  WorkspaceSearchIndexScanFailed,
   WorkspaceSearchIndexSearchFailed,
 ]);
 export type WorkspaceEntriesError = typeof WorkspaceEntriesError.Type;

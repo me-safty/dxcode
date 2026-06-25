@@ -29,7 +29,7 @@ import {
   WorkspaceEntriesError,
   WorkspaceEntriesReadDirectoryError,
   WorkspaceEntriesWindowsPathUnsupportedError,
-  WorkspaceSearchIndexCreateFailed,
+  WorkspaceSearchIndexScanFailed,
   type WorkspaceEntriesShape,
 } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
@@ -289,8 +289,9 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         return { relativeDir, dirents };
       },
       catch: (cause) =>
-        new WorkspaceSearchIndexCreateFailed({
+        new WorkspaceSearchIndexScanFailed({
           cwd,
+          directory: relativeDir || ".",
           reason: cause instanceof Error ? cause.message : String(cause),
           cause,
         }),

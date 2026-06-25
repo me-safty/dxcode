@@ -159,6 +159,12 @@ function projectEntriesFailureContext(error: WorkspaceEntriesError): {
         normalizedCwd: error.cwd,
         timeout: error.timeout,
       };
+    case "WorkspaceSearchIndexScanFailed":
+      return {
+        failure: "search_index_scan_failed",
+        normalizedCwd: error.cwd,
+        detail: `${error.directory}: ${error.reason}`,
+      };
     case "WorkspaceSearchIndexSearchFailed":
       return {
         failure: "search_index_search_failed",
