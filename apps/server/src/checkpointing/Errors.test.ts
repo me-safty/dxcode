@@ -31,7 +31,7 @@ it("derives checkpoint messages from structured context", () => {
     "Checkpoint unavailable for thread thread-1 turn 4: Turn diff range exceeds current turn count: requested 4, current 2.",
   );
   expect(checkpoint.message).toBe(
-    "Checkpoint unavailable for thread thread-1 turn 2: Checkpoint ref is unavailable for turn 2.",
+    "Checkpoint unavailable for thread thread-1 turn 2: to checkpoint ref is unavailable for turn 2.",
   );
   expect(workspace.message).toBe(
     "Checkpoint invariant violation in CheckpointDiffQuery.getFullThreadDiff: Workspace path missing for thread 'thread-1' when computing full thread diff.",

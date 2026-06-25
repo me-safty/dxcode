@@ -78,7 +78,7 @@ export class CheckpointRefUnavailableError extends Schema.TaggedErrorClass<Check
   },
 ) {
   override get message(): string {
-    return `Checkpoint unavailable for thread ${this.threadId} turn ${this.turnCount}: Checkpoint ref is unavailable for turn ${this.turnCount}.`;
+    return `Checkpoint unavailable for thread ${this.threadId} turn ${this.turnCount}: ${this.checkpoint} checkpoint ref is unavailable for turn ${this.turnCount}.`;
   }
 }
 
