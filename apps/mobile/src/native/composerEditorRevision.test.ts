@@ -2,7 +2,9 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   acknowledgeComposerNativeEvent,
+  isComposerNativeValue,
   resolveComposerControlledEventCount,
+  resolveComposerControlledSelection,
 } from "./composerEditorRevision";
 
 describe("acknowledgeComposerNativeEvent", () => {
@@ -24,32 +26,71 @@ describe("acknowledgeComposerNativeEvent", () => {
   });
 });
 
+describe("resolveComposerControlledSelection", () => {
+  const snapshots = [{ eventCount: 3, value: "native", selection: { start: 6, end: 6 } }];
+
+  it("does not replay selection for text that originated from native input", () => {
+    expect(
+      resolveComposerControlledSelection("native", { start: 2, end: 2 }, snapshots),
+    ).toBeNull();
+  });
+
+  it("preserves selection for a parent-driven text replacement", () => {
+    expect(resolveComposerControlledSelection("/plan ", { start: 6, end: 6 }, snapshots)).toEqual({
+      start: 6,
+      end: 6,
+    });
+  });
+});
+
+describe("isComposerNativeValue", () => {
+  const snapshots = [{ eventCount: 3, value: "native", selection: { start: 6, end: 6 } }];
+
+  it("identifies values emitted by the native editor", () => {
+    expect(isComposerNativeValue("native", snapshots)).toBe(true);
+    expect(isComposerNativeValue("parent edit", snapshots)).toBe(false);
+  });
+});
+
 describe("resolveComposerControlledEventCount", () => {
   const snapshots = [
-    { eventCount: 0, value: "" },
-    { eventCount: 2, value: "a" },
-    { eventCount: 4, value: "ab" },
+    { eventCount: 0, value: "", selection: { start: 0, end: 0 } },
+    { eventCount: 2, value: "a", selection: { start: 1, end: 1 } },
+    { eventCount: 4, value: "ab", selection: { start: 2, end: 2 } },
   ];
 
   it("tags a delayed parent value with the native revision that produced it", () => {
-    expect(resolveComposerControlledEventCount("a", 4, snapshots)).toBe(2);
+    expect(resolveComposerControlledEventCount("a", { start: 1, end: 1 }, 4, snapshots)).toBe(2);
   });
 
   it("does not acknowledge the pre-edit parent value as the latest revision", () => {
-    expect(resolveComposerControlledEventCount("", 4, snapshots)).toBe(0);
+    expect(resolveComposerControlledEventCount("", { start: 0, end: 0 }, 4, snapshots)).toBe(0);
   });
 
   it("acknowledges the latest native value at the latest revision", () => {
-    expect(resolveComposerControlledEventCount("ab", 4, snapshots)).toBe(4);
+    expect(resolveComposerControlledEventCount("ab", { start: 2, end: 2 }, 4, snapshots)).toBe(4);
   });
 
   it("allows an unmatched parent-driven edit at the latest native revision", () => {
-    expect(resolveComposerControlledEventCount("/plan ", 4, snapshots)).toBe(4);
+    expect(resolveComposerControlledEventCount("/plan ", { start: 6, end: 6 }, 4, snapshots)).toBe(
+      4,
+    );
   });
 
   it("uses the newest revision when selection events repeat the same value", () => {
     expect(
-      resolveComposerControlledEventCount("ab", 5, [...snapshots, { eventCount: 5, value: "ab" }]),
+      resolveComposerControlledEventCount("ab", { start: 1, end: 1 }, 5, [
+        ...snapshots,
+        { eventCount: 5, value: "ab", selection: { start: 1, end: 1 } },
+      ]),
     ).toBe(5);
+  });
+
+  it("keeps a stale selection paired with current text behind the native revision", () => {
+    expect(resolveComposerControlledEventCount("ab", { start: 1, end: 1 }, 4, snapshots)).toBe(3);
+  });
+
+  it("does not control selection when no selection prop is provided", () => {
+    expect(resolveComposerControlledEventCount("ab", null, 4, snapshots)).toBe(4);
   });
 });

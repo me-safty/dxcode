@@ -20,6 +20,7 @@ private struct ComposerControlledDocumentPayload: Decodable {
   let selection: ComposerSelectionPayload?
   let tokensJson: String
   let mostRecentEventCount: Int
+  let isNativeValue: Bool
 }
 
 private struct ComposerThemePayload: Decodable {
@@ -363,6 +364,9 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
           document.mostRecentEventCount >= nativeEventCount else {
       return
     }
+    if document.isNativeValue && textView.serializedText() != document.value {
+      return
+    }
     if tokensJson != document.tokensJson {
       tokensJson = document.tokensJson
       tokens = decode([ComposerTokenPayload].self, from: document.tokensJson) ?? []
@@ -371,7 +375,6 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
     value = document.value
     requestedSelection = document.selection
     applyControlledDocument(force: tokensNeedRebuild)
-    applyRequestedSelection()
     if tokensMatchCurrentValue() {
       tokensNeedRebuild = false
     }
@@ -485,6 +488,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
   private func applyControlledDocument(force: Bool = false) {
     let currentSource = textView.serializedText()
     guard force || currentSource != value || !documentMatchesExpectedTokens() else {
+      requestedSelection = nil
       updatePlaceholderVisibility()
       return
     }
@@ -759,7 +763,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
     isApplyingControlledValue = true
     textView.selectedRange = nextRange
     isApplyingControlledValue = false
-    requestedSelection = nil
+    self.requestedSelection = nil
   }
 
   private func updatePlaceholderVisibility() {

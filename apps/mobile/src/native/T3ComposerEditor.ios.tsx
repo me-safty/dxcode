@@ -18,7 +18,9 @@ import { MOBILE_TYPOGRAPHY } from "../lib/typography";
 import { useThemeColor } from "../lib/useThemeColor";
 import {
   acknowledgeComposerNativeEvent,
+  isComposerNativeValue,
   resolveComposerControlledEventCount,
+  resolveComposerControlledSelection,
   type ComposerNativeEventSnapshot,
 } from "./composerEditorRevision";
 import type { ComposerEditorProps, ComposerEditorSelection } from "./T3ComposerEditor.types";
@@ -98,7 +100,7 @@ export function ComposerEditor({
   const mostRecentEventCountRef = useRef(0);
   const [mostRecentEventCount, setMostRecentEventCount] = useState(0);
   const nativeEventSnapshotsRef = useRef<ComposerNativeEventSnapshot[]>([
-    { eventCount: 0, value: props.value },
+    { eventCount: 0, value: props.value, selection: selection ?? null },
   ]);
   const confirmedTokensRef = useRef(collectComposerInlineTokens(props.value));
   const textColor = useThemeColor("--color-foreground");
@@ -147,35 +149,50 @@ export function ComposerEditor({
   }, [props.value, skillLabels]);
   const controlledEventCount = resolveComposerControlledEventCount(
     props.value,
+    selection ?? null,
     Math.max(mostRecentEventCount, mostRecentEventCountRef.current),
     nativeEventSnapshotsRef.current,
   );
+  const controlledSelection = resolveComposerControlledSelection(
+    props.value,
+    selection ?? null,
+    nativeEventSnapshotsRef.current,
+  );
+  const isNativeValue = isComposerNativeValue(props.value, nativeEventSnapshotsRef.current);
   const controlledDocumentJson = JSON.stringify({
     value: props.value,
-    selection: selection ?? null,
+    selection: controlledSelection,
     tokensJson,
     mostRecentEventCount: controlledEventCount,
+    isNativeValue,
   });
   useEffect(() => {
     nativeEventSnapshotsRef.current = [
-      { eventCount: controlledEventCount, value: props.value },
+      { eventCount: controlledEventCount, value: props.value, selection: selection ?? null },
       ...nativeEventSnapshotsRef.current.filter(
         (snapshot) => snapshot.eventCount > controlledEventCount,
       ),
     ];
-  }, [controlledEventCount, props.value]);
-  const acceptNativeEvent = useCallback((eventCount: number, value: string) => {
-    const acknowledgedEventCount = acknowledgeComposerNativeEvent(
-      mostRecentEventCountRef.current,
-      eventCount,
-    );
-    if (acknowledgedEventCount === null) {
-      return false;
-    }
-    mostRecentEventCountRef.current = acknowledgedEventCount;
-    nativeEventSnapshotsRef.current.push({ eventCount: acknowledgedEventCount, value });
-    return acknowledgedEventCount;
-  }, []);
+  }, [controlledEventCount, props.value, selection]);
+  const acceptNativeEvent = useCallback(
+    (eventCount: number, value: string, nextSelection: ComposerEditorSelection) => {
+      const acknowledgedEventCount = acknowledgeComposerNativeEvent(
+        mostRecentEventCountRef.current,
+        eventCount,
+      );
+      if (acknowledgedEventCount === null) {
+        return false;
+      }
+      mostRecentEventCountRef.current = acknowledgedEventCount;
+      nativeEventSnapshotsRef.current.push({
+        eventCount: acknowledgedEventCount,
+        value,
+        selection: nextSelection,
+      });
+      return acknowledgedEventCount;
+    },
+    [],
+  );
   const themeJson = JSON.stringify({
     text: String(textColor),
     placeholder: String(placeholderColor),
@@ -220,6 +237,7 @@ export function ComposerEditor({
         const acknowledgedEventCount = acceptNativeEvent(
           event.nativeEvent.eventCount,
           event.nativeEvent.value,
+          event.nativeEvent.selection,
         );
         if (acknowledgedEventCount === false) return;
         onChangeText(event.nativeEvent.value);
@@ -230,6 +248,7 @@ export function ComposerEditor({
         const acknowledgedEventCount = acceptNativeEvent(
           event.nativeEvent.eventCount,
           event.nativeEvent.value,
+          event.nativeEvent.selection,
         );
         if (acknowledgedEventCount === false) return;
         onSelectionChange?.(event.nativeEvent.selection);
