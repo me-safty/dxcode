@@ -15,6 +15,12 @@ private struct ComposerSelectionPayload: Decodable {
   let end: Int
 }
 
+private struct ComposerControlledDocumentPayload: Decodable {
+  let value: String
+  let selection: ComposerSelectionPayload?
+  let mostRecentEventCount: Int
+}
+
 private struct ComposerThemePayload: Decodable {
   let text: String
   let placeholder: String
@@ -281,6 +287,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
   private var shouldAutoFocus = false
   private var didAutoFocus = false
   private var isApplyingControlledValue = false
+  private var nativeEventCount = 0
   private var lastContentSize = CGSize.zero
   private var iconImages: [String: UIImage] = [:]
   private var pendingIconUris = Set<String>()
@@ -350,9 +357,15 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
     }
   }
 
-  func setValue(_ value: String) {
-    self.value = value
+  func setControlledDocumentJson(_ documentJson: String) {
+    guard let document = decode(ComposerControlledDocumentPayload.self, from: documentJson),
+          document.mostRecentEventCount >= nativeEventCount else {
+      return
+    }
+    value = document.value
+    requestedSelection = document.selection
     applyControlledDocument(force: tokensNeedRebuild)
+    applyRequestedSelection()
     if tokensMatchCurrentValue() {
       tokensNeedRebuild = false
     }
@@ -369,11 +382,6 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
     if tokensMatchCurrentValue() {
       tokensNeedRebuild = false
     }
-  }
-
-  func setSelectionJson(_ selectionJson: String) {
-    requestedSelection = decode(ComposerSelectionPayload.self, from: selectionJson)
-    applyRequestedSelection()
   }
 
   func setThemeJson(_ themeJson: String) {
@@ -700,9 +708,11 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
     }
     value = textView.serializedText()
     let selection = sourceSelection()
+    nativeEventCount += 1
     onComposerChange([
       "value": value,
       "selection": ["start": selection.start, "end": selection.end],
+      "eventCount": nativeEventCount,
     ])
     updatePlaceholderVisibility()
     emitContentSizeIfNeeded()
@@ -710,8 +720,10 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
 
   private func emitSelection() {
     let selection = sourceSelection()
+    nativeEventCount += 1
     onComposerSelectionChange([
       "selection": ["start": selection.start, "end": selection.end],
+      "eventCount": nativeEventCount,
     ])
   }
 
@@ -752,6 +764,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
     isApplyingControlledValue = true
     textView.selectedRange = nextRange
     isApplyingControlledValue = false
+    requestedSelection = nil
   }
 
   private func updatePlaceholderVisibility() {
