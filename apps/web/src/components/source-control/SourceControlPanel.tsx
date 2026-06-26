@@ -2231,6 +2231,7 @@ export function SourceControlPanel({
           return next;
         });
       } catch (nextError) {
+        if (isSourceControlPanelCommandInterrupted(nextError)) return;
         setError(errorMessage(nextError));
       } finally {
         setLoadingBranchDetails((current) => {
@@ -2284,7 +2285,12 @@ export function SourceControlPanel({
   );
 
   const loadMoreBranchCommits = useCallback(
-    async (branch: VcsRef, details: VcsPanelBranchDetails, kind: BranchCommitListKind) => {
+    async (
+      branch: VcsRef,
+      details: VcsPanelBranchDetails,
+      kind: BranchCommitListKind,
+      detailsKey = branch.name,
+    ) => {
       const loadedCount =
         kind === "ahead"
           ? details.aheadCommits.length
@@ -2304,7 +2310,7 @@ export function SourceControlPanel({
       if (!api || remaining <= 0) return;
       setLoadingBranchDetails((current) => {
         const next = new Set(current);
-        next.add(branch.name);
+        next.add(detailsKey);
         return next;
       });
       try {
@@ -2317,7 +2323,8 @@ export function SourceControlPanel({
           limit: COMMIT_PAGE_SIZE,
         });
         setBranchDetailsByRef((current) => {
-          const nextDetails = current.get(details.fullRefName) ?? details;
+          const nextDetails =
+            current.get(detailsKey) ?? current.get(details.fullRefName) ?? details;
           const merged =
             kind === "ahead"
               ? {
@@ -2343,6 +2350,7 @@ export function SourceControlPanel({
                       commitsRemaining: result.remaining,
                     };
           const next = new Map(current);
+          next.set(detailsKey, merged);
           next.set(merged.fullRefName, merged);
           next.set(merged.name, merged);
           return next;
@@ -2352,7 +2360,7 @@ export function SourceControlPanel({
       } finally {
         setLoadingBranchDetails((current) => {
           const next = new Set(current);
-          next.delete(branch.name);
+          next.delete(detailsKey);
           return next;
         });
       }
@@ -2864,7 +2872,7 @@ export function SourceControlPanel({
                   <LoadMoreCommitsButton
                     remaining={details.aheadCommitsRemaining}
                     loading={loadingDetails}
-                    onClick={() => void loadMoreBranchCommits(branch, details, "ahead")}
+                    onClick={() => void loadMoreBranchCommits(branch, details, "ahead", detailsKey)}
                   />
                 </div>
               ),
@@ -2883,7 +2891,9 @@ export function SourceControlPanel({
                   <LoadMoreCommitsButton
                     remaining={details.behindCommitsRemaining}
                     loading={loadingDetails}
-                    onClick={() => void loadMoreBranchCommits(branch, details, "behind")}
+                    onClick={() =>
+                      void loadMoreBranchCommits(branch, details, "behind", detailsKey)
+                    }
                   />
                 </div>
               ),
@@ -2904,7 +2914,7 @@ export function SourceControlPanel({
               <LoadMoreCommitsButton
                 remaining={details.commitsRemaining}
                 loading={loadingDetails}
-                onClick={() => void loadMoreBranchCommits(branch, details, "history")}
+                onClick={() => void loadMoreBranchCommits(branch, details, "history", detailsKey)}
               />
             </div>
           ),
