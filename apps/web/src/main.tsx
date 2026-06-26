@@ -1,6 +1,6 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
-import { createHashHistory, createBrowserHistory, RouterProvider } from "@tanstack/react-router";
+import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 import { ClerkProvider } from "@clerk/react";
 import { passkeys } from "@clerk/electron/passkeys";
 import { ClerkProvider as ElectronClerkProvider } from "@clerk/electron/react";
@@ -16,8 +16,7 @@ import { ManagedRelayAuthProvider } from "./cloud/managedAuth";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
-import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
-import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
+import { AppRoot } from "./AppRoot";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
@@ -30,12 +29,7 @@ if (isElectron) {
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 
-const app = (
-  <AppAtomRegistryProvider>
-    <RouterProvider router={router} />
-    <ElectronBrowserHost />
-  </AppAtomRegistryProvider>
-);
+const app = <AppRoot router={router} />;
 
 const AuthWrapper = (props: { children: React.ReactNode }) =>
   clerkPublishableKey && hasCloudPublicConfig() ? (
