@@ -1091,11 +1091,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               ),
             );
 
-          for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
-            yield* Effect.yieldNow;
-          }
-          yield* prepared.acp.drainEvents;
-
           return yield* withThreadLock(
             input.threadId,
             Effect.gen(function* () {
@@ -1117,6 +1112,13 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   detail: "Grok session changed before the turn completed.",
                 });
               }
+              // Keep prompt settlement atomic with respect to Stop and steering.
+              // interruptTurn marks its target before waiting for this lock, so
+              // cancellation can still win while queued ACP events are drained.
+              for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
+                yield* Effect.yieldNow;
+              }
+              yield* prepared.acp.drainEvents;
               if (ctx.interruptedTurnIds.has(prepared.turnId)) {
                 yield* Ref.set(promptSettled, true);
                 return {
@@ -1270,47 +1272,87 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       });
 
     const interruptTurn: GrokAdapterShape["interruptTurn"] = (threadId, turnId) =>
-      withThreadLock(
-        threadId,
-        Effect.gen(function* () {
-          const ctx = yield* requireSession(threadId);
-          const activeTurnId = ctx.activeTurnId ?? ctx.session.activeTurnId;
-          if (turnId !== undefined && activeTurnId !== undefined && activeTurnId !== turnId) {
-            return;
-          }
-          const interruptedTurnId = turnId ?? activeTurnId ?? ctx.session.activeTurnId;
-          yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
-          yield* settlePendingUserInputsAsCancelled(ctx.pendingUserInputs);
-          yield* Effect.ignore(
-            ctx.acp.cancel.pipe(
-              Effect.mapError((error) =>
-                mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", error),
-              ),
-            ),
-          );
-          if (interruptedTurnId) {
-            ctx.interruptedTurnIds.add(interruptedTurnId);
-            yield* settlePromptInFlight(threadId, interruptedTurnId, ctx.acpSessionId, {
-              completedStopReason: "cancelled",
-              settleAllPrompts: true,
-            });
-          } else if (
-            ctx.promptsInFlight > 0 ||
-            ctx.session.status === "running" ||
-            ctx.session.status === "connecting"
-          ) {
-            const updatedAt = yield* nowIso;
-            ctx.promptsInFlight = 0;
-            ctx.activeTurnId = undefined;
-            const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
-            ctx.session = {
-              ...readySession,
-              status: "ready",
-              updatedAt,
+      Effect.gen(function* () {
+        const observed = yield* Effect.sync(() => {
+          const ctx = sessions.get(threadId);
+          if (!ctx || ctx.stopped) {
+            return {
+              _tag: "Proceed" as const,
+              acpSessionId: undefined,
+              interruptedTurnId: turnId,
             };
           }
-        }),
-      );
+          const activeTurnId = ctx.activeTurnId ?? ctx.session.activeTurnId;
+          if (turnId !== undefined && activeTurnId !== undefined && activeTurnId !== turnId) {
+            return { _tag: "Ignore" as const };
+          }
+          const interruptedTurnId = turnId ?? activeTurnId;
+          if (interruptedTurnId !== undefined) {
+            ctx.interruptedTurnIds.add(interruptedTurnId);
+          }
+          return {
+            _tag: "Proceed" as const,
+            acpSessionId: ctx.acpSessionId,
+            interruptedTurnId,
+          };
+        });
+        if (observed._tag === "Ignore") {
+          return;
+        }
+
+        yield* withThreadLock(
+          threadId,
+          Effect.gen(function* () {
+            const ctx = yield* requireSession(threadId);
+            if (observed.acpSessionId !== undefined && ctx.acpSessionId !== observed.acpSessionId) {
+              return;
+            }
+            const activeTurnId = ctx.activeTurnId ?? ctx.session.activeTurnId;
+            if (turnId !== undefined && activeTurnId !== undefined && activeTurnId !== turnId) {
+              return;
+            }
+            if (
+              observed.interruptedTurnId !== undefined &&
+              activeTurnId !== undefined &&
+              activeTurnId !== observed.interruptedTurnId
+            ) {
+              return;
+            }
+            const interruptedTurnId =
+              observed.interruptedTurnId ?? turnId ?? activeTurnId ?? ctx.session.activeTurnId;
+            yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
+            yield* settlePendingUserInputsAsCancelled(ctx.pendingUserInputs);
+            yield* Effect.ignore(
+              ctx.acp.cancel.pipe(
+                Effect.mapError((error) =>
+                  mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", error),
+                ),
+              ),
+            );
+            if (interruptedTurnId) {
+              ctx.interruptedTurnIds.add(interruptedTurnId);
+              yield* settlePromptInFlight(threadId, interruptedTurnId, ctx.acpSessionId, {
+                completedStopReason: "cancelled",
+                settleAllPrompts: true,
+              });
+            } else if (
+              ctx.promptsInFlight > 0 ||
+              ctx.session.status === "running" ||
+              ctx.session.status === "connecting"
+            ) {
+              const updatedAt = yield* nowIso;
+              ctx.promptsInFlight = 0;
+              ctx.activeTurnId = undefined;
+              const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
+              ctx.session = {
+                ...readySession,
+                status: "ready",
+                updatedAt,
+              };
+            }
+          }),
+        );
+      });
 
     const respondToRequest: GrokAdapterShape["respondToRequest"] = (
       threadId,
