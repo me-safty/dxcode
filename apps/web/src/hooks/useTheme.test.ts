@@ -153,6 +153,70 @@ describe("theme failure handling", () => {
     unsubscribe?.();
   });
 
+  it("logs palette write failures without throwing from setPalette", async () => {
+    const writeCause = new Error("palette storage quota exceeded");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const store = new Map<string, string>();
+    let readSnapshot: (() => unknown) | undefined;
+    vi.doMock("react", () => ({
+      useCallback: <A>(callback: A) => callback,
+      useEffect: () => undefined,
+      useSyncExternalStore: (
+        _subscribe: (listener: () => void) => () => void,
+        getSnapshot: () => unknown,
+      ) => {
+        readSnapshot = getSnapshot;
+        return getSnapshot();
+      },
+    }));
+    vi.stubGlobal("window", {
+      addEventListener: () => undefined,
+      localStorage: createStorage({
+        setItem: (key, value) => {
+          if (key === "t3code:theme-palette") {
+            throw writeCause;
+          }
+          store.set(key, value);
+        },
+        getItem: (key) => store.get(key) ?? null,
+      }),
+      matchMedia: () => ({
+        matches: false,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }),
+      removeEventListener: () => undefined,
+    });
+    vi.stubGlobal("document", {
+      documentElement: {
+        classList: { toggle: vi.fn() },
+        dataset: {},
+        offsetHeight: 0,
+      },
+      body: { style: {} },
+      head: { append: vi.fn() },
+      querySelector: () => null,
+    });
+    vi.stubGlobal("getComputedStyle", () => ({ backgroundColor: "rgb(0, 0, 0)" }));
+
+    const { useTheme } = await import("./useTheme");
+    const { setPalette } = useTheme();
+    setPalette("catppuccin");
+    readSnapshot?.();
+
+    expect(errorLog).toHaveBeenCalledWith(
+      "Failed to write theme preference for t3code:theme-palette.",
+      expect.objectContaining({
+        operation: "write",
+        storageKey: "t3code:theme-palette",
+        errorTag: "ThemeStorageError",
+      }),
+    );
+    const attributes = errorLog.mock.calls[0]?.[1];
+    expect(attributes).not.toHaveProperty("cause");
+    expect(JSON.stringify(attributes)).not.toContain(writeCause.message);
+  });
+
   it("preserves desktop sync causes and retries after a failed cosmetic sync", async () => {
     const cause = new Error("desktop IPC unavailable");
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});

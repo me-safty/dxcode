@@ -121,6 +121,20 @@ export function writeThemePreference(theme: Theme): void {
   }
 }
 
+function writeThemePalette(palette: ThemePalette): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PALETTE_STORAGE_KEY, palette);
+    themeStorageReadFailure = null;
+  } catch (cause) {
+    throw new ThemeStorageError({
+      operation: "write",
+      storageKey: PALETTE_STORAGE_KEY,
+      cause,
+    });
+  }
+}
+
 function getStored(): Theme {
   if (!hasThemeStorage()) return DEFAULT_THEME_SNAPSHOT.theme;
   if (themeStorageReadFailure !== null) {
@@ -353,7 +367,14 @@ export function useTheme() {
   const setPalette = useCallback(
     (next: ThemePalette) => {
       if (!hasThemeStorage()) return;
-      window.localStorage.setItem(PALETTE_STORAGE_KEY, next);
+      try {
+        writeThemePalette(next);
+      } catch (error) {
+        if (isThemeStorageError(error)) {
+          console.error(error.message, themeErrorLogAttributes(error));
+        }
+        return;
+      }
       applyTheme(theme, next, true);
       emitChange();
     },

@@ -402,7 +402,11 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
               cause,
             }),
         });
-        if (!session.data) {
+        if (
+          !session.data ||
+          typeof session.data.id !== "string" ||
+          session.data.id.length === 0
+        ) {
           return yield* new OpenCodeTextGenerationSessionPayloadError({
             operation: input.operation,
             cwd: input.cwd,

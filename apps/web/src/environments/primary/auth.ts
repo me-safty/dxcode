@@ -62,7 +62,10 @@ export class PrimaryEnvironmentRequestError extends Schema.TaggedErrorClass<Prim
   }
 
   override get message(): string {
-    return `Primary environment request failed during ${this.operation} (HTTP ${this.status}).`;
+    return readHttpApiErrorMessage(
+      this.cause,
+      `Primary environment request failed during ${this.operation} (HTTP ${this.status}).`,
+    );
   }
 }
 
@@ -219,6 +222,28 @@ function readEnvironmentHttpErrorStatus(error: EnvironmentHttpCommonErrorType): 
       return 403;
     case "EnvironmentInternalError":
       return 500;
+  }
+}
+
+function readHttpApiErrorMessage(error: unknown, fallbackMessage: string): string {
+  if (!isEnvironmentHttpCommonError(error)) {
+    return fallbackMessage;
+  }
+  switch (error._tag) {
+    case "EnvironmentAuthInvalidError":
+      return error.reason === "missing_credential"
+        ? "Authentication required."
+        : "Invalid bootstrap credential.";
+    case "EnvironmentRequestInvalidError":
+      return error.reason === "invalid_scope"
+        ? "Requested token scope is invalid."
+        : "Requested scope exceeds the bootstrap credential grant.";
+    case "EnvironmentScopeRequiredError":
+      return `The authenticated token is missing required scope: ${error.requiredScope}.`;
+    case "EnvironmentOperationForbiddenError":
+      return "This operation is not allowed for the current session.";
+    case "EnvironmentInternalError":
+      return fallbackMessage;
   }
 }
 

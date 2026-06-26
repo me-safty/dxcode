@@ -199,16 +199,19 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
         ),
       ),
       Effect.flatMap((rows) =>
-        Effect.forEach(rows, (row) =>
-          decodeRuntimeRow(row).pipe(
-            Effect.mapError((cause) =>
-              PersistenceDecodeError.fromSchemaError(
-                "ProviderSessionRuntimeRepository.list:decodeRows",
-                cause,
-                { threadId: row.threadId },
+        Effect.forEach(
+          rows,
+          (row) =>
+            decodeRuntimeRow(row).pipe(
+              Effect.mapError((cause) =>
+                PersistenceDecodeError.fromSchemaError(
+                  "ProviderSessionRuntimeRepository.list:decodeRows",
+                  cause,
+                  { threadId: row.threadId },
+                ),
               ),
             ),
-          ),
+          { concurrency: "unbounded" },
         ),
       ),
     );

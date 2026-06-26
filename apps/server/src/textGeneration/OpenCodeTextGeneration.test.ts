@@ -285,6 +285,26 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
     ),
   );
 
+  it.effect("reports a missing session id without manufacturing a cause", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.sessionResult = { data: {} };
+
+        const error = yield* textGeneration
+          .generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT)
+          .pipe(Effect.flip);
+
+        expect(error.message).toContain("OpenCode session.create returned no session payload.");
+        expect(error.cause).toMatchObject({
+          _tag: "OpenCodeTextGenerationSessionPayloadError",
+          operation: "generateCommitMessage",
+          cwd: process.cwd(),
+        });
+        expect(error.cause).not.toHaveProperty("cause");
+      }),
+    ),
+  );
+
   it.effect("preserves the SDK cause and request context when prompting fails", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {

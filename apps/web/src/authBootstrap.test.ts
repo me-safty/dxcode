@@ -1,5 +1,6 @@
 import {
   EnvironmentAuthInvalidError,
+  EnvironmentOperationForbiddenError,
   type AuthBrowserSessionResult,
   type AuthCreatePairingCredentialInput,
   type AuthSessionState,
@@ -359,6 +360,48 @@ describe("resolveInitialServerAuthGateState", () => {
       "Primary environment request failed during list-pairing-links (HTTP 500).",
     );
     expect(error.message).not.toContain(cause.message);
+  });
+
+  it("maps environment HTTP errors to user-facing request messages", async () => {
+    const cause = new EnvironmentOperationForbiddenError({
+      code: "operation_forbidden",
+      reason: "current_session_revoke_not_allowed",
+      traceId: "trace-forbidden",
+    });
+    const { PrimaryEnvironmentRequestError } = await import("./environments/primary");
+    const error = PrimaryEnvironmentRequestError.fromCause({
+      operation: "list-client-sessions",
+      cause,
+    });
+
+    expect(error.status).toBe(403);
+    expect(error.message).toBe("This operation is not allowed for the current session.");
+    expect(error.message).not.toContain(cause.traceId);
+  });
+
+  it("surfaces a friendly bootstrap error when desktop credentials are missing", async () => {
+    const testApi = await installAuthApi({
+      session: () => unauthenticatedSession(DESKTOP_AUTH),
+      browserSession: () =>
+        Effect.fail(
+          new EnvironmentAuthInvalidError({
+            code: "auth_invalid",
+            reason: "missing_credential",
+            traceId: "trace-missing-credential",
+          }),
+        ),
+    });
+
+    installDesktopBootstrap();
+
+    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "requires-auth",
+      auth: DESKTOP_AUTH,
+      errorMessage: "Authentication required.",
+    });
+    expect(testApi.calls.browserSession).toEqual([{ credential: "desktop-bootstrap-token" }]);
   });
 
   it("waits for the authenticated session to become observable after silent desktop bootstrap", async () => {

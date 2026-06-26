@@ -1,12 +1,22 @@
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
+function formatSchemaIssuePath(path: ReadonlyArray<PropertyKey>): string {
+  return path
+    .map((segment) => (typeof segment === "number" ? `[${segment}]` : String(segment)))
+    .join(".");
+}
+
 function summarizeSchemaIssue(issue: SchemaIssue.Issue): string {
   switch (issue._tag) {
     case "Filter":
     case "Encoding":
-    case "Pointer":
       return `${issue._tag}(${summarizeSchemaIssue(issue.issue)})`;
+    case "Pointer": {
+      const inner = summarizeSchemaIssue(issue.issue);
+      const path = formatSchemaIssuePath(issue.path);
+      return path.length > 0 ? `${path}:${inner}` : inner;
+    }
     case "Composite":
     case "AnyOf":
       return `${issue._tag}(${issue.issues.map(summarizeSchemaIssue).join(",")})`;
