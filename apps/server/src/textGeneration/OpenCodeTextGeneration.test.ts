@@ -288,7 +288,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
   it.effect("reports a missing session id without manufacturing a cause", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
-        runtimeMock.state.sessionResult = { data: {} };
+        runtimeMock.state.sessionResult = { data: { id: "" } };
 
         const error = yield* textGeneration
           .generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT)

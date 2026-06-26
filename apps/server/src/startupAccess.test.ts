@@ -29,17 +29,18 @@ it("resolves wildcard hosts to a concrete external interface when one is availab
       {
         address: "192.168.1.42",
         netmask: "255.255.255.0",
-        family: "IPv4",
+        family: "IPv4" as const,
         mac: "00:00:00:00:00:00",
         internal: false,
         cidr: "192.168.1.42/24",
+        scopeid: 0,
       },
     ],
     lo0: [
       {
         address: "127.0.0.1",
         netmask: "255.0.0.0",
-        family: "IPv4",
+        family: "IPv4" as const,
         mac: "00:00:00:00:00:00",
         internal: true,
         cidr: "127.0.0.1/8",
@@ -79,6 +80,7 @@ it("resolves a LAN connection string from the first external IPv4 interface", ()
         mac: "00:00:00:00:00:00",
         internal: false,
         cidr: "192.168.1.42/24",
+        scopeid: 0,
       },
     ],
   };
