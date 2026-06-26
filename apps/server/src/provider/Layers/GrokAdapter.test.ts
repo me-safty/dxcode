@@ -320,6 +320,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const wrapperPath = yield* Effect.promise(() =>
         makeMockGrokWrapper({
           T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG: "1",
+          T3_ACP_EMIT_FOREIGN_SESSION_UPDATES: "1",
         }),
       );
       const adapter = yield* makeTestAdapter(wrapperPath);
@@ -353,6 +354,9 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       });
 
       yield* Deferred.await(turnCompleted);
+      for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
+        yield* Effect.yieldNow;
+      }
       const readySessions = yield* adapter.listSessions();
       const readySession = readySessions.find((session) => session.threadId === threadId);
       const turnCompletedEvent = runtimeEvents.find(
@@ -360,9 +364,38 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
           event.type === "turn.completed",
       );
       const eventTypes = runtimeEvents.map((event) => event.type);
+      const content = runtimeEvents
+        .filter(
+          (event): event is Extract<ProviderRuntimeEvent, { type: "content.delta" }> =>
+            event.type === "content.delta" && String(event.threadId) === String(threadId),
+        )
+        .map((event) => event.payload.delta)
+        .join("");
+      const terminalIndex = runtimeEvents.findIndex(
+        (event) => event.type === "turn.completed" && String(event.threadId) === String(threadId),
+      );
+      const turnOutputTypes = new Set([
+        "content.delta",
+        "item.started",
+        "item.updated",
+        "item.completed",
+        "turn.plan.updated",
+      ]);
+      const outputAfterTerminal = runtimeEvents
+        .slice(terminalIndex + 1)
+        .filter(
+          (event) => String(event.threadId) === String(threadId) && turnOutputTypes.has(event.type),
+        );
+      const toolTitles = runtimeEvents.flatMap((event) =>
+        event.type === "item.updated" && event.payload.title ? [event.payload.title] : [],
+      );
 
       assert.equal(sendTurnResult.threadId, threadId);
       assert.include(eventTypes, "turn.completed");
+      assert.equal(content, "hello from mock");
+      assert.isAtLeast(terminalIndex, 0);
+      assert.deepEqual(outputAfterTerminal, []);
+      assert.notInclude(toolTitles, "Child-only tool");
       assert.equal(turnCompletedEvent?.payload.stopReason, "end_turn");
       assert.equal(readySession?.status, "ready");
       assert.isUndefined(readySession?.activeTurnId);

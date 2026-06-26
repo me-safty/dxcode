@@ -1545,29 +1545,24 @@ const make = Effect.gen(function* () {
         const proposedPlans = detailedThread?.proposedPlans ?? [];
         const turnId = toTurnId(event.turnId);
         if (turnId) {
-          // Grok can emit turn.completed while assistant segments are still
-          // streaming. Defer assistant finalization to item.completed so
-          // trailing chunks keep appending to the active segment.
-          if (event.provider !== "grok") {
-            const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
-            yield* Effect.forEach(
-              assistantMessageIds,
-              (assistantMessageId) =>
-                finalizeAssistantMessage({
-                  event,
-                  threadId: thread.id,
-                  messageId: assistantMessageId,
-                  turnId,
-                  createdAt: now,
-                  commandTag: "assistant-complete-finalize",
-                  finalDeltaCommandTag: "assistant-delta-finalize-fallback",
-                  hasProjectedMessage: findMessageById(messages, assistantMessageId) !== undefined,
-                }),
-              { concurrency: 1 },
-            ).pipe(Effect.asVoid);
-            yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
-            yield* clearAssistantSegmentStateForTurn(thread.id, turnId);
-          }
+          const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
+          yield* Effect.forEach(
+            assistantMessageIds,
+            (assistantMessageId) =>
+              finalizeAssistantMessage({
+                event,
+                threadId: thread.id,
+                messageId: assistantMessageId,
+                turnId,
+                createdAt: now,
+                commandTag: "assistant-complete-finalize",
+                finalDeltaCommandTag: "assistant-delta-finalize-fallback",
+                hasProjectedMessage: findMessageById(messages, assistantMessageId) !== undefined,
+              }),
+            { concurrency: 1 },
+          ).pipe(Effect.asVoid);
+          yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
+          yield* clearAssistantSegmentStateForTurn(thread.id, turnId);
 
           yield* finalizeBufferedProposedPlan({
             event,

@@ -412,9 +412,6 @@ export function reorderProjects(
 }
 
 interface UiStateStore extends UiState {
-  /** Ephemeral: composer waiting for server acknowledgement after send. */
-  threadDispatchPendingById: Record<string, boolean>;
-  setThreadDispatchPending: (threadKey: string, pending: boolean) => void;
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
@@ -429,31 +426,6 @@ interface UiStateStore extends UiState {
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
-  threadDispatchPendingById: {},
-  setThreadDispatchPending: (threadKey, pending) =>
-    set((state) => {
-      if (pending) {
-        if (state.threadDispatchPendingById[threadKey] === true) {
-          return state;
-        }
-        return {
-          ...state,
-          threadDispatchPendingById: {
-            ...state.threadDispatchPendingById,
-            [threadKey]: true,
-          },
-        };
-      }
-      if (!(threadKey in state.threadDispatchPendingById)) {
-        return state;
-      }
-      const nextPending = { ...state.threadDispatchPendingById };
-      delete nextPending[threadKey];
-      return {
-        ...state,
-        threadDispatchPendingById: nextPending,
-      };
-    }),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>

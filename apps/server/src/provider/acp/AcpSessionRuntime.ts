@@ -55,6 +55,13 @@ interface PendingXAiPromptCompletion {
   readonly deferred: Deferred.Deferred<EffectAcpSchema.PromptResponse>;
 }
 
+export interface AcpSessionEventStreamBarrier {
+  readonly _tag: "EventStreamBarrier";
+  readonly acknowledge: Deferred.Deferred<void>;
+}
+
+export type AcpSessionRuntimeEvent = AcpParsedSessionEvent | AcpSessionEventStreamBarrier;
+
 const completedXAiPromptIdLimit = 128;
 const defaultSessionLoadTimeout = Duration.seconds(90);
 const defaultSessionLoadReplayIdleGap = Duration.seconds(2);
@@ -190,7 +197,9 @@ export class AcpSessionRuntime extends Context.Service<
      */
     readonly start: () => Effect.Effect<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
     /** Stream of parsed ACP session events emitted after startup. */
-    readonly getEvents: () => Stream.Stream<AcpParsedSessionEvent, never>;
+    readonly getEvents: () => Stream.Stream<AcpSessionRuntimeEvent, never>;
+    /** Waits until the current event consumer has processed every queued event. */
+    readonly drainEvents: Effect.Effect<void>;
     /** Latest mode state observed from session setup and `session/update` notifications. */
     readonly getModeState: Effect.Effect<AcpSessionModeState | undefined>;
     /** Latest configuration options observed from session setup and configuration writes. */
@@ -284,7 +293,7 @@ export const make = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
-    const eventQueue = yield* Queue.unbounded<AcpParsedSessionEvent>();
+    const eventQueue = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
@@ -389,6 +398,15 @@ export const make = (
           return;
         }
         if (sessionUpdateIsReplay(notification)) {
+          return;
+        }
+        const startState = yield* Ref.get(startStateRef);
+        // One runtime projects one root ACP session. Child-session updates need
+        // explicit lineage routing and must never be flattened into this stream.
+        if (
+          startState._tag !== "Started" ||
+          notification.sessionId !== startState.result.sessionId
+        ) {
           return;
         }
         yield* handleSessionUpdate({
@@ -714,6 +732,14 @@ export const make = (
       handleExtNotification: acp.handleExtNotification,
       start: () => start,
       getEvents: () => Stream.fromQueue(eventQueue),
+      drainEvents: Effect.gen(function* () {
+        const acknowledge = yield* Deferred.make<void>();
+        yield* Queue.offer(eventQueue, {
+          _tag: "EventStreamBarrier",
+          acknowledge,
+        });
+        yield* Deferred.await(acknowledge);
+      }),
       getModeState: Ref.get(modeStateRef),
       getConfigOptions: Ref.get(configOptionsRef),
       prompt: (payload) =>
@@ -877,7 +903,7 @@ const handleSessionUpdate = ({
   assistantSegmentRef,
   params,
 }: {
-  readonly queue: Queue.Queue<AcpParsedSessionEvent>;
+  readonly queue: Queue.Queue<AcpSessionRuntimeEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
@@ -973,7 +999,7 @@ const ensureActiveAssistantSegment = ({
   assistantSegmentRef,
   sessionId,
 }: {
-  readonly queue: Queue.Queue<AcpParsedSessionEvent>;
+  readonly queue: Queue.Queue<AcpSessionRuntimeEvent>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly sessionId: string;
 }) =>
@@ -1010,7 +1036,7 @@ const closeActiveAssistantSegment = ({
   queue,
   assistantSegmentRef,
 }: {
-  readonly queue: Queue.Queue<AcpParsedSessionEvent>;
+  readonly queue: Queue.Queue<AcpSessionRuntimeEvent>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
 }) =>
   Ref.modify(assistantSegmentRef, (current) => {

@@ -1,25 +1,12 @@
-import type {
-  MessageId,
-  OrchestrationEvent,
-  OrchestrationReadModel,
-  ThreadId,
-  TurnId,
-} from "@t3tools/contracts";
+import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
-import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import {
-  assistantSegmentBelongsToActiveTurn,
-  applyAssistantSegmentMessageUpdate,
-  repointCheckpointsForArchivedAssistantSegment,
-  repointLatestTurnForArchivedAssistantSegment,
-} from "@t3tools/shared/orchestrationMessages";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
@@ -44,16 +31,6 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
-
-function rebindCheckpointAssistantMessage(
-  checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
-  turnId: TurnId,
-  messageId: MessageId,
-): OrchestrationCheckpointSummary[] {
-  return Arr.map(checkpoints, (entry) =>
-    entry.turnId === turnId ? { ...entry, assistantMessageId: messageId } : entry,
-  );
-}
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -432,108 +409,33 @@ export function projectEvent(
           "message",
         );
 
-        const existingMessage = thread.messages.find((entry) => entry.id === payload.messageId);
-        const turnStillActive =
-          thread.session?.status === "running" &&
-          assistantSegmentBelongsToActiveTurn({
-            activeTurnId: thread.session.activeTurnId,
-            existingTurnId: existingMessage?.turnId,
-            incomingTurnId: payload.turnId,
-          });
-        const applied = applyAssistantSegmentMessageUpdate(thread.messages, message, {
-          activeTurnId: thread.session?.activeTurnId ?? null,
-          turnStillActive: turnStillActive === true,
-        });
-        if (applied.messages === thread.messages) {
-          return nextBase;
-        }
-        const cappedMessages = applied.messages.slice(-MAX_THREAD_MESSAGES);
-        const settlesTurn = !payload.streaming && !turnStillActive;
-        let latestTurn = thread.latestTurn;
-        const checkpointRepointAdvancesLatestTurn =
-          applied.checkpointsToRepoint !== undefined &&
-          (latestTurn === null ||
-            latestTurn.turnId === applied.checkpointsToRepoint.archivedTurnId);
-        const shouldAdvanceLatestTurn =
-          payload.role === "assistant" &&
-          payload.turnId !== null &&
-          (latestTurn === null ||
-            latestTurn.turnId === payload.turnId ||
-            turnStillActive ||
-            checkpointRepointAdvancesLatestTurn);
-        const preservedLatestTurn =
-          latestTurn?.turnId === payload.turnId &&
-          !turnStillActive &&
-          (latestTurn.state === "completed" ||
-            latestTurn.state === "interrupted" ||
-            latestTurn.state === "error")
-            ? latestTurn
-            : null;
-        const nextLatestTurnState = preservedLatestTurn
-          ? preservedLatestTurn.state
-          : settlesTurn
-            ? latestTurn?.turnId === payload.turnId && latestTurn.state === "interrupted"
-              ? "interrupted"
-              : latestTurn?.turnId === payload.turnId && latestTurn.state === "error"
-                ? "error"
-                : "completed"
-            : "running";
-        const nextLatestTurnCompletedAt = preservedLatestTurn
-          ? preservedLatestTurn.completedAt
-          : settlesTurn
-            ? latestTurn?.turnId === payload.turnId
-              ? (latestTurn.completedAt ?? payload.updatedAt)
-              : payload.updatedAt
-            : latestTurn?.turnId === payload.turnId
-              ? (latestTurn.completedAt ?? null)
-              : null;
-        latestTurn = shouldAdvanceLatestTurn
-          ? {
-              turnId: payload.turnId,
-              state: nextLatestTurnState,
-              requestedAt:
-                latestTurn?.turnId === payload.turnId ? latestTurn.requestedAt : payload.createdAt,
-              startedAt:
-                latestTurn?.turnId === payload.turnId
-                  ? (latestTurn.startedAt ?? payload.createdAt)
-                  : payload.createdAt,
-              completedAt: nextLatestTurnCompletedAt,
-              assistantMessageId: payload.messageId,
-            }
-          : latestTurn;
-        const retainedRepoint =
-          applied.checkpointsToRepoint !== undefined &&
-          cappedMessages.some(
-            (message) => message.id === applied.checkpointsToRepoint?.archivedMessageId,
-          )
-            ? applied.checkpointsToRepoint
-            : undefined;
-        const checkpointRepoint = retainedRepoint;
-        if (checkpointRepoint) {
-          latestTurn = repointLatestTurnForArchivedAssistantSegment(latestTurn, checkpointRepoint);
-        }
-        let checkpoints = checkpointRepoint
-          ? repointCheckpointsForArchivedAssistantSegment(
-              thread.checkpoints,
-              checkpointRepoint.providerMessageId,
-              checkpointRepoint.archivedMessageId,
-              checkpointRepoint.archivedTurnId,
+        const existingMessage = thread.messages.find((entry) => entry.id === message.id);
+        const messages = existingMessage
+          ? thread.messages.map((entry) =>
+              entry.id === message.id
+                ? {
+                    ...entry,
+                    text: message.streaming
+                      ? `${entry.text}${message.text}`
+                      : message.text.length > 0
+                        ? message.text
+                        : entry.text,
+                    streaming: message.streaming,
+                    updatedAt: message.updatedAt,
+                    turnId: message.turnId,
+                    ...(message.attachments !== undefined
+                      ? { attachments: message.attachments }
+                      : {}),
+                  }
+                : entry,
             )
-          : thread.checkpoints;
-        if (payload.role === "assistant" && payload.turnId !== null) {
-          checkpoints = rebindCheckpointAssistantMessage(
-            checkpoints,
-            payload.turnId,
-            payload.messageId,
-          );
-        }
+          : [...thread.messages, message];
+        const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
 
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             messages: cappedMessages,
-            checkpoints,
-            latestTurn,
             updatedAt: event.occurredAt,
           }),
         };

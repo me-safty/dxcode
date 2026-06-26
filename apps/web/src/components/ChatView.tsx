@@ -1036,7 +1036,6 @@ function ChatViewContent(props: ChatViewProps) {
     routeKind === "server" ? routeThreadRef : props.draftId;
   const serverThread = useThread(routeKind === "server" ? routeThreadRef : null);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
-  const setThreadDispatchPending = useUiStateStore((store) => store.setThreadDispatchPending);
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
@@ -1812,15 +1811,6 @@ function ChatViewContent(props: ChatViewProps) {
     threadError,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
-  useEffect(() => {
-    if (routeKind !== "server") {
-      return;
-    }
-    setThreadDispatchPending(routeThreadKey, isSendBusy);
-    return () => {
-      setThreadDispatchPending(routeThreadKey, false);
-    };
-  }, [isSendBusy, routeKind, routeThreadKey, setThreadDispatchPending]);
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,

@@ -1,7 +1,6 @@
 import {
   ApprovalRequestId,
   type ChatAttachment,
-  MessageId,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
@@ -13,18 +12,6 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import {
-  archivedAssistantSegmentMessageId,
-  archivedAssistantSegmentTurnIds,
-  assistantSegmentBelongsToActiveTurn,
-  assistantSegmentRebindArchives,
-  assistantSegmentStreamingTextResets,
-  assistantSegmentTimelineAnchorResets,
-  assistantSegmentTurnChanged,
-  isLateAssistantSegmentFromPriorTurn,
-  isLateStreamingOnCompletedAssistant,
-  resolveAssistantSegmentText,
-} from "@t3tools/shared/orchestrationMessages";
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
@@ -829,171 +816,33 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             messageId: event.payload.messageId,
           });
           const previousMessage = Option.getOrUndefined(existingMessage);
-          const previousAssistantSegment = previousMessage
-            ? {
-                role: previousMessage.role,
-                streaming: previousMessage.isStreaming,
-                turnId: previousMessage.turnId,
+          const nextText = Option.match(existingMessage, {
+            onNone: () => event.payload.text,
+            onSome: (message) => {
+              if (event.payload.streaming) {
+                return `${message.text}${event.payload.text}`;
               }
-            : undefined;
-          const session = yield* projectionThreadSessionRepository.getByThreadId({
-            threadId: event.payload.threadId,
+              if (event.payload.text.length === 0) {
+                return message.text;
+              }
+              return event.payload.text;
+            },
           });
-          const activeTurnId = Option.isSome(session) ? session.value.activeTurnId : null;
-          const turnStillActive =
-            Option.isSome(session) &&
-            session.value.status === "running" &&
-            assistantSegmentBelongsToActiveTurn({
-              activeTurnId,
-              existingTurnId: previousAssistantSegment?.turnId,
-              incomingTurnId: event.payload.turnId,
-            });
-          const incomingAssistantSegment = {
-            role: event.payload.role,
-            streaming: event.payload.streaming,
-            turnId: event.payload.turnId,
-          };
-          const threadMessages = yield* projectionThreadMessageRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const archivedTurnIds = archivedAssistantSegmentTurnIds(
-            threadMessages.map((message) => ({
-              id: message.messageId,
-              turnId: message.turnId,
-            })),
-            event.payload.messageId,
-          );
-          if (
-            isLateAssistantSegmentFromPriorTurn({
-              existing: previousAssistantSegment,
-              incoming: incomingAssistantSegment,
-              providerMessageId: event.payload.messageId,
-              archivedTurnIds,
-              turnStillActive: turnStillActive === true,
-            }) ||
-            isLateStreamingOnCompletedAssistant({
-              existing: previousAssistantSegment,
-              incoming: incomingAssistantSegment,
-              turnStillActive: turnStillActive === true,
-            })
-          ) {
-            return;
-          }
-          const turnChanged = assistantSegmentTurnChanged(previousAssistantSegment, {
-            turnId: event.payload.turnId,
-          });
-          const rebindArchives = assistantSegmentRebindArchives(
-            previousAssistantSegment,
-            {
-              streaming: event.payload.streaming,
-              turnId: event.payload.turnId,
-            },
-            {
-              activeTurnId,
-              turnStillActive: turnStillActive === true,
-            },
-          );
-          const shouldArchive = turnChanged || rebindArchives;
-          const textResets = assistantSegmentStreamingTextResets(
-            previousAssistantSegment,
-            {
-              streaming: event.payload.streaming,
-              turnId: event.payload.turnId,
-            },
-            {
-              activeTurnId,
-              turnStillActive: turnStillActive === true,
-            },
-          );
-          const timelineAnchorResets = assistantSegmentTimelineAnchorResets(
-            previousAssistantSegment,
-            {
-              streaming: event.payload.streaming,
-              turnId: event.payload.turnId,
-            },
-            {
-              activeTurnId,
-              turnStillActive: turnStillActive === true,
-            },
-          );
-          const nextText = resolveAssistantSegmentText(
-            previousMessage,
-            {
-              text: event.payload.text,
-              streaming: event.payload.streaming,
-            },
-            textResets,
-          );
-          const materializedAttachments =
+          const nextAttachments =
             event.payload.attachments !== undefined
               ? yield* materializeAttachmentsForProjection({
                   attachments: event.payload.attachments,
                 })
-              : undefined;
-          const attachmentFields =
-            materializedAttachments !== undefined
-              ? { attachments: [...materializedAttachments] }
-              : shouldArchive
-                ? { attachments: [] as ProjectionThreadMessage["attachments"] }
-                : previousMessage?.attachments !== undefined
-                  ? { attachments: [...previousMessage.attachments] }
-                  : {};
-
-          if (shouldArchive && previousMessage !== undefined) {
-            const archivedTurnId = previousMessage.turnId;
-            yield* projectionThreadMessageRepository.upsert({
-              messageId: MessageId.make(
-                archivedAssistantSegmentMessageId(
-                  event.payload.messageId,
-                  archivedTurnId,
-                  previousMessage.createdAt,
-                ),
-              ),
-              threadId: event.payload.threadId,
-              turnId: archivedTurnId,
-              role: previousMessage.role,
-              text: previousMessage.text,
-              ...(previousMessage.attachments !== undefined
-                ? { attachments: [...previousMessage.attachments] }
-                : {}),
-              isStreaming: false,
-              createdAt: previousMessage.createdAt,
-              updatedAt: previousMessage.updatedAt,
-            });
-            if (archivedTurnId !== null) {
-              const archivedTurn = yield* projectionTurnRepository.getByTurnId({
-                threadId: event.payload.threadId,
-                turnId: archivedTurnId,
-              });
-              if (
-                Option.isSome(archivedTurn) &&
-                archivedTurn.value.assistantMessageId === event.payload.messageId
-              ) {
-                yield* projectionTurnRepository.upsertByTurnId({
-                  ...archivedTurn.value,
-                  assistantMessageId: MessageId.make(
-                    archivedAssistantSegmentMessageId(
-                      event.payload.messageId,
-                      archivedTurnId,
-                      previousMessage.createdAt,
-                    ),
-                  ),
-                });
-              }
-            }
-          }
-
+              : previousMessage?.attachments;
           yield* projectionThreadMessageRepository.upsert({
             messageId: event.payload.messageId,
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
             role: event.payload.role,
             text: nextText,
-            ...attachmentFields,
+            ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
             isStreaming: event.payload.streaming,
-            createdAt: timelineAnchorResets
-              ? event.payload.createdAt
-              : (previousMessage?.createdAt ?? event.payload.createdAt),
+            createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -1305,22 +1154,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (event.payload.turnId === null || event.payload.role !== "assistant") {
             return;
           }
-          const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
-            messageId: event.payload.messageId,
-          });
-          const previousMessage = Option.getOrUndefined(existingMessage);
-          const previousAssistantSegment = previousMessage
-            ? {
-                role: previousMessage.role,
-                streaming: previousMessage.isStreaming,
-                turnId: previousMessage.turnId,
-              }
-            : undefined;
-          const incomingAssistantSegment = {
-            role: event.payload.role,
-            streaming: event.payload.streaming,
-            turnId: event.payload.turnId,
-          };
+          // A completed assistant message only settles the turn once the
+          // session is no longer running it — providers may emit several
+          // assistant messages per turn (commentary between tool calls), and
+          // the turn must stay unsettled until the provider reports turn end
+          // (projected as thread.session-set leaving the "running" status).
           const session = yield* projectionThreadSessionRepository.getByThreadId({
             threadId: event.payload.threadId,
           });
@@ -1328,37 +1166,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             Option.isSome(session) &&
             session.value.status === "running" &&
             session.value.activeTurnId === event.payload.turnId;
-          const threadMessages = yield* projectionThreadMessageRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const archivedTurnIds = archivedAssistantSegmentTurnIds(
-            threadMessages.map((message) => ({
-              id: message.messageId,
-              turnId: message.turnId,
-            })),
-            event.payload.messageId,
-          );
-          if (
-            isLateAssistantSegmentFromPriorTurn({
-              existing: previousAssistantSegment,
-              incoming: incomingAssistantSegment,
-              providerMessageId: event.payload.messageId,
-              archivedTurnIds,
-              turnStillActive: turnStillRunning,
-            }) ||
-            isLateStreamingOnCompletedAssistant({
-              existing: previousAssistantSegment,
-              incoming: incomingAssistantSegment,
-              turnStillActive: turnStillRunning,
-            })
-          ) {
-            return;
-          }
-          // A completed assistant message only settles the turn once the
-          // session is no longer running it — providers may emit several
-          // assistant messages per turn (commentary between tool calls), and
-          // the turn must stay unsettled until the provider reports turn end
-          // (projected as thread.session-set leaving the "running" status).
           const settlesTurn = !event.payload.streaming && !turnStillRunning;
           const existingTurn = yield* projectionTurnRepository.getByTurnId({
             threadId: event.payload.threadId,
@@ -1658,10 +1465,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyProjectsProjection,
       },
       {
-        name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
-        apply: applyThreadSessionsProjection,
-      },
-      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -1672,6 +1475,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
         apply: applyThreadActivitiesProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+        apply: applyThreadSessionsProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
@@ -1724,6 +1531,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       );
     });
 
+    const bootstrapProjector = (projector: ProjectorDefinition) =>
+      projectionStateRepository
+        .getByProjector({
+          projector: projector.name,
+        })
+        .pipe(
+          Effect.flatMap((stateRow) =>
+            Stream.runForEach(
+              eventStore.readFromSequence(
+                Option.isSome(stateRow) ? stateRow.value.lastAppliedSequence : 0,
+              ),
+              (event) => runProjectorForEvent(projector, event),
+            ),
+          ),
+        );
+
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
       Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
         concurrency: 1,
@@ -1737,37 +1560,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         ),
       );
 
-    const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.gen(function* () {
-      const stateRows = yield* projectionStateRepository.listAll();
-      const lastAppliedByProjector = new Map(
-        stateRows.map((row) => [row.projector, row.lastAppliedSequence] as const),
-      );
-      const minLastAppliedSequence = projectors.reduce(
-        (minimum, projector) => Math.min(minimum, lastAppliedByProjector.get(projector.name) ?? 0),
-        Number.POSITIVE_INFINITY,
-      );
-      const readFromSequence = Number.isFinite(minLastAppliedSequence) ? minLastAppliedSequence : 0;
-
-      yield* Stream.runForEach(eventStore.readFromSequence(readFromSequence), (event) =>
-        Effect.forEach(
-          projectors,
-          (projector) => {
-            const lastAppliedSequence = lastAppliedByProjector.get(projector.name) ?? 0;
-            if (lastAppliedSequence >= event.sequence) {
-              return Effect.void;
-            }
-            return runProjectorForEvent(projector, event).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  lastAppliedByProjector.set(projector.name, event.sequence);
-                }),
-              ),
-            );
-          },
-          { concurrency: 1 },
-        ),
-      );
-    }).pipe(
+    const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.forEach(
+      projectors,
+      bootstrapProjector,
+      { concurrency: 1 },
+    ).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ServerConfig, serverConfig),

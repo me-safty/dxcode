@@ -110,9 +110,6 @@ interface GrokSessionContext {
   turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
-  /** Retains the most recently settled turn so trailing session/update chunks
-   * emitted after prompt completion still attach to the completed turn. */
-  streamingTurnId: TurnId | undefined;
   /** Turns already interrupted; late prompt RPCs must not resurrect them. */
   interruptedTurnIds: Set<TurnId>;
   /** Number of sendTurn prompts currently in flight or being prepared.
@@ -163,8 +160,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const resolveNotificationTurnId = (ctx: GrokSessionContext): TurnId | undefined =>
-  ctx.streamingTurnId ?? ctx.activeTurnId;
+const resolveNotificationTurnId = (ctx: GrokSessionContext): TurnId | undefined => ctx.activeTurnId;
 
 const resolveCallbackTurnId = (ctx: GrokSessionContext): TurnId | undefined => ctx.activeTurnId;
 
@@ -364,13 +360,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const shouldEmitFailedTurn = options?.errorMessage !== undefined && canEmitTurnCompletion;
           const shouldEmitCompletedTurn =
             options?.completedStopReason !== undefined && canEmitTurnCompletion;
-          const shouldRetainStreamingTurnId = shouldEmitFailedTurn || shouldEmitCompletedTurn;
           const { activeTurnId: _activeTurnId, ...readySession } = liveCtx.session;
-          if (shouldRetainStreamingTurnId) {
-            liveCtx.streamingTurnId = turnId;
-          } else if (liveCtx.streamingTurnId === turnId) {
-            liveCtx.streamingTurnId = undefined;
-          }
           liveCtx.activeTurnId = undefined;
           liveCtx.session = {
             ...readySession,
@@ -445,13 +435,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         const shouldEmitFailedTurn = options?.errorMessage !== undefined && canEmitTurnCompletion;
         const shouldEmitCompletedTurn =
           options?.completedStopReason !== undefined && canEmitTurnCompletion;
-        const shouldRetainStreamingTurnId = shouldEmitFailedTurn || shouldEmitCompletedTurn;
         const { activeTurnId: _activeTurnId, ...readySession } = liveCtx.session;
-        if (shouldRetainStreamingTurnId) {
-          liveCtx.streamingTurnId = settleTurnId;
-        } else if (liveCtx.streamingTurnId === settleTurnId) {
-          liveCtx.streamingTurnId = undefined;
-        }
         liveCtx.activeTurnId = undefined;
         liveCtx.session = {
           ...readySession,
@@ -830,7 +814,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
-            streamingTurnId: undefined,
             interruptedTurnIds: new Set(),
             promptsInFlight: 0,
             currentModelId: boundModelId,
@@ -840,6 +823,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const nf = yield* Stream.runDrain(
             Stream.mapEffect(acp.getEvents(), (event) =>
               Effect.gen(function* () {
+                if (event._tag === "EventStreamBarrier") {
+                  yield* Deferred.succeed(event.acknowledge, undefined);
+                  return;
+                }
                 if (
                   event._tag === "PlanUpdated" ||
                   event._tag === "ToolCallUpdated" ||
@@ -852,14 +839,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   return;
                 }
 
-                const stamp = yield* makeEventStamp();
                 const notificationTurnId = resolveNotificationTurnId(ctx);
                 if (
-                  notificationTurnId !== undefined &&
+                  notificationTurnId === undefined ||
                   ctx.interruptedTurnIds.has(notificationTurnId)
                 ) {
                   return;
                 }
+                const stamp = yield* makeEventStamp();
 
                 switch (event._tag) {
                   case "AssistantItemStarted":
@@ -1070,7 +1057,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               }
               if (steeringTurnId === undefined) {
                 ctx.lastPlanFingerprint = undefined;
-                ctx.streamingTurnId = undefined;
               }
               ctx.session = {
                 ...ctx.session,
@@ -1138,7 +1124,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 Ref.set(
                   promptFailureMessageRef,
                   mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error).message,
-                ),
+                ).pipe(Effect.andThen(prepared.acp.drainEvents)),
               ),
               Effect.mapError((error) =>
                 mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
@@ -1148,6 +1134,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
             yield* Effect.yieldNow;
           }
+          yield* prepared.acp.drainEvents;
 
           return yield* withThreadLock(
             input.threadId,
@@ -1221,7 +1208,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 }
                 const completedAt = yield* nowIso;
                 const { activeTurnId: _completedTurnId, ...readySession } = ctx.session;
-                ctx.streamingTurnId = prepared.turnId;
                 ctx.activeTurnId = undefined;
                 ctx.session = {
                   ...readySession,

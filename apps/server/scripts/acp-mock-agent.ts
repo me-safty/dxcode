@@ -20,6 +20,7 @@ const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHO
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION === "1";
 const emitXAiPromptCompleteThenHang = process.env.T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG === "1";
+const emitForeignSessionUpdates = process.env.T3_ACP_EMIT_FOREIGN_SESSION_UPDATES === "1";
 const hangPromptForever = process.env.T3_ACP_HANG_PROMPT_FOREVER === "1";
 const hangFirstPromptForever = process.env.T3_ACP_HANG_FIRST_PROMPT_FOREVER === "1";
 const emitLateUpdateAfterCancel = process.env.T3_ACP_EMIT_LATE_UPDATE_AFTER_CANCEL === "1";
@@ -530,12 +531,43 @@ const program = Effect.gen(function* () {
           },
         });
 
+        if (emitForeignSessionUpdates) {
+          writeJsonRpcNotification("session/update", {
+            sessionId: "mock-child-session-1",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "child before completion" },
+            },
+          });
+        }
+
         writeJsonRpcNotification("_x.ai/session/prompt_complete", {
           sessionId: requestedSessionId,
           promptId: promptIdFromRequestMeta(request) ?? "mock-xai-prompt-1",
           ...(omitXAiPromptCompleteStopReason ? {} : { stopReason: "end_turn" }),
           agentResult: null,
         });
+
+        if (emitForeignSessionUpdates) {
+          writeJsonRpcNotification("session/update", {
+            sessionId: "mock-child-session-1",
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "child-tool-call-1",
+              title: "Child-only tool",
+              kind: "other",
+              status: "pending",
+              rawInput: {},
+            },
+          });
+          writeJsonRpcNotification("session/update", {
+            sessionId: "mock-child-session-1",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "child after completion" },
+            },
+          });
+        }
 
         writeJsonRpcNotification("session/update", {
           sessionId: requestedSessionId,
@@ -775,6 +807,42 @@ const program = Effect.gen(function* () {
           throw new Error("Expected accepted _x.ai/ask_user_question response answers.");
         }
 
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitForeignSessionUpdates) {
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "root before child" },
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: "mock-child-session-1",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "child content" },
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: "mock-child-session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "child-tool-call-1",
+            title: "Child-only tool",
+            kind: "other",
+            status: "pending",
+            rawInput: {},
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: " root after child" },
+          },
+        });
         return { stopReason: "end_turn" };
       }
 

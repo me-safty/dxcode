@@ -58,7 +58,6 @@ type ThreadStatusInput = Pick<
   | "session"
 > & {
   lastVisitedAt?: string | undefined;
-  hasPendingLocalDispatch?: boolean | undefined;
 };
 
 export interface ThreadJumpHintVisibilityController {
@@ -381,7 +380,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "running" || thread.hasPendingLocalDispatch) {
+  if (thread.session?.status === "running") {
     return {
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
