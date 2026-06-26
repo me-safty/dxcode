@@ -174,42 +174,36 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
         );
     },
     getRepositoryCloneUrls: (input) =>
-      gitlab
-        .getRepositoryCloneUrls(input)
-        .pipe(
-          Effect.mapError((error) =>
-            providerError("getRepositoryCloneUrls", error, {
-              cwd: input.cwd,
-              repository: input.repository,
-            }),
-          ),
+      gitlab.getRepositoryCloneUrls(input).pipe(
+        Effect.mapError((error) =>
+          providerError("getRepositoryCloneUrls", error, {
+            cwd: input.cwd,
+            repository: input.repository,
+          }),
         ),
+      ),
     createRepository: (input) =>
-      gitlab
-        .createRepository(input)
-        .pipe(
-          Effect.mapError((error) =>
-            providerError("createRepository", error, {
-              cwd: input.cwd,
-              repository: input.repository,
-            }),
-          ),
+      gitlab.createRepository(input).pipe(
+        Effect.mapError((error) =>
+          providerError("createRepository", error, {
+            cwd: input.cwd,
+            repository: input.repository,
+          }),
         ),
+      ),
     getDefaultBranch: (input) =>
       gitlab
         .getDefaultBranch(input)
         .pipe(Effect.mapError((error) => providerError("getDefaultBranch", error, input))),
     checkoutChangeRequest: (input) =>
-      gitlab
-        .checkoutMergeRequest(input)
-        .pipe(
-          Effect.mapError((error) =>
-            providerError("checkoutChangeRequest", error, {
-              cwd: input.cwd,
-              reference: input.reference,
-            }),
-          ),
+      gitlab.checkoutMergeRequest(input).pipe(
+        Effect.mapError((error) =>
+          providerError("checkoutChangeRequest", error, {
+            cwd: input.cwd,
+            reference: input.reference,
+          }),
         ),
+      ),
   });
 });
 

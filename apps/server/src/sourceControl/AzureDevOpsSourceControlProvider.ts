@@ -145,27 +145,23 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
         );
     },
     getRepositoryCloneUrls: (input) =>
-      azure
-        .getRepositoryCloneUrls(input)
-        .pipe(
-          Effect.mapError((error) =>
-            providerError("getRepositoryCloneUrls", error, {
-              cwd: input.cwd,
-              repository: input.repository,
-            }),
-          ),
+      azure.getRepositoryCloneUrls(input).pipe(
+        Effect.mapError((error) =>
+          providerError("getRepositoryCloneUrls", error, {
+            cwd: input.cwd,
+            repository: input.repository,
+          }),
         ),
+      ),
     createRepository: (input) =>
-      azure
-        .createRepository(input)
-        .pipe(
-          Effect.mapError((error) =>
-            providerError("createRepository", error, {
-              cwd: input.cwd,
-              repository: input.repository,
-            }),
-          ),
+      azure.createRepository(input).pipe(
+        Effect.mapError((error) =>
+          providerError("createRepository", error, {
+            cwd: input.cwd,
+            repository: input.repository,
+          }),
         ),
+      ),
     getDefaultBranch: (input) =>
       azure
         .getDefaultBranch({ cwd: input.cwd })

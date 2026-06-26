@@ -21,8 +21,8 @@ function providerError(
     operation === "getRepositoryCloneUrls"
       ? "Failed to get repository clone URLs."
       : "detail" in cause && typeof cause.detail === "string" && cause.detail.length > 0
-      ? cause.detail
-      : cause.message;
+        ? cause.detail
+        : cause.message;
   return new SourceControlProviderError({
     provider: "bitbucket",
     operation,
@@ -118,27 +118,23 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
         );
     },
     getRepositoryCloneUrls: (input) =>
-      bitbucket
-        .getRepositoryCloneUrls(input)
-        .pipe(
-          Effect.mapError((error) =>
-            providerError("getRepositoryCloneUrls", error, {
-              cwd: input.cwd,
-              repository: input.repository,
-            }),
-          ),
+      bitbucket.getRepositoryCloneUrls(input).pipe(
+        Effect.mapError((error) =>
+          providerError("getRepositoryCloneUrls", error, {
+            cwd: input.cwd,
+            repository: input.repository,
+          }),
         ),
+      ),
     createRepository: (input) =>
-      bitbucket
-        .createRepository(input)
-        .pipe(
-          Effect.mapError((error) =>
-            providerError("createRepository", error, {
-              cwd: input.cwd,
-              repository: input.repository,
-            }),
-          ),
+      bitbucket.createRepository(input).pipe(
+        Effect.mapError((error) =>
+          providerError("createRepository", error, {
+            cwd: input.cwd,
+            repository: input.repository,
+          }),
         ),
+      ),
     getDefaultBranch: (input) =>
       bitbucket
         .getDefaultBranch({

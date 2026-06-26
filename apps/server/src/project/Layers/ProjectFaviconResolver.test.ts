@@ -9,7 +9,10 @@ import * as PlatformError from "effect/PlatformError";
 import { ProjectFaviconResolver } from "../Services/ProjectFaviconResolver.ts";
 import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 import { WorkspaceRootNotExistsError } from "../../workspace/Services/WorkspacePaths.ts";
-import { makeProjectFaviconResolver, ProjectFaviconResolverLive } from "./ProjectFaviconResolver.ts";
+import {
+  makeProjectFaviconResolver,
+  ProjectFaviconResolverLive,
+} from "./ProjectFaviconResolver.ts";
 
 const TestLayer = Layer.empty.pipe(
   Layer.provideMerge(ProjectFaviconResolverLive),

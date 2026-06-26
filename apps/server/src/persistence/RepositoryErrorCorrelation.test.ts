@@ -19,7 +19,9 @@ const expiresAt = DateTime.makeUnsafe("2027-06-20T00:00:00.000Z");
 const now = DateTime.makeUnsafe("2026-06-21T00:00:00.000Z");
 const scopes: ReadonlyArray<AuthEnvironmentScope> = ["access:read"];
 
-const authSessionLayer = AuthSessionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const authSessionLayer = AuthSessionRepositoryLive.pipe(
+  Layer.provideMerge(SqlitePersistenceMemory),
+);
 const authPairingLinkLayer = AuthPairingLinkRepositoryLive.pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
 );
