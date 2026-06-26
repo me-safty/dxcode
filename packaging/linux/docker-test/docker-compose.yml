@@ -1,0 +1,8 @@
+services:
+  morecode-headless:
+    build:
+      context: ../../..
+      dockerfile: packaging/linux/docker-test/Dockerfile.source
+    ports:
+      - "127.0.0.1:3773:3773"
+    restart: unless-stopped

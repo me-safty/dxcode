@@ -42,6 +42,11 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packagingDir = join(repoRoot, "packaging/linux");
 const serverDir = join(repoRoot, "apps/server");
 const serverDistDir = join(serverDir, "dist");
+// pnpm deploy can omit these Effect peer/runtime modules; pin to lockfile versions.
+const PACKAGED_RUNTIME_DEPS = {
+  "fast-check": "4.8.0",
+  "pure-rand": "8.4.0",
+} as const;
 
 function run(command: string, args: ReadonlyArray<string>, cwd = repoRoot): void {
   process.stdout.write(`+ ${command} ${args.join(" ")}\n`);
@@ -98,6 +103,19 @@ export function writeDebianPackageMetadata(
   }
 }
 
+function materializeNodeModules(appDir: string): void {
+  const nodeModules = join(appDir, "node_modules");
+  if (!existsSync(nodeModules)) {
+    return;
+  }
+
+  const materialized = `${nodeModules}.__materialized__`;
+  rmSync(materialized, { recursive: true, force: true });
+  run("cp", ["-aL", `${nodeModules}/.`, materialized]);
+  rmSync(nodeModules, { recursive: true, force: true });
+  renameSync(materialized, nodeModules);
+}
+
 function copyPackagePayload(root: string): void {
   const appDir = join(root, "opt/morecode");
   mkdirSync(dirname(appDir), { recursive: true });
@@ -114,6 +132,29 @@ function copyPackagePayload(root: string): void {
   if (!existsSync(join(appDir, "dist/bin.mjs"))) {
     throw new Error("pnpm deploy did not include the built server runtime.");
   }
+
+  materializeNodeModules(appDir);
+  const runtimeDepsDir = join(appDir, ".__runtime_deps__");
+  rmSync(runtimeDepsDir, { recursive: true, force: true });
+  mkdirSync(runtimeDepsDir, { recursive: true });
+  run("npm", ["init", "-y"], runtimeDepsDir);
+  run(
+    "npm",
+    [
+      "install",
+      `fast-check@${PACKAGED_RUNTIME_DEPS["fast-check"]}`,
+      `pure-rand@${PACKAGED_RUNTIME_DEPS["pure-rand"]}`,
+      "--omit=dev",
+      "--no-package-lock",
+    ],
+    runtimeDepsDir,
+  );
+  for (const packageName of Object.keys(PACKAGED_RUNTIME_DEPS)) {
+    cpSync(join(runtimeDepsDir, "node_modules", packageName), join(appDir, "node_modules", packageName), {
+      recursive: true,
+    });
+  }
+  rmSync(runtimeDepsDir, { recursive: true, force: true });
 
   const files: ReadonlyArray<readonly [string, string, number]> = [
     ["morecode", "usr/bin/morecode", 0o755],
