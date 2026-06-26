@@ -666,70 +666,65 @@ describe("providerMaintenanceRunner", () => {
       ),
   );
 
-  it.effect(
-    "resolves npm to a .cmd shim and routes through the shell on win32",
-    () => {
-      const captured: Array<{
-        readonly command: string;
-        readonly args: ReadonlyArray<string>;
-        readonly shell: boolean | string | undefined;
-      }> = [];
-      return Effect.gen(function* () {
-        const { registry } = yield* makeRegistry(baseProvider);
-        const runner = yield* makeTestRunner(registry);
+  it.effect("resolves npm to a .cmd shim and routes through the shell on win32", () => {
+    const captured: Array<{
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+      readonly shell: boolean | string | undefined;
+    }> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const runner = yield* makeTestRunner(registry);
 
-        const result = yield* runner.updateProvider(CODEX_DRIVER);
+      const result = yield* runner.updateProvider(CODEX_DRIVER);
 
-        // On win32, resolveSpawnCommand resolves `npm` to the `.cmd` shim and
-        // routes the spawn through cmd.exe (shell: true), escaping every arg.
-        assert.strictEqual(captured.length, 1);
-        const call = captured[0];
-        assert.ok(call, "expected the spawner to be invoked once");
-        // The resolved command is the escaped `.cmd` path. Asserting the precise
-        // escaped string is brittle, so verify it carries the resolved shim and
-        // that shell mode was used.
-        assert.match(call.command, /npm\.cmd/i);
-        assert.strictEqual(call.shell, true);
-        // Args are escaped for cmd.exe shell mode (each quoted) but still carry
-        // the original install command (`install -g @openai/codex@latest`) in order.
-        assert.strictEqual(call.args.length, 3);
-        assert.match(call.args[0] ?? "", /install/);
-        assert.match(call.args[1] ?? "", /-g/);
-        assert.match(call.args[2] ?? "", /@openai\/codex@latest/);
-        assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            Layer.succeed(HostProcessPlatform, "win32"),
-            Layer.succeed(HostProcessEnvironment, {
-              PATH: "C:\\fake\\npm",
-              PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      // On win32, resolveSpawnCommand resolves `npm` to the `.cmd` shim and
+      // routes the spawn through cmd.exe (shell: true), escaping every arg.
+      assert.strictEqual(captured.length, 1);
+      const call = captured[0];
+      assert.ok(call, "expected the spawner to be invoked once");
+      // The resolved command is the escaped `.cmd` path. Asserting the precise
+      // escaped string is brittle, so verify it carries the resolved shim and
+      // that shell mode was used.
+      assert.match(call.command, /npm\.cmd/i);
+      assert.strictEqual(call.shell, true);
+      // Args are escaped for cmd.exe shell mode (each quoted) but still carry
+      // the original install command (`install -g @openai/codex@latest`) in order.
+      assert.strictEqual(call.args.length, 3);
+      assert.match(call.args[0] ?? "", /install/);
+      assert.match(call.args[1] ?? "", /-g/);
+      assert.match(call.args[2] ?? "", /@openai\/codex@latest/);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcessPlatform, "win32"),
+          Layer.succeed(HostProcessEnvironment, {
+            PATH: "C:\\fake\\npm",
+            PATHEXT: ".COM;.EXE;.BAT;.CMD",
+          }),
+          Layer.succeed(SpawnExecutableResolution, (command) =>
+            command === "npm" ? "C:\\fake\\npm\\npm.cmd" : undefined,
+          ),
+          latestVersionHttpClient("0.0.0"),
+          Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make((command) => {
+              const childProcess = command as unknown as {
+                readonly command: string;
+                readonly args: ReadonlyArray<string>;
+                readonly options: { readonly shell?: boolean | string | undefined };
+              };
+              captured.push({
+                command: childProcess.command,
+                args: childProcess.args,
+                shell: childProcess.options.shell,
+              });
+              return Effect.succeed(mockHandle({ stdout: "updated" }));
             }),
-            Layer.succeed(
-              SpawnExecutableResolution,
-              (command) => (command === "npm" ? "C:\\fake\\npm\\npm.cmd" : undefined),
-            ),
-            latestVersionHttpClient("0.0.0"),
-            Layer.succeed(
-              ChildProcessSpawner.ChildProcessSpawner,
-              ChildProcessSpawner.make((command) => {
-                const childProcess = command as unknown as {
-                  readonly command: string;
-                  readonly args: ReadonlyArray<string>;
-                  readonly options: { readonly shell?: boolean | string | undefined };
-                };
-                captured.push({
-                  command: childProcess.command,
-                  args: childProcess.args,
-                  shell: childProcess.options.shell,
-                });
-                return Effect.succeed(mockHandle({ stdout: "updated" }));
-              }),
-            ),
           ),
         ),
-      );
-    },
-  );
+      ),
+    );
+  });
 });
-

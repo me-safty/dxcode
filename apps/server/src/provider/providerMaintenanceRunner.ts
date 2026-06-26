@@ -83,9 +83,7 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn("ProviderMaintenanceR
         // shell. On Linux/macOS (incl. the WSL backend) this is a no-op.
         const resolved = yield* resolveSpawnCommand(input.command, input.args);
         const child = yield* input.spawner
-          .spawn(
-            ChildProcess.make(resolved.command, resolved.args, { shell: resolved.shell }),
-          )
+          .spawn(ChildProcess.make(resolved.command, resolved.args, { shell: resolved.shell }))
           .pipe(
             Effect.mapError(
               (cause) =>
