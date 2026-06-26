@@ -56,8 +56,34 @@ export function fileExistsInRef(ref, filePath) {
   return listed?.split("\n").includes(filePath) ?? false;
 }
 
-function isGitIgnored(filePath) {
-  return maybeRunGit(["check-ignore", filePath]) !== null;
+export function listFilesInRef(ref) {
+  const listed = maybeRunGit(["ls-tree", "-r", "--name-only", ref]);
+  if (!listed) return new Set();
+  return new Set(
+    listed
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+}
+
+function collectIgnoredPaths(filePaths) {
+  if (filePaths.length === 0) return new Set();
+  let result = "";
+  try {
+    result = execFileSync("git", ["check-ignore", "--stdin"], {
+      encoding: "utf8",
+      input: `${filePaths.join("\n")}\n`,
+    });
+  } catch {
+    return new Set();
+  }
+  return new Set(
+    result
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
 }
 
 export function collectCandidatePaths(mergeBase) {
@@ -75,8 +101,9 @@ export function collectCandidatePaths(mergeBase) {
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean)) {
-      if (!isGitIgnored(filePath)) combined.add(filePath);
+      combined.add(filePath);
     }
   }
-  return combined;
+  const ignored = collectIgnoredPaths([...combined]);
+  return new Set([...combined].filter((filePath) => !ignored.has(filePath)));
 }
