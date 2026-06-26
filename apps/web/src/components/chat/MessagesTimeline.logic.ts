@@ -197,7 +197,7 @@ export function hasCommandWorkEntryDetails(workEntry: WorkLogEntry): boolean {
     return false;
   }
   if (workEntry.itemType) {
-    return workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call";
+    return workEntry.itemType === "dynamic_tool_call";
   }
   return Boolean(workEntry.command || workEntry.rawCommand);
 }
@@ -219,6 +219,32 @@ export function hasFileChangeWorkEntryDetails(workEntry: WorkLogEntry): boolean 
     return false;
   }
   return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
+}
+
+export function filterChangedFilesWithoutInlineDiff(
+  changedFiles: ReadonlyArray<string> | undefined,
+  inlineDiffPaths: ReadonlyArray<string>,
+): string[] {
+  if (!changedFiles || changedFiles.length === 0) {
+    return [];
+  }
+  if (inlineDiffPaths.length === 0) {
+    return [...changedFiles];
+  }
+  return changedFiles.filter(
+    (changedFile) =>
+      !inlineDiffPaths.some((diffPath) => changedFileMatchesDiffPath(changedFile, diffPath)),
+  );
+}
+
+function changedFileMatchesDiffPath(changedFile: string, diffPath: string): boolean {
+  const normalizedChangedFile = changedFile.replace(/\\/gu, "/");
+  const normalizedDiffPath = diffPath.replace(/\\/gu, "/");
+  return (
+    normalizedChangedFile === normalizedDiffPath ||
+    normalizedChangedFile.endsWith(`/${normalizedDiffPath}`) ||
+    normalizedDiffPath.endsWith(`/${normalizedChangedFile.replace(/^\/+/u, "")}`)
+  );
 }
 
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {

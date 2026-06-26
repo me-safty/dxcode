@@ -5,6 +5,7 @@ import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  filterChangedFilesWithoutInlineDiff,
   getRenderableCommandOutputLines,
   hasCommandWorkEntryDetails,
   hasFileChangeWorkEntryDetails,
@@ -389,6 +390,23 @@ describe("activity detail expansion", () => {
     ).toBe(false);
   });
 
+  it("does not treat MCP calls with runtime metadata as command details", () => {
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "mcp_tool_call",
+          durationMs: 1234,
+          exitCode: 0,
+          toolData: {
+            server: "filesystem",
+            name: "read_file",
+            arguments: { path: "package.json" },
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("expands file-change entries and patch-carrying tool calls", () => {
     expect(
       hasFileChangeWorkEntryDetails(
@@ -478,6 +496,18 @@ describe("activity detail expansion", () => {
         { dedupeRenderedCommandOutput: true },
       ),
     ).toBe("exit code 0");
+  });
+
+  it("keeps changed files not represented by inline diff paths", () => {
+    expect(
+      filterChangedFilesWithoutInlineDiff(
+        [
+          "/Users/example/t3code/apps/web/src/session-logic.ts",
+          "/Users/example/t3code/apps/web/src/components/chat/MessagesTimeline.tsx",
+        ],
+        ["apps/web/src/session-logic.ts"],
+      ),
+    ).toEqual(["/Users/example/t3code/apps/web/src/components/chat/MessagesTimeline.tsx"]);
   });
 });
 

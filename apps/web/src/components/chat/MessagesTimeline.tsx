@@ -70,6 +70,7 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import {
   buildSupplementalToolDetailBody,
   computeStableMessagesTimelineRows,
+  filterChangedFilesWithoutInlineDiff,
   getRenderableCommandOutputLines,
   hasCommandWorkEntryDetails,
   hasFileChangeWorkEntryDetails,
@@ -1724,12 +1725,18 @@ function FileChangeEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry })
     `tool-file-change:${workEntry.id}:${ctx.resolvedTheme}`,
   );
   const hasInlineDiff = renderablePatch?.kind === "files";
+  const changedFilesWithoutInlineDiff = hasInlineDiff
+    ? filterChangedFilesWithoutInlineDiff(
+        workEntry.changedFiles,
+        renderablePatch.files.map(resolveFileDiffPath),
+      )
+    : (workEntry.changedFiles ?? []);
 
   return (
     <div className="mt-2 ms-2 space-y-2 border-s border-border/45 ps-3 pt-0.5">
-      {!hasInlineDiff && (workEntry.changedFiles?.length ?? 0) > 0 && (
+      {changedFilesWithoutInlineDiff.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {workEntry.changedFiles?.map((filePath) => {
+          {changedFilesWithoutInlineDiff.map((filePath) => {
             const displayPath = formatWorkspaceRelativePath(filePath, ctx.workspaceRoot);
             return (
               <span
