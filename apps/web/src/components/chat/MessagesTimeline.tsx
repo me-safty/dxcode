@@ -168,6 +168,7 @@ interface MessagesTimelineProps {
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   anchorMessageId: MessageId | null;
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
+  onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
   contentInsetEndAdjustment: number;
   onIsAtEndChange: (isAtEnd: boolean) => void;
 }
@@ -198,6 +199,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   skills = EMPTY_TIMELINE_SKILLS,
   anchorMessageId,
   onAnchorReady,
+  onAnchorSizeChanged,
   contentInsetEndAdjustment,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
@@ -274,12 +276,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     },
     [anchorMessageId, onAnchorReady],
   );
+  const handleAnchorSizeChanged = useCallback(
+    (size: number) => {
+      if (anchorMessageId !== null) {
+        onAnchorSizeChanged(anchorMessageId, size);
+      }
+    },
+    [anchorMessageId, onAnchorSizeChanged],
+  );
   const anchoredEndSpace = useMemo(() => {
     const config = resolveChatListAnchoredEndSpace(rows, anchorMessageId, (row) =>
       row.kind === "message" ? row.message.id : null,
     );
-    return config ? { ...config, onReady: handleAnchorReady } : undefined;
-  }, [anchorMessageId, handleAnchorReady, rows]);
+    return config
+      ? { ...config, onReady: handleAnchorReady, onSizeChanged: handleAnchorSizeChanged }
+      : undefined;
+  }, [anchorMessageId, handleAnchorReady, handleAnchorSizeChanged, rows]);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -362,7 +374,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           contentInsetEndAdjustment={contentInsetEndAdjustment}
           maintainVisibleContentPosition={false}
           onScroll={handleScroll}
-          className="scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+          className="scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
         />

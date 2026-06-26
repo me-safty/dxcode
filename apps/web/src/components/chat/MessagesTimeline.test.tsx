@@ -18,13 +18,16 @@ vi.mock("@legendapp/list/react", async () => {
       anchorMaxSize?: number;
       anchorOffset?: number;
       onReady?: (info: { anchorIndex: number }) => void;
+      onSizeChanged?: (size: number) => void;
     };
     contentInsetEndAdjustment?: number;
+    className?: string;
     maintainScrollAtEnd?: boolean;
     maintainVisibleContentPosition?: boolean;
     ref?: Ref<LegendListRef>;
   }) => {
     if (props.anchoredEndSpace) {
+      props.anchoredEndSpace.onSizeChanged?.(240);
       props.anchoredEndSpace.onReady?.({ anchorIndex: props.anchoredEndSpace.anchorIndex });
     }
     return (
@@ -35,6 +38,7 @@ vi.mock("@legendapp/list/react", async () => {
         data-anchor-offset={props.anchoredEndSpace?.anchorOffset}
         data-anchor-on-ready={Boolean(props.anchoredEndSpace?.onReady)}
         data-content-inset-end={props.contentInsetEndAdjustment}
+        data-class-name={props.className}
         data-maintain-scroll-at-end={props.maintainScrollAtEnd}
         data-maintain-visible-content-position={props.maintainVisibleContentPosition}
       >
@@ -134,6 +138,7 @@ function buildProps() {
     workspaceRoot: undefined,
     anchorMessageId: null,
     onAnchorReady: () => {},
+    onAnchorSizeChanged: () => {},
     contentInsetEndAdjustment: 0,
     onIsAtEndChange: () => {},
   };
@@ -166,6 +171,7 @@ describe("MessagesTimeline", () => {
   it("anchors a sent attachment message using its measured height", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const onAnchorReady = vi.fn();
+    const onAnchorSizeChanged = vi.fn();
     const firstEntry = buildUserTimelineEntry("First prompt.");
     const secondEntry = {
       ...buildUserTimelineEntry("Newest prompt."),
@@ -190,6 +196,7 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         anchorMessageId={secondEntry.message.id}
         onAnchorReady={onAnchorReady}
+        onAnchorSizeChanged={onAnchorSizeChanged}
         contentInsetEndAdjustment={144}
         timelineEntries={[firstEntry, secondEntry]}
       />,
@@ -200,10 +207,12 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-anchor-on-ready="true"');
     expect(markup).not.toContain("data-anchor-max-size=");
     expect(markup).toContain('data-content-inset-end="144"');
+    expect(markup).toContain("[overflow-anchor:none]");
     expect(markup).not.toContain("data-maintain-scroll-at-end=");
     expect(markup).toContain('data-maintain-visible-content-position="false"');
     expect(onAnchorReady).toHaveBeenCalledOnce();
     expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1);
+    expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240);
   });
 
   it("renders collapse controls for long user messages", async () => {

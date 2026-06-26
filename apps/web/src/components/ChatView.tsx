@@ -3153,23 +3153,75 @@ function ChatViewContent(props: ChatViewProps) {
     void legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
   const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
+  const settledTimelineAnchorRef = useRef<MessageId | null>(null);
+  const pendingAnchorScrollRestoreRef = useRef<{
+    readonly messageId: MessageId;
+    readonly offset: number;
+  } | null>(null);
+  const anchorScrollRestoreFrameRef = useRef<number | null>(null);
   const onTimelineAnchorReady = useCallback((messageId: MessageId, anchorIndex: number) => {
     if (positionedTimelineAnchorRef.current === messageId) {
       return;
     }
     positionedTimelineAnchorRef.current = messageId;
+    settledTimelineAnchorRef.current = null;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (positionedTimelineAnchorRef.current !== messageId) {
           return;
         }
-        void legendListRef.current?.scrollToIndex?.({
+        const list = legendListRef.current;
+        if (!list) {
+          return;
+        }
+        const scrollNode = list.getScrollableNode();
+        let finished = false;
+        const finishAnimatedPositioning = () => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          window.clearTimeout(fallbackTimer);
+          scrollNode.removeEventListener("scrollend", finishAnimatedPositioning);
+          if (positionedTimelineAnchorRef.current !== messageId) {
+            return;
+          }
+          const scrollOffset = list.getState().scroll;
+          void list.scrollToOffset({ offset: scrollOffset, animated: false });
+          settledTimelineAnchorRef.current = messageId;
+        };
+        const fallbackTimer = window.setTimeout(finishAnimatedPositioning, 750);
+        scrollNode.addEventListener("scrollend", finishAnimatedPositioning, { once: true });
+        void list.scrollToIndex({
           index: anchorIndex,
           animated: true,
           viewPosition: 0,
           viewOffset: CHAT_LIST_ANCHOR_OFFSET,
         });
       });
+    });
+  }, []);
+  const onTimelineAnchorSizeChanged = useCallback((messageId: MessageId) => {
+    if (settledTimelineAnchorRef.current !== messageId) {
+      return;
+    }
+    const scrollOffset = legendListRef.current?.getState().scroll;
+    if (scrollOffset === undefined) {
+      return;
+    }
+    if (pendingAnchorScrollRestoreRef.current === null) {
+      pendingAnchorScrollRestoreRef.current = { messageId, offset: scrollOffset };
+    }
+    if (anchorScrollRestoreFrameRef.current !== null) {
+      return;
+    }
+    anchorScrollRestoreFrameRef.current = requestAnimationFrame(() => {
+      anchorScrollRestoreFrameRef.current = null;
+      const pending = pendingAnchorScrollRestoreRef.current;
+      pendingAnchorScrollRestoreRef.current = null;
+      if (pending && settledTimelineAnchorRef.current === pending.messageId) {
+        void legendListRef.current?.scrollToOffset({ offset: pending.offset, animated: false });
+      }
     });
   }, []);
 
@@ -4809,6 +4861,7 @@ function ChatViewContent(props: ChatViewProps) {
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                 anchorMessageId={timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReady}
+                onAnchorSizeChanged={onTimelineAnchorSizeChanged}
                 contentInsetEndAdjustment={composerOverlayHeight}
                 onIsAtEndChange={onIsAtEndChange}
               />
