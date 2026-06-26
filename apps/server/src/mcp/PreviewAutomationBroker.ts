@@ -81,6 +81,7 @@ interface HostAssignment {
   readonly queue: ClientConnection["queue"];
   readonly expiresAt: number;
   readonly tabId?: PreviewTabId;
+  readonly tabSequence?: number;
 }
 
 interface PreviewAutomationRequestErrorContext {
@@ -470,9 +471,11 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         queue: connection.queue,
         expiresAt: input.scope.expiresAt,
         ...(assigned?.tabId === undefined ? {} : { tabId: assigned.tabId }),
+        ...(assigned?.tabSequence === undefined ? {} : { tabSequence: assigned.tabSequence }),
       });
 
-      const requestId = `preview-${current.requestSequence}`;
+      const requestSequence = current.requestSequence;
+      const requestId = `preview-${requestSequence}`;
       const tabId = input.tabId ?? assigned?.tabId;
       const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
       const context: PreviewAutomationRequestErrorContext = {
@@ -491,7 +494,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       const pending = new Map(current.pending);
       pending.set(requestId, { queue: connection.queue, deferred, context });
       return [
-        { connection, requestId, requestContext: context },
+        { connection, requestId, requestContext: context, requestSequence },
         { ...current, assignments, pending, requestSequence: current.requestSequence + 1 },
       ] as const;
     });
@@ -504,7 +507,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         providerInstanceId: input.scope.providerInstanceId,
       });
     }
-    const { connection, requestId, requestContext } = route;
+    const { connection, requestId, requestContext, requestSequence } = route;
     const removePending = SynchronizedRef.update(state, (next) => {
       if (!next.pending.has(requestId)) return next;
       const pending = new Map(next.pending);
@@ -519,6 +522,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           requestId,
           threadId: input.scope.threadId,
           tabId: requestContext.tabId,
+          tabIdExplicit: input.tabId !== undefined,
           operation: input.operation,
           input: input.input,
           timeoutMs,
@@ -538,7 +542,8 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       });
     });
     const result = yield* awaitResponse().pipe(Effect.ensuring(removePending));
-    const resultTabId = readResultTabId(result);
+    const responseTabId = readResultTabId(result);
+    const resultTabId = responseTabId === undefined ? input.tabId : responseTabId;
     if (resultTabId !== undefined) {
       const assignmentKey = hostAssignmentKey(input.scope);
       yield* SynchronizedRef.update(state, (current) => {
@@ -546,16 +551,21 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         if (
           !assignment ||
           assignment.connectionId !== connection.connectionId ||
-          assignment.queue !== connection.queue
+          assignment.queue !== connection.queue ||
+          (assignment.tabSequence ?? -1) > requestSequence
         ) {
           return current;
         }
         const assignments = new Map(current.assignments);
         if (resultTabId === null) {
           const { tabId: _tabId, ...withoutTabId } = assignment;
-          assignments.set(assignmentKey, withoutTabId);
+          assignments.set(assignmentKey, { ...withoutTabId, tabSequence: requestSequence });
         } else {
-          assignments.set(assignmentKey, { ...assignment, tabId: resultTabId });
+          assignments.set(assignmentKey, {
+            ...assignment,
+            tabId: resultTabId,
+            tabSequence: requestSequence,
+          });
         }
         return { ...current, assignments };
       });

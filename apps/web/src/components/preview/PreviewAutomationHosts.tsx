@@ -496,7 +496,10 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case "recordingStop": {
             const recordingTabId = readActiveBrowserRecordingTabId();
-            const stopTabId = resolveBrowserRecordingStopTarget(recordingTabId);
+            const stopTabId = resolveBrowserRecordingStopTarget(
+              recordingTabId,
+              request.tabIdExplicit ? request.tabId : undefined,
+            );
             const artifact = stopTabId ? await stopBrowserRecording(stopTabId) : null;
             if (!artifact) {
               throw new PreviewAutomationRecordingNotActiveError({
