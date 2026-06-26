@@ -1,13 +1,27 @@
 import { describe, expect, it } from "vite-plus/test";
+import type { WorkLogEntry } from "../../session-logic";
 import {
+  buildSupplementalToolDetailBody,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   getRenderableCommandOutputLines,
+  hasCommandWorkEntryDetails,
+  hasFileChangeWorkEntryDetails,
   hasRenderableCommandOutput,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
 } from "./MessagesTimeline.logic";
+
+function buildWorkLogEntry(overrides: Partial<WorkLogEntry>): WorkLogEntry {
+  return {
+    id: "work-1",
+    createdAt: "2026-01-01T00:00:00Z",
+    label: "Tool",
+    tone: "tool",
+    ...overrides,
+  };
+}
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
@@ -282,6 +296,95 @@ describe("hasRenderableCommandOutput", () => {
       "\t",
       "stderr",
     ]);
+  });
+});
+
+describe("activity detail expansion", () => {
+  it("expands command entries and dynamic tool calls with command metadata", () => {
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "command_execution",
+          command: "vp test",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "dynamic_tool_call",
+          stdout: "passed",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat file-change and collab-agent entries as command details", () => {
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "file_change",
+          command: "apply_patch",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "collab_agent_tool_call",
+          command: "vp test",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("expands file-change entries with changed files or patches", () => {
+    expect(
+      hasFileChangeWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "file_change",
+          changedFiles: ["apps/web/src/session-logic.ts"],
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasFileChangeWorkEntryDetails(
+        buildWorkLogEntry({
+          requestKind: "file-change",
+          patch: "diff --git a/a b/a\n",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps supplemental detail only when it adds distinct information", () => {
+    expect(
+      buildSupplementalToolDetailBody(
+        buildWorkLogEntry({
+          command: "vp test",
+          detail: "vp test",
+        }),
+        { dedupeRenderedCommandOutput: true },
+      ),
+    ).toBeNull();
+    expect(
+      buildSupplementalToolDetailBody(
+        buildWorkLogEntry({
+          stdout: "passed\n",
+          detail: "passed",
+        }),
+        { dedupeRenderedCommandOutput: true },
+      ),
+    ).toBeNull();
+    expect(
+      buildSupplementalToolDetailBody(
+        buildWorkLogEntry({
+          stdout: "passed\n",
+          detail: "exit code 0",
+        }),
+        { dedupeRenderedCommandOutput: true },
+      ),
+    ).toBe("exit code 0");
   });
 });
 

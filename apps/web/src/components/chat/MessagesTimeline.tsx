@@ -68,8 +68,11 @@ import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
+  buildSupplementalToolDetailBody,
   computeStableMessagesTimelineRows,
   getRenderableCommandOutputLines,
+  hasCommandWorkEntryDetails,
+  hasFileChangeWorkEntryDetails,
   hasRenderableCommandOutput,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
@@ -1613,74 +1616,6 @@ function ToolEntryDetails({
 
   const genericDetails = buildToolCallExpandedBody(workEntry, workspaceRoot);
   return genericDetails ? <GenericToolEntryDetails value={genericDetails} /> : null;
-}
-
-function buildSupplementalToolDetailBody(
-  workEntry: TimelineWorkEntry,
-  options: { dedupeRenderedCommandOutput: boolean },
-): string | null {
-  const detail = workEntry.detail?.trim();
-  if (!detail) {
-    return null;
-  }
-  const command = workEntry.command?.trim();
-  const rawCommand = workEntry.rawCommand?.trim();
-  const renderedOutputMatchesDetail =
-    options.dedupeRenderedCommandOutput && commandOutputMatchesDetail(workEntry, detail);
-  if (detail === command || detail === rawCommand || renderedOutputMatchesDetail) {
-    return null;
-  }
-  return detail;
-}
-
-function commandOutputMatchesDetail(workEntry: TimelineWorkEntry, detail: string): boolean {
-  const hasStreamOutput =
-    hasRenderableCommandOutput(workEntry.stdout) || hasRenderableCommandOutput(workEntry.stderr);
-  return [workEntry.stdout, workEntry.stderr, !hasStreamOutput ? workEntry.output : undefined].some(
-    (value) => getRenderableCommandOutputLines(value).join("\n") === detail,
-  );
-}
-
-function hasCommandWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
-  if (!hasCommandWorkEntryMetadata(workEntry)) {
-    return false;
-  }
-  if (workEntry.itemType === "command_execution" || workEntry.requestKind === "command") {
-    return true;
-  }
-  if (
-    workEntry.itemType === "file_change" ||
-    workEntry.itemType === "collab_agent_tool_call" ||
-    workEntry.requestKind === "file-change"
-  ) {
-    return false;
-  }
-  if (workEntry.itemType || workEntry.requestKind) {
-    return workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call";
-  }
-  return Boolean(workEntry.command || workEntry.rawCommand);
-}
-
-function hasCommandWorkEntryMetadata(workEntry: TimelineWorkEntry): boolean {
-  return Boolean(
-    workEntry.command ||
-    workEntry.rawCommand ||
-    workEntry.output ||
-    workEntry.stdout ||
-    workEntry.stderr ||
-    workEntry.exitCode !== undefined ||
-    workEntry.durationMs !== undefined,
-  );
-}
-
-function hasFileChangeWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
-  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
-    return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
-  }
-  if (workEntry.itemType === "collab_agent_tool_call") {
-    return false;
-  }
-  return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
 }
 
 function CommandEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
