@@ -1757,13 +1757,16 @@ export function ArchivedThreadsPanel() {
       const visibleFailures = failures.filter((failure) => !isAtomCommandInterrupted(failure));
       if (visibleFailures.length === 0) return;
       const error = squashAtomCommandFailure(visibleFailures[0]!);
+      const interruptedCount = failures.length - visibleFailures.length;
       const successCount = totalCount - failures.length;
       toastManager.add(
         stackedThreadToast({
           type: "error",
           title,
           description: [
-            `${successCount} succeeded, ${visibleFailures.length} failed.`,
+            `${successCount} succeeded, ${visibleFailures.length} failed${
+              interruptedCount > 0 ? `, ${interruptedCount} interrupted` : ""
+            }.`,
             error instanceof Error ? error.message : "An error occurred.",
           ].join(" "),
         }),
@@ -2013,6 +2016,7 @@ export function ArchivedThreadsPanel() {
                   <button
                     type="button"
                     className="group flex min-w-0 items-center gap-2 text-left"
+                    disabled={isSearchingArchive}
                     aria-expanded={isExpanded}
                     onClick={() => toggleProjectExpanded(projectKey)}
                   >
