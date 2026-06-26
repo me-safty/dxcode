@@ -3146,9 +3146,18 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
-  // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
+  // Scrolling is explicit so streamed timeline updates never take control away
+  // from the user after the newly sent row has been positioned once.
   const scrollToEnd = useCallback((animated = false) => {
     void legendListRef.current?.scrollToEnd?.({ animated });
+  }, []);
+  const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
+  const onTimelineAnchorReady = useCallback((messageId: MessageId) => {
+    if (positionedTimelineAnchorRef.current === messageId) {
+      return;
+    }
+    positionedTimelineAnchorRef.current = messageId;
+    void legendListRef.current?.scrollToEnd?.({ animated: false });
   }, []);
 
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
@@ -3750,8 +3759,6 @@ function ChatViewContent(props: ChatViewProps) {
         streaming: false,
       },
     ]);
-    void legendListRef.current?.scrollToEnd?.({ animated: false });
-
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
@@ -4166,11 +4173,14 @@ function ChatViewContent(props: ChatViewProps) {
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(threadIdForSend, null);
 
-      // Scroll to the current end *before* adding the optimistic message.
+      // Position this sent row once LegendList has measured the anchored tail.
       isAtEndRef.current = true;
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
-      await legendListRef.current?.scrollToEnd?.({ animated: false });
+      setTimelineAnchor({
+        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+        messageId: messageIdForSend,
+      });
 
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -4785,6 +4795,7 @@ function ChatViewContent(props: ChatViewProps) {
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                 anchorMessageId={timelineAnchorMessageId}
+                onAnchorReady={onTimelineAnchorReady}
                 contentInsetEndAdjustment={composerOverlayHeight}
                 onIsAtEndChange={onIsAtEndChange}
               />

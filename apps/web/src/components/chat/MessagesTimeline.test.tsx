@@ -17,24 +17,30 @@ vi.mock("@legendapp/list/react", async () => {
       anchorIndex: number;
       anchorMaxSize?: number;
       anchorOffset?: number;
+      onReady?: () => void;
     };
     contentInsetEndAdjustment?: number;
+    maintainScrollAtEnd?: boolean;
     ref?: Ref<LegendListRef>;
-  }) => (
-    <div
-      data-testid={legendListTestId}
-      data-anchor-index={props.anchoredEndSpace?.anchorIndex}
-      data-anchor-max-size={props.anchoredEndSpace?.anchorMaxSize}
-      data-anchor-offset={props.anchoredEndSpace?.anchorOffset}
-      data-content-inset-end={props.contentInsetEndAdjustment}
-    >
-      {props.ListHeaderComponent}
-      {props.data.map((item) => (
-        <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
-      ))}
-      {props.ListFooterComponent}
-    </div>
-  );
+  }) => {
+    return (
+      <div
+        data-testid={legendListTestId}
+        data-anchor-index={props.anchoredEndSpace?.anchorIndex}
+        data-anchor-max-size={props.anchoredEndSpace?.anchorMaxSize}
+        data-anchor-offset={props.anchoredEndSpace?.anchorOffset}
+        data-anchor-on-ready={Boolean(props.anchoredEndSpace?.onReady)}
+        data-content-inset-end={props.contentInsetEndAdjustment}
+        data-maintain-scroll-at-end={props.maintainScrollAtEnd}
+      >
+        {props.ListHeaderComponent}
+        {props.data.map((item) => (
+          <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
+        ))}
+        {props.ListFooterComponent}
+      </div>
+    );
+  };
 
   return { LegendList };
 });
@@ -122,6 +128,7 @@ function buildProps() {
     timestampFormat: "locale" as const,
     workspaceRoot: undefined,
     anchorMessageId: null,
+    onAnchorReady: () => {},
     contentInsetEndAdjustment: 0,
     onIsAtEndChange: () => {},
   };
@@ -183,8 +190,10 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain('data-anchor-index="1"');
     expect(markup).toContain('data-anchor-offset="16"');
+    expect(markup).toContain('data-anchor-on-ready="true"');
     expect(markup).not.toContain("data-anchor-max-size=");
     expect(markup).toContain('data-content-inset-end="144"');
+    expect(markup).not.toContain("data-maintain-scroll-at-end=");
   });
 
   it("renders collapse controls for long user messages", async () => {
