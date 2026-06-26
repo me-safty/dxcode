@@ -1,0 +1,43 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    python3 \
+    adduser \
+    util-linux \
+  && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+  && apt-get install --yes --no-install-recommends nodejs \
+  && curl -fsSL https://vite.plus | bash \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/root/.vite-plus/bin:${PATH}"
+
+RUN useradd --system --home-dir /var/lib/morecode --shell /usr/sbin/nologin morecode \
+  && install -d -m 0750 -o morecode -g morecode \
+    /var/lib/morecode \
+    /var/lib/morecode/state \
+    /var/lib/morecode/workspace \
+    /etc/morecode
+
+WORKDIR /work
+COPY . .
+
+RUN vp install \
+  && vp run --filter t3 build
+
+COPY packaging/linux/morecode.env /etc/morecode/morecode.env
+COPY packaging/linux/docker-test/entrypoint-source.sh /usr/local/bin/morecode-docker-entrypoint.sh
+
+RUN chmod 0755 /usr/local/bin/morecode-docker-entrypoint.sh \
+  && chmod 0640 /etc/morecode/morecode.env \
+  && chown root:morecode /etc/morecode/morecode.env \
+  && sed -i 's/^MORECODE_T3CODE_HOST=.*/MORECODE_T3CODE_HOST=0.0.0.0/' /etc/morecode/morecode.env \
+  && chown -R morecode:morecode /var/lib/morecode
+
+EXPOSE 3773
+
+ENTRYPOINT ["/usr/local/bin/morecode-docker-entrypoint.sh"]

@@ -84,8 +84,7 @@ export const resolveHeadlessConnectionString = (
   return `http://${formatHostForUrl(connectionHost)}:${port}`;
 };
 
-export const resolveLocalConnectionString = (port: number): string =>
-  `http://localhost:${port}`;
+export const resolveLocalConnectionString = (port: number): string => `http://localhost:${port}`;
 
 export const resolveLanConnectionHost = (
   interfaces: NetworkInterfacesMap = NodeOS.networkInterfaces(),

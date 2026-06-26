@@ -1,3 +1,9 @@
+<div align="center">
+
+<img src="./assets/readme-demo.gif" alt="more Code demo" width="240" style="display: block; margin: 0 auto;" />
+
+</div>
+
 # more Code
 
 more Code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, Grok Build, and OpenCode, more coming soon).
