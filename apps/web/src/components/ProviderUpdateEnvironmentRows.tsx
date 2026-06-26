@@ -178,6 +178,13 @@ export function ProviderUpdateEnvironmentRows({
   // updates synchronously, so we can bail before doing any work.
   const inFlightEnvironmentsRef = useRef<Set<EnvironmentId>>(new Set());
 
+  // Monotonic per-environment request version. Bumped on each dispatch and
+  // captured locally, so an attempt that was superseded -- e.g. one that already
+  // tripped the expiry safety net and was retried -- detects it is no longer
+  // current and skips every state write when it finally resolves, instead of
+  // clobbering the newer attempt's spinner/result/error or its in-flight guard.
+  const requestVersionRef = useRef<Map<EnvironmentId, number>>(new Map());
+
   const [pendingEnvironments, setPendingEnvironments] = useState<ReadonlySet<EnvironmentId>>(
     () => new Set(),
   );
@@ -209,6 +216,10 @@ export function ProviderUpdateEnvironmentRows({
         return;
       }
       inFlightEnvironmentsRef.current.add(environmentId);
+      const requestVersion = (requestVersionRef.current.get(environmentId) ?? 0) + 1;
+      requestVersionRef.current.set(environmentId, requestVersion);
+      const isCurrentRequest = () =>
+        requestVersionRef.current.get(environmentId) === requestVersion;
       onInteract?.();
       const providerCount = group.candidates.length;
       const targets = group.candidates.map((candidate) => ({
@@ -235,6 +246,11 @@ export function ProviderUpdateEnvironmentRows({
       });
 
       const expiry = setTimeout(() => {
+        // A newer attempt may have superseded this one; if so, leave its state
+        // untouched.
+        if (!isCurrentRequest()) {
+          return;
+        }
         // The request is presumed dead (see PENDING_EXPIRY_MS). Clear the
         // spinner AND the in-flight guard together so the row never strands on a
         // dead Update button, and surface feedback so the timeout is visible
@@ -269,6 +285,22 @@ export function ProviderUpdateEnvironmentRows({
             }
           }),
         );
+        if (!isCurrentRequest()) {
+          // A newer attempt superseded this one while it was in flight; leave
+          // the newer attempt's state intact.
+          return;
+        }
+        // The request resolved (not a transport hang), so clear any stale
+        // timeout error the expiry may have set -- otherwise a late success
+        // would be masked, since an error takes priority in the row status.
+        setErrorByEnvironment((previous) => {
+          if (!previous.has(environmentId)) {
+            return previous;
+          }
+          const next = new Map(previous);
+          next.delete(environmentId);
+          return next;
+        });
         if (results.length === 0) {
           setErrorByEnvironment((previous) =>
             new Map(previous).set(
@@ -302,16 +334,22 @@ export function ProviderUpdateEnvironmentRows({
           setResultByEnvironment((previous) => new Map(previous).set(environmentId, view));
         }
       } catch (error) {
-        setErrorByEnvironment((previous) =>
-          new Map(previous).set(
-            environmentId,
-            error instanceof Error ? error.message : "Provider update failed.",
-          ),
-        );
+        if (isCurrentRequest()) {
+          setErrorByEnvironment((previous) =>
+            new Map(previous).set(
+              environmentId,
+              error instanceof Error ? error.message : "Provider update failed.",
+            ),
+          );
+        }
       } finally {
         clearTimeout(expiry);
-        clearPending(environmentId);
-        inFlightEnvironmentsRef.current.delete(environmentId);
+        // Only the current attempt owns the shared spinner and in-flight guard;
+        // a superseded attempt resolving late must not clear a newer one's.
+        if (isCurrentRequest()) {
+          clearPending(environmentId);
+          inFlightEnvironmentsRef.current.delete(environmentId);
+        }
       }
     },
     [clearPending, groupByEnvironment, onInteract, updateProvider],
