@@ -1397,7 +1397,13 @@ function OpenCommandPaletteDialog(props: {
   const canOpenProjectFromFileManager =
     isBrowsing &&
     browseEnvironmentId !== null &&
-    (browseEnvironmentId === primaryEnvironmentId || browseEnvironmentIsDesktopLocal) &&
+    // For a desktop-local (WSL) env, only offer the picker once we have resolved
+    // its desktop pool instance id. Without it pickFolder can't be routed to the
+    // WSL filesystem and would open the primary (Windows) picker, then add the
+    // chosen Windows path against the WSL env -- a wrong-path footgun. Stay
+    // hidden until the bootstrap mapping is available rather than mis-routing.
+    (browseEnvironmentId === primaryEnvironmentId ||
+      (browseEnvironmentIsDesktopLocal && browseDesktopInstanceId !== null)) &&
     typeof window !== "undefined" &&
     window.desktopBridge !== undefined;
   const fileManagerInitialPath = useMemo(() => {
