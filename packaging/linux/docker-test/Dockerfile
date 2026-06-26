@@ -25,11 +25,11 @@ RUN useradd --system --home-dir /var/lib/morecode --shell /usr/sbin/nologin more
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends python3 \
   && rm -rf /var/lib/apt/lists/* \
-  && set -euo pipefail \
+  && set -eu \
   && : "${GITHUB_REPOSITORY:?Set GITHUB_REPOSITORY to owner/repo for the release host}" \
   && release_json="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")" \
   && deb_asset="$(printf '%s' "$release_json" | python3 -c 'import json, os, sys; arch=os.environ["DEB_ARCH"]; data=json.load(sys.stdin); matches=[asset["name"] for asset in data.get("assets", []) if asset["name"].endswith(f"_{arch}.deb")]; print(matches[0] if matches else "")')" \
-  && if [[ -z "$deb_asset" ]]; then \
+  && if [ -z "$deb_asset" ]; then \
     echo "No morecode-headless .deb asset found for ${DEB_ARCH} on release ${RELEASE_TAG}." >&2; \
     exit 1; \
   fi \

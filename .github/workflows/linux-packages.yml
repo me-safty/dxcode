@@ -59,7 +59,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes rpm
 
       - name: Apply release package version
-        run: node scripts/update-release-package-versions.ts "${{ steps.release_tag.outputs.tag#v }}"
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+        run: node scripts/update-release-package-versions.ts "${RELEASE_TAG#v}"
 
       - name: Build Linux packages
         run: vp run dist:linux

@@ -150,9 +150,13 @@ function copyPackagePayload(root: string): void {
     runtimeDepsDir,
   );
   for (const packageName of Object.keys(PACKAGED_RUNTIME_DEPS)) {
-    cpSync(join(runtimeDepsDir, "node_modules", packageName), join(appDir, "node_modules", packageName), {
-      recursive: true,
-    });
+    cpSync(
+      join(runtimeDepsDir, "node_modules", packageName),
+      join(appDir, "node_modules", packageName),
+      {
+        recursive: true,
+      },
+    );
   }
   rmSync(runtimeDepsDir, { recursive: true, force: true });
 
