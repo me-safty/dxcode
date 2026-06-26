@@ -136,17 +136,28 @@ export async function runArchivedProjectThreadActions(
   action: (thread: ArchivedProjectBulkThread) => Promise<AtomCommandResult<unknown, unknown>>,
 ): Promise<ReadonlyArray<ArchivedProjectBulkFailure>> {
   const failures: Array<ArchivedProjectBulkFailure> = [];
+  const thrownErrors: unknown[] = [];
   let nextThreadIndex = 0;
+  let shouldStop = false;
   async function worker() {
     for (;;) {
+      if (shouldStop) {
+        return;
+      }
       const thread = threads[nextThreadIndex];
       nextThreadIndex += 1;
       if (!thread) {
         return;
       }
-      const result = await action(thread);
-      if (result._tag === "Failure") {
-        failures.push(result);
+      try {
+        const result = await action(thread);
+        if (result._tag === "Failure") {
+          failures.push(result);
+        }
+      } catch (error) {
+        thrownErrors.push(error);
+        shouldStop = true;
+        return;
       }
     }
   }
@@ -157,6 +168,9 @@ export async function runArchivedProjectThreadActions(
       worker,
     ),
   );
+  if (thrownErrors.length > 0) {
+    throw thrownErrors[0];
+  }
   return failures;
 }
 

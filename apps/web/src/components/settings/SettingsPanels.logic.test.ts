@@ -200,8 +200,10 @@ describe("runArchivedProjectThreadActions", () => {
     }));
     let activeCount = 0;
     let maxActiveCount = 0;
+    const attemptedThreadIds: string[] = [];
 
     const failures = await runArchivedProjectThreadActions(threads, async (thread) => {
+      attemptedThreadIds.push(thread.id);
       activeCount += 1;
       maxActiveCount = Math.max(maxActiveCount, activeCount);
       await Promise.resolve();
@@ -210,7 +212,37 @@ describe("runArchivedProjectThreadActions", () => {
     });
 
     expect(failures).toHaveLength(1);
+    expect(attemptedThreadIds).toHaveLength(threads.length);
+    expect(new Set(attemptedThreadIds)).toEqual(new Set(threads.map((thread) => thread.id)));
     expect(maxActiveCount).toBeLessThanOrEqual(4);
+  });
+
+  it("waits for active archived project thread actions before rethrowing", async () => {
+    const threads = Array.from({ length: 6 }, (_, index) => ({
+      id: ThreadId.make(`thread-${index}`),
+      environmentId,
+    }));
+    let activeCount = 0;
+    const attemptedThreadIds: string[] = [];
+
+    await expect(
+      runArchivedProjectThreadActions(threads, async (thread) => {
+        attemptedThreadIds.push(thread.id);
+        activeCount += 1;
+        try {
+          await Promise.resolve();
+          if (thread.id === "thread-0") {
+            throw new Error("failed");
+          }
+          return successResult();
+        } finally {
+          activeCount -= 1;
+        }
+      }),
+    ).rejects.toThrow("failed");
+
+    expect(activeCount).toBe(0);
+    expect(attemptedThreadIds).toEqual(["thread-0", "thread-1", "thread-2", "thread-3"]);
   });
 });
 
