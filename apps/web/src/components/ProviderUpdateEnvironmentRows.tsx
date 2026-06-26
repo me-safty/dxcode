@@ -168,6 +168,13 @@ export function ProviderUpdateEnvironmentRows({
   // Only surface results that land after this popover opened.
   const visibleAfterIsoRef = useRef<string>(new Date().toISOString());
 
+  // Synchronous re-entry guard. setPendingEnvironments is an async state update,
+  // and PENDING_EXPIRY_MS can clear the spinner while a request is still in
+  // flight, so a rapid double-click (or a click after the expiry fires mid-
+  // request) would otherwise dispatch a second full round of updates. A ref
+  // updates synchronously, so we can bail before doing any work.
+  const inFlightEnvironmentsRef = useRef<Set<EnvironmentId>>(new Set());
+
   const [pendingEnvironments, setPendingEnvironments] = useState<ReadonlySet<EnvironmentId>>(
     () => new Set(),
   );
@@ -195,6 +202,10 @@ export function ProviderUpdateEnvironmentRows({
       if (!group || group.candidates.length === 0) {
         return;
       }
+      if (inFlightEnvironmentsRef.current.has(environmentId)) {
+        return;
+      }
+      inFlightEnvironmentsRef.current.add(environmentId);
       onInteract?.();
       const providerCount = group.candidates.length;
       const targets = group.candidates.map((candidate) => ({
@@ -287,6 +298,7 @@ export function ProviderUpdateEnvironmentRows({
       } finally {
         clearTimeout(expiry);
         clearPending(environmentId);
+        inFlightEnvironmentsRef.current.delete(environmentId);
       }
     },
     [clearPending, groupByEnvironment, onInteract, updateProvider],
@@ -299,7 +311,12 @@ export function ProviderUpdateEnvironmentRows({
         group,
         error: errorByEnvironment.get(group.environmentId),
         result: resultByEnvironment.get(group.environmentId),
-        pill: getProviderUpdateSidebarPillView(group.providers, {
+        // Derive the live pill from the candidates this row is actually
+        // tracking, not every provider in the environment. Otherwise an
+        // unrelated provider's recent success (or one candidate succeeding while
+        // another was interrupted) makes the pill report success and hides the
+        // Update action for candidates that are still outdated.
+        pill: getProviderUpdateSidebarPillView(group.candidates, {
           visibleAfterIso: visibleAfterIsoRef.current,
         }),
         isPending: pendingEnvironments.has(group.environmentId),
