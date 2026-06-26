@@ -153,18 +153,41 @@ export function buildSupplementalToolDetailBody(
 }
 
 function commandOutputMatchesDetail(workEntry: WorkLogEntry, detail: string): boolean {
-  const hasStreamOutput =
-    hasRenderableCommandOutput(workEntry.stdout) || hasRenderableCommandOutput(workEntry.stderr);
-  return [workEntry.stdout, workEntry.stderr, !hasStreamOutput ? workEntry.output : undefined].some(
-    (value) => getRenderableCommandOutputLines(value).join("\n") === detail,
+  const stdoutLines = getRenderableCommandOutputLines(workEntry.stdout);
+  const stderrLines = getRenderableCommandOutputLines(workEntry.stderr);
+  const hasStreamOutput = stdoutLines.length > 0 || stderrLines.length > 0;
+  const outputLines = hasStreamOutput ? [] : getRenderableCommandOutputLines(workEntry.output);
+  const normalizedDetail = normalizeToolDetailLines(detail.split(/\r?\n/u));
+
+  return [stdoutLines, stderrLines, outputLines].some(
+    (lines) => lines.length > 0 && normalizeToolDetailLines(lines) === normalizedDetail,
   );
+}
+
+function normalizeToolDetailLines(lines: ReadonlyArray<string>): string {
+  const normalizedLines = lines.map((line) => line.trim());
+  let startIndex = 0;
+  let endIndex = normalizedLines.length;
+  while (startIndex < endIndex && normalizedLines[startIndex]?.length === 0) {
+    startIndex += 1;
+  }
+  while (endIndex > startIndex && normalizedLines[endIndex - 1]?.length === 0) {
+    endIndex -= 1;
+  }
+  return normalizedLines.slice(startIndex, endIndex).join("\n");
+}
+
+function isCollabAgentWorkEntry(workEntry: WorkLogEntry): boolean {
+  // Collab-agent rows own their nested activity UI; do not re-expand them as
+  // command or file-change detail boxes.
+  return workEntry.itemType === "collab_agent_tool_call";
 }
 
 export function hasCommandWorkEntryDetails(workEntry: WorkLogEntry): boolean {
   if (!hasCommandWorkEntryMetadata(workEntry)) {
     return false;
   }
-  if (workEntry.itemType === "collab_agent_tool_call") {
+  if (isCollabAgentWorkEntry(workEntry)) {
     return false;
   }
   if (workEntry.itemType === "command_execution" || workEntry.requestKind === "command") {
@@ -173,7 +196,7 @@ export function hasCommandWorkEntryDetails(workEntry: WorkLogEntry): boolean {
   if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
     return false;
   }
-  if (workEntry.itemType || workEntry.requestKind) {
+  if (workEntry.itemType) {
     return workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call";
   }
   return Boolean(workEntry.command || workEntry.rawCommand);
@@ -186,17 +209,14 @@ function hasCommandWorkEntryMetadata(workEntry: WorkLogEntry): boolean {
     workEntry.output ||
     workEntry.stdout ||
     workEntry.stderr ||
-    workEntry.exitCode !== undefined ||
-    workEntry.durationMs !== undefined,
+    workEntry.exitCode != null ||
+    workEntry.durationMs != null,
   );
 }
 
 export function hasFileChangeWorkEntryDetails(workEntry: WorkLogEntry): boolean {
-  if (workEntry.itemType === "collab_agent_tool_call") {
+  if (isCollabAgentWorkEntry(workEntry)) {
     return false;
-  }
-  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
-    return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
   }
   return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
 }

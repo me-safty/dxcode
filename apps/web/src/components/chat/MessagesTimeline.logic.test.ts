@@ -13,10 +13,13 @@ import {
   resolveAssistantMessageCopyState,
 } from "./MessagesTimeline.logic";
 
+let workLogEntrySequence = 0;
+
 function buildWorkLogEntry(overrides: Partial<WorkLogEntry>): WorkLogEntry {
+  const sequence = workLogEntrySequence++;
   return {
-    id: "work-1",
-    createdAt: "2026-01-01T00:00:00Z",
+    id: `work-${sequence + 1}`,
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, sequence)).toISOString(),
     label: "Tool",
     tone: "tool",
     ...overrides,
@@ -319,6 +322,45 @@ describe("activity detail expansion", () => {
     ).toBe(true);
   });
 
+  it("expands command entries that only have runtime metadata", () => {
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "command_execution",
+          exitCode: 0,
+          durationMs: 0,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          exitCode: 0,
+          durationMs: 0,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to command metadata when request kind alone is not enough", () => {
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          requestKind: "file-read",
+          command: "sed -n '1,20p' package.json",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasCommandWorkEntryDetails(
+        buildWorkLogEntry({
+          requestKind: "file-read",
+          stdout: '{ "name": "t3code" }',
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("does not treat file-change and collab-agent entries as command details", () => {
     expect(
       hasCommandWorkEntryDetails(
@@ -347,7 +389,7 @@ describe("activity detail expansion", () => {
     ).toBe(false);
   });
 
-  it("expands file-change entries with changed files or patches", () => {
+  it("expands file-change entries and patch-carrying tool calls", () => {
     expect(
       hasFileChangeWorkEntryDetails(
         buildWorkLogEntry({
@@ -360,6 +402,21 @@ describe("activity detail expansion", () => {
       hasFileChangeWorkEntryDetails(
         buildWorkLogEntry({
           requestKind: "file-change",
+          patch: "diff --git a/a b/a\n",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasFileChangeWorkEntryDetails(
+        buildWorkLogEntry({
+          patch: "diff --git a/a b/a\n",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasFileChangeWorkEntryDetails(
+        buildWorkLogEntry({
+          itemType: "dynamic_tool_call",
           patch: "diff --git a/a b/a\n",
         }),
       ),
@@ -394,6 +451,24 @@ describe("activity detail expansion", () => {
         { dedupeRenderedCommandOutput: true },
       ),
     ).toBeNull();
+    expect(
+      buildSupplementalToolDetailBody(
+        buildWorkLogEntry({
+          stdout: "line 1\r\n  line 2  \r\n\r\n",
+          detail: "line 1\nline 2",
+        }),
+        { dedupeRenderedCommandOutput: true },
+      ),
+    ).toBeNull();
+    expect(
+      buildSupplementalToolDetailBody(
+        buildWorkLogEntry({
+          stdout: "passed\n",
+          detail: "passed",
+        }),
+        { dedupeRenderedCommandOutput: false },
+      ),
+    ).toBe("passed");
     expect(
       buildSupplementalToolDetailBody(
         buildWorkLogEntry({
