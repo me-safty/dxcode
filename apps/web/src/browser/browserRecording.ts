@@ -68,6 +68,14 @@ export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<Brow
   }
 }
 
+type BrowserRecordingLifecycle =
+  | { readonly phase: "starting" }
+  | { readonly phase: "recording" }
+  | {
+      readonly phase: "stopping";
+      readonly stopPromise: Promise<DesktopPreviewRecordingArtifact>;
+    };
+
 interface ActiveRecording {
   readonly tabId: string;
   readonly canvas: HTMLCanvasElement;
@@ -76,7 +84,7 @@ interface ActiveRecording {
   readonly chunks: Blob[];
   readonly mimeType: string;
   readonly startedAt: string;
-  phase: "starting" | "recording" | "stopping";
+  lifecycle: BrowserRecordingLifecycle;
 }
 
 const activeBrowserRecordingTabIdAtom = Atom.make<string | null>(null).pipe(
@@ -175,13 +183,15 @@ const recordingStartupCancelledError = (
   });
 
 const isRecordingStarting = (recording: ActiveRecording): boolean =>
-  active === recording && recording.phase === "starting";
+  active === recording && recording.lifecycle.phase === "starting";
 
 export async function startBrowserRecording(tabId: string): Promise<string> {
   const bridge = previewBridge;
   if (!bridge) throw new BrowserRecordingUnavailableError({ tabId });
   if (active) {
-    if (active.tabId === tabId && active.phase === "recording") return active.startedAt;
+    if (active.tabId === tabId && active.lifecycle.phase === "recording") {
+      return active.startedAt;
+    }
     throw new BrowserRecordingConflictError({
       requestedTabId: tabId,
       activeTabId: active.tabId,
@@ -228,7 +238,7 @@ export async function startBrowserRecording(tabId: string): Promise<string> {
     chunks,
     mimeType,
     startedAt,
-    phase: "starting",
+    lifecycle: { phase: "starting" },
   };
   active = recording;
   try {
@@ -298,19 +308,16 @@ export async function startBrowserRecording(tabId: string): Promise<string> {
     }
     throw recordingStartupCancelledError(recording);
   }
-  recording.phase = "recording";
+  recording.lifecycle = { phase: "recording" };
   appAtomRegistry.set(activeBrowserRecordingTabIdAtom, tabId);
   return startedAt;
 }
 
-export async function stopBrowserRecording(
-  tabId: string,
-): Promise<DesktopPreviewRecordingArtifact | null> {
-  const bridge = previewBridge;
-  const recording = active;
-  if (!bridge || !recording || recording.tabId !== tabId) return null;
-  if (recording.phase === "stopping") return null;
-  recording.phase = "stopping";
+const finalizeBrowserRecording = async (
+  bridge: NonNullable<typeof previewBridge>,
+  recording: ActiveRecording,
+): Promise<DesktopPreviewRecordingArtifact> => {
+  const { tabId } = recording;
   let result:
     | { readonly _tag: "Success"; readonly artifact: DesktopPreviewRecordingArtifact }
     | { readonly _tag: "Failure"; readonly error: unknown };
@@ -381,4 +388,17 @@ export async function stopBrowserRecording(
   }
   if (cleanupError) throw cleanupError;
   return result.artifact;
+};
+
+export function stopBrowserRecording(
+  tabId: string,
+): Promise<DesktopPreviewRecordingArtifact | null> {
+  const bridge = previewBridge;
+  const recording = active;
+  if (!bridge || !recording || recording.tabId !== tabId) return Promise.resolve(null);
+  if (recording.lifecycle.phase === "stopping") return recording.lifecycle.stopPromise;
+
+  const stopPromise = Promise.resolve().then(() => finalizeBrowserRecording(bridge, recording));
+  recording.lifecycle = { phase: "stopping", stopPromise };
+  return stopPromise;
 }

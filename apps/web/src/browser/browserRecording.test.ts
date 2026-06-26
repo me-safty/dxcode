@@ -159,6 +159,28 @@ describe("browser recording surface preparation", () => {
     await stopPromise;
   });
 
+  it("shares an in-progress stop with duplicate callers", async () => {
+    let finishStoppingScreencast: (() => void) | undefined;
+    stopScreencast.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        finishStoppingScreencast = resolve;
+      });
+      return undefined;
+    });
+
+    await startBrowserRecording("recording-tab");
+    const firstStop = stopBrowserRecording("recording-tab");
+    await vi.waitFor(() => expect(stopScreencast).toHaveBeenCalledOnce());
+    const duplicateStop = stopBrowserRecording("recording-tab");
+
+    finishStoppingScreencast?.();
+    const [firstArtifact, duplicateArtifact] = await Promise.all([firstStop, duplicateStop]);
+
+    expect(duplicateArtifact).toEqual(firstArtifact);
+    expect(stopScreencast).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it("does not start a screencast after stopping during the paint wait", async () => {
     const frameCallbacks: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

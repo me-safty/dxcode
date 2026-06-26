@@ -545,6 +545,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     // A stop artifact identifies the globally recorded tab, not the caller's browsing target.
     const responseTabId = input.operation === "recordingStop" ? undefined : readResultTabId(result);
     const resultTabId = responseTabId === undefined ? input.tabId : responseTabId;
+    if (resultTabId === undefined) return result;
     const assignmentKey = hostAssignmentKey(input.scope);
     yield* SynchronizedRef.update(state, (current) => {
       const assignment = current.assignments.get(assignmentKey);

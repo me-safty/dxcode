@@ -208,13 +208,13 @@ it.effect("does not replace the default tab with a globally stopped recording ta
   ),
 );
 
-it.effect("advances tab ordering when a response does not include a tab", () =>
+it.effect("does not let a no-tab response suppress an earlier tab decision", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const broker = yield* makeBroker;
-      const browsingTabId = PreviewTabId.make("tab-current");
-      const staleResponseTabId = PreviewTabId.make("tab-stale-response");
-      const releaseOlderResponse = yield* Deferred.make<void>();
+      const initialTabId = PreviewTabId.make("tab-initial");
+      const openedTabId = PreviewTabId.make("tab-opened-late");
+      const releaseOpenResponse = yield* Deferred.make<void>();
       const routedRequests: RoutedRequest[] = [];
       const requests = requestsFrom(yield* broker.connect(makeHost()));
       yield* Stream.runForEach(requests, (request) => {
@@ -225,7 +225,7 @@ it.effect("advances tab ordering when a response does not include a tab", () =>
             : undefined;
         const response = Effect.gen(function* () {
           if (marker === "older") {
-            yield* Deferred.await(releaseOlderResponse);
+            yield* Deferred.await(releaseOpenResponse);
           }
           yield* broker.respond({
             clientId: "client-1",
@@ -234,13 +234,11 @@ it.effect("advances tab ordering when a response does not include a tab", () =>
             ok: true,
             result:
               request.operation === "open"
-                ? { available: true, tabId: browsingTabId }
-                : marker === "older"
-                  ? { tabId: staleResponseTabId }
-                  : { url: "http://localhost:3200" },
+                ? { available: true, tabId: marker === "older" ? openedTabId : initialTabId }
+                : { url: "http://localhost:3200" },
           });
           if (marker === "newer") {
-            yield* Deferred.succeed(releaseOlderResponse, undefined);
+            yield* Deferred.succeed(releaseOpenResponse, undefined);
           }
         });
         return response.pipe(Effect.forkScoped, Effect.asVoid);
@@ -249,7 +247,11 @@ it.effect("advances tab ordering when a response does not include a tab", () =>
 
       yield* broker.invoke({ scope, operation: "open", input: {} });
       const older = yield* broker
-        .invoke({ scope, operation: "snapshot", input: { marker: "older" } })
+        .invoke({
+          scope,
+          operation: "open",
+          input: { marker: "older", reuseExistingTab: false },
+        })
         .pipe(Effect.forkScoped);
       yield* Effect.yieldNow;
       const newer = yield* broker
@@ -259,7 +261,7 @@ it.effect("advances tab ordering when a response does not include a tab", () =>
       yield* Fiber.join(older);
       yield* broker.invoke({ scope, operation: "snapshot", input: {} });
 
-      expect(routedRequests.at(-1)?.tabId).toBe(browsingTabId);
+      expect(routedRequests.at(-1)?.tabId).toBe(openedTabId);
     }),
   ),
 );
