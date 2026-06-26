@@ -74,7 +74,7 @@ import {
   type ThreadFeedLatestTurn,
 } from "../../lib/threadActivity";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
-import { ThreadWorkLog } from "./thread-work-log";
+import { ThreadWorkGroupToggle, ThreadWorkLog } from "./thread-work-log";
 import { useAssetUrl } from "../../state/assets";
 import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
 
@@ -655,7 +655,6 @@ function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
   props: Pick<ThreadFeedProps, "environmentId" | "skills"> & {
     readonly copiedRowId: string | null;
-    readonly expandedWorkGroups: Record<string, boolean>;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: TurnId | null;
@@ -695,6 +694,18 @@ function renderFeedEntry(
           type="monochrome"
         />
       </Pressable>
+    );
+  }
+
+  if (entry.type === "work-toggle") {
+    return (
+      <ThreadWorkGroupToggle
+        expanded={entry.expanded}
+        hiddenCount={entry.hiddenCount}
+        iconSubtleColor={iconSubtleColor}
+        onlyToolActivities={entry.onlyToolActivities}
+        onToggle={() => props.onToggleWorkGroup(entry.groupId)}
+      />
     );
   }
 
@@ -825,11 +836,9 @@ function renderFeedEntry(
     <ThreadWorkLog
       activities={entry.activities}
       copiedRowId={props.copiedRowId}
-      expanded={props.expandedWorkGroups[entry.id] ?? false}
       expandedRows={props.expandedWorkRows}
       iconSubtleColor={iconSubtleColor}
       onCopyRow={props.onCopyWorkRow}
-      onToggleGroup={() => props.onToggleWorkGroup(entry.id)}
       onToggleRow={props.onToggleWorkRow}
     />
   );
@@ -1173,7 +1182,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const listAppearanceData = useMemo(
     () => ({
       copiedRowId,
-      expandedWorkGroups,
       expandedWorkRows,
       iconSubtleColor,
       markdownStyles,
@@ -1182,7 +1190,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }),
     [
       copiedRowId,
-      expandedWorkGroups,
       expandedWorkRows,
       iconSubtleColor,
       markdownStyles,
@@ -1190,9 +1197,24 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       userBubbleColor,
     ],
   );
+  const expandedWorkGroupIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [groupId, expanded] of Object.entries(expandedWorkGroups)) {
+      if (expanded) {
+        ids.add(groupId);
+      }
+    }
+    return ids;
+  }, [expandedWorkGroups]);
   const presentedFeed = useMemo(
-    () => deriveThreadFeedPresentation(props.feed, props.latestTurn, expandedTurnIds),
-    [expandedTurnIds, props.feed, props.latestTurn],
+    () =>
+      deriveThreadFeedPresentation(
+        props.feed,
+        props.latestTurn,
+        expandedTurnIds,
+        expandedWorkGroupIds,
+      ),
+    [expandedTurnIds, expandedWorkGroupIds, props.feed, props.latestTurn],
   );
   const anchoredEndSpace = useMemo(
     () =>
@@ -1331,7 +1353,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       renderFeedEntry(info, {
         environmentId: props.environmentId,
         copiedRowId,
-        expandedWorkGroups,
         expandedWorkRows,
         terminalAssistantMessageIds,
         unsettledTurnId,
@@ -1351,7 +1372,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       }),
     [
       copiedRowId,
-      expandedWorkGroups,
       expandedWorkRows,
       terminalAssistantMessageIds,
       unsettledTurnId,
