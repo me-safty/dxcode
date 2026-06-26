@@ -1552,7 +1552,13 @@ export function ArchivedThreadsPanel() {
         isSearching: archiveSearch.isSearching,
         sort,
       }),
-    [archiveSearch, archivedSnapshots, sort],
+    [
+      archiveSearch.isSearching,
+      archiveSearch.normalizedQuery,
+      archiveSearch.tokens,
+      archivedSnapshots,
+      sort,
+    ],
   );
 
   const toggleProjectExpanded = useCallback((projectKey: string) => {

@@ -16,7 +16,7 @@ import { normalizeSearchQuery, scoreQueryMatch } from "@t3tools/shared/searchRan
 
 const ARCHIVED_THREAD_ALL_TOKENS_SCORE_OFFSET = 1_000;
 const ARCHIVED_THREAD_PARTIAL_TOKENS_SCORE_OFFSET = 5_000;
-const ARCHIVED_PROJECT_BULK_ACTION_CONCURRENCY = 4;
+const DEFAULT_ARCHIVED_PROJECT_BULK_ACTION_CONCURRENCY = 4;
 
 export type ArchivedThreadSortField = "archivedAt" | "createdAt";
 export type ArchivedThreadSortDirection = "asc" | "desc";
@@ -62,6 +62,10 @@ export interface ArchivedThreadSearchInput {
   readonly isSearching: boolean;
 }
 
+export interface ArchivedProjectBulkActionOptions {
+  readonly concurrency?: number;
+}
+
 export function parseArchivedThreadSearchInput(query: string): ArchivedThreadSearchInput {
   const normalizedQuery = normalizeSearchQuery(query);
   return {
@@ -71,6 +75,7 @@ export function parseArchivedThreadSearchInput(query: string): ArchivedThreadSea
   };
 }
 
+// Lower search scores are more relevant, matching the shared search-ranking helpers.
 export function archivedThreadSearchScore(input: {
   readonly normalizedTitle: string;
   readonly normalizedQuery: string;
@@ -134,9 +139,14 @@ export function archivedThreadSearchScore(input: {
 export async function runArchivedProjectThreadActions(
   threads: ReadonlyArray<ArchivedProjectBulkThread>,
   action: (thread: ArchivedProjectBulkThread) => Promise<AtomCommandResult<unknown, unknown>>,
+  options: ArchivedProjectBulkActionOptions = {},
 ): Promise<ReadonlyArray<ArchivedProjectBulkFailure>> {
   const failures: Array<ArchivedProjectBulkFailure> = [];
   const thrownErrors: unknown[] = [];
+  const concurrency =
+    options.concurrency === undefined || !Number.isFinite(options.concurrency)
+      ? DEFAULT_ARCHIVED_PROJECT_BULK_ACTION_CONCURRENCY
+      : Math.max(1, Math.floor(options.concurrency));
   let nextThreadIndex = 0;
   let shouldStop = false;
   async function worker() {
@@ -144,11 +154,12 @@ export async function runArchivedProjectThreadActions(
       if (shouldStop) {
         return;
       }
-      const thread = threads[nextThreadIndex];
-      nextThreadIndex += 1;
-      if (!thread) {
+      const threadIndex = nextThreadIndex;
+      if (threadIndex >= threads.length) {
         return;
       }
+      nextThreadIndex += 1;
+      const thread = threads[threadIndex]!;
       try {
         const result = await action(thread);
         if (result._tag === "Failure") {
@@ -162,14 +173,13 @@ export async function runArchivedProjectThreadActions(
     }
   }
 
-  await Promise.all(
-    Array.from(
-      { length: Math.min(ARCHIVED_PROJECT_BULK_ACTION_CONCURRENCY, threads.length) },
-      worker,
-    ),
-  );
+  const workers: Array<Promise<void>> = [];
+  for (let index = 0; index < Math.min(concurrency, threads.length); index += 1) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
   if (thrownErrors.length > 0) {
-    throw thrownErrors[0];
+    throw new AggregateError(thrownErrors, "Archived project thread action failed");
   }
   return failures;
 }
@@ -215,50 +225,55 @@ export function buildArchivedThreadGroups(input: {
   readonly isSearching: boolean;
   readonly sort: ArchivedThreadSortState;
 }): ReadonlyArray<ArchivedThreadGroup> {
-  const projectsByEnvironmentAndId = new Map(
-    input.snapshots.flatMap(({ environmentId, snapshot }) =>
-      snapshot.projects.map(
-        (project) =>
-          [
-            `${environmentId}:${project.id}`,
-            {
-              id: project.id,
-              environmentId,
-              name: project.title,
-              cwd: project.workspaceRoot,
-            },
-          ] as const,
-      ),
-    ),
-  );
-  const threads = input.snapshots.flatMap(({ environmentId, snapshot }) =>
-    snapshot.threads.map((thread) => ({
-      ...thread,
-      environmentId,
-      normalizedTitle: normalizeSearchQuery(thread.title),
-    })),
-  );
+  const projectsByEnvironmentAndId = new Map<string, ArchivedThreadGroupProject>();
+  const threadsByEnvironmentAndProjectId = new Map<string, ArchivedThreadGroupThread[]>();
 
-  const groups: ArchivedThreadGroup[] = [];
-  for (const project of projectsByEnvironmentAndId.values()) {
-    const projectThreads: ArchivedThreadGroupThread[] = [];
-    for (const thread of threads) {
-      if (thread.projectId === project.id && thread.environmentId === project.environmentId) {
-        const searchScore = archivedThreadSearchScore({
-          normalizedTitle: thread.normalizedTitle,
-          normalizedQuery: input.normalizedSearchQuery,
-          tokens: input.searchTokens,
-        });
-        if (searchScore === null) {
-          continue;
-        }
-        projectThreads.push({
-          ...thread,
-          searchScore,
-        });
+  for (const { environmentId, snapshot } of input.snapshots) {
+    for (const project of snapshot.projects) {
+      const key = `${environmentId}:${project.id}`;
+      // Later snapshots for the same environment/project replace older project metadata.
+      projectsByEnvironmentAndId.set(key, {
+        id: project.id,
+        environmentId,
+        name: project.title,
+        cwd: project.workspaceRoot,
+      });
+    }
+
+    for (const thread of snapshot.threads) {
+      const normalizedTitle = normalizeSearchQuery(thread.title);
+      const searchScore = archivedThreadSearchScore({
+        normalizedTitle,
+        normalizedQuery: input.normalizedSearchQuery,
+        tokens: input.searchTokens,
+      });
+      if (searchScore === null) {
+        continue;
+      }
+      const key = `${environmentId}:${thread.projectId}`;
+      const projectThreads = threadsByEnvironmentAndProjectId.get(key);
+      const archivedThread = {
+        ...thread,
+        environmentId,
+        normalizedTitle,
+        searchScore,
+      };
+      if (projectThreads) {
+        projectThreads.push(archivedThread);
+      } else {
+        threadsByEnvironmentAndProjectId.set(key, [archivedThread]);
       }
     }
-    if (projectThreads.length > 0) {
+  }
+
+  const groups: ArchivedThreadGroup[] = [];
+  for (const [projectKey, project] of projectsByEnvironmentAndId.entries()) {
+    const projectThreads = threadsByEnvironmentAndProjectId.get(projectKey);
+    if (projectThreads && projectThreads.length > 0) {
+      const searchScore = projectThreads.reduce(
+        (minimumScore, thread) => Math.min(minimumScore, thread.searchScore),
+        Number.POSITIVE_INFINITY,
+      );
       groups.push({
         project,
         threads: projectThreads.toSorted((left, right) =>
@@ -267,7 +282,7 @@ export function buildArchivedThreadGroups(input: {
               compareArchivedThreads(left, right, input.sort)
             : compareArchivedThreads(left, right, input.sort),
         ),
-        searchScore: Math.min(...projectThreads.map((thread) => thread.searchScore)),
+        searchScore,
       });
     }
   }

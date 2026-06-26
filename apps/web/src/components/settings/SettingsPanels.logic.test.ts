@@ -12,6 +12,8 @@ import {
 import type { ArchivedSnapshotEntry } from "@t3tools/client-runtime/state/threads";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
+import * as Cause from "effect/Cause";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 import {
   archivedThreadSearchScore,
@@ -88,11 +90,15 @@ function makeSnapshot(
 }
 
 function successResult(value: unknown = null): AtomCommandResult<unknown, unknown> {
-  return { _tag: "Success", value, waiting: false } as AtomCommandResult<unknown, unknown>;
+  return AsyncResult.success(value);
 }
 
 function failureResult(cause: unknown): AtomCommandResult<unknown, unknown> {
-  return { _tag: "Failure", cause, waiting: false } as AtomCommandResult<unknown, unknown>;
+  return AsyncResult.failure(Cause.fail(cause));
+}
+
+function waitForMacrotask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("archivedThreadSearchScore", () => {
@@ -179,6 +185,64 @@ describe("buildArchivedThreadGroups", () => {
       "thread-partial",
     ]);
   });
+
+  it("uses the latest duplicate project metadata and ignores threads without projects", () => {
+    const sharedProjectId = ProjectId.make("project-shared");
+    const remoteEnvironmentId = EnvironmentId.make("environment-2");
+    const olderProject = makeProject({ id: sharedProjectId, title: "Older Local Project" });
+    const latestProject = makeProject({
+      id: sharedProjectId,
+      title: "Latest Local Project",
+      workspaceRoot: "/workspaces/latest-local",
+    });
+    const remoteProject = makeProject({
+      id: sharedProjectId,
+      title: "Remote Project",
+      workspaceRoot: "/workspaces/remote",
+    });
+    const localThread = makeThread({
+      id: ThreadId.make("thread-local"),
+      projectId: sharedProjectId,
+      title: "Local thread",
+    });
+    const remoteThread = makeThread({
+      id: ThreadId.make("thread-remote"),
+      projectId: sharedProjectId,
+      title: "Remote thread",
+    });
+    const orphanThread = makeThread({
+      id: ThreadId.make("thread-orphan"),
+      projectId: ProjectId.make("project-missing"),
+      title: "Missing project thread",
+    });
+    const search = parseArchivedThreadSearchInput("");
+
+    const result = buildArchivedThreadGroups({
+      snapshots: [
+        makeSnapshot([olderProject], [orphanThread]),
+        makeSnapshot([latestProject], [localThread]),
+        makeSnapshot([remoteProject], [remoteThread], remoteEnvironmentId),
+      ],
+      normalizedSearchQuery: search.normalizedQuery,
+      searchTokens: search.tokens,
+      isSearching: search.isSearching,
+      sort: { field: "archivedAt", direction: "desc" },
+    });
+
+    expect(result).toHaveLength(2);
+    expect(result.map((group) => `${group.project.environmentId}:${group.project.name}`)).toEqual([
+      "environment-1:Latest Local Project",
+      "environment-2:Remote Project",
+    ]);
+    expect(result.map((group) => group.project.cwd)).toEqual([
+      "/workspaces/latest-local",
+      "/workspaces/remote",
+    ]);
+    expect(result.flatMap((group) => group.threads.map((thread) => thread.id))).toEqual([
+      "thread-local",
+      "thread-remote",
+    ]);
+  });
 });
 
 describe("nextArchivedThreadSortState", () => {
@@ -206,7 +270,7 @@ describe("runArchivedProjectThreadActions", () => {
       attemptedThreadIds.push(thread.id);
       activeCount += 1;
       maxActiveCount = Math.max(maxActiveCount, activeCount);
-      await Promise.resolve();
+      await waitForMacrotask();
       activeCount -= 1;
       return thread.id === "thread-2" ? failureResult(new Error("failed")) : successResult();
     });
@@ -214,35 +278,43 @@ describe("runArchivedProjectThreadActions", () => {
     expect(failures).toHaveLength(1);
     expect(attemptedThreadIds).toHaveLength(threads.length);
     expect(new Set(attemptedThreadIds)).toEqual(new Set(threads.map((thread) => thread.id)));
-    expect(maxActiveCount).toBeLessThanOrEqual(4);
+    expect(maxActiveCount).toBe(4);
   });
 
-  it("waits for active archived project thread actions before rethrowing", async () => {
+  it("waits for active archived project thread actions before rethrowing aggregate errors", async () => {
     const threads = Array.from({ length: 6 }, (_, index) => ({
       id: ThreadId.make(`thread-${index}`),
       environmentId,
     }));
     let activeCount = 0;
     const attemptedThreadIds: string[] = [];
+    let caughtError: unknown;
 
-    await expect(
-      runArchivedProjectThreadActions(threads, async (thread) => {
+    try {
+      await runArchivedProjectThreadActions(threads, async (thread) => {
         attemptedThreadIds.push(thread.id);
         activeCount += 1;
         try {
-          await Promise.resolve();
-          if (thread.id === "thread-0") {
+          await waitForMacrotask();
+          if (thread.id === "thread-0" || thread.id === "thread-1") {
             throw new Error("failed");
           }
           return successResult();
         } finally {
           activeCount -= 1;
         }
-      }),
-    ).rejects.toThrow("failed");
+      });
+    } catch (error) {
+      caughtError = error;
+    }
 
     expect(activeCount).toBe(0);
-    expect(attemptedThreadIds).toEqual(["thread-0", "thread-1", "thread-2", "thread-3"]);
+    expect(caughtError).toBeInstanceOf(AggregateError);
+    expect((caughtError as AggregateError).errors).toHaveLength(2);
+    expect(attemptedThreadIds).toHaveLength(4);
+    expect(new Set(attemptedThreadIds)).toEqual(
+      new Set(["thread-0", "thread-1", "thread-2", "thread-3"]),
+    );
   });
 });
 
