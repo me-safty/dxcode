@@ -44,6 +44,8 @@ import {
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { OpenAddProjectCommandPaletteProvider } from "../commandPaletteContext";
+import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
+import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useClientSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
@@ -458,6 +460,7 @@ function OpenCommandPaletteDialog(props: {
     reportFailure: false,
   });
   const { environments } = useEnvironments();
+  const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironment = usePrimaryEnvironment();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
@@ -503,6 +506,28 @@ function OpenCommandPaletteDialog(props: {
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
+  // A desktop-local secondary backend (today: the WSL backend). The picker is
+  // available against these too — the desktop dispatches pickFolder into the
+  // backend's filesystem when routed by its instance id.
+  const browseEnvironmentIsDesktopLocal =
+    browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target);
+  // Map the browsed desktop-local env to its desktop pool instance id (e.g.
+  // "wsl:ubuntu"). The catalog environmentId is descriptor-derived and won't
+  // route on the desktop side; pickFolder only recognizes the pool id, which
+  // the bootstrap list exposes. Match on backend URL, exactly as Sidebar's
+  // LocalSecondaryStatus does (environment.displayUrl === bootstrap.httpBaseUrl).
+  const browseDesktopInstanceId = useMemo(() => {
+    if (!browseEnvironmentIsDesktopLocal || browseEnvironment === null) {
+      return null;
+    }
+    const displayUrl = browseEnvironment.displayUrl;
+    if (displayUrl === null) {
+      return null;
+    }
+    return (
+      desktopLocalBootstraps.find((bootstrap) => bootstrap.httpBaseUrl === displayUrl)?.id ?? null
+    );
+  }, [browseEnvironment, browseEnvironmentIsDesktopLocal, desktopLocalBootstraps]);
   const sourceControlDiscovery = useEnvironmentQuery(
     browseEnvironmentId === null
       ? null
@@ -1372,8 +1397,7 @@ function OpenCommandPaletteDialog(props: {
   const canOpenProjectFromFileManager =
     isBrowsing &&
     browseEnvironmentId !== null &&
-    primaryEnvironmentId !== null &&
-    browseEnvironmentId === primaryEnvironmentId &&
+    (browseEnvironmentId === primaryEnvironmentId || browseEnvironmentIsDesktopLocal) &&
     typeof window !== "undefined" &&
     window.desktopBridge !== undefined;
   const fileManagerInitialPath = useMemo(() => {
@@ -1469,8 +1493,21 @@ function OpenCommandPaletteDialog(props: {
     setIsPickingProjectFolder(true);
     let pickedPath: string | null = null;
     try {
+      // Route the picker to the browsed env's backend filesystem. The desktop
+      // only resolves a "wsl:*" pool instance id, so for a desktop-local env we
+      // pass the bootstrap-mapped instance id (not the catalog environmentId).
+      // For the primary env we omit targetEnvironmentId to keep historical
+      // behavior. The desktop converts a WSL UNC selection back to a Linux path
+      // before returning, so the picked path is already what handleAddProject
+      // (which targets browseEnvironmentId) expects.
+      const pickerOptions = {
+        ...(fileManagerInitialPath ? { initialPath: fileManagerInitialPath } : {}),
+        ...(browseEnvironmentIsDesktopLocal && browseDesktopInstanceId
+          ? { targetEnvironmentId: browseDesktopInstanceId }
+          : {}),
+      };
       pickedPath = await api.dialogs.pickFolder(
-        fileManagerInitialPath ? { initialPath: fileManagerInitialPath } : undefined,
+        Object.keys(pickerOptions).length > 0 ? pickerOptions : undefined,
       );
     } catch {
       // Ignore picker failures and leave the palette open.
@@ -1483,6 +1520,8 @@ function OpenCommandPaletteDialog(props: {
     }
     await handleAddProject(pickedPath);
   }, [
+    browseDesktopInstanceId,
+    browseEnvironmentIsDesktopLocal,
     canOpenProjectFromFileManager,
     fileManagerInitialPath,
     handleAddProject,
