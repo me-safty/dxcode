@@ -19,10 +19,13 @@ function providerError(
     provider: "azure-devops",
     operation,
     detail: cause.detail,
-    command: cause.command,
+    command: typeof cause.command === "string" ? cause.command : undefined,
     cwd: SourceControlProvider.transportSafeSourceControlErrorValue(context.cwd ?? cause.cwd),
     reference: SourceControlProvider.transportSafeSourceControlErrorValue(
-      context.reference ?? ("reference" in cause ? cause.reference : undefined),
+      context.reference ??
+        ("reference" in cause && typeof cause.reference === "string"
+          ? cause.reference
+          : undefined),
     ),
     repository: SourceControlProvider.transportSafeSourceControlErrorValue(context.repository),
     cause,

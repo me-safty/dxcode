@@ -27,7 +27,9 @@ function providerError(
     provider: "bitbucket",
     operation,
     detail,
-    cwd: SourceControlProvider.transportSafeSourceControlErrorValue(context.cwd ?? cause.cwd),
+    cwd: SourceControlProvider.transportSafeSourceControlErrorValue(
+      context.cwd ?? ("cwd" in cause && typeof cause.cwd === "string" ? cause.cwd : undefined),
+    ),
     reference: SourceControlProvider.transportSafeSourceControlErrorValue(
       context.reference ?? ("reference" in cause ? cause.reference : undefined),
     ),

@@ -298,4 +298,4 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
   });
 });
 
-export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make);
+export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make());
