@@ -8,9 +8,6 @@ public class T3ComposerEditorModule: Module {
       Prop("controlledDocumentJson") { (view: T3ComposerEditorView, documentJson: String) in
         view.setControlledDocumentJson(documentJson)
       }
-      Prop("tokensJson") { (view: T3ComposerEditorView, tokensJson: String) in
-        view.setTokensJson(tokensJson)
-      }
       Prop("themeJson") { (view: T3ComposerEditorView, themeJson: String) in
         view.setThemeJson(themeJson)
       }

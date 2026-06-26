@@ -1,6 +1,14 @@
 import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
 import { requireNativeView } from "expo";
-import { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import type { NativeSyntheticEvent, StyleProp, ViewProps, ViewStyle } from "react-native";
 import { Image, StyleSheet } from "react-native";
 
@@ -8,7 +16,11 @@ import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons
 import { resolveMarkdownFileIcon } from "@t3tools/mobile-markdown-text/links";
 import { MOBILE_TYPOGRAPHY } from "../lib/typography";
 import { useThemeColor } from "../lib/useThemeColor";
-import { acknowledgeComposerNativeEvent } from "./composerEditorRevision";
+import {
+  acknowledgeComposerNativeEvent,
+  resolveComposerControlledEventCount,
+  type ComposerNativeEventSnapshot,
+} from "./composerEditorRevision";
 import type { ComposerEditorProps, ComposerEditorSelection } from "./T3ComposerEditor.types";
 
 const NATIVE_MODULE_NAME = "T3ComposerEditor";
@@ -21,6 +33,7 @@ type NativeEditorEvent = NativeSyntheticEvent<{
 }>;
 
 type NativeSelectionEvent = NativeSyntheticEvent<{
+  readonly value: string;
   readonly selection: ComposerEditorSelection;
   readonly eventCount: number;
 }>;
@@ -38,7 +51,6 @@ interface NativeComposerEditorRef {
 interface NativeComposerEditorProps extends ViewProps {
   readonly ref?: Ref<NativeComposerEditorRef>;
   readonly controlledDocumentJson: string;
-  readonly tokensJson: string;
   readonly themeJson: string;
   readonly placeholder: string;
   readonly fontFamily: string;
@@ -85,6 +97,9 @@ export function ComposerEditor({
   const nativeRef = useRef<NativeComposerEditorRef>(null);
   const mostRecentEventCountRef = useRef(0);
   const [mostRecentEventCount, setMostRecentEventCount] = useState(0);
+  const nativeEventSnapshotsRef = useRef<ComposerNativeEventSnapshot[]>([
+    { eventCount: 0, value: props.value },
+  ]);
   const confirmedTokensRef = useRef(collectComposerInlineTokens(props.value));
   const textColor = useThemeColor("--color-foreground");
   const placeholderColor = useThemeColor("--color-placeholder");
@@ -130,16 +145,26 @@ export function ComposerEditor({
       })),
     );
   }, [props.value, skillLabels]);
-  const controlledDocumentJson = useMemo(
-    () =>
-      JSON.stringify({
-        value: props.value,
-        selection: selection ?? null,
-        mostRecentEventCount,
-      }),
-    [mostRecentEventCount, props.value, selection],
+  const controlledEventCount = resolveComposerControlledEventCount(
+    props.value,
+    Math.max(mostRecentEventCount, mostRecentEventCountRef.current),
+    nativeEventSnapshotsRef.current,
   );
-  const acceptNativeEvent = useCallback((eventCount: number) => {
+  const controlledDocumentJson = JSON.stringify({
+    value: props.value,
+    selection: selection ?? null,
+    tokensJson,
+    mostRecentEventCount: controlledEventCount,
+  });
+  useEffect(() => {
+    nativeEventSnapshotsRef.current = [
+      { eventCount: controlledEventCount, value: props.value },
+      ...nativeEventSnapshotsRef.current.filter(
+        (snapshot) => snapshot.eventCount > controlledEventCount,
+      ),
+    ];
+  }, [controlledEventCount, props.value]);
+  const acceptNativeEvent = useCallback((eventCount: number, value: string) => {
     const acknowledgedEventCount = acknowledgeComposerNativeEvent(
       mostRecentEventCountRef.current,
       eventCount,
@@ -148,6 +173,7 @@ export function ComposerEditor({
       return false;
     }
     mostRecentEventCountRef.current = acknowledgedEventCount;
+    nativeEventSnapshotsRef.current.push({ eventCount: acknowledgedEventCount, value });
     return acknowledgedEventCount;
   }, []);
   const themeJson = JSON.stringify({
@@ -166,7 +192,6 @@ export function ComposerEditor({
     <NativeView
       ref={nativeRef}
       controlledDocumentJson={controlledDocumentJson}
-      tokensJson={tokensJson}
       themeJson={themeJson}
       placeholder={props.placeholder ?? ""}
       fontFamily={
@@ -192,14 +217,20 @@ export function ComposerEditor({
       spellCheck={props.spellCheck ?? true}
       style={style as StyleProp<ViewStyle>}
       onComposerChange={(event) => {
-        const acknowledgedEventCount = acceptNativeEvent(event.nativeEvent.eventCount);
+        const acknowledgedEventCount = acceptNativeEvent(
+          event.nativeEvent.eventCount,
+          event.nativeEvent.value,
+        );
         if (acknowledgedEventCount === false) return;
         onChangeText(event.nativeEvent.value);
         onSelectionChange?.(event.nativeEvent.selection);
         setMostRecentEventCount(acknowledgedEventCount);
       }}
       onComposerSelectionChange={(event) => {
-        const acknowledgedEventCount = acceptNativeEvent(event.nativeEvent.eventCount);
+        const acknowledgedEventCount = acceptNativeEvent(
+          event.nativeEvent.eventCount,
+          event.nativeEvent.value,
+        );
         if (acknowledgedEventCount === false) return;
         onSelectionChange?.(event.nativeEvent.selection);
         setMostRecentEventCount(acknowledgedEventCount);

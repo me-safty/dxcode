@@ -18,6 +18,7 @@ private struct ComposerSelectionPayload: Decodable {
 private struct ComposerControlledDocumentPayload: Decodable {
   let value: String
   let selection: ComposerSelectionPayload?
+  let tokensJson: String
   let mostRecentEventCount: Int
 }
 
@@ -362,23 +363,15 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
           document.mostRecentEventCount >= nativeEventCount else {
       return
     }
+    if tokensJson != document.tokensJson {
+      tokensJson = document.tokensJson
+      tokens = decode([ComposerTokenPayload].self, from: document.tokensJson) ?? []
+      tokensNeedRebuild = true
+    }
     value = document.value
     requestedSelection = document.selection
     applyControlledDocument(force: tokensNeedRebuild)
     applyRequestedSelection()
-    if tokensMatchCurrentValue() {
-      tokensNeedRebuild = false
-    }
-  }
-
-  func setTokensJson(_ tokensJson: String) {
-    guard self.tokensJson != tokensJson else {
-      return
-    }
-    self.tokensJson = tokensJson
-    tokens = decode([ComposerTokenPayload].self, from: tokensJson) ?? []
-    tokensNeedRebuild = true
-    applyControlledDocument(force: true)
     if tokensMatchCurrentValue() {
       tokensNeedRebuild = false
     }
@@ -719,9 +712,11 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate {
   }
 
   private func emitSelection() {
+    let currentValue = textView.serializedText()
     let selection = sourceSelection()
     nativeEventCount += 1
     onComposerSelectionChange([
+      "value": currentValue,
       "selection": ["start": selection.start, "end": selection.end],
       "eventCount": nativeEventCount,
     ])
