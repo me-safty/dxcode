@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "~/lib/utils";
+import type { BundledT3WorkProfileId } from "@t3tools/t3work-skill-packs";
 import {
   listT3WorkProjectSetupProfiles,
   type T3WorkProjectSetupProfileId,
@@ -26,7 +27,7 @@ type T3workProjectSetupCardOption = {
 };
 
 const PROFILE_VISUALS: Record<
-  T3WorkProjectSetupProfileId,
+  BundledT3WorkProfileId,
   Omit<T3workProjectSetupCardOption, "id" | "title" | "description">
 > = {
   "qa-assistant": {
@@ -80,18 +81,21 @@ const PROFILE_VISUALS: Record<
 };
 
 export function listT3workProjectSetupCardOptions(): ReadonlyArray<T3workProjectSetupCardOption> {
-  return listT3WorkProjectSetupProfiles().map((profile) => {
-    const visuals = PROFILE_VISUALS[profile.id];
-    return {
-      id: profile.id,
-      title: profile.title,
-      description: profile.description,
-      eyebrow: visuals.eyebrow,
-      chips: visuals.chips,
-      icon: visuals.icon,
-      accentClassName: visuals.accentClassName,
-      iconClassName: visuals.iconClassName,
-    };
+  return listT3WorkProjectSetupProfiles().flatMap((profile) => {
+    const visuals = PROFILE_VISUALS[profile.id as BundledT3WorkProfileId];
+    if (!visuals) return [];
+    return [
+      {
+        id: profile.id,
+        title: profile.title,
+        description: profile.description,
+        eyebrow: visuals.eyebrow,
+        chips: visuals.chips,
+        icon: visuals.icon,
+        accentClassName: visuals.accentClassName,
+        iconClassName: visuals.iconClassName,
+      },
+    ];
   });
 }
 

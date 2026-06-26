@@ -1,12 +1,14 @@
 import type { RecipeProfileContext, SidecarComposition } from "@t3tools/project-recipes";
 
-export type T3WorkProfileId =
+export type BundledT3WorkProfileId =
   | "qa-assistant"
   | "product-partner"
   | "support-triage"
   | "delivery-coordinator"
   | "verification-guide"
   | "engineering-copilot";
+
+export type T3WorkProfileId = string;
 
 export type LegacyT3WorkProfileId =
   | "project-partner"
@@ -47,27 +49,66 @@ export type T3WorkProfile = {
   readonly hideImplementationComplexity: boolean;
 };
 
-const LEGACY_PROFILE_ALIASES: Record<LegacyT3WorkProfileId, T3WorkProfileId> = {
+export type T3WorkProfileResolutionSource =
+  | "bundled"
+  | "legacy-alias"
+  | "project-local"
+  | "manifest-inline"
+  | "fallback";
+
+export type T3WorkProfileResolution = {
+  readonly profile: T3WorkProfile;
+  readonly source: T3WorkProfileResolutionSource;
+  readonly requestedProfileId?: string;
+  readonly warning?: string;
+};
+
+export type T3WorkProjectProfileManifest = {
+  readonly version: number;
+  readonly profileId: T3WorkProfileId;
+  readonly enabledSkillPackIds?: ReadonlyArray<string>;
+  readonly title?: string;
+  readonly description?: string;
+  readonly audience?: T3WorkProfileAudience;
+  readonly tags?: ReadonlyArray<string>;
+  readonly communicationStyle?: T3WorkProfile["communicationStyle"];
+  readonly surfaceDefaults?: T3WorkProfile["surfaceDefaults"];
+  readonly preferredArtifactKinds?: ReadonlyArray<string>;
+  readonly defaultActionFamilies?: ReadonlyArray<string>;
+  readonly defaultRecipeWeights?: Readonly<Record<string, number>>;
+  readonly sidecarSections?: SidecarComposition;
+  readonly recommendedSkillPackIds?: ReadonlyArray<string>;
+  readonly hideImplementationComplexity?: boolean;
+  readonly managedFileHashes?: Readonly<Record<string, string>>;
+};
+
+export type ResolveT3WorkProfileInput = {
+  readonly profileId?: string;
+  readonly projectLocalProfiles?: Readonly<Record<string, T3WorkProfile>>;
+  readonly manifest?: T3WorkProjectProfileManifest;
+  readonly allowFallback?: boolean;
+};
+
+export const T3WORK_PROJECT_PROFILES_DIR = ".t3work/setup/profiles";
+export const T3WORK_PROJECT_PROFILE_MANIFEST_PATH = ".t3work/setup/profile.json";
+
+const LEGACY_PROFILE_ALIASES: Record<LegacyT3WorkProfileId, BundledT3WorkProfileId> = {
   "project-partner": "product-partner",
   "test-engineer": "qa-assistant",
   "requirements-engineer": "product-partner",
   developer: "engineering-copilot",
 };
 
-export const DEFAULT_T3WORK_PROFILE_ID: T3WorkProfileId = "product-partner";
+export const DEFAULT_T3WORK_PROFILE_ID: BundledT3WorkProfileId = "product-partner";
 
-export const T3WORK_PROFILES: Record<T3WorkProfileId, T3WorkProfile> = {
+export const T3WORK_PROFILES: Record<BundledT3WorkProfileId, T3WorkProfile> = {
   "qa-assistant": {
     id: "qa-assistant",
     title: "QA Assistant",
     description: "Short verification guidance with test matrices, repro steps, and risk notes.",
     audience: "qa",
     tags: ["qa", "verification"],
-    communicationStyle: {
-      technicalDepth: "medium",
-      brevity: "short",
-      guidanceStyle: "guided",
-    },
+    communicationStyle: { technicalDepth: "medium", brevity: "short", guidanceStyle: "guided" },
     surfaceDefaults: {
       detailDensity: "guided",
       activityOrder: "newest-first",
@@ -96,11 +137,7 @@ export const T3WORK_PROFILES: Record<T3WorkProfileId, T3WorkProfile> = {
     description: "Plain-language summaries, ambiguity checks, and stakeholder-ready updates.",
     audience: "product",
     tags: ["product", "planning"],
-    communicationStyle: {
-      technicalDepth: "low",
-      brevity: "short",
-      guidanceStyle: "guided",
-    },
+    communicationStyle: { technicalDepth: "low", brevity: "short", guidanceStyle: "guided" },
     surfaceDefaults: {
       detailDensity: "guided",
       activityOrder: "newest-first",
@@ -123,11 +160,7 @@ export const T3WORK_PROFILES: Record<T3WorkProfileId, T3WorkProfile> = {
     description: "Customer-readable issue framing with escalation and reproduction requests first.",
     audience: "support",
     tags: ["support", "triage"],
-    communicationStyle: {
-      technicalDepth: "low",
-      brevity: "short",
-      guidanceStyle: "guided",
-    },
+    communicationStyle: { technicalDepth: "low", brevity: "short", guidanceStyle: "guided" },
     surfaceDefaults: {
       detailDensity: "guided",
       activityOrder: "newest-first",
@@ -154,11 +187,7 @@ export const T3WORK_PROFILES: Record<T3WorkProfileId, T3WorkProfile> = {
     description: "Concise status, blockers, dependencies, and release-checklist guidance.",
     audience: "delivery",
     tags: ["delivery", "release"],
-    communicationStyle: {
-      technicalDepth: "low",
-      brevity: "short",
-      guidanceStyle: "guided",
-    },
+    communicationStyle: { technicalDepth: "low", brevity: "short", guidanceStyle: "guided" },
     surfaceDefaults: {
       detailDensity: "guided",
       activityOrder: "newest-first",
@@ -238,28 +267,182 @@ export const T3WORK_PROFILES: Record<T3WorkProfileId, T3WorkProfile> = {
   },
 };
 
-export function resolveT3WorkProfileId(profileId: string | undefined): T3WorkProfileId {
-  if (!profileId) {
-    return DEFAULT_T3WORK_PROFILE_ID;
-  }
-
-  if (profileId in T3WORK_PROFILES) {
-    return profileId as T3WorkProfileId;
-  }
-
-  if (profileId in LEGACY_PROFILE_ALIASES) {
-    return LEGACY_PROFILE_ALIASES[profileId as LegacyT3WorkProfileId];
-  }
-
-  return DEFAULT_T3WORK_PROFILE_ID;
+export function isBundledT3WorkProfileId(profileId: string): profileId is BundledT3WorkProfileId {
+  return profileId in T3WORK_PROFILES;
 }
 
-export function getT3WorkProfile(profileId?: string): T3WorkProfile {
-  return T3WORK_PROFILES[resolveT3WorkProfileId(profileId)];
+function resolveLegacyAlias(profileId: string): BundledT3WorkProfileId | undefined {
+  return profileId in LEGACY_PROFILE_ALIASES
+    ? LEGACY_PROFILE_ALIASES[profileId as LegacyT3WorkProfileId]
+    : undefined;
+}
+
+function buildResolution(
+  profile: T3WorkProfile,
+  source: T3WorkProfileResolutionSource,
+  requestedProfileId?: string,
+  warning?: string,
+): T3WorkProfileResolution {
+  return {
+    profile,
+    source,
+    ...(requestedProfileId ? { requestedProfileId } : {}),
+    ...(warning ? { warning } : {}),
+  };
+}
+
+export function resolveT3WorkProfile(input: ResolveT3WorkProfileInput = {}): T3WorkProfileResolution {
+  const requestedProfileId = input.profileId?.trim();
+  if (!requestedProfileId) {
+    return buildResolution(T3WORK_PROFILES[DEFAULT_T3WORK_PROFILE_ID], "fallback");
+  }
+  if (isBundledT3WorkProfileId(requestedProfileId)) {
+    return buildResolution(T3WORK_PROFILES[requestedProfileId], "bundled", requestedProfileId);
+  }
+  const legacyTarget = resolveLegacyAlias(requestedProfileId);
+  if (legacyTarget) {
+    return buildResolution(T3WORK_PROFILES[legacyTarget], "legacy-alias", requestedProfileId);
+  }
+  const projectLocalProfile = input.projectLocalProfiles?.[requestedProfileId];
+  if (projectLocalProfile) {
+    return buildResolution(projectLocalProfile, "project-local", requestedProfileId);
+  }
+  if (input.manifest?.profileId === requestedProfileId && input.manifest.title && input.manifest.description) {
+    const manifestProfile = parseT3WorkProfileDefinition(input.manifest, requestedProfileId);
+    if (manifestProfile) {
+      return buildResolution(manifestProfile, "manifest-inline", requestedProfileId);
+    }
+  }
+  if (input.allowFallback === false) {
+    throw new Error(`Unknown profile id '${requestedProfileId}'.`);
+  }
+  const warning = `Unknown profile id '${requestedProfileId}'. Falling back to ${T3WORK_PROFILES[DEFAULT_T3WORK_PROFILE_ID].title}.`;
+  return buildResolution(
+    { ...T3WORK_PROFILES[DEFAULT_T3WORK_PROFILE_ID], id: requestedProfileId },
+    "fallback",
+    requestedProfileId,
+    warning,
+  );
+}
+
+export function resolveT3WorkProfileId(profileId: string | undefined): T3WorkProfileId {
+  return resolveT3WorkProfile(profileId ? { profileId } : {}).profile.id;
+}
+
+export function getT3WorkProfile(
+  profileId?: string,
+  input?: Omit<ResolveT3WorkProfileInput, "profileId">,
+): T3WorkProfile {
+  return resolveT3WorkProfile({ ...input, ...(profileId ? { profileId } : {}) }).profile;
 }
 
 export function listT3WorkProfiles(): ReadonlyArray<T3WorkProfile> {
   return Object.values(T3WORK_PROFILES);
+}
+
+export function resolveEnabledSkillPackIds(input: {
+  readonly profile: T3WorkProfile;
+  readonly enabledSkillPackIds?: ReadonlyArray<string>;
+}): ReadonlyArray<string> {
+  const explicit = (input.enabledSkillPackIds ?? []).filter(
+    (packId) => typeof packId === "string" && packId.trim().length > 0,
+  );
+  if (explicit.length > 0) return [...new Set(explicit)];
+  return [...input.profile.recommendedSkillPackIds];
+}
+
+export function cloneBundledT3WorkProfile(
+  sourceProfileId: string,
+  customProfileId: string,
+  overrides: Partial<
+    Pick<
+      T3WorkProfile,
+      | "title"
+      | "description"
+      | "communicationStyle"
+      | "preferredArtifactKinds"
+      | "defaultActionFamilies"
+      | "defaultRecipeWeights"
+      | "recommendedSkillPackIds"
+      | "sidecarSections"
+    >
+  > = {},
+): T3WorkProfile {
+  const source = getT3WorkProfile(sourceProfileId);
+  return {
+    ...source,
+    ...overrides,
+    id: customProfileId,
+    communicationStyle: { ...source.communicationStyle, ...overrides.communicationStyle },
+  };
+}
+
+export function buildProjectLocalProfilePath(profileId: string): string {
+  return `${T3WORK_PROJECT_PROFILES_DIR}/${profileId}.json`;
+}
+
+export function parseT3WorkProfileDefinition(
+  value: unknown,
+  fallbackId?: string,
+): T3WorkProfile | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id.trim() : fallbackId?.trim();
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+  const description = typeof record.description === "string" ? record.description.trim() : "";
+  const style = record.communicationStyle;
+  if (!id || !title || !description || !style || typeof style !== "object" || Array.isArray(style)) {
+    return undefined;
+  }
+  const communicationStyle = style as T3WorkProfile["communicationStyle"];
+  const preferredArtifactKinds = Array.isArray(record.preferredArtifactKinds)
+    ? record.preferredArtifactKinds.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  if (preferredArtifactKinds.length === 0) return undefined;
+  return {
+    id,
+    title,
+    description,
+    audience:
+      typeof record.audience === "string"
+        ? (record.audience as T3WorkProfileAudience)
+        : "mixed",
+    communicationStyle,
+    preferredArtifactKinds,
+    defaultRecipeWeights:
+      record.defaultRecipeWeights && typeof record.defaultRecipeWeights === "object"
+        ? (record.defaultRecipeWeights as Readonly<Record<string, number>>)
+        : {},
+    recommendedSkillPackIds: Array.isArray(record.recommendedSkillPackIds)
+      ? record.recommendedSkillPackIds.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    hideImplementationComplexity:
+      typeof record.hideImplementationComplexity === "boolean"
+        ? record.hideImplementationComplexity
+        : false,
+    ...(record.sidecarSections && typeof record.sidecarSections === "object"
+      ? { sidecarSections: record.sidecarSections as SidecarComposition }
+      : {}),
+  };
+}
+
+export function buildT3WorkProjectProfileManifest(input: {
+  readonly profile: T3WorkProfile;
+  readonly enabledSkillPackIds: ReadonlyArray<string>;
+  readonly version?: number;
+  readonly managedFileHashes?: Readonly<Record<string, string>>;
+}): T3WorkProjectProfileManifest {
+  const { id, sidecarSections, ...profileFields } = input.profile;
+  return {
+    version: input.version ?? 1,
+    profileId: id,
+    enabledSkillPackIds: [...input.enabledSkillPackIds],
+    ...profileFields,
+    ...(sidecarSections ? { sidecarSections } : {}),
+    ...(input.managedFileHashes && Object.keys(input.managedFileHashes).length > 0
+      ? { managedFileHashes: input.managedFileHashes }
+      : {}),
+  };
 }
 
 export function toRecipeProfileContext(
@@ -267,7 +450,6 @@ export function toRecipeProfileContext(
 ): RecipeProfileContext {
   const resolvedProfile =
     typeof profile === "string" || profile === undefined ? getT3WorkProfile(profile) : profile;
-
   return {
     technicalDepth: resolvedProfile.communicationStyle.technicalDepth,
     brevity: resolvedProfile.communicationStyle.brevity,

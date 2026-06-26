@@ -1,4 +1,9 @@
 import {
+  buildProjectLocalProfilePath,
+  isBundledT3WorkProfileId,
+} from "@t3tools/t3work-skill-packs";
+
+import {
   jsonFile,
   renderAgentsMd,
   renderContextEntrypointPlaceholder,
@@ -12,13 +17,12 @@ import { renderBundledRecipeSetupFiles } from "./t3work-projectSetupRecipes.ts";
 import { renderStatusAndContextSkill } from "./t3work-projectSetupStatusSkill.ts";
 import {
   T3WORK_PROJECT_CLAUDE_PATH,
-  resolveT3WorkProjectSetupProfileId,
+  resolveT3WorkProjectSetupProfile,
   T3WORK_PROJECT_AGENTS_PATH,
   T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH,
   T3WORK_PROJECT_CONTEXT_ROOT,
   T3WORK_PROJECT_PROFILE_MANIFEST_PATH,
   T3WORK_PROJECT_RECIPES_ROOT,
-  T3WORK_PROJECT_SETUP_PROFILES,
   T3WORK_PROJECT_SKILLS_ROOT,
   T3WORK_PROJECT_STATUS_SKILL_PATH,
   T3WORK_PROJECT_TEMPLATES_ROOT,
@@ -33,6 +37,7 @@ import {
 export {
   DEFAULT_T3WORK_PROJECT_SETUP_PROFILE_ID,
   T3WORK_PROJECT_CLAUDE_PATH,
+  resolveT3WorkProjectSetupProfile,
   resolveT3WorkProjectSetupProfileId,
   T3WORK_PROJECT_AGENTS_PATH,
   T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH,
@@ -47,13 +52,22 @@ export {
 
 export function renderT3WorkProjectSetupFiles(input?: {
   readonly profileId?: string;
+  readonly enabledSkillPackIds?: ReadonlyArray<string>;
+  readonly customProfile?: import("@t3tools/t3work-skill-packs").T3WorkProfile;
   readonly managedFileHashes?: T3WorkProjectSetupManagedFileHashes;
 }): ReadonlyArray<T3WorkProjectSetupFile> {
-  const profile =
-    T3WORK_PROJECT_SETUP_PROFILES[resolveT3WorkProjectSetupProfileId(input?.profileId)];
+  const resolved = resolveT3WorkProjectSetupProfile({
+    ...((input?.customProfile?.id ?? input?.profileId)
+      ? { profileId: input?.customProfile?.id ?? input?.profileId }
+      : {}),
+    ...(input?.enabledSkillPackIds ? { enabledSkillPackIds: input.enabledSkillPackIds } : {}),
+    ...(input?.customProfile
+      ? { projectLocalProfiles: { [input.customProfile.id]: input.customProfile } }
+      : {}),
+  });
+  const profile = resolved.profile;
   const instructionContents = renderAgentsMd(profile);
-
-  return [
+  const files: T3WorkProjectSetupFile[] = [
     {
       relativePath: T3WORK_PROJECT_AGENTS_PATH,
       contents: instructionContents,
@@ -68,7 +82,12 @@ export function renderT3WorkProjectSetupFiles(input?: {
     },
     {
       relativePath: T3WORK_PROJECT_PROFILE_MANIFEST_PATH,
-      contents: jsonFile(buildT3WorkProjectSetupProfileManifest(profile, input?.managedFileHashes)),
+      contents: jsonFile(
+        buildT3WorkProjectSetupProfileManifest(profile, {
+          enabledSkillPackIds: resolved.enabledSkillPackIds,
+          ...(input?.managedFileHashes ? { managedFileHashes: input.managedFileHashes } : {}),
+        }),
+      ),
       writeMode: "overwrite",
     },
     {
@@ -108,4 +127,14 @@ export function renderT3WorkProjectSetupFiles(input?: {
       writeMode: "if-missing",
     },
   ];
+
+  if (input?.customProfile && !isBundledT3WorkProfileId(input.customProfile.id)) {
+    files.push({
+      relativePath: buildProjectLocalProfilePath(input.customProfile.id),
+      contents: jsonFile(input.customProfile),
+      writeMode: "overwrite",
+    });
+  }
+
+  return files;
 }

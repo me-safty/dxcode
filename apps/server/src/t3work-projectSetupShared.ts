@@ -1,15 +1,18 @@
 import {
   DEFAULT_T3WORK_PROFILE_ID,
-  resolveT3WorkProfileId,
+  resolveEnabledSkillPackIds,
+  resolveT3WorkProfile,
   T3WORK_PROFILES,
   type T3WorkProfile,
   type T3WorkProfileId,
+  type T3WorkProjectProfileManifest,
 } from "@t3tools/t3work-skill-packs";
 
 export const T3WORK_PROJECT_SETUP_VERSION = 1;
 export const T3WORK_PROJECT_AGENTS_PATH = "AGENTS.md";
 export const T3WORK_PROJECT_CLAUDE_PATH = "CLAUDE.md";
 export const T3WORK_PROJECT_SETUP_ROOT = ".t3work/setup";
+export const T3WORK_PROJECT_PROFILES_DIR = `${T3WORK_PROJECT_SETUP_ROOT}/profiles`;
 export const T3WORK_PROJECT_CONTEXT_ROOT = ".t3work/context";
 export const T3WORK_PROJECT_SKILLS_ROOT = ".t3work/skills";
 export const T3WORK_PROJECT_RECIPES_ROOT = ".t3work/recipes";
@@ -33,24 +36,40 @@ export type T3WorkProjectSetupManagedFileHashes = Readonly<Record<string, string
 
 export type ProjectSetupProfileDefinition = T3WorkProfile;
 
-export type T3WorkProjectSetupProfileManifest = Readonly<
-  Omit<ProjectSetupProfileDefinition, "id"> & {
-    readonly version: number;
-    readonly profileId: T3WorkProjectSetupProfileId;
-    readonly managedFileHashes?: T3WorkProjectSetupManagedFileHashes;
-  }
->;
+export type T3WorkProjectSetupProfileManifest = T3WorkProjectProfileManifest;
 
 export const DEFAULT_T3WORK_PROJECT_SETUP_PROFILE_ID: T3WorkProjectSetupProfileId =
   DEFAULT_T3WORK_PROFILE_ID;
 
-export const T3WORK_PROJECT_SETUP_PROFILES: Record<
-  T3WorkProjectSetupProfileId,
-  ProjectSetupProfileDefinition
-> = T3WORK_PROFILES;
+export const T3WORK_PROJECT_SETUP_PROFILES = T3WORK_PROFILES;
 
 export function resolveT3WorkProjectSetupProfileId(
   profileId: string | undefined,
 ): T3WorkProjectSetupProfileId {
-  return resolveT3WorkProfileId(profileId);
+  return resolveT3WorkProfile(profileId ? { profileId } : {}).profile.id;
+}
+
+export function resolveT3WorkProjectSetupProfile(input: {
+  readonly profileId?: string;
+  readonly enabledSkillPackIds?: ReadonlyArray<string>;
+  readonly projectLocalProfiles?: Readonly<Record<string, T3WorkProfile>>;
+  readonly manifest?: T3WorkProjectProfileManifest;
+}) {
+  const resolution = resolveT3WorkProfile({
+    ...(input.profileId !== undefined ? { profileId: input.profileId } : {}),
+    ...(input.projectLocalProfiles !== undefined
+      ? { projectLocalProfiles: input.projectLocalProfiles }
+      : {}),
+    ...(input.manifest !== undefined ? { manifest: input.manifest } : {}),
+  });
+  const packIds = input.enabledSkillPackIds ?? input.manifest?.enabledSkillPackIds;
+  const enabledSkillPackIds = resolveEnabledSkillPackIds({
+    profile: resolution.profile,
+    ...(packIds !== undefined ? { enabledSkillPackIds: packIds } : {}),
+  });
+
+  return {
+    ...resolution,
+    enabledSkillPackIds,
+  };
 }

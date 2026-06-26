@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { buildT3WorkProjectProfileManifest } from "@t3tools/t3work-skill-packs";
+
 import { renderAgentsMd } from "./t3work-projectSetupContent.ts";
 import {
   renderLegacyAgentsMd,
@@ -15,6 +17,7 @@ import {
 
 export type T3WorkProjectSetupPersistedState = {
   readonly profileId?: string;
+  readonly enabledSkillPackIds?: ReadonlyArray<string>;
   readonly managedFileHashes: T3WorkProjectSetupManagedFileHashes;
 };
 
@@ -39,18 +42,19 @@ export function buildT3WorkProjectAgentsManagedRefresh(profile: ProjectSetupProf
 
 export function buildT3WorkProjectSetupProfileManifest(
   profile: ProjectSetupProfileDefinition,
-  managedFileHashes?: T3WorkProjectSetupManagedFileHashes,
+  input?: {
+    readonly enabledSkillPackIds?: ReadonlyArray<string>;
+    readonly managedFileHashes?: T3WorkProjectSetupManagedFileHashes;
+  },
 ): T3WorkProjectSetupProfileManifest {
-  const { id, ...profileFields } = profile;
-
-  return {
+  return buildT3WorkProjectProfileManifest({
+    profile,
+    enabledSkillPackIds: input?.enabledSkillPackIds ?? [...profile.recommendedSkillPackIds],
     version: T3WORK_PROJECT_SETUP_VERSION,
-    profileId: id,
-    ...profileFields,
-    ...(managedFileHashes && Object.keys(managedFileHashes).length > 0
-      ? { managedFileHashes }
+    ...(input?.managedFileHashes && Object.keys(input.managedFileHashes).length > 0
+      ? { managedFileHashes: input.managedFileHashes }
       : {}),
-  };
+  });
 }
 
 function toManagedFileHashes(value: unknown): T3WorkProjectSetupManagedFileHashes {
@@ -72,6 +76,9 @@ export function readPersistedT3WorkProjectSetupState(
     const parsed = JSON.parse(value);
     return {
       profileId: typeof parsed?.profileId === "string" ? parsed.profileId : undefined,
+      enabledSkillPackIds: Array.isArray(parsed?.enabledSkillPackIds)
+        ? parsed.enabledSkillPackIds.filter((entry: unknown): entry is string => typeof entry === "string")
+        : undefined,
       managedFileHashes: toManagedFileHashes(parsed?.managedFileHashes),
     };
   } catch {
