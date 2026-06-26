@@ -82,10 +82,13 @@ function toProviderUpdateOutcome(input: {
   };
 }
 
-// If neither the dispatch result nor server state ever reports the update (e.g.
-// the request never reached the backend), stop the spinner after this long so
-// the row reverts to its Update button instead of spinning forever.
-const PENDING_EXPIRY_MS = 20_000;
+// Transport-hang safety net. The dispatch's `finally` clears the spinner and the
+// in-flight guard on completion, so this only matters if a request never resolves
+// at all (e.g. the socket drops mid-flight without surfacing an error). Keep it
+// well beyond the server's own update timeout (5 min) so a legitimately slow
+// update (npm installs routinely run tens of seconds) is never cut off and left
+// showing a dead, unresponsive Update button.
+const PENDING_EXPIRY_MS = 6 * 60_000;
 
 function rowToneClass(kind: ProviderUpdateRowStatusKind): string {
   switch (kind) {
@@ -231,7 +234,17 @@ export function ProviderUpdateEnvironmentRows({
         return next;
       });
 
-      const expiry = setTimeout(() => clearPending(environmentId), PENDING_EXPIRY_MS);
+      const expiry = setTimeout(() => {
+        // The request is presumed dead (see PENDING_EXPIRY_MS). Clear the
+        // spinner AND the in-flight guard together so the row never strands on a
+        // dead Update button, and surface feedback so the timeout is visible
+        // rather than silently reverting to idle.
+        inFlightEnvironmentsRef.current.delete(environmentId);
+        clearPending(environmentId);
+        setErrorByEnvironment((previous) =>
+          new Map(previous).set(environmentId, "Update timed out — try again."),
+        );
+      }, PENDING_EXPIRY_MS);
       try {
         // Dispatch each candidate's update to this environment's own backend and
         // normalize every settled outcome into the multi-backend reducer shape.
