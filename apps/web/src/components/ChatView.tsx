@@ -1426,9 +1426,10 @@ function ChatViewContent(props: ChatViewProps) {
   const handleFilePendingChange = useCallback(
     (relativePath: string, pending: boolean) => {
       if (!activeProjectKey) return;
+      const cwd = activeFileSurface?.cwd;
       setPendingFileSurfaceIdsByProject((currentByProject) => {
         const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
-        const surfaceId = `file:${relativePath}`;
+        const surfaceId = cwd ? `file:${cwd}:${relativePath}` : `file:${relativePath}`;
         if (current.has(surfaceId) === pending) return currentByProject;
         const next = new Set(current);
         if (pending) next.add(surfaceId);
@@ -1439,7 +1440,7 @@ function ChatViewContent(props: ChatViewProps) {
         return nextByProject;
       });
     },
-    [activeProjectKey],
+    [activeFileSurface?.cwd, activeProjectKey],
   );
   const configuredPreviewUrls = useMemo(
     () => getConfiguredPreviewUrls(activeProject?.scripts),
@@ -2888,9 +2889,11 @@ function ChatViewContent(props: ChatViewProps) {
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
-      useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
+      useRightPanelStore
+        .getState()
+        .openFile(activeThreadRef, relativePath, undefined, activeFileSurface?.cwd);
     },
-    [activeProject, activeThreadRef],
+    [activeFileSurface?.cwd, activeProject, activeThreadRef],
   );
   const togglePreviewPanel = useCallback(() => {
     if (!activeThreadRef || !isPreviewSupportedInRuntime()) return;
