@@ -55,12 +55,24 @@ export function isComposerNativeEcho(
   eventCount: number,
   snapshots: ReadonlyArray<ComposerNativeEventSnapshot>,
 ): boolean {
-  return snapshots.some(
-    (snapshot) =>
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    const snapshot = snapshots[index];
+    if (
+      snapshot !== undefined &&
       snapshot.eventCount === eventCount &&
       snapshot.value === value &&
       (selection === null ||
-        (snapshot.selection?.start === selection.start &&
-          snapshot.selection.end === selection.end)),
-  );
+        (snapshot.selection?.start === selection.start && snapshot.selection.end === selection.end))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function pruneAcknowledgedComposerNativeEvents(
+  snapshots: ReadonlyArray<ComposerNativeEventSnapshot>,
+  acknowledgedEventCount: number,
+): ComposerNativeEventSnapshot[] {
+  return snapshots.filter((snapshot) => snapshot.eventCount > acknowledgedEventCount);
 }

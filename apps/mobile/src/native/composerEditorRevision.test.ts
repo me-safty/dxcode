@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   acknowledgeComposerNativeEvent,
   isComposerNativeEcho,
+  pruneAcknowledgedComposerNativeEvents,
   resolveComposerControlledEventCount,
 } from "./composerEditorRevision";
 
@@ -83,5 +84,26 @@ describe("resolveComposerControlledEventCount", () => {
 
   it("does not control selection when no selection prop is provided", () => {
     expect(resolveComposerControlledEventCount("ab", null, 4, snapshots)).toBe(4);
+  });
+});
+
+describe("pruneAcknowledgedComposerNativeEvents", () => {
+  it("releases an arbitrarily long acknowledged backlog without a fixed-size cliff", () => {
+    const snapshots = Array.from({ length: 1_000 }, (_, eventCount) => ({
+      eventCount,
+      value: `value-${eventCount}`,
+      selection: { start: eventCount, end: eventCount },
+    }));
+
+    expect(pruneAcknowledgedComposerNativeEvents(snapshots, 999)).toEqual([]);
+  });
+
+  it("retains native events that arrive after the acknowledged render", () => {
+    const snapshots = [
+      { eventCount: 40, value: "a", selection: { start: 1, end: 1 } },
+      { eventCount: 41, value: "ab", selection: { start: 2, end: 2 } },
+    ];
+
+    expect(pruneAcknowledgedComposerNativeEvents(snapshots, 40)).toEqual([snapshots[1]]);
   });
 });

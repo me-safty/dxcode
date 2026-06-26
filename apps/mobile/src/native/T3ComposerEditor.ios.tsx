@@ -19,6 +19,7 @@ import { useThemeColor } from "../lib/useThemeColor";
 import {
   acknowledgeComposerNativeEvent,
   isComposerNativeEcho,
+  pruneAcknowledgedComposerNativeEvents,
   resolveComposerControlledEventCount,
   type ComposerNativeEventSnapshot,
 } from "./composerEditorRevision";
@@ -157,14 +158,16 @@ export function ComposerEditor({
         nativeEventSnapshotsRef.current,
       )
     : mostRecentEventCount;
+  const acknowledgesLatestNativeEvent = isComposerNativeEcho(
+    props.value,
+    selection ?? null,
+    mostRecentEventCount,
+    nativeEventSnapshotsRef.current,
+  );
   const isNativeEcho =
     includesNativeEvent &&
-    isComposerNativeEcho(
-      props.value,
-      selection ?? null,
-      controlledEventCount,
-      nativeEventSnapshotsRef.current,
-    );
+    controlledEventCount === mostRecentEventCount &&
+    acknowledgesLatestNativeEvent;
   const controlledDocumentJson = JSON.stringify({
     value: props.value,
     selection: isNativeEcho ? null : (selection ?? null),
@@ -175,6 +178,13 @@ export function ComposerEditor({
   useEffect(() => {
     previousRenderedEventSequenceRef.current = nativeEventSequence;
   }, [nativeEventSequence]);
+  useEffect(() => {
+    if (!acknowledgesLatestNativeEvent) return;
+    nativeEventSnapshotsRef.current = pruneAcknowledgedComposerNativeEvents(
+      nativeEventSnapshotsRef.current,
+      mostRecentEventCount,
+    );
+  }, [acknowledgesLatestNativeEvent, mostRecentEventCount]);
   const acceptNativeEvent = useCallback(
     (eventCount: number, value: string, nextSelection: ComposerEditorSelection) => {
       const acknowledgedEventCount = acknowledgeComposerNativeEvent(
