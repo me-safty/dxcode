@@ -87,9 +87,7 @@ function resolveConfiguredWslBackend(
   }
 
   if (configuration.distro === null) {
-    return configuration.distros.some((distro) => distro.isDefault)
-      ? { backendId: WSL_DEFAULT_BACKEND_ID, runningDistro: null }
-      : null;
+    return { backendId: WSL_DEFAULT_BACKEND_ID, runningDistro: null };
   }
 
   const installedDistro = configuration.distros.find(
@@ -126,6 +124,7 @@ export function applyWslEnvironmentConfiguration<TEnvironmentId extends string>(
   candidates: ReadonlyArray<WslEnvironmentCandidate<TEnvironmentId>>,
   primaryEnvironmentId: TEnvironmentId | null,
   configuration: WslEnvironmentConfiguration | null,
+  primaryRunningDistro: string | null = null,
 ): ReadonlyArray<WslEnvironmentCandidate<TEnvironmentId>> {
   if (!configuration) {
     return candidates;
@@ -142,7 +141,14 @@ export function applyWslEnvironmentConfiguration<TEnvironmentId extends string>(
     primaryEnvironmentId !== null &&
     !candidates.some((candidate) => candidate.environmentId === primaryEnvironmentId)
   ) {
-    return [...candidates, { environmentId: primaryEnvironmentId, ...configuredBackend }];
+    return [
+      ...candidates,
+      {
+        environmentId: primaryEnvironmentId,
+        ...configuredBackend,
+        runningDistro: primaryRunningDistro ?? configuredBackend.runningDistro,
+      },
+    ];
   }
 
   return candidates;

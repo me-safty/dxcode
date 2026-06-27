@@ -16,6 +16,7 @@ import {
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
+  PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
@@ -1590,6 +1591,16 @@ function OpenCommandPaletteDialog(props: {
     }
     if (parseWslUncPath(pickedPath)) {
       desktopWslState ??= (await window.desktopBridge?.getWslState().catch(() => null)) ?? null;
+      let primaryRunningDistro: string | null = null;
+      try {
+        primaryRunningDistro =
+          window.desktopBridge
+            ?.getLocalEnvironmentBootstraps()
+            .find((bootstrap) => bootstrap.id === PRIMARY_LOCAL_ENVIRONMENT_ID)?.runningDistro ??
+          null;
+      } catch {
+        // Keep UNC routing strict when the live primary identity cannot be read.
+      }
       const selection = resolveWslProjectSelection(
         pickedPath,
         applyWslEnvironmentConfiguration(
@@ -1607,6 +1618,7 @@ function OpenCommandPaletteDialog(props: {
           }),
           primaryEnvironmentId,
           desktopWslState ?? null,
+          primaryRunningDistro,
         ),
       );
       if (!selection) {

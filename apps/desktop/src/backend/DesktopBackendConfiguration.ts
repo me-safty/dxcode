@@ -513,26 +513,30 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   // The WSL server spawns commands its providers reference by name — `npm`/`npx`
   // for provider updates, and the installed CLIs themselves (e.g. `codex`). Those
   // live in the resolved Node's bin dir, which `wsl.exe -- node` does NOT put on
-  // the process PATH, so `npm install -g ...` fails with NotFound. Launch through
-  // a shell that front-loads that bin dir (plus the standard system dirs) onto
-  // PATH, then `exec` the resolved Node. exec keeps fd 0, so the
-  // bootstrap-over-stdin delivery is unchanged, and we still run the exact
-  // version-managed Node node-pty was built against (not a bare `node`),
-  // regardless of PATH ordering.
+  // the process PATH, so `npm install -g ...` fails with NotFound. Pass the
+  // environment assignment and command as distinct argv values through `env`
+  // and `wsl.exe --exec` instead of embedding a script in `bash -c`: wsl.exe
+  // re-quotes shell command lines and can corrupt quotes before Bash sees them.
+  // A direct exec also leaves stdin untouched for the bootstrap envelope and
+  // still runs the exact version-managed Node node-pty was built against (not a
+  // bare `node`), regardless of PATH ordering.
   const lastSlash = preflight.nodePath.lastIndexOf("/");
   const nodeBinDir = lastSlash > 0 ? preflight.nodePath.slice(0, lastSlash) : "/usr/bin";
-  const wslShellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
   const launchPathPrefix = `${nodeBinDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
-  const wslServerCommand = [
-    `export PATH=${wslShellQuote(launchPathPrefix)}:"$PATH"`,
-    `exec ${wslShellQuote(preflight.nodePath)} ${wslShellQuote(preflight.linuxEntryPath)} --bootstrap-fd 0${devUrlArgs
-      .map((arg) => ` ${wslShellQuote(arg)}`)
-      .join("")}`,
-  ].join("; ");
 
   return {
     ...baseConfig,
-    args: [...distroArgs, "--", "bash", "-c", wslServerCommand],
+    args: [
+      ...distroArgs,
+      "--exec",
+      "env",
+      `PATH=${launchPathPrefix}`,
+      preflight.nodePath,
+      preflight.linuxEntryPath,
+      "--bootstrap-fd",
+      "0",
+      ...devUrlArgs,
+    ],
     preflightFailure: Option.none(),
   } satisfies DesktopBackendManager.DesktopBackendStartConfig;
 });

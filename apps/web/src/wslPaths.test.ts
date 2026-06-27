@@ -150,6 +150,30 @@ describe("applyWslEnvironmentConfiguration", () => {
     ).toEqual([{ environmentId: "env-primary", backendId: "wsl:default", runningDistro: null }]);
   });
 
+  it("uses the live primary distro for a default-tracking WSL-only primary", () => {
+    const candidates = applyWslEnvironmentConfiguration(
+      [],
+      "env-primary",
+      {
+        ...ubuntuConfiguration,
+        wslOnly: true,
+        distros: [],
+      },
+      "Ubuntu",
+    );
+
+    expect(candidates).toEqual([
+      { environmentId: "env-primary", backendId: "wsl:default", runningDistro: "Ubuntu" },
+    ]);
+    expect(
+      resolveWslProjectSelection("\\\\wsl.localhost\\Ubuntu\\home\\theo\\repo", candidates),
+    ).toEqual({
+      distro: "Ubuntu",
+      environmentId: "env-primary",
+      linuxPath: "/home/theo/repo",
+    });
+  });
+
   it("does not represent the primary environment for a missing configured distro", () => {
     expect(
       applyWslEnvironmentConfiguration([], "env-primary", {
@@ -190,6 +214,30 @@ describe("resolveProjectPickerTarget", () => {
         primaryEnvironmentId: "env-primary",
         desktopInstanceId: null,
         wslConfiguration: { ...ubuntuConfiguration, distro: null },
+      }),
+    ).toBe("wsl:default");
+  });
+
+  it("routes a default-tracking picker when the distro catalog has no default", () => {
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-primary",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: null,
+        wslConfiguration: {
+          ...ubuntuConfiguration,
+          distro: null,
+          distros: [{ name: "Ubuntu-22.04", isDefault: false }],
+        },
+      }),
+    ).toBe("wsl:default");
+
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-primary",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: null,
+        wslConfiguration: { ...ubuntuConfiguration, distro: null, distros: [] },
       }),
     ).toBe("wsl:default");
   });
