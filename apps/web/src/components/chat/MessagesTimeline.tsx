@@ -34,6 +34,7 @@ import {
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import {
+  createChangedFileDiffPathMatcher,
   getRenderablePatch,
   resolveDiffThemeName,
   resolveFileDiffPath,
@@ -67,7 +68,6 @@ import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
-  changedFileMatchesDiffPath,
   deriveCommandOutputDisplay,
   deriveExpandableWorkEntryDetails,
   deriveFileChangeDisplayFiles,
@@ -1712,9 +1712,8 @@ function resolveInlineFileDiffDisplayPath(
   workspaceRoot: string | undefined,
 ): string {
   const rawPath = resolveFileDiffPath(fileDiff);
-  const matchedChangedFile = changedFiles?.find((filePath) => {
-    return changedFileMatchesDiffPath(filePath, rawPath);
-  });
+  const matchesDiffPath = createChangedFileDiffPathMatcher(rawPath);
+  const matchedChangedFile = changedFiles?.find(matchesDiffPath);
 
   return formatWorkspaceRelativePath(matchedChangedFile ?? rawPath, workspaceRoot);
 }

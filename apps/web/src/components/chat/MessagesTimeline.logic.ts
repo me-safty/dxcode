@@ -9,6 +9,7 @@ import {
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { createChangedFileDiffPathMatcher } from "../../lib/diffRendering";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 export const COMMAND_OUTPUT_TAIL_LINES = 40;
@@ -451,9 +452,9 @@ export function filterChangedFilesWithoutInlineDiff(
   if (inlineDiffPaths.length === 0) {
     return [...changedFiles];
   }
+  const inlineDiffMatchers = inlineDiffPaths.map(createChangedFileDiffPathMatcher);
   return changedFiles.filter(
-    (changedFile) =>
-      !inlineDiffPaths.some((diffPath) => changedFileMatchesDiffPath(changedFile, diffPath)),
+    (changedFile) => !inlineDiffMatchers.some((matchesDiffPath) => matchesDiffPath(changedFile)),
   );
 }
 
@@ -502,18 +503,6 @@ export function deriveCommandOutputDisplay(input: {
     visibleValue,
     suffix,
   };
-}
-
-export function changedFileMatchesDiffPath(changedFile: string, diffPath: string): boolean {
-  const normalizedChangedFile = changedFile.replace(/\\/gu, "/");
-  const normalizedDiffPath = diffPath.replace(/\\/gu, "/");
-  const normalizedChangedFileSuffix = normalizedChangedFile.replace(/^\/+/u, "");
-  const changedFileHasPathSeparator = normalizedChangedFileSuffix.includes("/");
-  return (
-    normalizedChangedFile === normalizedDiffPath ||
-    normalizedChangedFile.endsWith(`/${normalizedDiffPath}`) ||
-    (changedFileHasPathSeparator && normalizedDiffPath.endsWith(`/${normalizedChangedFileSuffix}`))
-  );
 }
 
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
