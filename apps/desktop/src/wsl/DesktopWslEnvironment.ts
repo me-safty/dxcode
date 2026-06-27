@@ -31,7 +31,7 @@ export interface EnsureWslNodePtyOptions {
 
 export type EnsureWslNodePtyResult =
   | { readonly ok: true; readonly nodePath: string; readonly resolvedPath: string }
-  | { readonly ok: false; readonly reason: string };
+  | { readonly ok: false; readonly reason: string; readonly fatal: boolean };
 
 export class DesktopWslDistroListError extends Schema.TaggedErrorClass<DesktopWslDistroListError>()(
   "DesktopWslDistroListError",
@@ -97,7 +97,7 @@ interface ShellResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
-  readonly transportFailure: "timeout" | "spawn" | null;
+  readonly transportFailure: "timeout" | "spawn" | "process" | null;
 }
 
 const TIMEOUT_RESULT: ShellResult = {
@@ -115,6 +115,8 @@ export const formatWslShellTransportFailureReason = (
       return "WSL backend preflight timed out while probing for Node.js. WSL may be slow to start; retry, or check that the distro is healthy.";
     case "spawn":
       return "WSL backend preflight could not start wsl.exe to probe for Node.js. Check that WSL is installed and the distro is accessible.";
+    case "process":
+      return "WSL backend preflight lost communication with wsl.exe while probing for Node.js. Retry, or check that the distro is healthy.";
     case null:
       return null;
   }
@@ -159,7 +161,21 @@ const runWslShell = (
   return Effect.scoped(
     Effect.gen(function* () {
       const spawnerService = yield* spawner;
-      const handle = yield* spawnerService.spawn(command);
+      const spawnResult = yield* spawnerService.spawn(command).pipe(
+        Effect.match({
+          onFailure: (error) => ({ _tag: "Failure", error }) as const,
+          onSuccess: (handle) => ({ _tag: "Success", handle }) as const,
+        }),
+      );
+      if (spawnResult._tag === "Failure") {
+        return {
+          exitCode: 127,
+          stdout: "",
+          stderr: `\n${spawnResult.error.message}`,
+          transportFailure: "spawn",
+        } satisfies ShellResult;
+      }
+      const handle = spawnResult.handle;
       // Drain stdout and stderr concurrently so neither pipe buffer can fill
       // and stall the child (node-gyp rebuild emits large output on both).
       const [stdoutBytes, stderrBytes, exitCode] = yield* Effect.all(
@@ -181,7 +197,7 @@ const runWslShell = (
         exitCode: 127,
         stdout: "",
         stderr: `\n${error.message}`,
-        transportFailure: "spawn",
+        transportFailure: "process",
       }),
     ),
   );
@@ -362,6 +378,7 @@ const ensureNodePtyImpl = (
       return {
         ok: false,
         reason: `wslpath conversion failed for ${windowsRepoRoot}`,
+        fatal: false,
       } as const;
     }
     const linuxRepoRoot = linuxRepoRootOption.value;
@@ -380,7 +397,7 @@ const ensureNodePtyImpl = (
 
     const transportFailureReason = formatWslShellTransportFailureReason(probe.transportFailure);
     if (transportFailureReason !== null) {
-      return { ok: false, reason: transportFailureReason } as const;
+      return { ok: false, reason: transportFailureReason, fatal: false } as const;
     }
 
     // No node at all, even after the shared resolver repaired PATH. Surface
@@ -393,17 +410,24 @@ const ensureNodePtyImpl = (
         TOOLCHAIN_TIMEOUT,
         options,
       );
+      const toolchainTransportFailure = formatWslShellTransportFailureReason(
+        toolchainCheck.transportFailure,
+      );
+      if (toolchainTransportFailure !== null) {
+        return { ok: false, reason: toolchainTransportFailure, fatal: false } as const;
+      }
       const report = parseToolchainReport(toolchainCheck.stdout);
       const reason =
         formatMissingToolsReason(report, options.nodeEngineRange?.trim() || null) ??
         "Node.js was not found in the WSL distro. Install it (e.g. via nvm) and restart the desktop app.";
-      return { ok: false, reason } as const;
+      return { ok: false, reason, fatal: true } as const;
     }
 
     if (resolvedPath === null) {
       return {
         ok: false,
         reason: "WSL login-shell PATH could not be resolved during backend preflight.",
+        fatal: true,
       } as const;
     }
 
@@ -417,6 +441,7 @@ const ensureNodePtyImpl = (
         ok: false,
         reason:
           "WSL server dependencies could not be loaded (for example \"effect\"). The server's bundled node_modules is not readable by the WSL distro's Node — this is a packaging problem with this build. Please report it.",
+        fatal: true,
       } as const;
     }
 
@@ -425,7 +450,7 @@ const ensureNodePtyImpl = (
     if (options.allowBuild !== true) {
       const packagedProbeFailure = formatNodePtyProbeFailureReason(probe.exitCode);
       if (packagedProbeFailure !== null) {
-        return { ok: false, reason: packagedProbeFailure } as const;
+        return { ok: false, reason: packagedProbeFailure, fatal: true } as const;
       }
     }
 
@@ -436,6 +461,12 @@ const ensureNodePtyImpl = (
       TOOLCHAIN_TIMEOUT,
       options,
     );
+    const toolchainTransportFailure = formatWslShellTransportFailureReason(
+      toolchainCheck.transportFailure,
+    );
+    if (toolchainTransportFailure !== null) {
+      return { ok: false, reason: toolchainTransportFailure, fatal: false } as const;
+    }
     const report = parseToolchainReport(toolchainCheck.stdout);
 
     if (options.allowBuild !== true) {
@@ -457,6 +488,7 @@ const ensureNodePtyImpl = (
         reason:
           nodeOnlyReason ??
           "The bundled WSL backend binary (node-pty) could not be loaded in this distro. This usually means an unsupported CPU architecture or incompatible system libraries (glibc). Use a glibc-based x64/arm64 WSL distro such as Ubuntu; if you already are, please report this with your distro and the output of `uname -m`.",
+        fatal: true,
       } as const;
     }
 
@@ -466,7 +498,7 @@ const ensureNodePtyImpl = (
     // failure. Developers have the toolchain; end users never reach this path.
     const missingReason = formatMissingToolsReason(report, options.nodeEngineRange?.trim() || null);
     if (missingReason !== null) {
-      return { ok: false, reason: missingReason } as const;
+      return { ok: false, reason: missingReason, fatal: true } as const;
     }
 
     const build = yield* runWslShell(
@@ -475,11 +507,16 @@ const ensureNodePtyImpl = (
       BUILD_TIMEOUT,
       options,
     );
+    const buildTransportFailure = formatWslShellTransportFailureReason(build.transportFailure);
+    if (buildTransportFailure !== null) {
+      return { ok: false, reason: buildTransportFailure, fatal: false } as const;
+    }
     if (build.exitCode === 0) return { ok: true, nodePath, resolvedPath } as const;
     const trimmedTail = `${build.stdout}${build.stderr}`.trim().slice(-500);
     return {
       ok: false,
       reason: `node-pty Linux build failed (exit ${build.exitCode}): ${trimmedTail || "no stderr captured"}`,
+      fatal: true,
     } as const;
   });
 
@@ -704,6 +741,7 @@ export const layerTest = (stub: DesktopWslEnvironmentTestStub = {}) => {
           stub.ensureNodePty?.(distro, windowsRepoRoot, options) ?? {
             ok: false,
             reason: "ensureNodePty stub not configured",
+            fatal: true,
           },
         ),
     }),

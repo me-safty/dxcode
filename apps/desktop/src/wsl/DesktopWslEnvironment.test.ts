@@ -104,6 +104,7 @@ describe("formatWslShellTransportFailureReason", () => {
   it("distinguishes timeouts and spawn failures from normal shell exit codes", () => {
     expect(formatWslShellTransportFailureReason("timeout")).toContain("timed out");
     expect(formatWslShellTransportFailureReason("spawn")).toContain("could not start wsl.exe");
+    expect(formatWslShellTransportFailureReason("process")).toContain("lost communication");
     expect(formatWslShellTransportFailureReason(null)).toBeNull();
   });
 });

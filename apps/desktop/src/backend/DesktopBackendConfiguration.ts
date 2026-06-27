@@ -275,7 +275,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     return {
       _tag: "Failed",
       reason: `WSL node-pty unavailable: ${nodePtyResult.reason}`,
-      fatal: true,
+      fatal: nodePtyResult.fatal,
     } as const;
   }
 
