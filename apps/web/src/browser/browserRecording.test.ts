@@ -45,6 +45,7 @@ vi.mock("./browserSurfaceStore", () => ({
 }));
 
 import {
+  BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
   BrowserRecordingConflictError,
   BrowserRecordingOperationError,
   BrowserRecordingRequiresVisibleTabError,
@@ -103,6 +104,7 @@ describe("browser recording", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -247,5 +249,31 @@ describe("browser recording", () => {
     await stopBrowserRecording("recording-tab");
 
     expect(startCallsBeforeFirstSettled).toBe(1);
+  });
+
+  it("does not hang forever when stop waits for a stuck startup", async () => {
+    vi.useFakeTimers();
+    startScreencast.mockImplementationOnce(async () => {
+      events.push("start-screencast");
+      await new Promise<void>(() => undefined);
+    });
+
+    void startBrowserRecording("recording-tab");
+    expect(startScreencast).toHaveBeenCalledOnce();
+
+    const stopPromise = stopBrowserRecording("recording-tab");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(stopScreencast).toHaveBeenCalledOnce();
+
+    const rejection = expect(stopPromise).rejects.toMatchObject({
+      operation: "wait-startup",
+      tabId: "recording-tab",
+    });
+    await vi.advanceTimersByTimeAsync(BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS);
+
+    await rejection;
+    expect(save).not.toHaveBeenCalled();
+    expect(events.at(-1)).toBe("clear");
   });
 });

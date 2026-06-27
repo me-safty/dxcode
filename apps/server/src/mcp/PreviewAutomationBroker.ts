@@ -465,18 +465,24 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         if (!hasLiveAssignment) assignments.delete(assignmentKey);
         return [undefined, { ...current, assignments }] as const;
       }
+      const canReuseAssignedTab =
+        assigned !== undefined &&
+        assigned.connectionId === connection.connectionId &&
+        assigned.queue === connection.queue;
       assignments.set(assignmentKey, {
         clientId: connection.clientId,
         connectionId: connection.connectionId,
         queue: connection.queue,
         expiresAt: input.scope.expiresAt,
-        ...(assigned?.tabId === undefined ? {} : { tabId: assigned.tabId }),
-        ...(assigned?.tabSequence === undefined ? {} : { tabSequence: assigned.tabSequence }),
+        ...(canReuseAssignedTab && assigned.tabId !== undefined ? { tabId: assigned.tabId } : {}),
+        ...(canReuseAssignedTab && assigned.tabSequence !== undefined
+          ? { tabSequence: assigned.tabSequence }
+          : {}),
       });
 
       const requestSequence = current.requestSequence;
       const requestId = `preview-${requestSequence}`;
-      const tabId = input.tabId ?? assigned?.tabId;
+      const tabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
       const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
       const context: PreviewAutomationRequestErrorContext = {
         operation: input.operation,

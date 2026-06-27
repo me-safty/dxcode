@@ -929,6 +929,53 @@ it.effect("keeps a replacement stream authoritative when the old stream finalize
   ),
 );
 
+it.effect("does not carry a tab id across a replacement automation stream", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const openedTabId = PreviewTabId.make("tab-first-webcontents");
+      const firstRequests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(firstRequests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: true,
+          result:
+            request.operation === "open"
+              ? { host: "first", tabId: openedTabId }
+              : { host: "first" },
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      expect(yield* broker.invoke({ scope, operation: "open", input: {} })).toEqual({
+        host: "first",
+        tabId: openedTabId,
+      });
+
+      const routedRequests: RoutedRequest[] = [];
+      const replacementRequests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(replacementRequests, (request) => {
+        routedRequests.push(request);
+        return broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: true,
+          result: "replacement",
+        });
+      }).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      expect(yield* broker.invoke<string>({ scope, operation: "status", input: {} })).toBe(
+        "replacement",
+      );
+      expect(routedRequests.at(-1)?.tabId).toBeUndefined();
+    }),
+  ),
+);
+
 it.effect("fails requests assigned to the stream that is replaced", () =>
   Effect.scoped(
     Effect.gen(function* () {

@@ -66,6 +66,7 @@ export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<Brow
       "start-media-recorder",
       "start-screencast",
       "stop-screencast",
+      "wait-startup",
       "stop-media-recorder",
       "save-artifact",
       "cleanup",
@@ -110,6 +111,8 @@ export function useActiveBrowserRecordingTabId(): string | null {
 
 let active: ActiveRecording | null = null;
 let unsubscribeFrames: (() => void) | null = null;
+
+export const BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS = 5_000;
 
 export function readActiveBrowserRecordingTabId(): string | null {
   return active?.tabId ?? null;
@@ -164,6 +167,28 @@ const recordingStartupCancelledError = (
 
 const isRecordingStarting = (recording: ActiveRecording): boolean =>
   active === recording && recording.lifecycle.phase === "starting";
+
+const waitForRecordingStartupToSettle = async (recording: ActiveRecording): Promise<void> => {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      recording.startupSettled,
+      new Promise<void>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`Browser recording startup did not settle for tab ${recording.tabId}.`));
+        }, BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (cause) {
+    throw new BrowserRecordingOperationError({
+      operation: "wait-startup",
+      tabId: recording.tabId,
+      cause,
+    });
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
+  }
+};
 
 export async function startBrowserRecording(tabId: string): Promise<string> {
   const bridge = previewBridge;
@@ -319,7 +344,7 @@ const finalizeBrowserRecording = async (
         cause,
       });
     }
-    await recording.startupSettled;
+    await waitForRecordingStartupToSettle(recording);
     try {
       await stopMediaRecorder(recording.recorder);
     } catch (cause) {

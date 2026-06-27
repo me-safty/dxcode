@@ -14,6 +14,7 @@ import { browserViewportSettingKey } from "./browserViewportLayout";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
 import { acquireDesktopTab, type AcquiredDesktopTab } from "./desktopTabLifetime";
+import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
 import { usePreviewWebviewConfig } from "./previewWebviewConfigState";
 import { useBrowserViewportResize } from "./useBrowserViewportResize";
 
@@ -175,25 +176,11 @@ export function HostedBrowserWebview(props: {
 
   if (!config) return null;
 
-  const wrapperStyle =
-    active && lastRect
-      ? {
-          left: lastRect.x,
-          top: lastRect.y,
-          width: lastRect.width,
-          height: lastRect.height,
-          zIndex: 30,
-          pointerEvents: "auto" as const,
-        }
-      : {
-          left: -100_000,
-          top: -100_000,
-          width: hiddenSize.width,
-          height: hiddenSize.height,
-          zIndex: -1,
-          pointerEvents: "none" as const,
-          visibility: "hidden" as const,
-        };
+  const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
+    active,
+    rect: lastRect,
+    hiddenSize,
+  });
 
   return (
     <div
