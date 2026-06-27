@@ -12,26 +12,64 @@ const baseWslState: DesktopWslState = {
 };
 
 describe("applyWslEnableSelection", () => {
-  it("clears a persisted WSL-only preference when enabling both backends", async () => {
+  it("clears WSL-only and updates the distro before enabling both backends", async () => {
+    const calls: Array<string> = [];
     let persistedWslOnly = true;
-    const setWslDistro = vi.fn(async () => baseWslState);
-    const setWslBackendEnabled = vi.fn(async () => ({ ...baseWslState, enabled: true }));
+    let persistedDistro: string | null = "Ubuntu";
+    const setWslDistro = vi.fn(async (distro: string | null) => {
+      calls.push(`setWslDistro:${distro ?? "default"}`);
+      persistedDistro = distro;
+      return { ...baseWslState, distro, wslOnly: persistedWslOnly };
+    });
+    const setWslBackendEnabled = vi.fn(async (enabled: boolean) => {
+      calls.push(`setWslBackendEnabled:${enabled}`);
+      return {
+        ...baseWslState,
+        enabled,
+        distro: persistedDistro,
+        wslOnly: persistedWslOnly,
+      };
+    });
     const setWslOnly = vi.fn(async (enabled: boolean) => {
+      calls.push(`setWslOnly:${enabled}`);
       persistedWslOnly = enabled;
-      return { ...baseWslState, enabled: true, wslOnly: enabled };
+      return { ...baseWslState, distro: persistedDistro, wslOnly: enabled };
     });
 
     const state = await applyWslEnableSelection({
       bridge: { setWslDistro, setWslBackendEnabled, setWslOnly },
       mode: "both",
+      nextDistro: "Debian",
+      persistedDistro: "Ubuntu",
+    });
+
+    expect(calls).toEqual(["setWslOnly:false", "setWslDistro:Debian", "setWslBackendEnabled:true"]);
+    expect(state).toMatchObject({ enabled: true, distro: "Debian", wslOnly: false });
+  });
+
+  it("stages WSL-only before enabling without rewriting an unchanged distro", async () => {
+    const calls: Array<string> = [];
+    let persistedWslOnly = false;
+    const setWslDistro = vi.fn(async () => baseWslState);
+    const setWslOnly = vi.fn(async (enabled: boolean) => {
+      calls.push(`setWslOnly:${enabled}`);
+      persistedWslOnly = enabled;
+      return { ...baseWslState, wslOnly: enabled };
+    });
+    const setWslBackendEnabled = vi.fn(async (enabled: boolean) => {
+      calls.push(`setWslBackendEnabled:${enabled}`);
+      return { ...baseWslState, enabled, wslOnly: persistedWslOnly };
+    });
+
+    const state = await applyWslEnableSelection({
+      bridge: { setWslDistro, setWslBackendEnabled, setWslOnly },
+      mode: "wsl-only",
       nextDistro: null,
       persistedDistro: null,
     });
 
+    expect(calls).toEqual(["setWslOnly:true", "setWslBackendEnabled:true"]);
     expect(setWslDistro).not.toHaveBeenCalled();
-    expect(setWslBackendEnabled).toHaveBeenCalledWith(true);
-    expect(setWslOnly).toHaveBeenCalledWith(false);
-    expect(persistedWslOnly).toBe(false);
-    expect(state.wslOnly).toBe(false);
+    expect(state).toMatchObject({ enabled: true, wslOnly: true });
   });
 });

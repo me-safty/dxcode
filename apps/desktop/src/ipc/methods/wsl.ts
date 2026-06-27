@@ -88,13 +88,10 @@ export const setWslDistro = makeIpcMethod({
     const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
     const change = yield* appSettings.setWslDistro(distro);
     const settings = yield* appSettings.get;
-    // In wsl-only mode the pool's primary IS the WSL backend, and its distro
-    // is captured when that backend starts. reconcile only manages the
-    // dual-mode secondary (it skips registering one when wslOnly), so it can't
-    // swap the primary's distro — relaunch so the primary comes back up on the
-    // newly selected distro, same as the wsl-only toggle. In dual-backend mode
-    // the secondary wsl:<distro> instance is swapped by reconcile instead.
-    if (settings.wslOnly && change.changed) {
+    // In active wsl-only mode the pool's primary IS the WSL backend, and its
+    // distro is captured when that backend starts, so relaunch to replace it.
+    // When WSL is disabled, this only stages a preference for the next enable.
+    if (settings.wslBackendEnabled && settings.wslOnly && change.changed) {
       const state = yield* readWslState;
       yield* lifecycle.relaunch(`wslDistro=${distro ?? "default"}`);
       return state;
@@ -109,16 +106,15 @@ export const setWslOnly = makeIpcMethod({
   payload: Schema.Boolean,
   result: DesktopWslStateSchema,
   handler: Effect.fn("desktop.ipc.wsl.setOnly")(function* (enabled) {
-    // wsl-only decides which backend the pool spins up as "primary",
-    // and that decision is captured once at layer init. After
-    // persisting the new value we relaunch so the user lands in the
-    // mode they just picked instead of having to close + reopen
-    // themselves. Same pattern as the server-exposure-mode change.
+    // wsl-only decides which backend the pool spins up as "primary", and that
+    // decision is captured once at layer init. A disabled WSL backend always
+    // leaves Windows primary active, so mode changes can be staged without a
+    // relaunch and applied by the subsequent enable call.
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
     const change = yield* appSettings.setWslOnly(enabled);
     const state = yield* readWslState;
-    if (change.changed) {
+    if (state.enabled && change.changed) {
       yield* lifecycle.relaunch(`wslOnly=${enabled}`);
     }
     return state;

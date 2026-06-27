@@ -15,12 +15,16 @@ import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
-import { setWslBackendEnabled } from "./wsl.ts";
+import { setWslBackendEnabled, setWslDistro, setWslOnly } from "./wsl.ts";
 
 const decodeWslState = Schema.decodeUnknownEffect(DesktopWslStateSchema);
 
 const invokeSetWslBackendEnabled = (enabled: boolean) =>
   setWslBackendEnabled.handler(enabled).pipe(Effect.flatMap(decodeWslState));
+const invokeSetWslDistro = (distro: string | null) =>
+  setWslDistro.handler(distro).pipe(Effect.flatMap(decodeWslState));
+const invokeSetWslOnly = (enabled: boolean) =>
+  setWslOnly.handler(enabled).pipe(Effect.flatMap(decodeWslState));
 
 function makeWslBackendLayer(input: { readonly onReconcile?: Effect.Effect<void> } = {}) {
   return Layer.succeed(
@@ -69,6 +73,73 @@ const unusedLifecycleRuntimeLayer = Layer.mergeAll(
 );
 
 describe("WSL IPC", () => {
+  it.effect("stages dual-backend preferences before enabling without relaunching", () => {
+    const relaunchReasons: Array<string> = [];
+    const layer = Layer.mergeAll(
+      DesktopAppSettings.layerTest({
+        ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+        wslBackendEnabled: false,
+        wslOnly: true,
+      }),
+      DesktopWslEnvironment.layerTest({ isAvailable: true }),
+      makeWslBackendLayer(),
+      makeLifecycleLayer(relaunchReasons),
+      unusedLifecycleRuntimeLayer,
+    );
+
+    return Effect.gen(function* () {
+      yield* invokeSetWslOnly(false);
+      yield* invokeSetWslDistro("Debian");
+      const state = yield* invokeSetWslBackendEnabled(true);
+
+      assert.deepEqual(state, {
+        enabled: true,
+        distro: "Debian",
+        available: true,
+        wslOnly: false,
+        distros: [],
+        preflightError: null,
+      });
+      assert.deepEqual(relaunchReasons, []);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("stages WSL-only preferences and relaunches only after enabling", () => {
+    const relaunchReasons: Array<string> = [];
+    const layer = Layer.mergeAll(
+      DesktopAppSettings.layerTest({
+        ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+        wslBackendEnabled: false,
+        wslOnly: false,
+      }),
+      DesktopWslEnvironment.layerTest({ isAvailable: true }),
+      makeWslBackendLayer(),
+      makeLifecycleLayer(relaunchReasons),
+      unusedLifecycleRuntimeLayer,
+    );
+
+    return Effect.gen(function* () {
+      const stagedMode = yield* invokeSetWslOnly(true);
+      assert.equal(stagedMode.enabled, false);
+      assert.equal(stagedMode.wslOnly, true);
+      assert.deepEqual(relaunchReasons, []);
+
+      yield* invokeSetWslDistro("Debian");
+      assert.deepEqual(relaunchReasons, []);
+
+      const state = yield* invokeSetWslBackendEnabled(true);
+      assert.deepEqual(state, {
+        enabled: true,
+        distro: "Debian",
+        available: true,
+        wslOnly: true,
+        distros: [],
+        preflightError: null,
+      });
+      assert.deepEqual(relaunchReasons, ["wslBackendEnabled=true"]);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("relaunches when enabling the WSL backend while wsl-only is already persisted", () => {
     const relaunchReasons: Array<string> = [];
     let reconcileCount = 0;
