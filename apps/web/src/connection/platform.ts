@@ -49,7 +49,11 @@ import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
-import { desktopLocalConnectionId, readDesktopSecondaryBootstraps } from "./desktopLocal";
+import {
+  desktopLocalConnectionId,
+  readDesktopSecondaryBootstrapsResult,
+  type DesktopSecondaryBootstrapsRead,
+} from "./desktopLocal";
 import { connectionStorageLayer } from "./storage";
 
 let nextObservedRpcRequestId = 0;
@@ -411,6 +415,21 @@ export function canRetainCachedPlatformRegistrationAfterRefreshFailure(
   );
 }
 
+export function secondaryRegistrationsToRetainAfterTopologyRead(
+  previous: ReadonlyMap<string, CachedPlatformRegistration>,
+  topologyRead: DesktopSecondaryBootstrapsRead,
+  nowEpochMs: number,
+): ReadonlyMap<string, CachedPlatformRegistration> {
+  if (topologyRead._tag === "Success") {
+    return new Map();
+  }
+  return new Map(
+    [...previous].filter(
+      ([, cached]) => cached.expiresAtEpochMs !== undefined && nowEpochMs < cached.expiresAtEpochMs,
+    ),
+  );
+}
+
 const platformConnectionSourceLayer = Layer.effect(
   PlatformConnectionSource,
   Effect.gen(function* () {
@@ -456,36 +475,52 @@ const platformConnectionSourceLayer = Layer.effect(
         }
       }
 
-      for (const bootstrap of readDesktopSecondaryBootstraps()) {
-        const signature = `${bootstrap.httpBaseUrl}|${bootstrap.wsBaseUrl}|${bootstrap.bootstrapToken ?? ""}`;
-        const cached = previous.get(bootstrap.id);
-        if (
-          cached !== undefined &&
-          canReuseCachedPlatformRegistration(cached, signature, nowEpochMs)
-        ) {
-          next.set(bootstrap.id, cached);
-          registrations.push(cached.registration);
-          continue;
-        }
-        const built = yield* loadSecondaryConnectionRegistration(bootstrap).pipe(
-          Effect.tapError((error) =>
-            Effect.logWarning("Could not connect a desktop-local backend.", {
-              id: bootstrap.id,
-              error,
-            }),
-          ),
-          Effect.option,
-        );
-        if (Option.isSome(built)) {
-          const cacheEntry = { signature, ...built.value };
-          next.set(bootstrap.id, cacheEntry);
-          registrations.push(built.value.registration);
-        } else if (
-          cached !== undefined &&
-          canRetainCachedPlatformRegistrationAfterRefreshFailure(cached, signature, nowEpochMs)
-        ) {
-          next.set(bootstrap.id, cached);
-          registrations.push(cached.registration);
+      const topologyRead = readDesktopSecondaryBootstrapsResult();
+      for (const [id, cached] of secondaryRegistrationsToRetainAfterTopologyRead(
+        previous,
+        topologyRead,
+        nowEpochMs,
+      )) {
+        next.set(id, cached);
+        registrations.push(cached.registration);
+      }
+
+      if (topologyRead._tag === "Failure") {
+        yield* Effect.logWarning("Could not read the desktop-local backend topology.", {
+          cause: topologyRead.cause,
+        });
+      } else {
+        for (const bootstrap of topologyRead.bootstraps) {
+          const signature = `${bootstrap.httpBaseUrl}|${bootstrap.wsBaseUrl}|${bootstrap.bootstrapToken ?? ""}`;
+          const cached = previous.get(bootstrap.id);
+          if (
+            cached !== undefined &&
+            canReuseCachedPlatformRegistration(cached, signature, nowEpochMs)
+          ) {
+            next.set(bootstrap.id, cached);
+            registrations.push(cached.registration);
+            continue;
+          }
+          const built = yield* loadSecondaryConnectionRegistration(bootstrap).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("Could not connect a desktop-local backend.", {
+                id: bootstrap.id,
+                error,
+              }),
+            ),
+            Effect.option,
+          );
+          if (Option.isSome(built)) {
+            const cacheEntry = { signature, ...built.value };
+            next.set(bootstrap.id, cacheEntry);
+            registrations.push(built.value.registration);
+          } else if (
+            cached !== undefined &&
+            canRetainCachedPlatformRegistrationAfterRefreshFailure(cached, signature, nowEpochMs)
+          ) {
+            next.set(bootstrap.id, cached);
+            registrations.push(cached.registration);
+          }
         }
       }
 

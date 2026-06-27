@@ -1,5 +1,9 @@
 import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
-import { PRIMARY_LOCAL_ENVIRONMENT_ID, type DesktopEnvironmentBootstrap } from "@t3tools/contracts";
+import {
+  PRIMARY_LOCAL_ENVIRONMENT_ID,
+  type DesktopBridge,
+  type DesktopEnvironmentBootstrap,
+} from "@t3tools/contracts";
 
 /**
  * Desktop-local secondary backends (e.g. a parallel WSL backend) are registered
@@ -34,6 +38,34 @@ export function desktopLocalBackendId(target: ConnectionTarget): string | null {
     : null;
 }
 
+export type DesktopSecondaryBootstrapsRead =
+  | {
+      readonly _tag: "Success";
+      readonly bootstraps: ReadonlyArray<DesktopEnvironmentBootstrap>;
+    }
+  | {
+      readonly _tag: "Failure";
+      readonly cause: unknown;
+    };
+
+export function readDesktopSecondaryBootstrapsResult(
+  bridge: Pick<DesktopBridge, "getLocalEnvironmentBootstraps"> | undefined = window.desktopBridge,
+): DesktopSecondaryBootstrapsRead {
+  if (bridge === undefined) {
+    return { _tag: "Success", bootstraps: [] };
+  }
+  try {
+    return {
+      _tag: "Success",
+      bootstraps: bridge
+        .getLocalEnvironmentBootstraps()
+        .filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID),
+    };
+  } catch (cause) {
+    return { _tag: "Failure", cause };
+  }
+}
+
 /**
  * Read the desktop's secondary local backends (everything except the primary)
  * from the bridge. Returns an empty list off-desktop or if the bridge throws.
@@ -41,15 +73,6 @@ export function desktopLocalBackendId(target: ConnectionTarget): string | null {
  * read the same host topology from one place.
  */
 export function readDesktopSecondaryBootstraps(): ReadonlyArray<DesktopEnvironmentBootstrap> {
-  const bridge = window.desktopBridge;
-  if (bridge === undefined) {
-    return [];
-  }
-  try {
-    return bridge
-      .getLocalEnvironmentBootstraps()
-      .filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID);
-  } catch {
-    return [];
-  }
+  const result = readDesktopSecondaryBootstrapsResult();
+  return result._tag === "Success" ? result.bootstraps : [];
 }

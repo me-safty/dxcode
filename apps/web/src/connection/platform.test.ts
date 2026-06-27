@@ -11,6 +11,7 @@ import {
   canRetainCachedPlatformRegistrationAfterRefreshFailure,
   canReuseCachedPlatformRegistration,
   provisionDesktopSshEnvironment,
+  secondaryRegistrationsToRetainAfterTopologyRead,
   secondaryBearerExpiresAtEpochMs,
   secondaryBearerRefreshAtEpochMs,
 } from "./platform.ts";
@@ -129,5 +130,56 @@ describe("desktop-local bearer cache", () => {
 
     expect(refreshAtEpochMs).toBe(10_000);
     expect(canReuseCachedPlatformRegistration(cached, cached.signature, 10_000)).toBe(false);
+  });
+
+  it("retains only unexpired secondaries after a topology read failure", () => {
+    const valid = {
+      expiresAtEpochMs: 20_000,
+      signature: "valid-secondary",
+      registration,
+      refreshAtEpochMs: 15_000,
+    };
+    const previous = new Map([
+      ["valid-secondary", valid],
+      [
+        "expired-secondary",
+        {
+          expiresAtEpochMs: 10_000,
+          signature: "expired-secondary",
+          registration,
+          refreshAtEpochMs: 5_000,
+        },
+      ],
+    ]);
+
+    expect(
+      secondaryRegistrationsToRetainAfterTopologyRead(
+        previous,
+        { _tag: "Failure", cause: new Error("IPC unavailable") },
+        10_000,
+      ),
+    ).toEqual(new Map([["valid-secondary", valid]]));
+  });
+
+  it("treats a successful empty topology as authoritative removal", () => {
+    const previous = new Map([
+      [
+        "secondary",
+        {
+          expiresAtEpochMs: 20_000,
+          signature: "secondary",
+          registration,
+          refreshAtEpochMs: 15_000,
+        },
+      ],
+    ]);
+
+    expect(
+      secondaryRegistrationsToRetainAfterTopologyRead(
+        previous,
+        { _tag: "Success", bootstraps: [] },
+        10_000,
+      ),
+    ).toEqual(new Map());
   });
 });

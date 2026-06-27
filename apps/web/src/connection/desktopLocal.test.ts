@@ -2,13 +2,14 @@ import {
   BearerConnectionTarget,
   PrimaryConnectionTarget,
 } from "@t3tools/client-runtime/connection";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   desktopLocalBackendId,
   desktopLocalConnectionId,
   isDesktopLocalConnectionTarget,
+  readDesktopSecondaryBootstrapsResult,
 } from "./desktopLocal";
 
 describe("desktop local connection identity", () => {
@@ -33,5 +34,44 @@ describe("desktop local connection identity", () => {
 
     expect(isDesktopLocalConnectionTarget(target)).toBe(false);
     expect(desktopLocalBackendId(target)).toBeNull();
+  });
+});
+
+describe("desktop local topology reads", () => {
+  it("distinguishes a successful empty topology from a read failure", () => {
+    expect(
+      readDesktopSecondaryBootstrapsResult({ getLocalEnvironmentBootstraps: () => [] }),
+    ).toEqual({ _tag: "Success", bootstraps: [] });
+
+    const cause = new Error("IPC unavailable");
+    expect(
+      readDesktopSecondaryBootstrapsResult({
+        getLocalEnvironmentBootstraps: () => {
+          throw cause;
+        },
+      }),
+    ).toEqual({ _tag: "Failure", cause });
+  });
+
+  it("filters the primary bootstrap from successful topology reads", () => {
+    const secondary = {
+      id: "wsl:Ubuntu",
+      label: "WSL: Ubuntu",
+      httpBaseUrl: "http://127.0.0.1:4000",
+      wsBaseUrl: "ws://127.0.0.1:4000",
+    };
+
+    expect(
+      readDesktopSecondaryBootstrapsResult({
+        getLocalEnvironmentBootstraps: () => [
+          {
+            ...secondary,
+            id: PRIMARY_LOCAL_ENVIRONMENT_ID,
+            label: "Windows",
+          },
+          secondary,
+        ],
+      }),
+    ).toEqual({ _tag: "Success", bootstraps: [secondary] });
   });
 });
