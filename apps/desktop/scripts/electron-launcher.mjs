@@ -357,11 +357,15 @@ function resolveLinuxSandboxArgs(electronBinaryPath) {
   return ["--no-sandbox"];
 }
 
-export function resolveElectronPath() {
+function resolveElectronBinaryPath() {
   ensureElectronRuntime();
 
   const require = NodeModule.createRequire(import.meta.url);
-  const electronBinaryPath = require("electron");
+  return require("electron");
+}
+
+export function resolveElectronPath() {
+  const electronBinaryPath = resolveElectronBinaryPath();
 
   if (hostPlatform !== "darwin") {
     return electronBinaryPath;
@@ -383,8 +387,7 @@ export function resolveDevProtocolClient() {
     return null;
   }
 
-  const require = NodeModule.createRequire(import.meta.url);
-  const electronBinaryPath = require("electron");
+  const electronBinaryPath = resolveElectronBinaryPath();
   const launcherBinaryPath = buildMacLauncher(electronBinaryPath);
   return {
     appBundlePath: NodePath.resolve(launcherBinaryPath, "..", "..", ".."),

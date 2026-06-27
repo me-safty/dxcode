@@ -41,7 +41,17 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     expect(decoded.providerInstances).toEqual({});
     // Legacy `providers` struct is still hydrated with its per-driver defaults
     // so existing call sites keep working through the migration.
-    expect(decoded.providers.codex.enabled).toBe(true);
+    expect(
+      Object.fromEntries(
+        Object.entries(decoded.providers).map(([key, provider]) => [key, provider.enabled]),
+      ),
+    ).toEqual({
+      codex: false,
+      claudeAgent: false,
+      cursor: false,
+      grok: false,
+      opencode: false,
+    });
   });
 
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {
