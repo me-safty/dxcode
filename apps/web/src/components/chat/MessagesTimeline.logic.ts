@@ -8,8 +8,10 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
+import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
+export const COMMAND_OUTPUT_TAIL_LINES = 40;
 
 function computeElapsedMs(startIso: string, endIso: string): number | null {
   const start = Date.parse(startIso);
@@ -111,6 +113,36 @@ export function computeMessageDurationStart(
 
 export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
+}
+
+function capitalizePhrase(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return value;
+  }
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+export function deriveToolWorkEntryHeading(workEntry: WorkLogEntry): string {
+  if (!workEntry.toolTitle) {
+    return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
+  }
+  return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
+}
+
+export function deriveWorkEntryPreview(
+  workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles">,
+  workspaceRoot: string | undefined,
+): string | null {
+  if (workEntry.command) return workEntry.command;
+  if (workEntry.detail) return workEntry.detail;
+  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
+  const [firstPath] = workEntry.changedFiles ?? [];
+  if (!firstPath) return null;
+  const displayPath = formatWorkspaceRelativePath(firstPath, workspaceRoot);
+  return workEntry.changedFiles!.length === 1
+    ? displayPath
+    : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
 }
 
 export function resolveAssistantMessageCopyState({
@@ -229,6 +261,137 @@ function hasCommandWorkEntryMetadata(workEntry: WorkLogEntry): boolean {
   );
 }
 
+export interface DerivedCommandOutputSection {
+  title: "Stdout" | "Stderr" | "Output";
+  value: string;
+  tone?: "default" | "error";
+}
+
+export interface DerivedCommandWorkEntryDetails {
+  command: string | null;
+  rawCommand: string | null;
+  exitCodeLabel: string;
+  durationLabel: string;
+  outputs: ReadonlyArray<DerivedCommandOutputSection>;
+}
+
+export interface DerivedFileChangeWorkEntryDetails {
+  id: string;
+  patch: string | undefined;
+  changedFiles: ReadonlyArray<string>;
+}
+
+export interface DerivedExpandableWorkEntryDetails {
+  command: DerivedCommandWorkEntryDetails | null;
+  fileChange: DerivedFileChangeWorkEntryDetails | null;
+  supplementalDetail: string | null;
+  genericDetail: string | null;
+}
+
+function deriveRawCommand(workEntry: Pick<WorkLogEntry, "command" | "rawCommand">): string | null {
+  const rawCommand = workEntry.rawCommand?.trim();
+  if (!rawCommand || !workEntry.command) {
+    return null;
+  }
+  return rawCommand === workEntry.command.trim() ? null : rawCommand;
+}
+
+function buildGenericToolExpandedBody(
+  workEntry: WorkLogEntry,
+  workspaceRoot: string | undefined,
+): string | null {
+  const blocks: string[] = [];
+  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
+    blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
+  }
+  const raw = deriveRawCommand(workEntry);
+  if (raw?.trim()) {
+    blocks.push(raw.trim());
+  } else if (workEntry.command?.trim()) {
+    blocks.push(workEntry.command.trim());
+  }
+  if (workEntry.detail?.trim()) {
+    blocks.push(workEntry.detail.trim());
+  }
+  const changedFiles = workEntry.changedFiles ?? [];
+  if (changedFiles.length > 0) {
+    blocks.push(
+      changedFiles
+        .map((filePath) => formatWorkspaceRelativePath(filePath, workspaceRoot))
+        .join("\n"),
+    );
+  }
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
+}
+
+function deriveCommandWorkEntryDetails(workEntry: WorkLogEntry): DerivedCommandWorkEntryDetails {
+  const command = workEntry.command ?? workEntry.rawCommand ?? null;
+  const rawCommand =
+    workEntry.rawCommand && workEntry.rawCommand !== command ? workEntry.rawCommand : null;
+  const stdout = hasRenderableCommandOutput(workEntry.stdout) ? workEntry.stdout : null;
+  const stderr = hasRenderableCommandOutput(workEntry.stderr) ? workEntry.stderr : null;
+  const output =
+    !stdout && !stderr && hasRenderableCommandOutput(workEntry.output) ? workEntry.output : null;
+  const outputs: DerivedCommandOutputSection[] = [];
+  if (stdout) {
+    outputs.push({ title: "Stdout", value: stdout });
+  }
+  if (stderr) {
+    outputs.push({ title: "Stderr", value: stderr, tone: "error" });
+  }
+  if (output) {
+    outputs.push({ title: "Output", value: output });
+  }
+
+  return {
+    command,
+    rawCommand,
+    exitCodeLabel: String(workEntry.exitCode ?? "unknown"),
+    durationLabel:
+      workEntry.durationMs !== undefined ? formatDuration(workEntry.durationMs) : "unknown",
+    outputs,
+  };
+}
+
+export function deriveExpandableWorkEntryDetails(
+  workEntry: WorkLogEntry,
+  workspaceRoot: string | undefined,
+): DerivedExpandableWorkEntryDetails | null {
+  const showCommandDetails = hasCommandWorkEntryDetails(workEntry);
+  const showFileChangeDetails = hasFileChangeWorkEntryDetails(workEntry);
+  const supplementalDetail =
+    showCommandDetails || showFileChangeDetails
+      ? buildSupplementalToolDetailBody(workEntry, {
+          dedupeRenderedCommandOutput: showCommandDetails,
+        })
+      : null;
+
+  if (showCommandDetails || showFileChangeDetails) {
+    return {
+      command: showCommandDetails ? deriveCommandWorkEntryDetails(workEntry) : null,
+      fileChange: showFileChangeDetails
+        ? {
+            id: workEntry.id,
+            patch: workEntry.patch,
+            changedFiles: workEntry.changedFiles ?? [],
+          }
+        : null,
+      supplementalDetail,
+      genericDetail: null,
+    };
+  }
+
+  const genericDetail = buildGenericToolExpandedBody(workEntry, workspaceRoot);
+  return genericDetail
+    ? {
+        command: null,
+        fileChange: null,
+        supplementalDetail: null,
+        genericDetail,
+      }
+    : null;
+}
+
 export function hasFileChangeWorkEntryDetails(workEntry: WorkLogEntry): boolean {
   if (isCollabAgentWorkEntry(workEntry)) {
     return false;
@@ -250,6 +413,53 @@ export function filterChangedFilesWithoutInlineDiff(
     (changedFile) =>
       !inlineDiffPaths.some((diffPath) => changedFileMatchesDiffPath(changedFile, diffPath)),
   );
+}
+
+export interface DerivedFileChangeDisplayFile {
+  path: string;
+  displayPath: string;
+}
+
+export function deriveFileChangeDisplayFiles(input: {
+  changedFiles: ReadonlyArray<string> | undefined;
+  inlineDiffPaths: ReadonlyArray<string>;
+  workspaceRoot: string | undefined;
+}): DerivedFileChangeDisplayFile[] {
+  return filterChangedFilesWithoutInlineDiff(input.changedFiles, input.inlineDiffPaths).map(
+    (filePath) => ({
+      path: filePath,
+      displayPath: formatWorkspaceRelativePath(filePath, input.workspaceRoot),
+    }),
+  );
+}
+
+export interface DerivedCommandOutputDisplay {
+  isTruncated: boolean;
+  visibleValue: string;
+  suffix: string;
+}
+
+export function deriveCommandOutputDisplay(input: {
+  value: string;
+  showFull: boolean;
+  maxVisibleLines?: number;
+}): DerivedCommandOutputDisplay {
+  const maxVisibleLines = input.maxVisibleLines ?? COMMAND_OUTPUT_TAIL_LINES;
+  const lines = getRenderableCommandOutputLines(input.value);
+  const isTruncated = lines.length > maxVisibleLines;
+  const visibleValue =
+    input.showFull || !isTruncated ? lines.join("\n") : lines.slice(-maxVisibleLines).join("\n");
+  const suffix = isTruncated
+    ? input.showFull
+      ? `${lines.length.toLocaleString()} lines`
+      : `last ${maxVisibleLines} of ${lines.length.toLocaleString()} lines`
+    : `${lines.length.toLocaleString()} line${lines.length === 1 ? "" : "s"}`;
+
+  return {
+    isTruncated,
+    visibleValue,
+    suffix,
+  };
 }
 
 function changedFileMatchesDiffPath(changedFile: string, diffPath: string): boolean {

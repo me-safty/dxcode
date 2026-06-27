@@ -26,7 +26,6 @@ import { FileDiff } from "@pierre/diffs/react";
 import type { FileDiffMetadata, Hunk } from "@pierre/diffs/types";
 import {
   deriveTimelineEntries,
-  formatDuration,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
@@ -67,16 +66,18 @@ import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
-  buildSupplementalToolDetailBody,
   computeStableMessagesTimelineRows,
-  filterChangedFilesWithoutInlineDiff,
-  getRenderableCommandOutputLines,
-  hasCommandWorkEntryDetails,
-  hasFileChangeWorkEntryDetails,
-  hasRenderableCommandOutput,
+  deriveCommandOutputDisplay,
+  deriveExpandableWorkEntryDetails,
+  deriveFileChangeDisplayFiles,
   deriveMessagesTimelineRows,
+  deriveToolWorkEntryHeading,
+  deriveWorkEntryPreview,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  type DerivedCommandWorkEntryDetails,
+  type DerivedExpandableWorkEntryDetails,
+  type DerivedFileChangeWorkEntryDetails,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   type TimelineLatestTurn,
@@ -148,7 +149,6 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
-const COMMAND_OUTPUT_TAIL_LINES = 40;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -1455,59 +1455,6 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
   };
 }
 
-function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
-  workspaceRoot: string | undefined,
-) {
-  if (workEntry.command) return workEntry.command;
-  if (workEntry.detail) return workEntry.detail;
-  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
-  const [firstPath] = workEntry.changedFiles ?? [];
-  if (!firstPath) return null;
-  const displayPath = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-  return workEntry.changedFiles!.length === 1
-    ? displayPath
-    : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
-}
-
-function workEntryRawCommand(
-  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
-): string | null {
-  const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
-    return null;
-  }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
-}
-
-function buildToolCallExpandedBody(
-  workEntry: TimelineWorkEntry,
-  workspaceRoot: string | undefined,
-): string | null {
-  const blocks: string[] = [];
-  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
-  }
-  const raw = workEntryRawCommand(workEntry);
-  if (raw?.trim()) {
-    blocks.push(raw.trim());
-  } else if (workEntry.command?.trim()) {
-    blocks.push(workEntry.command.trim());
-  }
-  if (workEntry.detail?.trim()) {
-    blocks.push(workEntry.detail.trim());
-  }
-  const changedFiles = workEntry.changedFiles ?? [];
-  if (changedFiles.length > 0) {
-    blocks.push(
-      changedFiles
-        .map((filePath) => formatWorkspaceRelativePath(filePath, workspaceRoot))
-        .join("\n"),
-    );
-  }
-  return blocks.length > 0 ? blocks.join("\n\n") : null;
-}
-
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (
     workEntry.sourceActivityKind === "user-input.requested" ||
@@ -1539,21 +1486,6 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   return workToneIcon(workEntry.tone).iconName;
 }
 
-function capitalizePhrase(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return value;
-  }
-  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
-}
-
-function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
-  if (!workEntry.toolTitle) {
-    return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
-  }
-  return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
-}
-
 function ToolDetailBlock(props: {
   title: string;
   children: ReactNode;
@@ -1579,100 +1511,63 @@ function ToolDetailBlock(props: {
   );
 }
 
-function hasExpandableWorkEntryDetails(
-  workEntry: TimelineWorkEntry,
-  workspaceRoot: string | undefined,
-): boolean {
-  if (hasCommandWorkEntryDetails(workEntry) || hasFileChangeWorkEntryDetails(workEntry)) {
-    return true;
-  }
-  return buildToolCallExpandedBody(workEntry, workspaceRoot) !== null;
-}
-
-function ToolEntryDetails({
-  workEntry,
-  workspaceRoot,
-}: {
-  workEntry: TimelineWorkEntry;
-  workspaceRoot: string | undefined;
-}) {
-  const showCommandDetails = hasCommandWorkEntryDetails(workEntry);
-  const showFileChangeDetails = hasFileChangeWorkEntryDetails(workEntry);
-  const supplementalDetails =
-    showCommandDetails || showFileChangeDetails
-      ? buildSupplementalToolDetailBody(workEntry, {
-          dedupeRenderedCommandOutput: showCommandDetails,
-        })
-      : null;
-  if (showCommandDetails || showFileChangeDetails) {
+function ToolEntryDetails({ details }: { details: DerivedExpandableWorkEntryDetails }) {
+  if (details.command || details.fileChange) {
     return (
       <>
-        {showCommandDetails && <CommandEntryDetails workEntry={workEntry} />}
-        {showFileChangeDetails && <FileChangeEntryDetails workEntry={workEntry} />}
-        {supplementalDetails ? <GenericToolEntryDetails value={supplementalDetails} /> : null}
+        {details.command ? <CommandEntryDetails details={details.command} /> : null}
+        {details.fileChange ? <FileChangeEntryDetails details={details.fileChange} /> : null}
+        {details.supplementalDetail ? (
+          <GenericToolEntryDetails value={details.supplementalDetail} />
+        ) : null}
       </>
     );
   }
 
-  const genericDetails = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  return genericDetails ? <GenericToolEntryDetails value={genericDetails} /> : null;
+  return details.genericDetail ? <GenericToolEntryDetails value={details.genericDetail} /> : null;
 }
 
-function CommandEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
-  const command = workEntry.command ?? workEntry.rawCommand ?? null;
-  const rawCommand =
-    workEntry.rawCommand && workEntry.rawCommand !== command ? workEntry.rawCommand : null;
-  const hasStreamOutput =
-    hasRenderableCommandOutput(workEntry.stdout) || hasRenderableCommandOutput(workEntry.stderr);
-
+function CommandEntryDetails({ details }: { details: DerivedCommandWorkEntryDetails }) {
   return (
     <div className="mt-2 ms-2 space-y-2 border-s border-border/45 ps-3 pt-0.5">
-      {command && (
+      {details.command && (
         <ToolDetailBlock title="Command" mono>
-          {command}
+          {details.command}
         </ToolDetailBlock>
       )}
-      {rawCommand && (
+      {details.rawCommand && (
         <ToolDetailBlock title="Raw command" mono>
-          {rawCommand}
+          {details.rawCommand}
         </ToolDetailBlock>
       )}
       <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground/70">
         <span className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5">
-          Exit code {workEntry.exitCode ?? "unknown"}
+          Exit code {details.exitCodeLabel}
         </span>
         <span className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5">
-          Duration{" "}
-          {workEntry.durationMs !== undefined ? formatDuration(workEntry.durationMs) : "unknown"}
+          Duration {details.durationLabel}
         </span>
       </div>
-      {hasRenderableCommandOutput(workEntry.stdout) ? (
-        <CommandOutputBlock title="Stdout" value={workEntry.stdout} />
-      ) : null}
-      {hasRenderableCommandOutput(workEntry.stderr) ? (
-        <CommandOutputBlock title="Stderr" value={workEntry.stderr} tone="error" />
-      ) : null}
-      {!hasStreamOutput && hasRenderableCommandOutput(workEntry.output) ? (
-        <CommandOutputBlock title="Output" value={workEntry.output} />
-      ) : null}
+      {details.outputs.map((output) => (
+        <CommandOutputBlock
+          key={output.title}
+          title={output.title}
+          value={output.value}
+          {...(output.tone ? { tone: output.tone } : {})}
+        />
+      ))}
     </div>
   );
 }
 
 function CommandOutputBlock(props: { title: string; value: string; tone?: "default" | "error" }) {
   const [showFull, setShowFull] = useState(false);
-  const lines = useMemo(() => getRenderableCommandOutputLines(props.value), [props.value]);
-  const isTruncated = lines.length > COMMAND_OUTPUT_TAIL_LINES;
+  const outputDisplay = useMemo(
+    () => deriveCommandOutputDisplay({ value: props.value, showFull }),
+    [props.value, showFull],
+  );
+  const isTruncated = outputDisplay.isTruncated;
   const toggleLabel = `${showFull ? "Collapse" : "Expand"} ${props.title}`;
-  const visibleValue =
-    showFull || !isTruncated
-      ? lines.join("\n")
-      : lines.slice(-COMMAND_OUTPUT_TAIL_LINES).join("\n");
-  const suffix = isTruncated
-    ? showFull
-      ? `${lines.length.toLocaleString()} lines`
-      : `last ${COMMAND_OUTPUT_TAIL_LINES} of ${lines.length.toLocaleString()} lines`
-    : `${lines.length.toLocaleString()} line${lines.length === 1 ? "" : "s"}`;
 
   return (
     <div className="space-y-1">
@@ -1692,7 +1587,7 @@ function CommandOutputBlock(props: { title: string; value: string; tone?: "defau
         }}
       >
         <span>{props.title}</span>
-        <span className="normal-case tracking-normal">({suffix})</span>
+        <span className="normal-case tracking-normal">({outputDisplay.suffix})</span>
       </button>
       <button
         type="button"
@@ -1711,42 +1606,38 @@ function CommandOutputBlock(props: { title: string; value: string; tone?: "defau
           }
         }}
       >
-        {visibleValue}
+        {outputDisplay.visibleValue}
       </button>
     </div>
   );
 }
 
-function FileChangeEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
+function FileChangeEntryDetails({ details }: { details: DerivedFileChangeWorkEntryDetails }) {
   const ctx = use(TimelineRowCtx);
   const renderablePatch = getRenderablePatch(
-    workEntry.patch,
-    `tool-file-change:${workEntry.id}:${ctx.resolvedTheme}`,
+    details.patch,
+    `tool-file-change:${details.id}:${ctx.resolvedTheme}`,
   );
   const hasInlineDiff = renderablePatch?.kind === "files";
-  const changedFilesWithoutInlineDiff = hasInlineDiff
-    ? filterChangedFilesWithoutInlineDiff(
-        workEntry.changedFiles,
-        renderablePatch.files.map(resolveFileDiffPath),
-      )
-    : (workEntry.changedFiles ?? []);
+  const displayFiles = deriveFileChangeDisplayFiles({
+    changedFiles: details.changedFiles,
+    inlineDiffPaths: hasInlineDiff ? renderablePatch.files.map(resolveFileDiffPath) : [],
+    workspaceRoot: ctx.workspaceRoot,
+  });
 
   return (
     <div className="mt-2 ms-2 space-y-2 border-s border-border/45 ps-3 pt-0.5">
-      {changedFilesWithoutInlineDiff.length > 0 && (
+      {displayFiles.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {changedFilesWithoutInlineDiff.map((filePath) => {
-            const displayPath = formatWorkspaceRelativePath(filePath, ctx.workspaceRoot);
-            return (
-              <span
-                key={`${workEntry.id}:expanded-file:${filePath}`}
-                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
-                title={displayPath}
-              >
-                {displayPath}
-              </span>
-            );
-          })}
+          {displayFiles.map((file) => (
+            <span
+              key={`${details.id}:expanded-file:${file.path}`}
+              className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+              title={file.displayPath}
+            >
+              {file.displayPath}
+            </span>
+          ))}
         </div>
       )}
       {hasInlineDiff &&
@@ -1757,7 +1648,7 @@ function FileChangeEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry })
             renderCustomHeader={(renderedFileDiff) => (
               <InlineFileDiffHeader
                 fileDiff={renderedFileDiff}
-                changedFiles={workEntry.changedFiles}
+                changedFiles={details.changedFiles}
                 workspaceRoot={ctx.workspaceRoot}
               />
             )}
@@ -1854,8 +1745,8 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const entryIconName = showWarningIndicator ? "x" : workEntryIconName(workEntry);
-  const heading = toolWorkEntryHeading(workEntry);
-  const rawPreview = workEntryPreview(workEntry, workspaceRoot);
+  const heading = deriveToolWorkEntryHeading(workEntry);
+  const rawPreview = deriveWorkEntryPreview(workEntry, workspaceRoot);
   const preview =
     rawPreview &&
     normalizeCompactToolLabel(rawPreview).toLowerCase() ===
@@ -1863,7 +1754,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       ? null
       : rawPreview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
-  const canExpand = hasExpandableWorkEntryDetails(workEntry, workspaceRoot);
+  const details = useMemo(
+    () => deriveExpandableWorkEntryDetails(workEntry, workspaceRoot),
+    [workEntry, workspaceRoot],
+  );
+  const canExpand = details !== null;
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -1990,7 +1885,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       </div>
       {expanded && canExpand ? (
         <div className="cursor-default" onClick={stopRowToggle} onPointerDown={stopRowToggle}>
-          <ToolEntryDetails workEntry={workEntry} workspaceRoot={workspaceRoot} />
+          <ToolEntryDetails details={details} />
         </div>
       ) : null}
     </div>

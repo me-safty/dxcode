@@ -4,7 +4,12 @@ import {
   buildSupplementalToolDetailBody,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
+  deriveCommandOutputDisplay,
+  deriveExpandableWorkEntryDetails,
+  deriveFileChangeDisplayFiles,
   deriveMessagesTimelineRows,
+  deriveToolWorkEntryHeading,
+  deriveWorkEntryPreview,
   filterChangedFilesWithoutInlineDiff,
   getRenderableCommandOutputLines,
   hasCommandWorkEntryDetails,
@@ -498,6 +503,88 @@ describe("activity detail expansion", () => {
     ).toBe("exit code 0");
   });
 
+  it("derives command details without React-local command stream decisions", () => {
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "command_execution",
+        command: "vp test",
+        rawCommand: "pnpm exec vp test",
+        stdout: "passed\n",
+        stderr: "warning\n",
+        output: "legacy output that should not render when streams exist",
+        exitCode: 0,
+        durationMs: 1234,
+        detail: "passed",
+      }),
+      undefined,
+    );
+
+    expect(details?.command).toEqual({
+      command: "vp test",
+      rawCommand: "pnpm exec vp test",
+      exitCodeLabel: "0",
+      durationLabel: "1.2s",
+      outputs: [
+        { title: "Stdout", value: "passed\n" },
+        { title: "Stderr", value: "warning\n", tone: "error" },
+      ],
+    });
+    expect(details?.fileChange).toBeNull();
+    expect(details?.supplementalDetail).toBeNull();
+    expect(details?.genericDetail).toBeNull();
+  });
+
+  it("derives legacy command output only when stdout and stderr are absent", () => {
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "command_execution",
+        command: "vp test",
+        output: "legacy output\n",
+      }),
+      undefined,
+    );
+
+    expect(details?.command?.outputs).toEqual([{ title: "Output", value: "legacy output\n" }]);
+  });
+
+  it("keeps collab-agent rows out of generic command and file detail derivation", () => {
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "collab_agent_tool_call",
+        requestKind: "command",
+        command: "vp test",
+        stdout: "passed",
+        patch: "diff --git a/a b/a\n",
+        changedFiles: ["a"],
+      }),
+      undefined,
+    );
+
+    expect(details?.command).toBeNull();
+    expect(details?.fileChange).toBeNull();
+    expect(details?.genericDetail).toContain("vp test");
+  });
+
+  it("derives generic MCP detail fallback outside command and file detail rows", () => {
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "mcp_tool_call",
+        toolData: {
+          server: "filesystem",
+          name: "read_file",
+          arguments: { path: "package.json" },
+        },
+        detail: "Read package metadata",
+      }),
+      undefined,
+    );
+
+    expect(details?.command).toBeNull();
+    expect(details?.fileChange).toBeNull();
+    expect(details?.genericDetail).toContain("MCP call");
+    expect(details?.genericDetail).toContain("Read package metadata");
+  });
+
   it("keeps changed files not represented by inline diff paths", () => {
     expect(
       filterChangedFilesWithoutInlineDiff(
@@ -518,6 +605,53 @@ describe("activity detail expansion", () => {
     expect(
       filterChangedFilesWithoutInlineDiff(["src/index.ts"], ["apps/web/src/index.ts"]),
     ).toEqual([]);
+  });
+
+  it("derives changed-file display chips after inline diff paths are removed", () => {
+    expect(
+      deriveFileChangeDisplayFiles({
+        changedFiles: [
+          "/Users/example/t3code/apps/web/src/session-logic.ts",
+          "/Users/example/t3code/apps/web/src/components/chat/MessagesTimeline.tsx",
+        ],
+        inlineDiffPaths: ["apps/web/src/session-logic.ts"],
+        workspaceRoot: "/Users/example/t3code",
+      }),
+    ).toEqual([
+      {
+        path: "/Users/example/t3code/apps/web/src/components/chat/MessagesTimeline.tsx",
+        displayPath: "t3code/apps/web/src/components/chat/MessagesTimeline.tsx",
+      },
+    ]);
+  });
+
+  it("derives command output tail display state", () => {
+    const value = Array.from({ length: 45 }, (_, index) => `line ${index + 1}`).join("\n");
+
+    expect(deriveCommandOutputDisplay({ value, showFull: false })).toEqual({
+      isTruncated: true,
+      visibleValue: Array.from({ length: 40 }, (_, index) => `line ${index + 6}`).join("\n"),
+      suffix: "last 40 of 45 lines",
+    });
+    expect(deriveCommandOutputDisplay({ value, showFull: true }).suffix).toBe("45 lines");
+  });
+
+  it("derives work entry headings and compact previews", () => {
+    const workEntry = buildWorkLogEntry({
+      label: "Ran command complete",
+      command: "vp test",
+    });
+
+    expect(deriveToolWorkEntryHeading(workEntry)).toBe("Ran command");
+    expect(deriveWorkEntryPreview(workEntry, undefined)).toBe("vp test");
+    expect(
+      deriveWorkEntryPreview(
+        buildWorkLogEntry({
+          changedFiles: ["/Users/example/t3code/apps/web/src/session-logic.ts", "README.md"],
+        }),
+        "/Users/example/t3code",
+      ),
+    ).toBe("t3code/apps/web/src/session-logic.ts +1 more");
   });
 });
 
