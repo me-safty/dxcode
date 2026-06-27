@@ -49,6 +49,7 @@ import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
+import { applyWslEnableSelection } from "./ConnectionsSettings.logic";
 import { resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
 import {
   SettingsPageContainer,
@@ -2971,18 +2972,14 @@ export function ConnectionsSettings() {
       const nextDistro = pendingWslChange.nextDistro;
       setPendingWslChange(null);
       const persistedDistro = desktopWslState?.distro ?? null;
-      const distroChanged = persistedDistro !== nextDistro;
-      void applyWslSettingChange(async () => {
-        if (distroChanged) {
-          await desktopBridge.setWslDistro(nextDistro);
-        }
-        const enabled = await desktopBridge.setWslBackendEnabled(true);
-        if (mode === "wsl-only") {
-          // Relaunches.
-          return await desktopBridge.setWslOnly(true);
-        }
-        return enabled;
-      });
+      void applyWslSettingChange(() =>
+        applyWslEnableSelection({
+          bridge: desktopBridge,
+          mode,
+          nextDistro,
+          persistedDistro,
+        }),
+      );
     },
     [applyWslSettingChange, desktopBridge, desktopWslState, pendingWslChange],
   );
