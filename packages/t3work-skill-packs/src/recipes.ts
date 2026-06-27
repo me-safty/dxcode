@@ -10,6 +10,7 @@ import {
   SHAPE_NEXT_BACKLOG_SLICE_ACTION_VIEW,
   SUMMARIZE_PROJECT_RISK_ACTION_VIEW,
   TECHNICAL_IMPLEMENTATION_PLAN_ACTION_VIEW,
+  TSHIRT_SIZE_EPIC_ACTION_VIEW,
   UNBLOCK_BLOCKED_TICKET_ACTION_VIEW,
   UNBLOCK_MY_WORK_ACTION_VIEW,
 } from "./recipeActionViews.ts";
@@ -750,6 +751,44 @@ const BUNDLED_RECIPES: ReadonlyArray<BundledT3WorkRecipe> = [
     artifactKinds: ["escalation-summary", "impact-summary"],
     actionFamilies: ["support"],
     rankHint: 24,
+  }),
+  createBundledRecipe({
+    id: "tshirt-size-epic",
+    title: "T-shirt-size this epic",
+    manifestDisplayName: "T-shirt-size {{selectedWorkLabel}}",
+    shortDescription:
+      "Estimate the epic effort as XS/S/M/L/XL with rationale, confidence, and the main risk drivers.",
+    actionViewTemplate: TSHIRT_SIZE_EPIC_ACTION_VIEW,
+    surfaces: ["workitem.detail.sidepanel", "project.dashboard.backlog"],
+    promptTemplate:
+      "T-shirt-size the epic {{selectedWorkLabel}}. First confirm the epic (title, key, and any existing children/stories). Then produce a single T-shirt size (XS, S, M, L, or XL) with a short rationale grounded in the epic's scope, acceptance criteria, and known unknowns. Note your confidence (low/medium/high) and the main risk drivers that could move the size up. If the epic has no stories or subtasks yet, recommend running the shape-next-backlog-slice recipe to decompose it before implementation. Persist the estimate as a durable estimation-notes artifact.",
+    icon: "ruler",
+    appliesTo: {
+      jiraIssueTypes: ["Epic"],
+      // Surface preferentially when the epic is un-sized (no children yet). Stays
+      // visible when epicHasChildren is unknown (e.g. backlog dashboard surface).
+      requiresNoChildren: true,
+    },
+    requiredContext: [
+      { key: "ticket.summary", description: "Epic summary" },
+      {
+        key: "ticket.context.pre-implementation",
+        description: "Epic is still before implementation or PR work starts",
+        optional: true,
+      },
+    ],
+    skillRef: { id: "delivery.tshirt-size-epic" },
+    outputPreference: "comment",
+    artifactKinds: ["estimation-notes", "open-questions"],
+    actionFamilies: ["delivery", "product", "engineering"],
+    rankHint: 22,
+    suggestedActions: [
+      {
+        id: "shape-next-backlog-slice",
+        label: "Shape the next backlog slice",
+        recipeId: "shape-next-backlog-slice",
+      },
+    ],
   }),
 ] as const;
 

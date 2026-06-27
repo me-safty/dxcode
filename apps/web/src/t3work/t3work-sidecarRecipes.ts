@@ -54,6 +54,10 @@ export function buildT3workSidecarRecipeQuickStarts(
   const availableContextKeys = buildAvailableContextKeys(input);
   const templateValues = buildBundledRecipeTemplateValues(input);
   const launchContext = buildT3workActionRecipeLaunchContext(renderContext);
+  const epicHasChildren =
+    input.jiraIssueType && input.jiraIssueType.toLowerCase() === "epic"
+      ? (input.ticketContext?.relationships?.childKeys?.length ?? 0) > 0
+      : undefined;
   const matches = matchRecipes(listBundledT3WorkRecipes(), {
     activeProject: input.project,
     selectedResource: null,
@@ -66,6 +70,7 @@ export function buildT3workSidecarRecipeQuickStarts(
     enabledSkillPacks,
     profile: toRecipeProfileContext(profile),
     availableContextKeys,
+    ...(epicHasChildren !== undefined ? { epicHasChildren } : {}),
   }).filter((result) => result.missingContext.length === 0);
 
   return buildPinnedQuickStartSelection(matches, input.limit ?? 5).map((result) => {

@@ -28,6 +28,10 @@ export const RecipeApplicability = Schema.Struct({
   brevities: Schema.optional(Schema.Array(RecipeBrevity)),
   guidanceStyles: Schema.optional(Schema.Array(RecipeGuidanceStyle)),
   detailDensities: Schema.optional(Schema.Array(RecipeDetailDensity)),
+  // When true, the recipe hides if the selected epic already has children/stories
+  // (RecipeMatchInput.epicHasChildren === true). Unknown epicHasChildren is permissive
+  // so the recipe still surfaces where the signal is not yet threaded through.
+  requiresNoChildren: Schema.optional(Schema.Boolean),
 });
 export type RecipeApplicability = typeof RecipeApplicability.Type;
 
@@ -93,6 +97,10 @@ export type RecipeMatchInput = {
   readonly enabledSkillPacks: ReadonlyArray<string>;
   readonly profile: RecipeProfileContext;
   readonly availableContextKeys?: ReadonlyArray<string>;
+  // Runtime signal: true when the selected epic already has child tickets/stories.
+  // Undefined when unknown (e.g. dashboard surface with no selected epic); recipes
+  // gating on requiresNoChildren stay visible in that case.
+  readonly epicHasChildren?: boolean | null;
 };
 
 export type RecipeMatchResult = {
@@ -273,6 +281,10 @@ export function isRecipeApplicable(recipe: Recipe, input: RecipeMatchInput): boo
     recipe.appliesTo.jiraIssueTypes.length > 0 &&
     (!input.jiraIssueType || !recipe.appliesTo.jiraIssueTypes.includes(input.jiraIssueType))
   ) {
+    return false;
+  }
+
+  if (recipe.appliesTo.requiresNoChildren === true && input.epicHasChildren === true) {
     return false;
   }
 

@@ -323,3 +323,41 @@ export default function Action() {
   );
 }
 `;
+
+export const TSHIRT_SIZE_EPIC_ACTION_VIEW = `
+export default function Action() {
+  return (
+    <RecipeAction
+      title="T-shirt-size this epic"
+      icon="ruler"
+      description="Produce an XS/S/M/L/XL estimate with rationale, confidence, and the main risk drivers."
+    >
+      <LaunchOptionGroup
+        name="sizingLens"
+        label="Sizing lens"
+        defaultValue="evidence"
+        options={[
+          {
+            value: "evidence",
+            label: "Evidence-based",
+            promptText:
+              "Ground the size in scope, acceptance criteria, and known unknowns before naming a size.",
+          },
+          {
+            value: "gut",
+            label: "Gut check",
+            promptText:
+              "Lead with a fast gut size, then briefly justify it from the epic scope.",
+          },
+          {
+            value: "comparative",
+            label: "Comparative",
+            promptText:
+              "Compare against similar past epics when available, and size relative to them.",
+          },
+        ]}
+      />
+    </RecipeAction>
+  );
+}
+`;
