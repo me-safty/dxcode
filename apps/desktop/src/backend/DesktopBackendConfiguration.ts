@@ -254,7 +254,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     return {
       _tag: "Failed",
       reason: `missing server entry at ${input.windowsEntryPath}`,
-      fatal: false,
+      fatal: true,
     } as const;
   }
 

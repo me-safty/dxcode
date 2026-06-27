@@ -414,7 +414,7 @@ const ensureNodePtyImpl = (
         toolchainCheck.transportFailure,
       );
       if (toolchainTransportFailure !== null) {
-        return { ok: false, reason: toolchainTransportFailure, fatal: false } as const;
+        return { ok: false, reason: toolchainTransportFailure, fatal: true } as const;
       }
       const report = parseToolchainReport(toolchainCheck.stdout);
       const reason =
@@ -465,7 +465,7 @@ const ensureNodePtyImpl = (
       toolchainCheck.transportFailure,
     );
     if (toolchainTransportFailure !== null) {
-      return { ok: false, reason: toolchainTransportFailure, fatal: false } as const;
+      return { ok: false, reason: toolchainTransportFailure, fatal: true } as const;
     }
     const report = parseToolchainReport(toolchainCheck.stdout);
 
@@ -509,7 +509,7 @@ const ensureNodePtyImpl = (
     );
     const buildTransportFailure = formatWslShellTransportFailureReason(build.transportFailure);
     if (buildTransportFailure !== null) {
-      return { ok: false, reason: buildTransportFailure, fatal: false } as const;
+      return { ok: false, reason: buildTransportFailure, fatal: true } as const;
     }
     if (build.exitCode === 0) return { ok: true, nodePath, resolvedPath } as const;
     const trimmedTail = `${build.stdout}${build.stderr}`.trim().slice(-500);
