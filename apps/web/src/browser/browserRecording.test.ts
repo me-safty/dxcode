@@ -286,7 +286,9 @@ describe("browser recording", () => {
 
     finishStartingScreencast?.();
     await rejectedStart;
-    await stopBrowserRecording("recording-tab");
+    const cleanupResult = await stopBrowserRecording("recording-tab");
+    expect(cleanupResult).toBeNull();
+    expect(save).not.toHaveBeenCalled();
     expect(events.at(-1)).toBe("clear");
   });
 });

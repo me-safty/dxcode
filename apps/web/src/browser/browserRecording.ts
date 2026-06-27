@@ -87,7 +87,7 @@ type BrowserRecordingLifecycle =
   | { readonly phase: "recording" }
   | {
       readonly phase: "stopping";
-      readonly stopPromise: Promise<DesktopPreviewRecordingArtifact>;
+      readonly stopPromise: Promise<DesktopPreviewRecordingArtifact | null>;
     };
 
 interface ActiveRecording {
@@ -417,6 +417,19 @@ const finalizeBrowserRecording = async (
   return result.artifact;
 };
 
+const discardBrowserRecording = async (
+  bridge: NonNullable<typeof previewBridge>,
+  recording: ActiveRecording,
+): Promise<null> => {
+  try {
+    await bridge.recording.stopScreencast(recording.tabId).catch(() => undefined);
+    await stopMediaRecorder(recording.recorder).catch(() => undefined);
+    return null;
+  } finally {
+    clearActiveRecording(recording);
+  }
+};
+
 export function stopBrowserRecording(
   tabId: string,
 ): Promise<DesktopPreviewRecordingArtifact | null> {
@@ -430,7 +443,7 @@ export function stopBrowserRecording(
     .catch((error) => {
       if (isStartupWaitTimeout(error) && active === recording) {
         const cleanupAfterStartup = recording.startupSettled.then(() =>
-          finalizeBrowserRecording(bridge, recording),
+          discardBrowserRecording(bridge, recording),
         );
         recording.lifecycle = { phase: "stopping", stopPromise: cleanupAfterStartup };
         void cleanupAfterStartup.catch(() => undefined);
