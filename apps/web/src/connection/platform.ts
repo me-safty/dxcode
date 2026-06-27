@@ -44,7 +44,10 @@ import { FetchHttpClient } from "effect/unstable/http";
 
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
-import { readPrimaryEnvironmentTarget } from "../environments/primary/target";
+import {
+  readPrimaryEnvironmentTarget,
+  type PrimaryEnvironmentTarget,
+} from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -282,14 +285,7 @@ const capabilitiesLayer = Layer.effectContext(
 
 const loadPrimaryConnectionRegistration = Effect.fn(
   "web.connectionPlatform.loadPrimaryConnectionRegistration",
-)(function* () {
-  const resolved = readPrimaryEnvironmentTarget();
-  if (resolved === null) {
-    return yield* new ConnectionBlockedError({
-      reason: "configuration",
-      detail: "Unable to resolve the primary environment endpoint.",
-    });
-  }
+)(function* (resolved: PrimaryEnvironmentTarget) {
   const descriptor = yield* fetchRemoteEnvironmentDescriptor({
     httpBaseUrl: resolved.target.httpBaseUrl,
   }).pipe(Effect.provide(primaryEnvironmentHttpLayer), Effect.mapError(mapRemoteEnvironmentError));
@@ -392,6 +388,33 @@ interface CachedPlatformRegistration {
   readonly refreshAtEpochMs?: number;
 }
 
+export type PrimaryEnvironmentTargetRead =
+  | {
+      readonly _tag: "Success";
+      readonly target: PrimaryEnvironmentTarget | null;
+    }
+  | {
+      readonly _tag: "Failure";
+      readonly cause: unknown;
+    };
+
+export function readPrimaryEnvironmentTargetResult(
+  readTarget: () => PrimaryEnvironmentTarget | null = readPrimaryEnvironmentTarget,
+): PrimaryEnvironmentTargetRead {
+  try {
+    return { _tag: "Success", target: readTarget() };
+  } catch (cause) {
+    return { _tag: "Failure", cause };
+  }
+}
+
+export function primaryRegistrationToRetainAfterTopologyRead(
+  previous: ReadonlyMap<string, CachedPlatformRegistration>,
+  topologyRead: PrimaryEnvironmentTargetRead,
+): CachedPlatformRegistration | undefined {
+  return topologyRead._tag === "Failure" ? previous.get(PRIMARY_LOCAL_ENVIRONMENT_ID) : undefined;
+}
+
 export function canReuseCachedPlatformRegistration(
   cached: CachedPlatformRegistration,
   signature: string,
@@ -450,8 +473,22 @@ const platformConnectionSourceLayer = Layer.effect(
       const next = new Map<string, CachedPlatformRegistration>();
       const registrations: Array<PlatformConnectionRegistration> = [];
 
-      const primaryTarget = readPrimaryEnvironmentTarget();
-      if (primaryTarget !== null) {
+      const primaryTopologyRead = readPrimaryEnvironmentTargetResult();
+      const retainedPrimary = primaryRegistrationToRetainAfterTopologyRead(
+        previous,
+        primaryTopologyRead,
+      );
+      if (retainedPrimary !== undefined) {
+        next.set(PRIMARY_LOCAL_ENVIRONMENT_ID, retainedPrimary);
+        registrations.push(retainedPrimary.registration);
+      }
+
+      if (primaryTopologyRead._tag === "Failure") {
+        yield* Effect.logWarning("Could not read the primary environment topology.", {
+          cause: primaryTopologyRead.cause,
+        });
+      } else if (primaryTopologyRead.target !== null) {
+        const primaryTarget = primaryTopologyRead.target;
         const signature = `primary|${primaryTarget.target.httpBaseUrl}|${primaryTarget.target.wsBaseUrl}`;
         const cached = previous.get(PRIMARY_LOCAL_ENVIRONMENT_ID);
         if (
@@ -461,7 +498,7 @@ const platformConnectionSourceLayer = Layer.effect(
           next.set(PRIMARY_LOCAL_ENVIRONMENT_ID, cached);
           registrations.push(cached.registration);
         } else {
-          const built = yield* loadPrimaryConnectionRegistration().pipe(
+          const built = yield* loadPrimaryConnectionRegistration(primaryTarget).pipe(
             Effect.tapError((error) =>
               Effect.logWarning("Could not discover the primary environment.", { error }),
             ),
