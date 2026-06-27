@@ -32,8 +32,8 @@ describe("resolveWslProjectSelection", () => {
   it("routes a UNC path to the matching WSL backend", () => {
     expect(
       resolveWslProjectSelection("\\\\wsl.localhost\\Ubuntu\\home\\theo\\repo", [
-        { environmentId: "env-debian", backendId: "wsl:Debian" },
-        { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu" },
+        { environmentId: "env-debian", backendId: "wsl:Debian", runningDistro: null },
+        { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu", runningDistro: null },
       ]),
     ).toEqual({
       distro: "Ubuntu",
@@ -45,7 +45,7 @@ describe("resolveWslProjectSelection", () => {
   it("does not route to the only WSL backend when its distro is unknown", () => {
     expect(
       resolveWslProjectSelection("\\\\wsl.localhost\\Ubuntu\\home\\theo\\repo", [
-        { environmentId: "env-wsl", backendId: "wsl:default" },
+        { environmentId: "env-wsl", backendId: "wsl:default", runningDistro: null },
       ]),
     ).toBeNull();
   });
@@ -53,7 +53,7 @@ describe("resolveWslProjectSelection", () => {
   it("does not route to a sole WSL backend for a different distro", () => {
     expect(
       resolveWslProjectSelection("\\\\wsl.localhost\\Debian\\home\\theo\\repo", [
-        { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu" },
+        { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu", runningDistro: null },
       ]),
     ).toBeNull();
   });
@@ -61,9 +61,26 @@ describe("resolveWslProjectSelection", () => {
   it("does not guess when multiple WSL backends fail to match", () => {
     expect(
       resolveWslProjectSelection("\\\\wsl.localhost\\Fedora\\home\\theo\\repo", [
-        { environmentId: "env-debian", backendId: "wsl:Debian" },
-        { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu" },
+        { environmentId: "env-debian", backendId: "wsl:Debian", runningDistro: null },
+        { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu", runningDistro: null },
       ]),
+    ).toBeNull();
+  });
+
+  it("routes a default backend only to the distro used by its running process", () => {
+    const candidates = [
+      { environmentId: "env-wsl", backendId: "wsl:default", runningDistro: "Debian" },
+    ];
+
+    expect(
+      resolveWslProjectSelection("\\\\wsl.localhost\\Debian\\home\\theo\\repo", candidates),
+    ).toEqual({
+      distro: "Debian",
+      environmentId: "env-wsl",
+      linuxPath: "/home/theo/repo",
+    });
+    expect(
+      resolveWslProjectSelection("\\\\wsl.localhost\\Ubuntu\\home\\theo\\repo", candidates),
     ).toBeNull();
   });
 });
@@ -82,16 +99,22 @@ describe("applyWslEnvironmentConfiguration", () => {
   it("preserves a live default-distro backend instance id", () => {
     expect(
       applyWslEnvironmentConfiguration(
-        [{ environmentId: "env-wsl", backendId: "wsl:default" }],
+        [
+          {
+            environmentId: "env-wsl",
+            backendId: "wsl:default",
+            runningDistro: "Debian",
+          },
+        ],
         "env-primary",
         ubuntuConfiguration,
       ),
-    ).toEqual([{ environmentId: "env-wsl", backendId: "wsl:default" }]);
+    ).toEqual([{ environmentId: "env-wsl", backendId: "wsl:default", runningDistro: "Debian" }]);
   });
 
-  it("does not route a newly reported default distro to a live default sentinel", () => {
+  it("does not replace a live default backend's running distro from current configuration", () => {
     const candidates = applyWslEnvironmentConfiguration(
-      [{ environmentId: "env-wsl", backendId: "wsl:default" }],
+      [{ environmentId: "env-wsl", backendId: "wsl:default", runningDistro: "Debian" }],
       "env-primary",
       ubuntuConfiguration,
     );
@@ -99,6 +122,13 @@ describe("applyWslEnvironmentConfiguration", () => {
     expect(
       resolveWslProjectSelection("\\\\wsl.localhost\\Ubuntu\\home\\theo\\repo", candidates),
     ).toBeNull();
+    expect(
+      resolveWslProjectSelection("\\\\wsl.localhost\\Debian\\home\\theo\\repo", candidates),
+    ).toEqual({
+      distro: "Debian",
+      environmentId: "env-wsl",
+      linuxPath: "/home/theo/repo",
+    });
   });
 
   it("represents an explicitly configured WSL-only primary by its distro", () => {
@@ -108,7 +138,7 @@ describe("applyWslEnvironmentConfiguration", () => {
         wslOnly: true,
         distro: "ubuntu",
       }),
-    ).toEqual([{ environmentId: "env-primary", backendId: "wsl:Ubuntu" }]);
+    ).toEqual([{ environmentId: "env-primary", backendId: "wsl:Ubuntu", runningDistro: "Ubuntu" }]);
   });
 
   it("preserves default tracking for a WSL-only primary", () => {
@@ -117,7 +147,7 @@ describe("applyWslEnvironmentConfiguration", () => {
         ...ubuntuConfiguration,
         wslOnly: true,
       }),
-    ).toEqual([{ environmentId: "env-primary", backendId: "wsl:default" }]);
+    ).toEqual([{ environmentId: "env-primary", backendId: "wsl:default", runningDistro: null }]);
   });
 
   it("does not represent the primary environment for a missing configured distro", () => {

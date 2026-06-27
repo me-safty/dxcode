@@ -271,6 +271,10 @@ export interface DesktopEnvironmentBootstrap {
   // routed to a specific backend reopen against the same one.
   id: string;
   label: string;
+  // Concrete WSL distro used by the current backend run. This stays separate
+  // from id because a default-tracking instance keeps the stable
+  // "wsl:default" IPC target while each run launches a specific distro.
+  runningDistro?: string | null;
   httpBaseUrl: string | null;
   wsBaseUrl: string | null;
   bootstrapToken?: string;
@@ -279,6 +283,7 @@ export interface DesktopEnvironmentBootstrap {
 export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
+  runningDistro: Schema.optionalKey(Schema.NullOr(Schema.String)),
   httpBaseUrl: Schema.NullOr(Schema.String),
   wsBaseUrl: Schema.NullOr(Schema.String),
   bootstrapToken: Schema.optionalKey(Schema.String),

@@ -51,9 +51,11 @@ const serverExposureLayer = Layer.succeed(DesktopServerExposure.DesktopServerExp
 function makeEnvironmentLayer(
   baseDir: string,
   options?: {
+    readonly appPath?: string;
     readonly isPackaged?: boolean;
     readonly devServerUrl?: string;
     readonly platform?: NodeJS.Platform;
+    readonly resourcesPath?: string;
   },
 ) {
   return DesktopEnvironment.layer({
@@ -62,9 +64,9 @@ function makeEnvironmentLayer(
     platform: options?.platform ?? "darwin",
     processArch: "x64",
     appVersion: "1.2.3",
-    appPath: "/repo",
+    appPath: options?.appPath ?? "/repo",
     isPackaged: options?.isPackaged ?? true,
-    resourcesPath: "/missing/resources",
+    resourcesPath: options?.resourcesPath ?? "/missing/resources",
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
@@ -161,6 +163,65 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(wsl.bootstrap.desktopBootstrapToken, primary.bootstrap.desktopBootstrapToken);
       }),
     ),
+  );
+
+  it.effect("resolveWsl pins a default-tracking run to the concrete default distro", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-config-test-",
+      });
+      const entryPath = path.join(baseDir, "app.asar.unpacked/apps/server/dist/bin.mjs");
+      yield* fileSystem.makeDirectory(path.dirname(entryPath), { recursive: true });
+      yield* fileSystem.writeFileString(entryPath, "");
+
+      const observedDistros: Array<string | null> = [];
+      const config = yield* Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        return yield* configuration.resolveWsl({ port: 5000, distro: null });
+      }).pipe(
+        Effect.provide(
+          DesktopBackendConfiguration.layer.pipe(
+            Layer.provideMerge(serverExposureLayer),
+            Layer.provideMerge(DesktopAppSettings.layerTest()),
+            Layer.provideMerge(
+              DesktopWslEnvironment.layerTest({
+                isAvailable: true,
+                distros: [
+                  { name: "Debian", isDefault: false, version: 2 },
+                  { name: "Ubuntu", isDefault: true, version: 2 },
+                ],
+                windowsToWslPath: (distro) => {
+                  observedDistros.push(distro);
+                  return Option.some("/repo/apps/server/dist/bin.mjs");
+                },
+                ensureNodePty: (distro) => {
+                  observedDistros.push(distro);
+                  return { ok: true, nodePath: "/usr/bin/node" };
+                },
+                getDistroIp: (distro) => {
+                  observedDistros.push(distro);
+                  return Option.some("172.27.0.99");
+                },
+              }),
+            ),
+            Layer.provideMerge(
+              makeEnvironmentLayer(baseDir, {
+                appPath: baseDir,
+                platform: "win32",
+                resourcesPath: baseDir,
+              }),
+            ),
+          ),
+        ),
+      );
+
+      assert.equal(config.runningDistro, "Ubuntu");
+      assert.deepEqual(config.args.slice(0, 2), ["-d", "Ubuntu"]);
+      assert.deepEqual(observedDistros, ["Ubuntu", "Ubuntu", "Ubuntu"]);
+      assert.isTrue(Option.isNone(config.preflightFailure));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.effect("resolvePrimary and resolveWsl share one token under concurrent resolution", () =>

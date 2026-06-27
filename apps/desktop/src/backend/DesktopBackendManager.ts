@@ -86,6 +86,9 @@ export interface DesktopBackendStartConfig {
   readonly httpBaseUrl: URL;
   readonly captureOutput: boolean;
   readonly preflightFailure: Option.Option<PreflightFailure>;
+  // Present for a WSL run after the configured/default distro has been
+  // resolved to the concrete distro passed to wsl.exe.
+  readonly runningDistro?: string;
 }
 
 // A preflight failure records whether it is fatal. Transient failures (WSL

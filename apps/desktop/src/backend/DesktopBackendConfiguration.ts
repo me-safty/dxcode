@@ -171,6 +171,7 @@ interface SharedBootstrapInput {
 
 interface WslPreflightOutcome {
   readonly _tag: "Ready";
+  readonly runningDistro: string;
   readonly linuxEntryPath: string;
   // Absolute path to the node binary the preflight validated after the shared
   // remote resolver repaired PATH. The launch must use this exact path so it
@@ -224,17 +225,19 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
   }
 
   const installedDistros = distroProbe.distros;
-  const distroAvailable = input.distro
-    ? installedDistros.some(
+  const runningDistro = input.distro
+    ? (installedDistros.find(
         (installed) => installed.name.toLowerCase() === input.distro?.toLowerCase(),
-      )
-    : installedDistros.length > 0;
-  if (!distroAvailable) {
+      )?.name ?? null)
+    : (installedDistros.find((installed) => installed.isDefault)?.name ?? null);
+  if (runningDistro === null) {
     return {
       _tag: "Failed",
       reason: input.distro
         ? `WSL distro is not installed: ${input.distro}`
-        : "WSL has no installed distributions",
+        : installedDistros.length === 0
+          ? "WSL has no installed distributions"
+          : "WSL has no default distribution",
       fatal: true,
     } as const;
   }
@@ -250,7 +253,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     } as const;
   }
 
-  const linuxEntry = yield* wslEnv.windowsToWslPath(input.distro, input.windowsEntryPath);
+  const linuxEntry = yield* wslEnv.windowsToWslPath(runningDistro, input.windowsEntryPath);
   if (Option.isNone(linuxEntry)) {
     return {
       _tag: "Failed",
@@ -259,7 +262,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     } as const;
   }
 
-  const nodePtyResult = yield* wslEnv.ensureNodePty(input.distro, input.windowsRepoRoot, {
+  const nodePtyResult = yield* wslEnv.ensureNodePty(runningDistro, input.windowsRepoRoot, {
     allowBuild: input.allowBuild,
     nodeEngineRange: serverPackageJson.engines.node,
   });
@@ -273,6 +276,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
 
   return {
     _tag: "Ready",
+    runningDistro,
     linuxEntryPath: linuxEntry.value,
     nodePath: nodePtyResult.nodePath,
   } as const;
@@ -382,28 +386,6 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   // LAN; the primary owns LAN exposure when the user opts in.
   const wslBindHost = "0.0.0.0";
 
-  // Resolve the WSL distro's IPv4 address (eth0). Falls back to
-  // 127.0.0.1 + wslhost forwarding when the IP probe fails: that
-  // gives us the same behavior as before this change, so a missing
-  // WSL setup doesn't regress instead of just degrading.
-  //
-  // In mirrored mode (`networkingMode=mirrored` in .wslconfig) the
-  // distro shares the Windows network stack, so `hostname -I` returns
-  // the Windows host's IP (e.g. 192.168.0.64). Windows can't route a
-  // packet to its own NIC address and have it loop back to a WSL
-  // listener — it just times out. Loopback DOES work in mirrored mode,
-  // though, so detect this case by checking whether the distro IP
-  // matches one of our own interfaces and fall back to 127.0.0.1.
-  const distroIp = yield* wslEnvironment.getDistroIp(input.distro);
-  const usesSharedNetworkStack = Option.match(distroIp, {
-    onNone: () => false,
-    onSome: (ip) => isLocalHostIpv4(ip),
-  });
-  const rendererHost = usesSharedNetworkStack
-    ? "127.0.0.1"
-    : Option.getOrElse(distroIp, () => "127.0.0.1");
-  const httpBaseUrl = new URL(`http://${rendererHost}:${input.port}`);
-
   const bootstrap = {
     mode: "desktop" as const,
     noBrowser: true,
@@ -448,7 +430,26 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     allowBuild: !environment.isPackaged,
   });
 
-  const distroArgs = input.distro ? ["-d", input.distro] : [];
+  // Every operation after preflight uses the same concrete distro. In
+  // default-tracking mode this closes the race where the system default
+  // changes between probing and spawning the backend.
+  const runningDistro = preflight._tag === "Ready" ? preflight.runningDistro : null;
+  const distroForConfig = runningDistro ?? input.distro;
+
+  // Resolve the selected distro's IPv4 address. In mirrored mode the distro
+  // reports a host interface, so use loopback instead; a failed probe also
+  // falls back to loopback and preserves the previous behavior.
+  const distroIp = yield* wslEnvironment.getDistroIp(distroForConfig);
+  const usesSharedNetworkStack = Option.match(distroIp, {
+    onNone: () => false,
+    onSome: (ip) => isLocalHostIpv4(ip),
+  });
+  const rendererHost = usesSharedNetworkStack
+    ? "127.0.0.1"
+    : Option.getOrElse(distroIp, () => "127.0.0.1");
+  const httpBaseUrl = new URL(`http://${rendererHost}:${input.port}`);
+
+  const distroArgs = distroForConfig ? ["-d", distroForConfig] : [];
   const forwardedEnv: Record<string, string> = {};
   const forwardedEnvNames: string[] = [];
   for (const name of WSL_FORWARDED_ENV_NAMES) {
@@ -488,6 +489,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     bootstrapDelivery: "stdin" as const,
     httpBaseUrl,
     captureOutput: true,
+    ...(runningDistro !== null ? { runningDistro } : {}),
   };
 
   // Forward the dev-server URL as an explicit CLI flag so the WSL backend's

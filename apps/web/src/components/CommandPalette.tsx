@@ -1595,7 +1595,15 @@ function OpenCommandPaletteDialog(props: {
         applyWslEnvironmentConfiguration(
           environments.flatMap((environment) => {
             const backendId = desktopLocalBackendId(environment.entry.target);
-            return backendId ? [{ environmentId: environment.environmentId, backendId }] : [];
+            if (!backendId) {
+              return [];
+            }
+
+            const bootstrap = desktopLocalBootstraps.find(
+              (candidate) => candidate.httpBaseUrl === environment.displayUrl,
+            );
+            const runningDistro = bootstrap?.runningDistro ?? null;
+            return [{ environmentId: environment.environmentId, backendId, runningDistro }];
           }),
           primaryEnvironmentId,
           desktopWslState ?? null,
@@ -1625,6 +1633,7 @@ function OpenCommandPaletteDialog(props: {
     browseEnvironmentId,
     browseEnvironmentPlatform,
     canOpenProjectFromFileManager,
+    desktopLocalBootstraps,
     environments,
     fileManagerInitialPath,
     handleAddProject,
