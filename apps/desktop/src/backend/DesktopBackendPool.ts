@@ -207,14 +207,26 @@ export const layer = Layer.effect(
     // primary instance uses.
     const factoryContext = yield* Effect.context<BackendInstanceFactoryRequirements>();
 
-    // A fatal WSL preflight failure on the *primary* only happens in wsl-only
-    // mode (the primary is Windows otherwise, and Windows has no preflight).
-    // Surface the reason and fall back to the Windows backend so a window can
-    // still open instead of the app sitting invisible, retrying a node setup
-    // that won't fix itself. The user re-enables "Run in WSL only" from Settings
-    // once the distro is fixed.
+    // A WSL preflight failure on the primary only happens in wsl-only mode.
+    // Fatal configuration failures persist the Windows fallback. Bounded
+    // transport failures use an in-memory fallback for this launch so the app
+    // opens without overwriting the user's WSL preference.
     const handlePrimaryPreflightFailure = Effect.fn("desktop.backendPool.primaryPreflightFailed")(
-      function* (reason: string) {
+      function* (failure: DesktopBackendManager.PreflightFailure) {
+        const { reason, fatal } = failure;
+        if (!fatal) {
+          yield* logBackendPoolWarning(
+            "primary WSL preflight retry window exhausted; using Windows for this launch",
+            { reason },
+          );
+          yield* electronDialog.showErrorBox(
+            "WSL backend is still unavailable",
+            `${reason}\n\nT3 Code will use the Windows backend for this launch and retry WSL the next time the app starts.`,
+          );
+          yield* appSettings.applyWslWindowsFallbackInMemory;
+          return true;
+        }
+
         yield* logBackendPoolWarning("primary WSL preflight failed; falling back to Windows", {
           reason,
         });
@@ -239,6 +251,7 @@ export const layer = Layer.effect(
             ).pipe(Effect.andThen(appSettings.applyWslWindowsFallbackInMemory)),
           ),
         );
+        return true;
       },
     );
 

@@ -166,7 +166,8 @@ export const layer = Layer.effect(
           // Dual-mode secondary: record a fatal preflight failure so Connections
           // settings can show why the WSL backend never appeared. No dialog or
           // fallback — Windows is the primary and keeps working.
-          onPreflightFailed: (reason) => Ref.set(preflightErrorRef, Option.some(reason)),
+          onPreflightFailed: (failure) =>
+            Ref.set(preflightErrorRef, Option.some(failure.reason)).pipe(Effect.as(false)),
           onReady: () => Ref.set(preflightErrorRef, Option.none()),
         })
         .pipe(

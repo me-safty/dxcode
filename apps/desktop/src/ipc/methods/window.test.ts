@@ -62,4 +62,67 @@ describe("getLocalEnvironmentBootstraps", () => {
       ]);
     }).pipe(Effect.provide(DesktopBackendPool.layerTest([defaultWslInstance]))),
   );
+
+  it.effect("publishes a pending bootstrap only while a transient retry is scheduled", () => {
+    const retryingConfig: DesktopBackendManager.DesktopBackendStartConfig = {
+      ...readyWslConfig,
+      preflightFailure: Option.some({
+        reason: "WSL probe timed out",
+        fatal: false,
+        retryLimit: 12,
+      }),
+    };
+    const retryingInstance: DesktopBackendManager.DesktopBackendInstance = {
+      ...defaultWslInstance,
+      currentConfig: Effect.succeed(Option.some(retryingConfig)),
+      snapshot: Effect.succeed({
+        desiredRunning: true,
+        ready: false,
+        activePid: Option.none(),
+        restartAttempt: 2,
+        restartScheduled: true,
+      }),
+    };
+
+    return Effect.gen(function* () {
+      const result = yield* getLocalEnvironmentBootstraps.handler();
+      assert.deepEqual(result, [
+        {
+          id: "wsl:default",
+          label: "WSL (default distro)",
+          runningDistro: null,
+          httpBaseUrl: null,
+          wsBaseUrl: null,
+        },
+      ]);
+    }).pipe(Effect.provide(DesktopBackendPool.layerTest([retryingInstance])));
+  });
+
+  it.effect("omits a bounded transient bootstrap after retries stop", () => {
+    const stoppedInstance: DesktopBackendManager.DesktopBackendInstance = {
+      ...defaultWslInstance,
+      currentConfig: Effect.succeed(
+        Option.some({
+          ...readyWslConfig,
+          preflightFailure: Option.some({
+            reason: "WSL probe timed out",
+            fatal: false,
+            retryLimit: 12,
+          }),
+        }),
+      ),
+      snapshot: Effect.succeed({
+        desiredRunning: false,
+        ready: false,
+        activePid: Option.none(),
+        restartAttempt: 12,
+        restartScheduled: false,
+      }),
+    };
+
+    return Effect.gen(function* () {
+      const result = yield* getLocalEnvironmentBootstraps.handler();
+      assert.deepEqual(result, []);
+    }).pipe(Effect.provide(DesktopBackendPool.layerTest([stoppedInstance])));
+  });
 });

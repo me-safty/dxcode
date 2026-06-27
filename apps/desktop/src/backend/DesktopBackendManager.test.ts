@@ -108,7 +108,9 @@ interface MakeInstanceInput {
   readonly backendOutputLog?: Partial<DesktopObservability.DesktopBackendOutputLogShape>;
   readonly onReady?: Effect.Effect<void>;
   readonly onShutdown?: Effect.Effect<void>;
-  readonly onPreflightFailed?: (reason: string) => Effect.Effect<void>;
+  readonly onPreflightFailed?: (
+    failure: DesktopBackendManager.PreflightFailure,
+  ) => Effect.Effect<boolean>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
   readonly configResolve?: Effect.Effect<DesktopBackendManager.DesktopBackendStartConfig>;
 }
@@ -464,10 +466,10 @@ describe("DesktopBackendManager", () => {
             ...baseConfig,
             preflightFailure: Option.some({ reason: "Node.js not found", fatal: true }),
           },
-          onPreflightFailed: (reason) =>
+          onPreflightFailed: (failure) =>
             Effect.sync(() => {
-              failures.push(reason);
-            }),
+              failures.push(failure.reason);
+            }).pipe(Effect.as(false)),
         });
 
         yield* instance.start;
@@ -564,10 +566,10 @@ describe("DesktopBackendManager", () => {
             ...baseConfig,
             preflightFailure: Option.some({ reason: "wslpath conversion failed", fatal: false }),
           },
-          onPreflightFailed: (reason) =>
+          onPreflightFailed: (failure) =>
             Effect.sync(() => {
-              failures.push(reason);
-            }),
+              failures.push(failure.reason);
+            }).pipe(Effect.as(false)),
         });
 
         yield* instance.start;
@@ -598,10 +600,10 @@ describe("DesktopBackendManager", () => {
               retryLimit: 3,
             }),
           },
-          onPreflightFailed: (reason) =>
+          onPreflightFailed: (failure) =>
             Effect.sync(() => {
-              failures.push(reason);
-            }),
+              failures.push(failure.reason);
+            }).pipe(Effect.as(false)),
         });
 
         yield* instance.start;

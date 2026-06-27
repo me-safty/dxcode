@@ -128,7 +128,7 @@ describe("DesktopWslBackend", () => {
         throw new Error("Expected WSL backend callbacks");
       }
 
-      yield* recordFailure("Node.js not found");
+      assert.isFalse(yield* recordFailure({ reason: "Node.js not found", fatal: true }));
       assert.deepEqual(yield* backend.lastPreflightError, Option.some("Node.js not found"));
 
       yield* clearFailure(new URL("http://127.0.0.1:41773"));

@@ -65,6 +65,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
     for (const instance of instances) {
       const isPrimary = instance.id === PRIMARY_LOCAL_ENVIRONMENT_ID;
       const config = yield* instance.currentConfig;
+      const snapshot = yield* instance.snapshot;
       // A secondary backend (e.g. a parallel WSL backend) that hasn't produced
       // a config yet (mid-registration, before its first start cycle) or that
       // is retrying a *transient* preflight failure (WSL VM still booting, a
@@ -84,7 +85,11 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
           Option.isSome(config) &&
           Option.isSome(config.value.preflightFailure) &&
           config.value.preflightFailure.value.fatal;
-        if (isPrimary || fatalPreflight) continue;
+        const stoppedPreflight =
+          Option.isSome(config) &&
+          Option.isSome(config.value.preflightFailure) &&
+          (!snapshot.desiredRunning || !snapshot.restartScheduled);
+        if (isPrimary || fatalPreflight || stoppedPreflight) continue;
         bootstraps.push({
           id: instance.id,
           label: yield* instance.label,

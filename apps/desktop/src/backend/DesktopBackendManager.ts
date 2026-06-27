@@ -214,11 +214,10 @@ export interface BackendInstanceSpec {
   // between "fired onReady" and "currentConfig already advanced".
   readonly onReady?: (httpBaseUrl: URL) => Effect.Effect<void>;
   readonly onShutdown?: () => Effect.Effect<void>;
-  // Fired once when a fatal or bounded preflight failure has exhausted its retries. The
-  // pool wires this on the primary to surface the reason and, in wsl-only mode,
-  // fall back to the Windows backend so a window can still open instead of the
-  // app silently retrying forever with no window.
-  readonly onPreflightFailed?: (reason: string) => Effect.Effect<void>;
+  // Fired once when a fatal or bounded preflight failure has exhausted its
+  // retries. Returns true when the callback changed configuration and the
+  // manager should resolve once more; false stops the failed instance.
+  readonly onPreflightFailed?: (failure: PreflightFailure) => Effect.Effect<boolean>;
 }
 
 interface ActiveBackendRun {
@@ -524,8 +523,18 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               "backend preflight failed repeatedly; surfacing and falling back",
               { reason, attempt },
             );
-            yield* spec.onPreflightFailed?.(reason) ?? Effect.void;
-            yield* scheduleRestart(reason);
+            const shouldRestart = yield* (
+              spec.onPreflightFailed?.(preflightFailure.value) ?? Effect.succeed(false)
+            );
+            if (shouldRestart) {
+              yield* scheduleRestart(reason);
+            } else {
+              yield* Ref.update(state, (latest) => ({
+                ...latest,
+                desiredRunning: false,
+                ready: false,
+              }));
+            }
             return;
           }
           yield* scheduleRestart(reason);
