@@ -80,6 +80,8 @@ export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<Brow
   }
 }
 
+const isBrowserRecordingOperationError = Schema.is(BrowserRecordingOperationError);
+
 type BrowserRecordingLifecycle =
   | { readonly phase: "starting" }
   | { readonly phase: "recording" }
@@ -189,6 +191,9 @@ const waitForRecordingStartupToSettle = async (recording: ActiveRecording): Prom
     if (timeout !== null) clearTimeout(timeout);
   }
 };
+
+const isStartupWaitTimeout = (error: unknown): error is BrowserRecordingOperationError =>
+  isBrowserRecordingOperationError(error) && error.operation === "wait-startup";
 
 export async function startBrowserRecording(tabId: string): Promise<string> {
   const bridge = previewBridge;
@@ -373,6 +378,14 @@ const finalizeBrowserRecording = async (
     result = { _tag: "Failure", error };
   }
 
+  if (result._tag === "Failure" && isStartupWaitTimeout(result.error)) {
+    // Do not clear `active` yet. The renderer-side start promise can still
+    // resolve later, and its cancellation path will call `stopScreencast`.
+    // Keeping the slot reserved prevents a newer recording for this tab from
+    // being started and then accidentally stopped by the older late cleanup.
+    throw result.error;
+  }
+
   let cleanupError: BrowserRecordingOperationError | undefined;
   try {
     await stopMediaRecorder(recording.recorder);
@@ -412,7 +425,18 @@ export function stopBrowserRecording(
   if (!bridge || !recording || recording.tabId !== tabId) return Promise.resolve(null);
   if (recording.lifecycle.phase === "stopping") return recording.lifecycle.stopPromise;
 
-  const stopPromise = Promise.resolve().then(() => finalizeBrowserRecording(bridge, recording));
+  const stopPromise = Promise.resolve()
+    .then(() => finalizeBrowserRecording(bridge, recording))
+    .catch((error) => {
+      if (isStartupWaitTimeout(error) && active === recording) {
+        const cleanupAfterStartup = recording.startupSettled.then(() =>
+          finalizeBrowserRecording(bridge, recording),
+        );
+        recording.lifecycle = { phase: "stopping", stopPromise: cleanupAfterStartup };
+        void cleanupAfterStartup.catch(() => undefined);
+      }
+      throw error;
+    });
   recording.lifecycle = { phase: "stopping", stopPromise };
   return stopPromise;
 }

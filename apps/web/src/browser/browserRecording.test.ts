@@ -251,14 +251,20 @@ describe("browser recording", () => {
     expect(startCallsBeforeFirstSettled).toBe(1);
   });
 
-  it("does not hang forever when stop waits for a stuck startup", async () => {
+  it("fails a stop that waits too long for startup without freeing the recording slot", async () => {
     vi.useFakeTimers();
+    let finishStartingScreencast: (() => void) | undefined;
     startScreencast.mockImplementationOnce(async () => {
       events.push("start-screencast");
-      await new Promise<void>(() => undefined);
+      await new Promise<void>((resolve) => {
+        finishStartingScreencast = resolve;
+      });
     });
 
-    void startBrowserRecording("recording-tab");
+    const startPromise = startBrowserRecording("recording-tab");
+    const rejectedStart = expect(startPromise).rejects.toBeInstanceOf(
+      BrowserRecordingOperationError,
+    );
     expect(startScreencast).toHaveBeenCalledOnce();
 
     const stopPromise = stopBrowserRecording("recording-tab");
@@ -274,6 +280,13 @@ describe("browser recording", () => {
 
     await rejection;
     expect(save).not.toHaveBeenCalled();
+    await expect(startBrowserRecording("recording-tab")).rejects.toBeInstanceOf(
+      BrowserRecordingConflictError,
+    );
+
+    finishStartingScreencast?.();
+    await rejectedStart;
+    await stopBrowserRecording("recording-tab");
     expect(events.at(-1)).toBe("clear");
   });
 });
