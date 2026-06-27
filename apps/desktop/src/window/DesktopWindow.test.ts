@@ -28,6 +28,7 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { MENU_ACTION_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
@@ -84,6 +85,7 @@ function makeFakeBrowserWindow() {
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
+    send: webContents.send,
     setAutoHideCursor: window.setAutoHideCursor,
     webContentsListeners,
   };
@@ -501,5 +503,47 @@ describe("DesktopWindow", () => {
           assert.deepEqual(yield* Ref.get(scenario.revealedWindows), [splash.window]);
         }).pipe(Effect.provide(scenario.layer));
       }),
+  );
+
+  it.effect("does not dispatch menu actions to the splash before the backend is ready", () =>
+    Effect.gen(function* () {
+      const splash = makeFakeBrowserWindow();
+      const main = makeFakeBrowserWindow();
+      const scenario = yield* makeSplashScenario([splash.window, main.window]);
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+
+        yield* desktopWindow.showConnectingSplash;
+        yield* desktopWindow.dispatchMenuAction("open-settings");
+
+        assert.equal(yield* Ref.get(scenario.createCalls), 1);
+        assert.equal(splash.send.mock.calls.length, 0);
+        assert.equal(main.send.mock.calls.length, 0);
+      }).pipe(Effect.provide(scenario.layer));
+    }),
+  );
+
+  it.effect("dispatches menu actions after backend readiness when no main window exists", () =>
+    Effect.gen(function* () {
+      const splash = makeFakeBrowserWindow();
+      const main = makeFakeBrowserWindow();
+      const scenario = yield* makeSplashScenario([splash.window, null, main.window]);
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+
+        yield* desktopWindow.showConnectingSplash;
+        const readyExit = yield* Effect.exit(
+          desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773")),
+        );
+        assert.equal(readyExit._tag, "Failure");
+
+        yield* desktopWindow.dispatchMenuAction("open-settings");
+
+        assert.equal(yield* Ref.get(scenario.createCalls), 3);
+        assert.deepEqual(main.send.mock.calls, [[MENU_ACTION_CHANNEL, "open-settings"]]);
+      }).pipe(Effect.provide(scenario.layer));
+    }),
   );
 });

@@ -592,6 +592,9 @@ export const make = Effect.gen(function* () {
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });
       const existingWindow = yield* focusedMainWindow;
+      if (Option.isNone(existingWindow) && !(yield* Ref.get(backendReadyRef))) {
+        return;
+      }
       const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
 
       const send = () => {
