@@ -46,6 +46,17 @@ export class BrowserRecordingCanvasUnavailableError extends Schema.TaggedErrorCl
   }
 }
 
+export class BrowserRecordingRequiresVisibleTabError extends Schema.TaggedErrorClass<BrowserRecordingRequiresVisibleTabError>()(
+  "BrowserRecordingRequiresVisibleTabError",
+  {
+    tabId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Browser recording requires tab ${this.tabId} to be visible.`;
+  }
+}
+
 export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<BrowserRecordingOperationError>()(
   "BrowserRecordingOperationError",
   {
@@ -56,7 +67,6 @@ export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<Brow
       "start-screencast",
       "stop-screencast",
       "stop-media-recorder",
-      "validate-artifact",
       "save-artifact",
       "cleanup",
     ]),
@@ -68,8 +78,6 @@ export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<Brow
     return `Browser recording operation ${this.operation} failed for tab ${this.tabId}.`;
   }
 }
-
-const isBrowserRecordingOperationError = Schema.is(BrowserRecordingOperationError);
 
 type BrowserRecordingLifecycle =
   | { readonly phase: "starting" }
@@ -170,6 +178,7 @@ export async function startBrowserRecording(tabId: string): Promise<string> {
     });
   }
   const surface = useBrowserSurfaceStore.getState().byTabId[tabId];
+  if (!surface?.visible) throw new BrowserRecordingRequiresVisibleTabError({ tabId });
   const recordingSize = surface?.content ?? surface?.rect;
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, recordingSize?.width ?? 1280);
@@ -238,6 +247,9 @@ export async function startBrowserRecording(tabId: string): Promise<string> {
         tabId,
         cause,
       });
+    }
+    if (!isRecordingStarting(recording)) {
+      throw recordingStartupCancelledError(recording);
     }
     try {
       await bridge.recording.startScreencast(tabId);
@@ -319,28 +331,13 @@ const finalizeBrowserRecording = async (
     }
     try {
       const blob = new Blob(recording.chunks, { type: recording.mimeType });
-      if (blob.size === 0) {
-        throw new BrowserRecordingOperationError({
-          operation: "validate-artifact",
-          tabId,
-          cause: new Error("The browser recording contained no encoded media data."),
-        });
-      }
       const artifact = await bridge.recording.save(
         tabId,
         recording.mimeType,
         new Uint8Array(await blob.arrayBuffer()),
       );
-      if (artifact.sizeBytes <= 0) {
-        throw new BrowserRecordingOperationError({
-          operation: "validate-artifact",
-          tabId,
-          cause: new Error("The saved browser recording artifact is empty."),
-        });
-      }
       result = { _tag: "Success", artifact };
     } catch (cause) {
-      if (isBrowserRecordingOperationError(cause)) throw cause;
       throw new BrowserRecordingOperationError({
         operation: "save-artifact",
         tabId,

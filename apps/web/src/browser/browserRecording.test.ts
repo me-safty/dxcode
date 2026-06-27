@@ -1,27 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const { events, onFrame, registrySet, save, startScreencast, stopScreencast } = vi.hoisted(() => {
-  const events: string[] = [];
-  return {
-    events,
-    onFrame: vi.fn(() => vi.fn()),
-    registrySet: vi.fn((_atom: unknown, value: string | null) => {
-      events.push(value === null ? "clear" : `publish:${value}`);
-    }),
-    save: vi.fn(async () => ({
-      id: "recording-test",
-      tabId: "recording-tab",
-      path: "/tmp/recording-test.webm",
-      mimeType: "video/webm" as const,
-      sizeBytes: 5,
-      createdAt: "2026-06-26T00:00:00.000Z",
-    })),
-    startScreencast: vi.fn(async () => {
-      events.push("start-screencast");
-    }),
-    stopScreencast: vi.fn(async () => undefined),
-  };
-});
+const { events, onFrame, registrySet, save, startScreencast, stopScreencast, surfaceState } =
+  vi.hoisted(() => {
+    const events: string[] = [];
+    const surfaceState = {
+      byTabId: {} as Record<string, unknown>,
+    };
+    return {
+      events,
+      onFrame: vi.fn(() => vi.fn()),
+      registrySet: vi.fn((_atom: unknown, value: string | null) => {
+        events.push(value === null ? "clear" : `publish:${value}`);
+      }),
+      save: vi.fn(async () => ({
+        id: "recording-test",
+        tabId: "recording-tab",
+        path: "/tmp/recording-test.webm",
+        mimeType: "video/webm" as const,
+        sizeBytes: 0,
+        createdAt: "2026-06-26T00:00:00.000Z",
+      })),
+      startScreencast: vi.fn(async () => {
+        events.push("start-screencast");
+      }),
+      stopScreencast: vi.fn(async () => undefined),
+      surfaceState,
+    };
+  });
 
 vi.mock("~/components/preview/previewBridge", () => ({
   previewBridge: {
@@ -35,20 +40,19 @@ vi.mock("~/rpc/atomRegistry", () => ({
 
 vi.mock("./browserSurfaceStore", () => ({
   useBrowserSurfaceStore: {
-    getState: () => ({ byTabId: {} }),
+    getState: () => surfaceState,
   },
 }));
 
 import {
   BrowserRecordingConflictError,
   BrowserRecordingOperationError,
+  BrowserRecordingRequiresVisibleTabError,
   startBrowserRecording,
   stopBrowserRecording,
 } from "./browserRecording";
 
 class FakeMediaRecorder {
-  static emitData = true;
-
   static isTypeSupported(): boolean {
     return true;
   }
@@ -68,14 +72,6 @@ class FakeMediaRecorder {
 
   stop(): void {
     this.state = "inactive";
-    if (FakeMediaRecorder.emitData) {
-      for (const listener of this.listeners.get("dataavailable") ?? []) {
-        const event = new Event("dataavailable") as Event & { data: Blob };
-        Object.defineProperty(event, "data", { value: new Blob(["video"]) });
-        if (typeof listener === "function") listener(event);
-        else listener.handleEvent(event);
-      }
-    }
     for (const listener of this.listeners.get("stop") ?? []) {
       if (typeof listener === "function") listener(new Event("stop"));
       else listener.handleEvent(new Event("stop"));
@@ -83,10 +79,16 @@ class FakeMediaRecorder {
   }
 }
 
-describe("browser recording lifecycle", () => {
+describe("browser recording", () => {
   beforeEach(() => {
     events.length = 0;
-    FakeMediaRecorder.emitData = true;
+    surfaceState.byTabId = {
+      "recording-tab": {
+        visible: true,
+        rect: { x: 0, y: 0, width: 800, height: 600 },
+        content: { x: 0, y: 0, width: 800, height: 600, scale: 1, scrollLeft: 0, scrollTop: 0 },
+      },
+    };
     vi.clearAllMocks();
     vi.stubGlobal("window", globalThis);
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder as unknown as typeof MediaRecorder);
@@ -98,28 +100,35 @@ describe("browser recording lifecycle", () => {
         getContext: () => ({ drawImage: vi.fn() }),
       }),
     });
-    let frameId = 0;
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      const id = ++frameId;
-      queueMicrotask(() => {
-        events.push(`paint:${id}`);
-        callback(id);
-      });
-      return id;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("starts the native screencast before publishing the recording", async () => {
+  it("starts recording for a visible tab", async () => {
     await startBrowserRecording("recording-tab");
 
     expect(events).toEqual(["start-screencast", "publish:recording-tab"]);
 
     await stopBrowserRecording("recording-tab");
+  });
+
+  it("rejects recording for a hidden tab before starting screencast", async () => {
+    surfaceState.byTabId = {
+      "recording-tab": {
+        visible: false,
+        rect: { x: 0, y: 0, width: 800, height: 600 },
+        content: { x: 0, y: 0, width: 800, height: 600, scale: 1, scrollLeft: 0, scrollTop: 0 },
+      },
+    };
+
+    await expect(startBrowserRecording("recording-tab")).rejects.toBeInstanceOf(
+      BrowserRecordingRequiresVisibleTabError,
+    );
+
+    expect(startScreencast).not.toHaveBeenCalled();
+    expect(registrySet).not.toHaveBeenCalled();
   });
 
   it("does not report success for a second start while the first is still starting", async () => {
@@ -184,17 +193,6 @@ describe("browser recording lifecycle", () => {
     expect(duplicateArtifact).toEqual(firstArtifact);
     expect(stopScreencast).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledOnce();
-  });
-
-  it("rejects an empty recording instead of saving a corrupt artifact", async () => {
-    FakeMediaRecorder.emitData = false;
-    await startBrowserRecording("recording-tab");
-
-    await expect(stopBrowserRecording("recording-tab")).rejects.toMatchObject({
-      _tag: "BrowserRecordingOperationError",
-      operation: "validate-artifact",
-    });
-    expect(save).not.toHaveBeenCalled();
   });
 
   it("stops a screencast that finishes starting after cancellation", async () => {

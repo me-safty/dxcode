@@ -13,13 +13,13 @@ const snapshot = (navStatus: PreviewSessionSnapshot["navStatus"]): PreviewSessio
 });
 
 describe("preview automation open readiness", () => {
-  it("waits for the native desktop tab even when opening an empty tab", () => {
+  it("does not wait for a desktop overlay when opening an empty tab", () => {
     expect(
       previewAutomationOpenNeedsOverlay(
         {} as PreviewAutomationOpenInput,
         snapshot({ _tag: "Idle" }),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("waits when an empty tab is immediately given a URL", () => {

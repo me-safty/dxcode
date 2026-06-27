@@ -9,17 +9,15 @@ import type {
 import { useEffect, useRef } from "react";
 
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
-import { setNativePreviewFocused } from "~/lib/previewFocus";
-import { applyPreviewDesktopState } from "~/previewStateStore";
+import { applyPreviewDesktopState, type DesktopPreviewOverlay } from "~/previewStateStore";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { previewBridge } from "./previewBridge";
-import { projectDesktopPreviewState } from "./desktopPreviewState";
 
 /**
  * Mirrors low-latency desktop state into the store and reflects navigation
- * events back to the server. Native view lifetime is owned by ElectronBrowserHost.
+ * events back to the server. Webview lifetime is owned by ElectronBrowserHost.
  */
 export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: string }): void {
   const { threadRef, tabId } = input;
@@ -37,18 +35,13 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
     lastReportedUrl.current = null;
     lastReportedKind.current = null;
     lastDesktopNavStatus.current = null;
-    let disposed = false;
-    let latestUpdatedAt = "";
-    const applyState = (changedTabId: string, state: DesktopPreviewTabState) => {
+    const unsubscribe = bridge.onStateChange((changedTabId, state) => {
       if (changedTabId !== tabId) return;
-      if (state.updatedAt < latestUpdatedAt) return;
-      latestUpdatedAt = state.updatedAt;
       if (shouldClearBrowserPointer(lastDesktopNavStatus.current, state.navStatus)) {
         clearBrowserPointer(tabId);
       }
       lastDesktopNavStatus.current = state.navStatus;
-      setNativePreviewFocused(tabId, state.focused);
-      applyPreviewDesktopState(threadRef, tabId, projectDesktopPreviewState(state));
+      applyPreviewDesktopState(threadRef, tabId, projectDesktopState(state));
       const reported = buildReportInput({
         threadId: threadRef.threadId,
         tabId,
@@ -63,23 +56,8 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
         environmentId: threadRef.environmentId,
         input: reported.input,
       });
-    };
-    const unsubscribe = bridge.onStateChange(applyState);
-    // Event subscription and native view creation are separate renderer
-    // effects. React may remount them in development, so an event-only bridge
-    // can miss the one state change that assigns the WebContents. Replay the
-    // current state after subscribing to make readiness deterministic.
-    void bridge
-      .getTabState(tabId)
-      .then((state) => {
-        if (!disposed && state) applyState(tabId, state);
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-      setNativePreviewFocused(tabId, false);
-      unsubscribe();
-    };
+    });
+    return unsubscribe;
   }, [bridge, clearBrowserPointer, reportStatus, tabId, threadRef]);
 }
 
@@ -91,6 +69,16 @@ function shouldClearBrowserPointer(
   if (current.kind === "Loading" && previous.kind !== "Loading") return true;
   if (current.kind === "Idle" || previous.kind === "Idle") return false;
   return current.url !== previous.url;
+}
+
+function projectDesktopState(state: DesktopPreviewTabState): DesktopPreviewOverlay {
+  return {
+    canGoBack: state.canGoBack,
+    canGoForward: state.canGoForward,
+    loading: state.navStatus.kind === "Loading",
+    zoomFactor: state.zoomFactor,
+    controller: state.controller,
+  };
 }
 
 /**

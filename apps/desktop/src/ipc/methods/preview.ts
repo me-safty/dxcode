@@ -7,24 +7,25 @@ import {
   DesktopPreviewAutomationScrollInputSchema,
   DesktopPreviewAutomationTypeInputSchema,
   DesktopPreviewAutomationWaitForInputSchema,
-  DesktopPreviewCreateTabInputSchema,
+  DesktopPreviewConfigInputSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
-  DesktopPreviewSurfaceInputSchema,
-  DesktopPreviewSurfaceFrameSchema,
+  DesktopPreviewRegisterWebviewInputSchema,
   DesktopPreviewScreenshotArtifactSchema,
-  DesktopPreviewTabStateSchema,
   DesktopPreviewTabInputSchema,
+  DesktopPreviewWebviewConfigSchema,
   PreviewAnnotationPayloadSchema,
   PreviewAutomationSnapshot,
   PreviewAutomationStatus,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 
@@ -46,16 +47,11 @@ export const installPreviewEventForwarding = Effect.fn(
 
 export const createTab = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CREATE_TAB_CHANNEL,
-  payload: DesktopPreviewCreateTabInputSchema,
+  payload: DesktopPreviewTabInputSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.createTab")(function* ({
-    tabId,
-    environmentId,
-    initialUrl,
-  }) {
+  handler: Effect.fn("desktop.ipc.preview.createTab")(function* ({ tabId }) {
     const manager = yield* PreviewManager.PreviewManager;
     yield* manager.createTab(tabId);
-    yield* manager.createNativeView(tabId, environmentId, initialUrl);
   }),
 });
 
@@ -69,28 +65,13 @@ export const closeTab = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const getTabState = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PREVIEW_GET_TAB_STATE_CHANNEL,
-  payload: DesktopPreviewTabInputSchema,
-  result: Schema.NullOr(DesktopPreviewTabStateSchema),
-  handler: Effect.fn("desktop.ipc.preview.getTabState")(function* ({ tabId }) {
-    const manager = yield* PreviewManager.PreviewManager;
-    return yield* manager.getTabState(tabId);
-  }),
-});
-
-export const setSurface = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PREVIEW_SET_SURFACE_CHANNEL,
-  payload: DesktopPreviewSurfaceInputSchema,
+export const registerWebview = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_REGISTER_WEBVIEW_CHANNEL,
+  payload: DesktopPreviewRegisterWebviewInputSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.setSurface")(function* ({
-    tabId,
-    bounds,
-    visible,
-    scale,
-  }) {
+  handler: Effect.fn("desktop.ipc.preview.registerWebview")(function* ({ tabId, webContentsId }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.setSurface(tabId, bounds, visible, scale);
+    yield* manager.registerWebview(tabId, webContentsId);
   }),
 });
 
@@ -198,6 +179,21 @@ export const clearCache = DesktopIpc.makeIpcMethod({
   }),
 });
 
+export const getPreviewConfig = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_GET_CONFIG_CHANNEL,
+  payload: DesktopPreviewConfigInputSchema,
+  result: DesktopPreviewWebviewConfigSchema,
+  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId }) {
+    const manager = yield* PreviewManager.PreviewManager;
+    yield* manager.getBrowserSession(environmentId);
+    return {
+      partition: yield* manager.getBrowserPartition(environmentId),
+      webPreferences: PREVIEW_WEBVIEW_PREFERENCES,
+      preloadUrl: NodeURL.pathToFileURL(`${__dirname}/preview-pick-preload.cjs`).href,
+    };
+  }),
+});
+
 export const setAnnotationTheme = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_SET_ANNOTATION_THEME_CHANNEL,
   payload: DesktopPreviewAnnotationThemeInputSchema,
@@ -225,16 +221,6 @@ export const captureScreenshot = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.captureScreenshot")(function* ({ tabId }) {
     const manager = yield* PreviewManager.PreviewManager;
     return yield* manager.captureScreenshot(tabId);
-  }),
-});
-
-export const captureSurfaceFrame = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PREVIEW_CAPTURE_SURFACE_FRAME_CHANNEL,
-  payload: DesktopPreviewTabInputSchema,
-  result: DesktopPreviewSurfaceFrameSchema,
-  handler: Effect.fn("desktop.ipc.preview.captureSurfaceFrame")(function* ({ tabId }) {
-    const manager = yield* PreviewManager.PreviewManager;
-    return yield* manager.captureSurfaceFrame(tabId);
   }),
 });
 
@@ -350,9 +336,8 @@ export const saveRecording = DesktopIpc.makeIpcMethod({
 
 export const methods = [
   createTab,
-  getTabState,
   closeTab,
-  setSurface,
+  registerWebview,
   navigate,
   goBack,
   goForward,
@@ -364,11 +349,11 @@ export const methods = [
   openDevTools,
   clearCookies,
   clearCache,
+  getPreviewConfig,
   setAnnotationTheme,
   pickElement,
   cancelPickElement,
   captureScreenshot,
-  captureSurfaceFrame,
   revealArtifact,
   copyArtifactToClipboard,
   automationStatus,

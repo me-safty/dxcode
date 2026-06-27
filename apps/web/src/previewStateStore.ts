@@ -22,7 +22,6 @@ export interface DesktopPreviewOverlay {
   canGoForward: boolean;
   loading: boolean;
   zoomFactor: number;
-  focused: boolean;
   controller: "human" | "agent" | "none";
 }
 
