@@ -211,6 +211,22 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     } as const;
   }
 
+  const installedDistros = yield* wslEnv.listDistros;
+  const distroAvailable = input.distro
+    ? installedDistros.some(
+        (installed) => installed.name.toLowerCase() === input.distro?.toLowerCase(),
+      )
+    : installedDistros.length > 0;
+  if (!distroAvailable) {
+    return {
+      _tag: "Failed",
+      reason: input.distro
+        ? `WSL distro is not installed: ${input.distro}`
+        : "WSL has no installed distributions",
+      fatal: true,
+    } as const;
+  }
+
   const entryExists = yield* fileSystem
     .exists(input.windowsEntryPath)
     .pipe(Effect.orElseSucceed(() => false));
