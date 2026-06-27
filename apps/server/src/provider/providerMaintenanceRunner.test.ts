@@ -1,4 +1,6 @@
 import { describe, it, assert } from "@effect/vitest";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
@@ -16,7 +18,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ProviderRegistry, type ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
@@ -34,6 +36,7 @@ const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 const encoder = new TextEncoder();
+const linuxHostPlatformLayer = Layer.succeed(HostProcessPlatform, "linux");
 
 function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabilities {
   if (provider === CURSOR_DRIVER) {
@@ -121,6 +124,7 @@ function mockSpawnerLayer(
   handler: (
     command: string,
     args: ReadonlyArray<string>,
+    options: ChildProcess.CommandOptions,
   ) => {
     readonly stdout?: string;
     readonly stderr?: string;
@@ -134,8 +138,11 @@ function mockSpawnerLayer(
       const childProcess = command as unknown as {
         readonly command: string;
         readonly args: ReadonlyArray<string>;
+        readonly options: ChildProcess.CommandOptions;
       };
-      return Effect.succeed(mockHandle(handler(childProcess.command, childProcess.args)));
+      return Effect.succeed(
+        mockHandle(handler(childProcess.command, childProcess.args, childProcess.options)),
+      );
     }),
   );
 }
@@ -230,6 +237,7 @@ describe("providerMaintenanceRunner", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          linuxHostPlatformLayer,
           latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((command, args) => {
             calls.push({ command, args });
@@ -279,6 +287,7 @@ describe("providerMaintenanceRunner", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          linuxHostPlatformLayer,
           latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((command, args) => {
             calls.push({ command, args });
@@ -309,6 +318,7 @@ describe("providerMaintenanceRunner", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            linuxHostPlatformLayer,
             latestVersionHttpClient("0.0.0"),
             mockSpawnerLayer((command, args) => {
               calls.push({ command, args });
@@ -319,6 +329,49 @@ describe("providerMaintenanceRunner", () => {
       );
     },
   );
+
+  it.effect("resolves Windows command shims before spawning update commands", () => {
+    const calls: Array<{
+      command: string;
+      args: ReadonlyArray<string>;
+      shell: ChildProcess.CommandOptions["shell"];
+    }> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const runner = yield* makeTestRunner(registry);
+
+      const result = yield* runner.updateProvider(CODEX_DRIVER);
+
+      assert.deepStrictEqual(calls, [
+        {
+          command: '^"C:\\nvm4w\\nodejs\\npm.cmd^"',
+          args: ['^"install^"', '^"-g^"', '^"@openai/codex@latest^"'],
+          shell: true,
+        },
+      ]);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer((command, args, options) => {
+            calls.push({ command, args, shell: options.shell });
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+      Effect.provideService(HostProcessPlatform, "win32"),
+      Effect.provideService(HostProcessEnvironment, {
+        PATH: "C:\\nvm4w\\nodejs",
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      }),
+      Effect.provideService(SpawnExecutableResolution, (command, platform, env) =>
+        command === "npm" && platform === "win32" && env.PATH === "C:\\nvm4w\\nodejs"
+          ? "C:\\nvm4w\\nodejs\\npm.cmd"
+          : undefined,
+      ),
+    );
+  });
 
   it.effect("updates a single provider instance without touching sibling instances", () => {
     const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
@@ -381,6 +434,7 @@ describe("providerMaintenanceRunner", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          linuxHostPlatformLayer,
           latestVersionHttpClient("0.124.0-alpha.3"),
           mockSpawnerLayer((command, args) => {
             calls.push({ command, args });
@@ -405,6 +459,7 @@ describe("providerMaintenanceRunner", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          linuxHostPlatformLayer,
           latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer(() => ({ stderr: "permission denied", code: 1 })),
         ),
@@ -430,6 +485,7 @@ describe("providerMaintenanceRunner", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            linuxHostPlatformLayer,
             latestVersionHttpClient("9.9.9"),
             mockSpawnerLayer(() => ({ stdout: "updated" })),
           ),
@@ -468,6 +524,7 @@ describe("providerMaintenanceRunner", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          linuxHostPlatformLayer,
           latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer(() => {
             startedLatch.resolve();
@@ -544,6 +601,7 @@ describe("providerMaintenanceRunner", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          linuxHostPlatformLayer,
           latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((_command, args) => {
             calls.push(args.join(" "));
@@ -587,6 +645,7 @@ describe("providerMaintenanceRunner", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          linuxHostPlatformLayer,
           latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((_command, args) => {
             calls.push(args.join(" "));
@@ -641,6 +700,7 @@ describe("providerMaintenanceRunner", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            linuxHostPlatformLayer,
             latestVersionHttpClient("0.0.0"),
             mockSpawnerLayer(() => ({ stdout: "updated" })),
           ),
