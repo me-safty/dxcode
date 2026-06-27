@@ -63,6 +63,43 @@ export function resolveWslProjectSelection<TEnvironmentId extends string>(
   return exact ? { ...parsed, environmentId: exact.environmentId } : null;
 }
 
+function resolveConfiguredWslBackendId(
+  configuration: WslEnvironmentConfiguration | null,
+): string | null {
+  if (!configuration) {
+    return null;
+  }
+
+  const selectedDistro =
+    configuration.distro ?? configuration.distros.find((distro) => distro.isDefault)?.name;
+  const installedDistro = configuration.distros.find(
+    (distro) => distro.name.toLowerCase() === selectedDistro?.toLowerCase(),
+  );
+  return installedDistro ? `wsl:${installedDistro.name}` : null;
+}
+
+export function resolveProjectPickerTarget<TEnvironmentId extends string>(input: {
+  readonly browseEnvironmentId: TEnvironmentId | null;
+  readonly primaryEnvironmentId: TEnvironmentId | null;
+  readonly desktopInstanceId: string | null;
+  readonly wslConfiguration: WslEnvironmentConfiguration | null;
+}): string | null {
+  if (input.desktopInstanceId !== null) {
+    return input.desktopInstanceId;
+  }
+
+  if (
+    input.browseEnvironmentId === null ||
+    input.browseEnvironmentId !== input.primaryEnvironmentId ||
+    !input.wslConfiguration?.enabled ||
+    !input.wslConfiguration.wslOnly
+  ) {
+    return null;
+  }
+
+  return resolveConfiguredWslBackendId(input.wslConfiguration);
+}
+
 export function applyWslEnvironmentConfiguration<TEnvironmentId extends string>(
   candidates: ReadonlyArray<WslEnvironmentCandidate<TEnvironmentId>>,
   primaryEnvironmentId: TEnvironmentId | null,
@@ -72,16 +109,11 @@ export function applyWslEnvironmentConfiguration<TEnvironmentId extends string>(
     return candidates;
   }
 
-  const selectedDistro =
-    configuration.distro ?? configuration.distros.find((distro) => distro.isDefault)?.name;
-  const installedDistro = configuration.distros.find(
-    (distro) => distro.name.toLowerCase() === selectedDistro?.toLowerCase(),
-  );
-  if (!installedDistro) {
+  const concreteBackendId = resolveConfiguredWslBackendId(configuration);
+  if (!concreteBackendId) {
     return candidates;
   }
 
-  const concreteBackendId = `wsl:${installedDistro.name}`;
   const resolvedCandidates = candidates.map((candidate) =>
     candidate.backendId.toLowerCase() === "wsl:default"
       ? { ...candidate, backendId: concreteBackendId }

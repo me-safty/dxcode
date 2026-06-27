@@ -8,6 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_MODEL,
+  type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
   type ProjectId,
@@ -85,6 +86,7 @@ import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoute
 import {
   applyWslEnvironmentConfiguration,
   parseWslUncPath,
+  resolveProjectPickerTarget,
   resolveWslProjectSelection,
 } from "../wslPaths";
 import {
@@ -1551,19 +1553,28 @@ function OpenCommandPaletteDialog(props: {
 
     setIsPickingProjectFolder(true);
     let pickedPath: string | null = null;
+    let desktopWslState: DesktopWslState | null = null;
     try {
+      desktopWslState =
+        browseEnvironmentId === primaryEnvironmentId && browseEnvironmentPlatform === "Linux"
+          ? ((await window.desktopBridge?.getWslState().catch(() => null)) ?? null)
+          : null;
       // Route the picker to the browsed env's backend filesystem. The desktop
       // only resolves a "wsl:*" pool instance id, so for a desktop-local env we
       // pass the bootstrap-mapped instance id (not the catalog environmentId).
-      // For the primary env we omit targetEnvironmentId to keep historical
-      // behavior. The desktop converts a WSL UNC selection back to a Linux path
-      // before returning, so the picked path is already what handleAddProject
-      // (which targets browseEnvironmentId) expects.
+      // A WSL-only primary has no secondary bootstrap, so resolve its instance
+      // id from desktop settings. Windows and combo-mode primaries still omit
+      // the target to preserve the native primary picker. The desktop converts
+      // a WSL UNC selection back to a Linux path before returning.
+      const pickerTargetEnvironmentId = resolveProjectPickerTarget({
+        browseEnvironmentId,
+        primaryEnvironmentId,
+        desktopInstanceId: browseDesktopInstanceId,
+        wslConfiguration: desktopWslState,
+      });
       const pickerOptions = {
         ...(fileManagerInitialPath ? { initialPath: fileManagerInitialPath } : {}),
-        ...(browseEnvironmentIsDesktopLocal && browseDesktopInstanceId
-          ? { targetEnvironmentId: browseDesktopInstanceId }
-          : {}),
+        ...(pickerTargetEnvironmentId ? { targetEnvironmentId: pickerTargetEnvironmentId } : {}),
       };
       pickedPath = await api.dialogs.pickFolder(
         Object.keys(pickerOptions).length > 0 ? pickerOptions : undefined,
@@ -1578,7 +1589,7 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
     if (parseWslUncPath(pickedPath)) {
-      const desktopWslState = await window.desktopBridge?.getWslState().catch(() => null);
+      desktopWslState ??= (await window.desktopBridge?.getWslState().catch(() => null)) ?? null;
       const selection = resolveWslProjectSelection(
         pickedPath,
         applyWslEnvironmentConfiguration(
@@ -1611,7 +1622,8 @@ function OpenCommandPaletteDialog(props: {
     await handleAddProject(pickedPath);
   }, [
     browseDesktopInstanceId,
-    browseEnvironmentIsDesktopLocal,
+    browseEnvironmentId,
+    browseEnvironmentPlatform,
     canOpenProjectFromFileManager,
     environments,
     fileManagerInitialPath,

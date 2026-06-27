@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyWslEnvironmentConfiguration,
   parseWslUncPath,
+  resolveProjectPickerTarget,
   resolveWslProjectSelection,
 } from "./wslPaths";
 
@@ -105,5 +106,60 @@ describe("applyWslEnvironmentConfiguration", () => {
         distro: "Fedora",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("resolveProjectPickerTarget", () => {
+  const ubuntuConfiguration = {
+    enabled: true,
+    wslOnly: true,
+    distro: "Ubuntu-22.04",
+    distros: [
+      { name: "Debian", isDefault: true },
+      { name: "Ubuntu-22.04", isDefault: false },
+    ],
+  };
+
+  it("routes a WSL-only primary picker to its configured distro", () => {
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-primary",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: null,
+        wslConfiguration: ubuntuConfiguration,
+      }),
+    ).toBe("wsl:Ubuntu-22.04");
+  });
+
+  it("routes a WSL-only primary picker to the default distro when configured", () => {
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-primary",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: null,
+        wslConfiguration: { ...ubuntuConfiguration, distro: null },
+      }),
+    ).toBe("wsl:Debian");
+  });
+
+  it("preserves combo-mode routing for primary and WSL backends", () => {
+    const comboConfiguration = { ...ubuntuConfiguration, wslOnly: false };
+
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-primary",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: null,
+        wslConfiguration: comboConfiguration,
+      }),
+    ).toBeNull();
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-wsl",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: "wsl:Ubuntu-22.04",
+        wslConfiguration: comboConfiguration,
+      }),
+    ).toBe("wsl:Ubuntu-22.04");
   });
 });
