@@ -81,6 +81,7 @@ export function HomeRouteScreen() {
       <NativeStackScreenOptions options={{ title: "Threads", headerTitle: "Threads" }} />
       <HomeHeader
         environments={environments}
+        searchQuery={searchQuery}
         selectedEnvironmentId={selectedEnvironmentId}
         projectSortOrder={listOptions.projectSortOrder}
         threadSortOrder={listOptions.threadSortOrder}
