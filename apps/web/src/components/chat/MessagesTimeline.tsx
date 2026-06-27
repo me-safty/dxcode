@@ -19,10 +19,11 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type RefAttributes,
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import { LegendList, type LegendListRef } from "@legendapp/list/react";
+import { LegendList, type LegendListProps, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   deriveTimelineEntries,
@@ -112,6 +113,15 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+
+type TimelineLegendListProps<ItemT> = LegendListProps<ItemT> &
+  RefAttributes<LegendListRef> & {
+    readonly contentInsetEndAdjustment?: number;
+  };
+
+const TimelineLegendList = LegendList as <ItemT>(
+  props: TimelineLegendListProps<ItemT>,
+) => ReactNode;
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -471,7 +481,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
         <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
-          <LegendList<MessagesTimelineRow>
+          <TimelineLegendList<MessagesTimelineRow>
             ref={listRef}
             data={rows}
             keyExtractor={keyExtractor}
