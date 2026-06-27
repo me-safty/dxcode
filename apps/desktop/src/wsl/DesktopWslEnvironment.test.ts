@@ -1,12 +1,89 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it } from "@effect/vitest";
+import { expect } from "vite-plus/test";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildWslNodeEnvPreamble,
+  DesktopWslDistroListError,
   formatMissingToolsReason,
   formatNodePtyProbeFailureReason,
   parseNodePath,
   parseToolchainReport,
+  probeWslDistros,
 } from "./DesktopWslEnvironment.ts";
+
+const encoder = new TextEncoder();
+
+const makeDistroListSpawner = (result: { readonly stdout?: string; readonly exitCode?: number }) =>
+  ChildProcessSpawner.make(() =>
+    Effect.succeed(
+      ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(1),
+        exitCode:
+          result.exitCode === undefined
+            ? Effect.never
+            : Effect.succeed(ChildProcessSpawner.ExitCode(result.exitCode)),
+        isRunning: Effect.succeed(result.exitCode === undefined),
+        kill: () => Effect.void,
+        unref: Effect.succeed(Effect.void),
+        stdin: Sink.drain,
+        stdout: Stream.make(encoder.encode(result.stdout ?? "")),
+        stderr: Stream.empty,
+        all: Stream.empty,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+      }),
+    ),
+  );
+
+describe("probeWslDistros", () => {
+  it.effect("preserves a successful empty distro list", () =>
+    Effect.gen(function* () {
+      const distros = yield* probeWslDistros;
+      expect(distros).toEqual([]);
+    }).pipe(
+      Effect.provideService(
+        ChildProcessSpawner.ChildProcessSpawner,
+        makeDistroListSpawner({ stdout: "", exitCode: 0 }),
+      ),
+    ),
+  );
+
+  it.effect("fails when the distro-list command exits unsuccessfully", () =>
+    Effect.gen(function* () {
+      const error = yield* probeWslDistros.pipe(Effect.flip);
+      expect(error).toBeInstanceOf(DesktopWslDistroListError);
+      expect(error.message).toContain("exited with code 1");
+    }).pipe(
+      Effect.provideService(
+        ChildProcessSpawner.ChildProcessSpawner,
+        makeDistroListSpawner({ exitCode: 1 }),
+      ),
+    ),
+  );
+
+  it.effect("fails when the distro-list command times out", () => {
+    const layer = Layer.merge(
+      TestClock.layer(),
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, makeDistroListSpawner({})),
+    );
+    return Effect.gen(function* () {
+      const fiber = yield* probeWslDistros.pipe(Effect.flip, Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.seconds(8));
+      const error = yield* Fiber.join(fiber);
+      expect(error).toBeInstanceOf(DesktopWslDistroListError);
+      expect(error.message).toContain("timed out");
+    }).pipe(Effect.provide(layer));
+  });
+});
 
 describe("formatNodePtyProbeFailureReason", () => {
   it("identifies a packaged build that omitted the Linux node-pty prebuild", () => {

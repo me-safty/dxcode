@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -32,11 +33,26 @@ export type EnsureWslNodePtyResult =
   | { readonly ok: true; readonly nodePath: string }
   | { readonly ok: false; readonly reason: string };
 
+export class DesktopWslDistroListError extends Schema.TaggedErrorClass<DesktopWslDistroListError>()(
+  "DesktopWslDistroListError",
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
+const isDesktopWslDistroListError = Schema.is(DesktopWslDistroListError);
+
 export class DesktopWslEnvironment extends Context.Service<
   DesktopWslEnvironment,
   {
     readonly isAvailable: Effect.Effect<boolean>;
+    // Best-effort enumeration for renderer UX. Backend health checks must use
+    // probeDistros so a transient command failure is not mistaken for a
+    // successful empty installation.
     readonly listDistros: Effect.Effect<readonly WslDistro[]>;
+    readonly probeDistros: Effect.Effect<readonly WslDistro[], DesktopWslDistroListError>;
     readonly preWarm: (distro: string | null) => Effect.Effect<void>;
     readonly windowsToWslPath: (
       distro: string | null,
@@ -421,9 +437,9 @@ const ensureNodePtyImpl = (
     } as const;
   });
 
-const listDistrosImpl: Effect.Effect<
+export const probeWslDistros: Effect.Effect<
   readonly WslDistro[],
-  never,
+  DesktopWslDistroListError,
   ChildProcessSpawner.ChildProcessSpawner
 > = Effect.scoped(
   Effect.gen(function* () {
@@ -439,14 +455,30 @@ const listDistrosImpl: Effect.Effect<
     const stdoutBytes = yield* Stream.runCollect(handle.stdout);
     const exitCode = yield* handle.exitCode;
     if ((exitCode as unknown as number) !== 0) {
-      return [] as readonly WslDistro[];
+      return yield* new DesktopWslDistroListError({
+        reason: `wsl.exe --list --verbose exited with code ${String(exitCode)}`,
+      });
     }
     return parseWslDistroList(Buffer.from(concatChunks(stdoutBytes)));
   }),
 ).pipe(
+  Effect.mapError((error) =>
+    isDesktopWslDistroListError(error)
+      ? error
+      : new DesktopWslDistroListError({
+          reason: `Failed to run wsl.exe --list --verbose: ${error.message}`,
+        }),
+  ),
   Effect.timeoutOption(LIST_TIMEOUT),
-  Effect.map(Option.getOrElse((): readonly WslDistro[] => [])),
-  Effect.orElseSucceed((): readonly WslDistro[] => []),
+  Effect.flatMap(
+    Option.match({
+      onNone: () =>
+        new DesktopWslDistroListError({
+          reason: "wsl.exe --list --verbose timed out",
+        }),
+      onSome: Effect.succeed,
+    }),
+  ),
 );
 
 const preWarmImpl = (
@@ -595,6 +627,7 @@ const makeIsAvailable = (
 export interface DesktopWslEnvironmentTestStub {
   readonly isAvailable?: boolean;
   readonly distros?: ReadonlyArray<WslDistro>;
+  readonly distroListError?: DesktopWslDistroListError;
   readonly windowsToWslPath?: (distro: string | null, windowsPath: string) => Option.Option<string>;
   readonly getUserHome?: (distro: string | null) => Option.Option<string>;
   readonly getDistroIp?: (distro: string | null) => Option.Option<string>;
@@ -605,12 +638,16 @@ export interface DesktopWslEnvironmentTestStub {
   ) => EnsureWslNodePtyResult;
 }
 
-export const layerTest = (stub: DesktopWslEnvironmentTestStub = {}) =>
-  Layer.succeed(
+export const layerTest = (stub: DesktopWslEnvironmentTestStub = {}) => {
+  const probeDistros = stub.distroListError
+    ? Effect.fail(stub.distroListError)
+    : Effect.succeed(stub.distros ?? []);
+  return Layer.succeed(
     DesktopWslEnvironment,
     DesktopWslEnvironment.of({
       isAvailable: Effect.succeed(stub.isAvailable ?? false),
-      listDistros: Effect.succeed(stub.distros ?? []),
+      listDistros: probeDistros.pipe(Effect.orElseSucceed(() => [])),
+      probeDistros,
       preWarm: () => Effect.void,
       windowsToWslPath: (distro, windowsPath) =>
         Effect.succeed(stub.windowsToWslPath?.(distro, windowsPath) ?? Option.none()),
@@ -625,6 +662,7 @@ export const layerTest = (stub: DesktopWslEnvironmentTestStub = {}) =>
         ),
     }),
   );
+};
 
 export const layer = Layer.effect(
   DesktopWslEnvironment,
@@ -680,9 +718,17 @@ export const layer = Layer.effect(
     const getDistroIp = (distro: string | null) =>
       provideSpawner(getDistroIpImpl(distro)).pipe(Effect.withSpan("desktop.wsl.getDistroIp"));
 
+    const probeDistros = provideSpawner(probeWslDistros).pipe(
+      Effect.withSpan("desktop.wsl.probeDistros"),
+    );
+
     return DesktopWslEnvironment.of({
       isAvailable,
-      listDistros: provideSpawner(listDistrosImpl).pipe(Effect.withSpan("desktop.wsl.listDistros")),
+      listDistros: probeDistros.pipe(
+        Effect.orElseSucceed(() => []),
+        Effect.withSpan("desktop.wsl.listDistros"),
+      ),
+      probeDistros,
       preWarm: (distro) =>
         provideSpawner(preWarmImpl(distro)).pipe(Effect.withSpan("desktop.wsl.preWarm")),
       windowsToWslPath,

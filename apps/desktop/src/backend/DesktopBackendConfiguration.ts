@@ -211,7 +211,19 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     } as const;
   }
 
-  const installedDistros = yield* wslEnv.listDistros;
+  const distroProbe = yield* wslEnv.probeDistros.pipe(
+    Effect.map((distros) => ({ _tag: "Success", distros }) as const),
+    Effect.catch((error) => Effect.succeed({ _tag: "Failure", error } as const)),
+  );
+  if (distroProbe._tag === "Failure") {
+    return {
+      _tag: "Failed",
+      reason: `Unable to list WSL distributions: ${distroProbe.error.message}`,
+      fatal: false,
+    } as const;
+  }
+
+  const installedDistros = distroProbe.distros;
   const distroAvailable = input.distro
     ? installedDistros.some(
         (installed) => installed.name.toLowerCase() === input.distro?.toLowerCase(),
