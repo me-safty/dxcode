@@ -62,8 +62,8 @@ export const layer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
 
-    // Workspace root is <baseDir>/workspace (e.g., ~/.t3/workspace or ~/.t3/dev/workspace)
-    const workspaceRoot = path.join(environment.baseDir, "workspace");
+    // Workspace root comes from environment (e.g., ~/tutoratlas)
+    const workspaceRoot = environment.workspaceRoot;
 
     return DesktopWorkspace.of({
       ensureStudentWorkspace: (input) =>
