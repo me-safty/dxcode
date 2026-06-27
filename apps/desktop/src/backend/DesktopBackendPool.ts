@@ -314,24 +314,27 @@ export const layer = Layer.effect(
         if (id === DesktopBackendManager.PRIMARY_INSTANCE_ID) {
           return yield* new DesktopBackendPoolCannotUnregisterPrimaryError();
         }
-        // modifyEffect atomically pulls the entry out of the registry
-        // and yields the scope handle; closing the scope below runs the
-        // instance's auto-stop finalizer.
-        const removed = yield* SynchronizedRef.modifyEffect(instancesRef, (current) => {
+        // Keep the registry lock until the old scope has fully closed. A
+        // concurrent register for the same id must not start a replacement on
+        // the old backend's port while its stop finalizer is still running.
+        yield* SynchronizedRef.modifyEffect(instancesRef, (current) => {
           const entry = current.get(id);
           if (entry === undefined) {
-            return Effect.succeed([Option.none<Scope.Closeable>(), current] as const);
+            return Effect.succeed([undefined, current] as const);
           }
-          const next = new Map(current);
-          next.delete(id);
-          return Effect.succeed([
-            entry.scope,
-            next as ReadonlyMap<BackendInstanceId, RegisteredInstance>,
-          ] as const);
-        });
-        yield* Option.match(removed, {
-          onNone: () => Effect.void,
-          onSome: (scope) => Scope.close(scope, Exit.void).pipe(Effect.ignore),
+          return Option.match(entry.scope, {
+            onNone: () => Effect.void,
+            onSome: (scope) => Scope.close(scope, Exit.void).pipe(Effect.ignore),
+          }).pipe(
+            Effect.map(() => {
+              const next = new Map(current);
+              next.delete(id);
+              return [
+                undefined,
+                next as ReadonlyMap<BackendInstanceId, RegisteredInstance>,
+              ] as const;
+            }),
+          );
         });
       });
 
