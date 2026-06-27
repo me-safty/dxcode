@@ -4,10 +4,10 @@
 
 Branch maintenance snapshot for the latest upstream merge resolution:
 
-- Generated from `upstream/main` `6245c547c2d88e26434ac7b8e08213f2d9ef8577` with starting branch HEAD `b53331f8828eb18577768042f55a5b59a4aa3efb`; the merge created local merge commit `28f7aeadf2c890a06ebe9f0087a8811a8954fb0a8`.
-- Shared refs at merge time: `origin/main` `28a69ee8d8fb03eccd0e9bb2f72a4b8faf738847`, local `main` `1b76c7a6bb3999896a3d5ba9f10c01d14744173d`.
-- Effective branch delta after the merge: `47 ahead / 0 behind upstream/main`, `49 ahead / 344 behind origin/main`, `49 ahead / 346 behind local main`; fork diff size is `53 files changed, 14229 insertions(+), 309 deletions(-)` against the `upstream/main` tree.
-- Merge note: upstream commits `24abab789f7b9e8cb96d55c2fbbd05ff332e8c23` and `6245c547c2d88e26434ac7b8e08213f2d9ef8577` brought chat scroll anchoring stabilization after send plus native composer revision-gated updates to prevent stale mobile editor updates from causing lag. Git auto-merged `apps/web/src/components/ChatView.tsx` cleanly; there were no conflict markers or manual conflict resolutions. No Version Control panel customization was retired, no upstream implementation made this branch's panel work obsolete, and no new source-control fork customization was introduced by the merge.
+- Generated from `upstream/main` `a9b1190a11276927caf573d92c33c5346fc4c076` with starting branch HEAD `f28c6bd19bbe16e6295315c126451d94a38960d3`; the merge created local merge commit `1f3e0060888a726d177d5c2c973901068139683c`.
+- Shared refs at merge time: `origin/main` `32d8580bf4cc1a80b782b3b13507320e511b1976`, local `main` `72200a3c363da256b8d839b8337728b94d884bd5`.
+- Effective branch delta after the merge: `53 ahead / 0 behind upstream/main`, `55 ahead / 355 behind origin/main`, `55 ahead / 360 behind local main`; fork diff size is `56 files changed, 14616 insertions(+), 312 deletions(-)` against the `upstream/main` tree.
+- Merge note: upstream commits `44fb34ad5b348185518568ad205e8ac6841afe18` and `a9b1190a11276927caf573d92c33c5346fc4c076` brought preview browser surface, automation, and recording stabilization plus desktop parallel WSL/Windows backend support with a mode picker. Git auto-merged `packages/contracts/src/ipc.ts` cleanly so upstream's new desktop window/WSL IPC contracts coexist with the branch's existing Version Control panel RPC/contracts; there were no conflict markers or manual conflict resolutions. No Version Control panel customization was retired, no upstream implementation made this branch's panel work obsolete, and no new source-control fork customization was introduced by the merge.
 
 T3 Code includes a Git-backed Version Control surface in the right panel. The panel is scoped to the active environment and repository cwd, uses server-owned Git operations, and reuses the existing VCS status, source-control provider, and WebSocket RPC infrastructure rather than shelling out from React.
 
