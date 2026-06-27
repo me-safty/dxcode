@@ -6,9 +6,8 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import { ServerConfig } from "./config.ts";
 import {
-  attachmentsRouteLayer,
+  assetRouteLayer,
   otlpTracesProxyRouteLayer,
-  projectFaviconRouteLayer,
   serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
@@ -19,8 +18,8 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { WorkflowRunRepositoryLive } from "./persistence/Layers/WorkflowRuns.ts";
 import { WorkflowJournalStoreLive } from "./persistence/Layers/SqliteJournalStore.ts";
-import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
-import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
+import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
+import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
@@ -28,18 +27,18 @@ import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
-import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery.ts";
-import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore.ts";
+import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
-import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
+import * as TerminalManager from "./terminal/Manager.ts";
 import * as GitManager from "./git/GitManager.ts";
-import { KeybindingsLive } from "./keybindings.ts";
-import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup.ts";
+import * as Keybindings from "./keybindings.ts";
+import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
@@ -49,12 +48,12 @@ import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletion
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
-import { ServerSettingsLive } from "./serverSettings.ts";
+import * as ServerSettings from "./serverSettings.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
-import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
-import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
-import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
+import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
@@ -67,7 +66,7 @@ import * as SourceControlProviderRegistry from "./sourceControl/SourceControlPro
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
-import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
+import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -124,10 +123,10 @@ import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale"
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
     if (typeof Bun !== "undefined") {
-      const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY.ts"));
+      const BunPTY = yield* Effect.promise(() => import("./terminal/BunPtyAdapter.ts"));
       return BunPTY.layer;
     } else {
-      const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY.ts"));
+      const NodePTY = yield* Effect.promise(() => import("./terminal/NodePtyAdapter.ts"));
       return NodePTY.layer;
     }
   }),
@@ -253,24 +252,24 @@ const VcsLayerLive = Layer.empty.pipe(
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(CheckpointDiffQueryLive),
-  Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
+  Layer.provideMerge(CheckpointDiffQuery.layer),
+  Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
-const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
+const TerminalLayerLive = TerminalManager.layer.pipe(Layer.provide(PtyAdapterLive));
 
-const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
-  Layer.provide(WorkspacePathsLive),
+const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(
+  Layer.provide(WorkspacePaths.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
 
-const WorkspaceFileSystemLayerLive = WorkspaceFileSystemLive.pipe(
-  Layer.provide(WorkspacePathsLive),
+const WorkspaceFileSystemLayerLive = WorkspaceFileSystem.layer.pipe(
+  Layer.provide(WorkspacePaths.layer),
   Layer.provide(WorkspaceEntriesLayerLive),
 );
 
 const WorkspaceLayerLive = Layer.mergeAll(
-  WorkspacePathsLive,
+  WorkspacePaths.layer,
   WorkspaceEntriesLayerLive,
   WorkspaceFileSystemLayerLive,
 );
@@ -319,7 +318,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
-  Layer.provideMerge(KeybindingsLive),
+  Layer.provideMerge(Keybindings.layer),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(
     T3workToolBrokerLive.pipe(
@@ -349,13 +348,13 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // no longer transitively provides it. Exposing it at the runtime level
   // keeps a single Live for all opencode consumers.
   Layer.provideMerge(OpenCodeRuntimeLive),
-  Layer.provideMerge(ServerSettingsLive),
+  Layer.provideMerge(ServerSettings.layer),
   Layer.provideMerge(WorkspaceLayerLive),
   // Project favicon + repo identity share one provideMerge slot (the `pipe` arity is capped).
   Layer.provideMerge(
     Layer.mergeAll(ProjectFaviconResolver.layer, RepositoryIdentityResolver.layer),
   ),
-  Layer.provideMerge(ServerEnvironmentLive),
+  Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(
     Layer.mergeAll(
@@ -371,13 +370,13 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(ProcessDiagnostics.layer),
   Layer.provideMerge(ProcessResourceMonitor.layer),
   Layer.provideMerge(TraceDiagnostics.layer),
-  Layer.provideMerge(AnalyticsServiceLayerLive),
+  Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
-  Layer.provideMerge(ServerLifecycleEventsLive),
+  Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
 );
 
-const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
+const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
@@ -389,8 +388,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     Layer.provide(serverEnvironmentHttpApiLayer),
     Layer.provide(environmentAuthenticatedAuthLayer),
   ),
-  attachmentsRouteLayer,
-  t3workAtlassianAccountsRouteLayer,
+  assetRouteLayer,
   t3workAtlassianAssetRouteLayer,
   t3workAtlassianAssetContentRouteLayer,
   t3workAtlassianBacklogRouteLayer,
@@ -412,7 +410,6 @@ export const makeRoutesLayer = Layer.mergeAll(
   t3workThreadToolContextRouteLayer,
   t3workProjectWorkspaceWriteContextFilesRouteLayer,
   otlpTracesProxyRouteLayer,
-  projectFaviconRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
@@ -421,12 +418,12 @@ export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
 
-    fixPath();
+    yield* fixPath();
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         yield* HttpServer.HttpServer;
-        const startup = yield* ServerRuntimeStartup;
+        const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
         yield* startup.markHttpListening;
       }),
     );

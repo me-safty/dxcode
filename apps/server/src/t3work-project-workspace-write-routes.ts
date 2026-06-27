@@ -16,7 +16,7 @@ import {
   type WriteContextFilesRequest,
   type WriteContextFilesResponse,
 } from "./t3work-project-repository-utils.ts";
-import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
+import { WorkspacePaths } from "./workspace/WorkspacePaths.ts";
 
 export const t3workProjectWorkspaceWriteContextFilesRouteLayer = HttpRouter.add(
   "POST",

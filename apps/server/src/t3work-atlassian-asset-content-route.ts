@@ -7,7 +7,7 @@ import { HttpRouter } from "effect/unstable/http";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { providerForAccount } from "./t3work-atlassian-auth-store.ts";
 import { tryAtlassianPromise } from "./t3work-atlassian-http.ts";
-import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
+import { WorkspacePaths } from "./workspace/WorkspacePaths.ts";
 
 type AssetContentInput = {
   readonly accountId: string;
