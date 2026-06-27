@@ -2,6 +2,15 @@ import type { IntegrationAccount } from "@t3tools/integrations-core";
 
 const LAST_ACCOUNT_ID_STORAGE_KEY = "t3work:last-atlassian-account-id";
 
+export function readConfiguredAtlassianSiteUrl(): string {
+  return __ATLASSIAN_SITE_URL__.trim();
+}
+
+export function defaultAtlassianSiteUrlInput(): string {
+  const configured = readConfiguredAtlassianSiteUrl();
+  return configured ? normalizeAtlassianUrl(configured) : "https://";
+}
+
 export function isValidAtlassianUrl(value: string): boolean {
   try {
     const url = new URL(normalizeAtlassianUrl(value));
@@ -32,9 +41,35 @@ export function persistLastAccountId(accountId: string): void {
   }
 }
 
+function atlassianSiteHost(value: string): string | null {
+  try {
+    return new URL(normalizeAtlassianUrl(value)).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function accountMatchesConfiguredSite(
+  account: IntegrationAccount,
+  configuredSiteUrl: string,
+): boolean {
+  if (!account.accountUrl) return false;
+  const configuredHost = atlassianSiteHost(configuredSiteUrl);
+  const accountHost = atlassianSiteHost(account.accountUrl);
+  return configuredHost !== null && configuredHost === accountHost;
+}
+
 export function pickPreferredAccount(
   loadedAccounts: ReadonlyArray<IntegrationAccount>,
 ): IntegrationAccount | null {
+  const configuredSiteUrl = readConfiguredAtlassianSiteUrl();
+  if (configuredSiteUrl) {
+    const configuredMatch = loadedAccounts.find((account) =>
+      accountMatchesConfiguredSite(account, configuredSiteUrl),
+    );
+    if (configuredMatch) return configuredMatch;
+  }
+
   const lastAccountId = readLastAccountId();
   if (!lastAccountId) return loadedAccounts[0] ?? null;
   return (

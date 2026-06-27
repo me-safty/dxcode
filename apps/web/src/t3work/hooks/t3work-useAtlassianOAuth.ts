@@ -8,10 +8,8 @@ import {
 } from "@t3tools/integrations-atlassian";
 import { randomUUID } from "~/lib/utils";
 import { useBackend } from "~/t3work/backend/t3work-index";
-
-const OAUTH_POPUP_WIDTH = 500;
-const OAUTH_POPUP_HEIGHT = 600;
-const POLL_INTERVAL_MS = 500;
+import { openOAuthPopup, waitForOAuthCallback } from "~/t3work/hooks/t3work-atlassianOAuthPopup";
+import { readAtlassianOAuthRedirectUri } from "~/t3work/hooks/t3work-atlassianOAuthRedirect";
 
 export type OAuthState =
   | { kind: "idle" }
@@ -21,60 +19,6 @@ export type OAuthState =
   | { kind: "listing_sites" }
   | { kind: "done"; token: TokenExchangeResult; sites: ReadonlyArray<AtlassianAccessibleResource> }
   | { kind: "error"; message: string };
-
-function openOAuthPopup(url: string): WindowProxy | null {
-  const left = Math.round(window.screenX + (window.outerWidth - OAUTH_POPUP_WIDTH) / 2);
-  const top = Math.round(window.screenY + (window.outerHeight - OAUTH_POPUP_HEIGHT) / 2);
-  return window.open(
-    url,
-    "atlassian-oauth",
-    `width=${OAUTH_POPUP_WIDTH},height=${OAUTH_POPUP_HEIGHT},left=${left},top=${top},noopener,noreferrer`,
-  );
-}
-
-function waitForCallback(
-  popup: WindowProxy,
-  redirectUri: string,
-  timeoutMs = 120000,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    let resolved = false;
-
-    const cleanup = () => {
-      resolved = true;
-      if (!popup.closed) popup.close();
-    };
-
-    const timer = setInterval(() => {
-      if (resolved) {
-        clearInterval(timer);
-        return;
-      }
-
-      if (popup.closed) {
-        cleanup();
-        reject(new Error("OAuth popup was closed before completing sign in."));
-        return;
-      }
-
-      try {
-        const href = popup.location.href;
-        if (href && href.startsWith(redirectUri)) {
-          cleanup();
-          resolve(href);
-        }
-      } catch {
-        // Cross-origin while on auth domain; ignore
-      }
-
-      if (Date.now() - start > timeoutMs) {
-        cleanup();
-        reject(new Error("OAuth sign in timed out. Please try again."));
-      }
-    }, POLL_INTERVAL_MS);
-  });
-}
 
 export type UseAtlassianOAuthResult = {
   state: OAuthState;
@@ -105,7 +49,16 @@ export function useAtlassianOAuth(): UseAtlassianOAuthResult {
         return;
       }
 
-      const redirectUri = `${window.location.origin}/oauth/callback`;
+      let redirectUri: string;
+      try {
+        redirectUri = readAtlassianOAuthRedirectUri();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "OAuth redirect URI is not configured.";
+        setState({ kind: "error", message });
+        return;
+      }
+
       const config: AtlassianOAuthConfig = {
         clientId: resolvedClientId,
         redirectUri,
@@ -124,7 +77,7 @@ export function useAtlassianOAuth(): UseAtlassianOAuthResult {
           throw new Error("Failed to open OAuth popup. Check your popup blocker settings.");
         }
 
-        const callbackUrl = await waitForCallback(popup, redirectUri);
+        const callbackUrl = await waitForOAuthCallback(popup, redirectUri);
         const callback = new URL(callbackUrl);
         const code = callback.searchParams.get("code");
         const returnedState = callback.searchParams.get("state");

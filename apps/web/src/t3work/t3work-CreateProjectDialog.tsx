@@ -16,6 +16,7 @@ import {
 import { AccountStep, ProjectStep, SourceStep } from "~/t3work/t3work-CreateProjectDialogSteps";
 import { ConfirmStep, CreatingStep } from "~/t3work/t3work-CreateProjectDialogConfirmStep";
 import { CreateProjectDialogFooter } from "~/t3work/t3work-CreateProjectDialogFooter";
+import { defaultAtlassianSiteUrlInput } from "~/t3work/hooks/t3work-createProjectUtils";
 
 export function CreateProjectDialog({
   onClose,
@@ -39,7 +40,7 @@ export function CreateProjectDialog({
     loadingProjects,
   } = setup;
   const setupProfileId = useT3workProjectSetupProfile();
-  const [siteUrl, setSiteUrl] = useState("https://");
+  const [siteUrl, setSiteUrl] = useState(defaultAtlassianSiteUrlInput);
   const [email, setEmail] = useState("");
   const [apiToken, setApiToken] = useState("");
   const [projectQuery, setProjectQuery] = useState("");

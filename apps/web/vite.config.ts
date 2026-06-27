@@ -37,6 +37,14 @@ const configuredAtlassianClientId =
   process.env.VITE_ATLASSIAN_CLIENT_ID?.trim() ||
   process.env.ATLASSIAN_CLIENT_ID?.trim() ||
   "";
+const configuredAtlassianSiteUrl =
+  process.env.T3WORK_ATLASSIAN_SITE_URL?.trim() ||
+  process.env.VITE_T3WORK_ATLASSIAN_SITE_URL?.trim() ||
+  "";
+const configuredAtlassianOAuthRedirectUri =
+  process.env.VITE_ATLASSIAN_OAUTH_REDIRECT_URI?.trim() ||
+  process.env.T3WORK_ATLASSIAN_OAUTH_REDIRECT_URI?.trim() ||
+  "";
 const configuredHostedAppUrl = (() => {
   const explicitHostedAppUrl = process.env.VITE_HOSTED_APP_URL?.trim();
   if (explicitHostedAppUrl) {
@@ -138,6 +146,8 @@ export default defineConfig(() => {
       "import.meta.env.VITE_HOSTED_APP_CHANNEL": JSON.stringify(configuredHostedAppChannel),
       "import.meta.env.APP_VERSION": JSON.stringify(configuredAppVersion),
       __ATLASSIAN_CLIENT_ID__: JSON.stringify(configuredAtlassianClientId),
+      __ATLASSIAN_SITE_URL__: JSON.stringify(configuredAtlassianSiteUrl),
+      __ATLASSIAN_OAUTH_REDIRECT_URI__: JSON.stringify(configuredAtlassianOAuthRedirectUri),
     },
     resolve: {
       tsconfigPaths: true,

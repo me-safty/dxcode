@@ -1,4 +1,14 @@
+import { useEffect } from "react";
+import { postAtlassianOAuthCallbackToOpener } from "~/t3work/components/t3work-atlassianOAuthCallbackMessage";
+
 export function OAuthCallbackPage() {
+  useEffect(() => {
+    const href = window.location.href;
+    if (postAtlassianOAuthCallbackToOpener(href)) {
+      window.close();
+    }
+  }, []);
+
   return (
     <div className="flex h-dvh items-center justify-center bg-background text-foreground">
       <div className="text-center">

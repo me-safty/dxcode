@@ -35,6 +35,8 @@ const config: StorybookConfig = {
         "import.meta.env.VITE_HOSTED_APP_CHANNEL": JSON.stringify("storybook"),
         "import.meta.env.APP_VERSION": JSON.stringify("storybook"),
         __ATLASSIAN_CLIENT_ID__: JSON.stringify(""),
+        __ATLASSIAN_SITE_URL__: JSON.stringify(""),
+        __ATLASSIAN_OAUTH_REDIRECT_URI__: JSON.stringify(""),
       },
     }),
 };
