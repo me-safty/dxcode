@@ -1,8 +1,5 @@
-import type {
-  AtlassianAccessibleResource,
-  AtlassianOAuthConfig,
-  TokenExchangeResult,
-} from "./oauth.ts";
+import type { AtlassianOAuthConfig, TokenExchangeResult } from "./oauth.ts";
+import { listAccessibleResources } from "./oauth.ts";
 import {
   AtlassianApiError,
   AtlassianAuthError,
@@ -433,24 +430,8 @@ export class AtlassianOAuthApiClient {
     this.token = token;
   }
 
-  async listAccessibleResources(): Promise<ReadonlyArray<AtlassianAccessibleResource>> {
-    const response = await fetch("https://auth.atlassian.com/oauth/token/accessible-resources", {
-      headers: {
-        Authorization: `Bearer ${this.token.accessToken}`,
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "Unknown error");
-      throw new AtlassianApiError({
-        status: response.status,
-        message: text,
-        path: "/oauth/token/accessible-resources",
-      });
-    }
-
-    return (await response.json()) as ReadonlyArray<AtlassianAccessibleResource>;
+  listAccessibleResources() {
+    return listAccessibleResources(this.token.accessToken);
   }
 
   forCloud(cloudId: string): JiraApiClient {

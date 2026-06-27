@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   ATLASSIAN_OAUTH_CALLBACK_MESSAGE_TYPE,
+  isAtlassianOAuthCallbackMessage,
   postAtlassianOAuthCallbackToOpener,
 } from "./t3work-atlassianOAuthCallbackMessage";
 
@@ -34,5 +36,25 @@ describe("postAtlassianOAuthCallbackToOpener", () => {
     expect(postAtlassianOAuthCallbackToOpener("http://127.0.0.1:5733/oauth/callback")).toBe(false);
 
     Object.defineProperty(window, "opener", { value: originalOpener, configurable: true });
+  });
+});
+
+describe("isAtlassianOAuthCallbackMessage", () => {
+  const redirectUri = "http://127.0.0.1:5733/oauth/callback";
+
+  it("accepts callback messages with matching redirect prefix", () => {
+    const message = {
+      type: ATLASSIAN_OAUTH_CALLBACK_MESSAGE_TYPE,
+      href: `${redirectUri}?code=abc&state=xyz`,
+    };
+    expect(isAtlassianOAuthCallbackMessage(message, redirectUri)).toBe(true);
+  });
+
+  it("rejects messages with mismatched redirect prefix", () => {
+    const message = {
+      type: ATLASSIAN_OAUTH_CALLBACK_MESSAGE_TYPE,
+      href: "https://evil.example/oauth/callback?code=abc",
+    };
+    expect(isAtlassianOAuthCallbackMessage(message, redirectUri)).toBe(false);
   });
 });

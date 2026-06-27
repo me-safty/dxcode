@@ -1,4 +1,4 @@
-import { ATLASSIAN_OAUTH_CALLBACK_MESSAGE_TYPE } from "~/t3work/components/t3work-atlassianOAuthCallbackMessage";
+import { isAtlassianOAuthCallbackMessage } from "~/t3work/components/t3work-atlassianOAuthCallbackMessage";
 import {
   ATLASSIAN_OAUTH_POPUP_FRAME_NAME,
   ATLASSIAN_OAUTH_POPUP_HEIGHT,
@@ -6,6 +6,8 @@ import {
 } from "@t3tools/integrations-atlassian";
 
 const POLL_INTERVAL_MS = 500;
+/** Cross-origin postMessage can arrive after the popup closes (desktop custom protocol). */
+const POPUP_CLOSED_GRACE_MS = 2000;
 
 export { ATLASSIAN_OAUTH_POPUP_FRAME_NAME };
 
@@ -19,6 +21,13 @@ export function openOAuthPopup(url: string): WindowProxy | null {
   return window.open(url, ATLASSIAN_OAUTH_POPUP_FRAME_NAME, buildOAuthPopupFeatures());
 }
 
+function acceptOAuthCallbackMessage(event: MessageEvent, redirectUri: string): string | null {
+  if (!isAtlassianOAuthCallbackMessage(event.data, redirectUri)) {
+    return null;
+  }
+  return event.data.href;
+}
+
 export function waitForOAuthCallback(
   popup: WindowProxy,
   redirectUri: string,
@@ -27,6 +36,8 @@ export function waitForOAuthCallback(
   return new Promise((resolve, reject) => {
     const start = Date.now();
     let resolved = false;
+    let popupClosedPolls = 0;
+    const closedGracePolls = Math.ceil(POPUP_CLOSED_GRACE_MS / POLL_INTERVAL_MS);
 
     const cleanup = () => {
       resolved = true;
@@ -36,15 +47,11 @@ export function waitForOAuthCallback(
     };
 
     const onMessage = (event: MessageEvent) => {
-      if (resolved || event.source !== popup) return;
-      const data = event.data;
-      if (
-        data?.type === ATLASSIAN_OAUTH_CALLBACK_MESSAGE_TYPE &&
-        typeof data.href === "string" &&
-        data.href.startsWith(redirectUri)
-      ) {
+      if (resolved) return;
+      const href = acceptOAuthCallbackMessage(event, redirectUri);
+      if (href) {
         cleanup();
-        resolve(data.href);
+        resolve(href);
       }
     };
 
@@ -54,10 +61,15 @@ export function waitForOAuthCallback(
       if (resolved) return;
 
       if (popup.closed) {
-        cleanup();
-        reject(new Error("OAuth popup was closed before completing sign in."));
+        popupClosedPolls += 1;
+        if (popupClosedPolls >= closedGracePolls) {
+          cleanup();
+          reject(new Error("OAuth popup was closed before completing sign in."));
+        }
         return;
       }
+
+      popupClosedPolls = 0;
 
       try {
         const href = popup.location.href;

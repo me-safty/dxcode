@@ -6,7 +6,8 @@ export class AtlassianOAuthError extends Data.TaggedError("AtlassianOAuthError")
 }> {}
 
 const AUTH_BASE = "https://auth.atlassian.com";
-const OAUTH_SCOPES = ["read:jira-work", "read:jira-user", "write:jira-work"];
+export const ATLASSIAN_API_BASE = "https://api.atlassian.com";
+const OAUTH_SCOPES = ["read:jira-work", "read:jira-user", "write:jira-work", "offline_access"];
 
 export type PkcePair = {
   readonly codeVerifier: string;
@@ -156,7 +157,7 @@ export type AtlassianAccessibleResource = {
 export async function listAccessibleResources(
   accessToken: string,
 ): Promise<ReadonlyArray<AtlassianAccessibleResource>> {
-  const response = await fetch(`${AUTH_BASE}/oauth/token/accessible-resources`, {
+  const response = await fetch(`${ATLASSIAN_API_BASE}/oauth/token/accessible-resources`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/json",

@@ -50,6 +50,11 @@ export function CreateProjectDialog({
   );
   const [newRepositoryUrl, setNewRepositoryUrl] = useState("");
   const [customProfile, setCustomProfile] = useState<T3WorkProfile | undefined>(undefined);
+  const oauthError = oauth.state.kind === "error" ? oauth.state.message : null;
+  const oauthBusy =
+    oauth.state.kind === "opening" ||
+    oauth.state.kind === "waiting" ||
+    oauth.state.kind === "exchanging";
 
   useEffect(() => {
     void loadPersistedAccounts();
@@ -107,16 +112,16 @@ export function CreateProjectDialog({
           apiToken={apiToken}
           selectedAccount={selectedAccount}
           selectedProject={selectedProject}
-          bootstrapping={bootstrapping}
+          bootstrapping={bootstrapping || oauthBusy}
           loadingProjects={loadingProjects}
           onCreateProject={createSelectedProject}
         />
       }
     >
       <div className="relative space-y-5 px-5 pb-5 pt-2 sm:px-6 sm:pb-6">
-        {setup.error ? (
+        {setup.error || oauthError ? (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            {setup.error}
+            {setup.error ?? oauthError}
           </div>
         ) : null}
         <CreateProjectWizardStepTransition step={setup.step}>
