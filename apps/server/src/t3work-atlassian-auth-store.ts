@@ -36,6 +36,49 @@ const mockProvider = new MockIntegrationProvider();
 const atlassianAuths = new Map<string, JiraApiAuth>();
 const OAUTH_REFRESH_SKEW_MS = 60_000;
 
+function normalizeAtlassianSiteUrl(value: string): string | null {
+  try {
+    const trimmed = value.trim();
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const url = new URL(withProtocol);
+    return `${url.protocol}//${url.hostname.toLowerCase()}${url.port ? `:${url.port}` : ""}${
+      url.pathname === "/" ? "" : url.pathname.replace(/\/+$/, "")
+    }`;
+  } catch {
+    return null;
+  }
+}
+
+function authSiteUrl(auth: JiraApiAuth): string | undefined {
+  if (auth.kind === "basic") {
+    return auth.siteUrl;
+  }
+  return auth.siteUrl;
+}
+
+function findAuthForAccountId(
+  accountId: string,
+): { readonly accountId: string; readonly auth: JiraApiAuth } | undefined {
+  const exact = atlassianAuths.get(accountId);
+  if (exact) {
+    return { accountId, auth: exact };
+  }
+
+  const normalizedAccountId = normalizeAtlassianSiteUrl(accountId);
+  if (!normalizedAccountId) {
+    return undefined;
+  }
+
+  for (const [storedAccountId, auth] of atlassianAuths) {
+    const storedAccountUrl = normalizeAtlassianSiteUrl(storedAccountId);
+    const storedAuthUrl = authSiteUrl(auth) ? normalizeAtlassianSiteUrl(authSiteUrl(auth)!) : null;
+    if (storedAccountUrl === normalizedAccountId || storedAuthUrl === normalizedAccountId) {
+      return { accountId: storedAccountId, auth };
+    }
+  }
+  return undefined;
+}
+
 function persistedAuthsPayload(): PersistedAtlassianAuths {
   return {
     version: 1,
@@ -116,9 +159,11 @@ function refreshOAuthAuthIfNeeded(accountId: string, auth: JiraApiAuth) {
 export function providerForAccount(accountId: string) {
   return Effect.gen(function* () {
     yield* loadPersistedAuths;
-    const auth = atlassianAuths.get(accountId);
-    return auth
-      ? new AtlassianIntegrationProvider(yield* refreshOAuthAuthIfNeeded(accountId, auth))
+    const resolved = findAuthForAccountId(accountId);
+    return resolved
+      ? new AtlassianIntegrationProvider(
+          yield* refreshOAuthAuthIfNeeded(resolved.accountId, resolved.auth),
+        )
       : mockProvider;
   });
 }

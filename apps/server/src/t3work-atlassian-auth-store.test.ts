@@ -6,7 +6,11 @@ import * as Layer from "effect/Layer";
 import { afterEach, vi } from "vite-plus/test";
 
 import * as ServerConfig from "./config.ts";
-import { providerForPersistedAuths, replaceAtlassianAuths } from "./t3work-atlassian-auth-store.ts";
+import {
+  providerForAccount,
+  providerForPersistedAuths,
+  replaceAtlassianAuths,
+} from "./t3work-atlassian-auth-store.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -68,6 +72,40 @@ it.effect("replaces old Atlassian auths instead of merging stale records", () =>
       ["new-cloud"],
     );
   }).pipe(Effect.provide(testLayer("t3work-atlassian-auth-replace-"))),
+);
+
+it.effect("resolves persisted OAuth auths by Atlassian site URL aliases", () =>
+  Effect.gen(function* () {
+    replaceAtlassianAuths([
+      {
+        accountId: "cloud-1",
+        auth: {
+          kind: "oauth",
+          cloudId: "cloud-1",
+          siteUrl: "https://example.atlassian.net",
+          accessToken: "token-1",
+        },
+      },
+    ]);
+
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      requestedUrls.push(input.toString());
+      return Response.json({ accountId: "user-1", displayName: "Test User" });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const provider = yield* providerForAccount("https://example.atlassian.net/");
+    const accounts = yield* Effect.tryPromise(() => provider.listAccounts());
+
+    assert.deepEqual(requestedUrls, [
+      "https://api.atlassian.com/ex/jira/cloud-1/rest/api/3/myself",
+    ]);
+    assert.deepEqual(
+      accounts.map((account) => account.id),
+      ["cloud-1"],
+    );
+  }).pipe(Effect.provide(testLayer("t3work-atlassian-auth-site-alias-"))),
 );
 
 it.effect("ignores stale expired OAuth records when a current account remains", () =>
