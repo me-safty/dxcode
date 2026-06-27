@@ -19,7 +19,7 @@ type WorkflowCardActionHandler =
       cardId: string;
       actionId: string;
       submit?: Record<string, unknown>;
-    }) => Promise<void>)
+    }) => void | Promise<void>)
   | undefined;
 
 export function getT3workWorkflowCardAttachment(
@@ -161,11 +161,13 @@ export function T3workWorkflowCardBody(props: {
                   }
 
                   setSubmittingActionId(action.id);
-                  void onSubmitRecipeCardAction({
-                    cardId: card.id,
-                    actionId: action.id,
-                    ...(action.submit ? { submit: action.submit } : {}),
-                  }).finally(() =>
+                  void Promise.resolve(
+                    onSubmitRecipeCardAction({
+                      cardId: card.id,
+                      actionId: action.id,
+                      ...(action.submit ? { submit: action.submit } : {}),
+                    }),
+                  ).finally(() =>
                     setSubmittingActionId((current) => (current === action.id ? null : current)),
                   );
                 }}

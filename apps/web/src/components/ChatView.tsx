@@ -999,6 +999,10 @@ function ChatViewContent(props: ChatViewProps) {
     routeKind === "server" ? props.composerContainerOverlay : undefined;
   const onComposerContextAttachmentsConsumed =
     routeKind === "server" ? props.onComposerContextAttachmentsConsumed : undefined;
+  const onSubmitRecipeCardAction =
+    routeKind === "server" ? props.onSubmitRecipeCardAction : undefined;
+  const dispatchWorkflowDecision =
+    routeKind === "server" ? props.dispatchWorkflowDecision : undefined;
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -4849,6 +4853,8 @@ function ChatViewContent(props: ChatViewProps) {
                 anchorMessageId={timelineAnchorMessageId}
                 contentInsetEndAdjustment={composerOverlayHeight}
                 onIsAtEndChange={onIsAtEndChange}
+                {...(onSubmitRecipeCardAction ? { onSubmitRecipeCardAction } : {})}
+                {...(dispatchWorkflowDecision ? { dispatchWorkflowDecision } : {})}
               />
 
               {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
