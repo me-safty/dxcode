@@ -5,11 +5,11 @@
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
-    "ensure:electron": "node scripts/ensure-electron-runtime.mjs",
-    "start": "node scripts/start-electron.mjs",
+    "ensure:electron": "bun scripts/ensure-electron-runtime.mjs",
+    "start": "bun scripts/start-electron.mjs",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run --passWithNoTests",
-    "smoke-test": "node scripts/smoke-test.mjs"
+    "smoke-test": "bun scripts/smoke-test.mjs"
   },
   "dependencies": {
     "@clerk/electron": "catalog:",

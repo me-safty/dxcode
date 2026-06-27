@@ -69,11 +69,11 @@ npx t3
 ```
 
 ```bash
-node --run dev
+bun run dev
 ```
 
 ```bash
-node --run dev:desktop
+bun run dev:desktop
 ```
 
 ### Option 2: Run With A Local LGTM Stack
@@ -122,13 +122,13 @@ npx t3
 Monorepo web/server dev:
 
 ```bash
-node --run dev
+bun run dev
 ```
 
 Monorepo desktop dev:
 
 ```bash
-node --run dev:desktop
+bun run dev:desktop
 ```
 
 Packaged desktop app:

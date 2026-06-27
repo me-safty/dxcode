@@ -14,22 +14,22 @@ export default defineConfig({
   run: {
     tasks: {
       build: {
-        command: "node scripts/build-preview-annotation-css.mjs && vp pack",
+        command: "bun scripts/build-preview-annotation-css.mjs && vp pack",
         dependsOn: ["t3#build"],
         cache: false,
       },
       dev: {
         command:
-          "node scripts/build-preview-annotation-css.mjs && cross-env T3CODE_DESKTOP_DEV=1 vp pack --watch",
+          "bun scripts/build-preview-annotation-css.mjs && cross-env T3CODE_DESKTOP_DEV=1 vp pack --watch",
         dependsOn: ["t3#build"],
         cache: false,
       },
       "dev:bundle": {
-        command: "node scripts/build-preview-annotation-css.mjs && vp pack --watch",
+        command: "bun scripts/build-preview-annotation-css.mjs && vp pack --watch",
         cache: false,
       },
       "dev:electron": {
-        command: "node scripts/dev-electron.mjs",
+        command: "bun scripts/dev-electron.mjs",
         dependsOn: ["t3#build"],
         cache: false,
       },
@@ -47,7 +47,7 @@ export default defineConfig({
       deps: {
         alwaysBundle: (id) => id.startsWith("@t3tools/"),
       },
-      ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
+      ...(shouldLaunchElectronAfterPack ? { onSuccess: "bun scripts/dev-electron.mjs" } : {}),
     },
     {
       format: "cjs",

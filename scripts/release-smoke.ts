@@ -11,8 +11,8 @@ const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.
 
 const workspaceFiles = [
   "package.json",
-  "pnpm-lock.yaml",
-  "pnpm-workspace.yaml",
+  "bun.lock",
+  "bunfig.toml",
   "apps/server/package.json",
   "apps/desktop/package.json",
   "apps/web/package.json",
@@ -32,6 +32,8 @@ const workspaceFiles = [
   "packages/effect-acp/package.json",
   "packages/effect-codex-app-server/package.json",
   "scripts/package.json",
+  "stubs/unused-wallet-auth/index.js",
+  "stubs/unused-wallet-auth/package.json",
 ] as const;
 
 function copyWorkspaceManifestFixture(targetRoot: string): void {
@@ -204,15 +206,19 @@ try {
     },
   );
 
-  NodeFS.rmSync(NodePath.resolve(tempRoot, "pnpm-lock.yaml"), { force: true });
+  NodeFS.rmSync(NodePath.resolve(tempRoot, "bun.lock"), { force: true });
 
-  NodeChildProcess.execFileSync("vp", ["install", "--lockfile-only", "--ignore-scripts"], {
-    cwd: tempRoot,
-    stdio: "inherit",
-  });
+  NodeChildProcess.execFileSync(
+    process.execPath,
+    ["install", "--lockfile-only", "--ignore-scripts"],
+    {
+      cwd: tempRoot,
+      stdio: "inherit",
+    },
+  );
 
-  const lockfile = NodeFS.readFileSync(NodePath.resolve(tempRoot, "pnpm-lock.yaml"), "utf8");
-  assertContains(lockfile, "lockfileVersion:", "Expected pnpm-lock.yaml to be regenerated.");
+  const lockfile = NodeFS.readFileSync(NodePath.resolve(tempRoot, "bun.lock"), "utf8");
+  assertContains(lockfile, '"lockfileVersion"', "Expected bun.lock to be regenerated.");
 
   for (const relativePath of [
     "apps/server/package.json",

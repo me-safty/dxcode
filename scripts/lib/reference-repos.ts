@@ -14,8 +14,8 @@ export const referenceRepos: ReadonlyArray<ReferenceRepo> = [
     prefix: ".repos/effect-smol",
     repository: "https://github.com/Effect-TS/effect-smol.git",
     latestRef: "main",
-    versionSourcePath: "pnpm-workspace.yaml",
-    packageVersionPath: ["catalog", "effect"],
+    versionSourcePath: "package.json",
+    packageVersionPath: ["workspaces", "catalog", "effect"],
     versionTagPrefix: "effect@",
   },
   {

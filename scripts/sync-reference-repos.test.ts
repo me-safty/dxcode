@@ -70,8 +70,8 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
         prefix: "sync-reference-repos-version-",
       });
       yield* fs.writeFileString(
-        path.join(rootDir, "pnpm-workspace.yaml"),
-        "catalog:\n  effect: 4.0.0-beta.73\n",
+        path.join(rootDir, "package.json"),
+        JSON.stringify({ workspaces: { catalog: { effect: "4.0.0-beta.73" } } }),
       );
 
       assert.equal(
@@ -186,8 +186,8 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
         prefix: "sync-reference-repos-plan-",
       });
       yield* fs.writeFileString(
-        path.join(rootDir, "pnpm-workspace.yaml"),
-        "catalog:\n  effect: 4.0.0-beta.73\n",
+        path.join(rootDir, "package.json"),
+        JSON.stringify({ workspaces: { catalog: { effect: "4.0.0-beta.73" } } }),
       );
 
       const addPlan = yield* planReferenceRepoSync(effectSmol, rootDir, false);
@@ -216,8 +216,8 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
         prefix: "sync-reference-repos-run-",
       });
       yield* fs.writeFileString(
-        path.join(rootDir, "pnpm-workspace.yaml"),
-        "catalog:\n  effect: 4.0.0-beta.73\n",
+        path.join(rootDir, "package.json"),
+        JSON.stringify({ workspaces: { catalog: { effect: "4.0.0-beta.73" } } }),
       );
 
       yield* syncReferenceRepos({ rootDir, repoId: "effect-smol" }).pipe(
@@ -266,8 +266,8 @@ it.layer(NodeServices.layer)("sync-reference-repos", (it) => {
         prefix: "sync-reference-repos-exit-error-",
       });
       yield* fs.writeFileString(
-        path.join(rootDir, "pnpm-workspace.yaml"),
-        "catalog:\n  effect: 4.0.0-beta.73\n",
+        path.join(rootDir, "package.json"),
+        JSON.stringify({ workspaces: { catalog: { effect: "4.0.0-beta.73" } } }),
       );
 
       const error = yield* syncReferenceRepos({ rootDir, repoId: "effect-smol" }).pipe(

@@ -16,8 +16,8 @@ import {
 } from "../../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
-import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import rootPackageJson from "../../../package.json" with { type: "json" };
 import serverPackageJson from "../package.json" with { type: "json" };
 import {
   ServerCliBuildAssetMissingError,
@@ -47,24 +47,25 @@ interface PackageJson {
 const PackageJsonPrettyJson = fromJsonStringPretty(Schema.Unknown);
 const encodePackageJson = Schema.encodeEffect(PackageJsonPrettyJson);
 
-const WorkspaceConfig = Schema.Struct({
-  catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-  overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-});
-type WorkspaceConfig = typeof WorkspaceConfig.Type;
-const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig));
+interface WorkspaceConfig {
+  readonly catalog: Record<string, string>;
+  readonly overrides: Record<string, string>;
+}
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
 
-const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
-  const path = yield* Path.Path;
-  const fs = yield* FileSystem.FileSystem;
-  const repoRoot = yield* RepoRoot;
-  const workspaceYaml = yield* fs.readFileString(path.join(repoRoot, "pnpm-workspace.yaml"));
-  return yield* decodeWorkspaceConfig(workspaceYaml);
-});
+function readWorkspaceConfig(): WorkspaceConfig {
+  return {
+    catalog: rootPackageJson.workspaces.catalog,
+    overrides: Object.fromEntries(
+      Object.entries(rootPackageJson.overrides).filter(
+        ([, value]) => typeof value !== "string" || !value.startsWith("file:"),
+      ),
+    ),
+  };
+}
 
 const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.StandardCommand) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -250,7 +251,7 @@ const publishCmd = Command.make(
         // Acquire: backup package.json, resolve catalog dependencies, and strip devDependencies/scripts
         Effect.gen(function* () {
           const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
-          const workspaceConfig = yield* readWorkspaceConfig();
+          const workspaceConfig = readWorkspaceConfig();
           const workspaceCatalog = workspaceConfig.catalog ?? {};
           const workspaceOverrides = workspaceConfig.overrides ?? {};
           const pkg: PackageJson = {
@@ -282,8 +283,8 @@ const publishCmd = Command.make(
           const iconBackups = yield* applyPublishIconOverrides(repoRoot, serverDir);
           return { iconBackups };
         }),
-        // Use: pnpm publish from the workspace root so pnpm-only workspace
-        // config, including override selectors, is interpreted correctly.
+        // Use the package-manager wrapper from the workspace root so workspace
+        // catalogs, overrides, and auth config are interpreted correctly.
         () =>
           Effect.gen(function* () {
             const args = createVpPmPublishArgs(config);

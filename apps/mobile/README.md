@@ -58,7 +58,7 @@ vp run config:preview
 Run static checks for mobile native code:
 
 ```bash
-node ../../scripts/mobile-native-static-check.ts
+bun ../../scripts/mobile-native-static-check.ts
 ```
 
 The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin. Missing native tools are reported as warnings and skipped locally. CI installs the default toolset from `apps/mobile/Brewfile` before running the native checks.

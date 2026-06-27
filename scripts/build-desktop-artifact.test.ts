@@ -10,8 +10,8 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   BuildCommandFailedError,
-  createStageWorkspaceConfig,
-  createStagePnpmConfig,
+  createStageInstallArgs,
+  createStagePatchedDependencies,
   createBuildConfig,
   DESKTOP_ASAR_UNPACK,
   InvalidMacPasskeyRpDomainError,
@@ -34,7 +34,7 @@ import {
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
   stageLinuxIconSize,
-  STAGE_INSTALL_ARGS,
+  STAGE_INSTALL_BASE_ARGS,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -168,7 +168,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("carries only staged dependency patch metadata into staged desktop installs", () => {
     assert.deepStrictEqual(
-      createStagePnpmConfig(
+      createStagePatchedDependencies(
         {
           "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
           "@ff-labs/fff-node@0.9.4": "patches/@ff-labs__fff-node@0.9.4.patch",
@@ -183,16 +183,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         },
       ),
       {
-        patchedDependencies: {
-          "@ff-labs/fff-node@0.9.4": "patches/@ff-labs__fff-node@0.9.4.patch",
-          "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
-          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
-        },
+        "@ff-labs/fff-node@0.9.4": "patches/@ff-labs__fff-node@0.9.4.patch",
+        "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
+        "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
       },
     );
 
     assert.equal(
-      createStagePnpmConfig(
+      createStagePatchedDependencies(
         {
           "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
         },
@@ -203,25 +201,25 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("installs optional native dependencies for the target desktop architecture", () => {
-    assert.deepStrictEqual(STAGE_INSTALL_ARGS, ["install", "--prod"]);
-    assert.deepStrictEqual(createStageWorkspaceConfig("mac", "x64"), {
-      supportedArchitectures: {
-        os: ["darwin"],
-        cpu: ["x64"],
-      },
-    });
-    assert.deepStrictEqual(createStageWorkspaceConfig("win", "arm64"), {
-      supportedArchitectures: {
-        os: ["win32"],
-        cpu: ["arm64"],
-      },
-    });
-    assert.deepStrictEqual(createStageWorkspaceConfig("mac", "universal"), {
-      supportedArchitectures: {
-        os: ["darwin"],
-        cpu: ["arm64", "x64"],
-      },
-    });
+    assert.deepStrictEqual(STAGE_INSTALL_BASE_ARGS, ["install", "--production"]);
+    assert.deepStrictEqual(createStageInstallArgs("mac", "x64"), [
+      "install",
+      "--production",
+      "--os=darwin",
+      "--cpu=x64",
+    ]);
+    assert.deepStrictEqual(createStageInstallArgs("win", "arm64"), [
+      "install",
+      "--production",
+      "--os=win32",
+      "--cpu=arm64",
+    ]);
+    assert.deepStrictEqual(createStageInstallArgs("mac", "universal"), [
+      "install",
+      "--production",
+      "--os=darwin",
+      "--cpu=*",
+    ]);
   });
 
   it("unpacks the fff shared library for filesystem and FFI access", () => {
