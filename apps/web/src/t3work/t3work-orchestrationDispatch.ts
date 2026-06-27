@@ -1,28 +1,36 @@
-import * as Effect from "effect/Effect";
 import { ORCHESTRATION_WS_METHODS, type ClientOrchestrationCommand } from "@t3tools/contracts";
-import { request } from "@t3tools/client-runtime/rpc";
 import {
-  createRuntimeCommand,
+  createEnvironmentRpcCommand,
   runAtomCommand,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 
 import { connectionAtomRuntime } from "~/connection/runtime";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 
-export const dispatchOrchestrationCommand = createRuntimeCommand(connectionAtomRuntime, {
+export const dispatchOrchestrationCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "t3work:orchestration:dispatch",
-  execute: (command: ClientOrchestrationCommand) =>
-    request(ORCHESTRATION_WS_METHODS.dispatchCommand, command).pipe(Effect.asVoid),
-} as never);
+  tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+});
 
 export async function runT3workOrchestrationDispatch(
   command: ClientOrchestrationCommand,
 ): Promise<void> {
-  const result = await runAtomCommand(appAtomRegistry, dispatchOrchestrationCommand, command, {
-    label: "t3work-orchestration-dispatch",
-    reportFailure: true,
-  });
+  const environmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
+  if (environmentId === null) {
+    throw new Error("Primary environment is not available. Finish server pairing and retry.");
+  }
+
+  const result = await runAtomCommand(
+    appAtomRegistry,
+    dispatchOrchestrationCommand,
+    { environmentId, input: command },
+    {
+      label: "t3work-orchestration-dispatch",
+      reportFailure: true,
+    },
+  );
   if (result._tag === "Failure") {
     throw squashAtomCommandFailure(result);
   }
