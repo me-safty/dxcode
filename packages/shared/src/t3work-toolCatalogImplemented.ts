@@ -2,6 +2,10 @@ import {
   EMPTY_OBJECT_INPUT_SCHEMA,
   type T3workToolCatalogEntry,
 } from "./t3work-toolCatalogCore.js";
+import {
+  IMPLEMENTED_T3WORK_BACKLOG_TOOL_CATALOG,
+  IMPLEMENTED_T3WORK_DRAFT_TOOL_CATALOG,
+} from "./t3work-toolCatalogImplementedDrafts.js";
 
 const START_CHILD_INPUT_SCHEMA = {
   type: "object",
@@ -57,6 +61,8 @@ const START_CHILD_INPUT_SCHEMA = {
 } as const;
 
 export const IMPLEMENTED_T3WORK_TOOL_CATALOG = {
+  ...IMPLEMENTED_T3WORK_BACKLOG_TOOL_CATALOG,
+  ...IMPLEMENTED_T3WORK_DRAFT_TOOL_CATALOG,
   "t3work.view.read": {
     id: "t3work.view.read",
     label: "Read view",
