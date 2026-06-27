@@ -76,6 +76,7 @@ import {
   hasExpandableWorkEntryDetails,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  shouldToggleWorkEntryRowFromKeyDown,
   type DerivedCommandWorkEntryDetails,
   type DerivedExpandableWorkEntryDetails,
   type DerivedFileChangeWorkEntryDetails,
@@ -1792,7 +1793,12 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         "aria-expanded": expanded,
         onClick: () => setExpanded((v) => !v),
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
-          if (e.key === "Enter" || e.key === " ") {
+          if (
+            shouldToggleWorkEntryRowFromKeyDown({
+              key: e.key,
+              targetIsCurrentTarget: e.currentTarget === e.target,
+            })
+          ) {
             e.preventDefault();
             setExpanded((v) => !v);
           }

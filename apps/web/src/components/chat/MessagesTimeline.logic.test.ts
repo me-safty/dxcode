@@ -18,6 +18,7 @@ import {
   hasRenderableCommandOutput,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  shouldToggleWorkEntryRowFromKeyDown,
 } from "./MessagesTimeline.logic";
 
 let workLogEntrySequence = 0;
@@ -665,6 +666,32 @@ describe("activity detail expansion", () => {
         "/Users/example/t3code",
       ),
     ).toBe("t3code/apps/web/src/session-logic.ts +1 more");
+    expect(
+      deriveWorkEntryPreview(
+        buildWorkLogEntry({
+          itemType: "file_change",
+          command: "apply_patch",
+          detail: "Updated files",
+          changedFiles: ["/Users/example/t3code/apps/web/src/components/chat/MessagesTimeline.tsx"],
+        }),
+        "/Users/example/t3code",
+      ),
+    ).toBe("t3code/apps/web/src/components/chat/MessagesTimeline.tsx");
+  });
+
+  it("only toggles expandable work rows from row-level keyboard events", () => {
+    expect(shouldToggleWorkEntryRowFromKeyDown({ key: "Enter", targetIsCurrentTarget: true })).toBe(
+      true,
+    );
+    expect(shouldToggleWorkEntryRowFromKeyDown({ key: " ", targetIsCurrentTarget: true })).toBe(
+      true,
+    );
+    expect(
+      shouldToggleWorkEntryRowFromKeyDown({ key: "Enter", targetIsCurrentTarget: false }),
+    ).toBe(false);
+    expect(
+      shouldToggleWorkEntryRowFromKeyDown({ key: "Escape", targetIsCurrentTarget: true }),
+    ).toBe(false);
   });
 });
 

@@ -131,11 +131,22 @@ export function deriveToolWorkEntryHeading(workEntry: WorkLogEntry): string {
 }
 
 export function deriveWorkEntryPreview(
-  workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles" | "itemType" | "requestKind">,
   workspaceRoot: string | undefined,
 ): string | null {
+  const changedFilesPreview = deriveChangedFilesPreview(workEntry, workspaceRoot);
+  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
+    return changedFilesPreview ?? workEntry.command ?? workEntry.detail ?? null;
+  }
   if (workEntry.command) return workEntry.command;
   if (workEntry.detail) return workEntry.detail;
+  return changedFilesPreview;
+}
+
+function deriveChangedFilesPreview(
+  workEntry: Pick<WorkLogEntry, "changedFiles">,
+  workspaceRoot: string | undefined,
+): string | null {
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
   const [firstPath] = workEntry.changedFiles ?? [];
   if (!firstPath) return null;
@@ -143,6 +154,16 @@ export function deriveWorkEntryPreview(
   return workEntry.changedFiles!.length === 1
     ? displayPath
     : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
+}
+
+export function shouldToggleWorkEntryRowFromKeyDown({
+  key,
+  targetIsCurrentTarget,
+}: {
+  key: string;
+  targetIsCurrentTarget: boolean;
+}): boolean {
+  return targetIsCurrentTarget && (key === "Enter" || key === " ");
 }
 
 export function resolveAssistantMessageCopyState({
