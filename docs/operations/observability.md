@@ -371,6 +371,44 @@ Usually one of these is true:
 
 If the local NDJSON file is updating, local tracing is working. The problem is almost always OTLP export configuration or process startup.
 
+## Reset State (Clean-Slate Wipe)
+
+Sometimes you need to completely wipe all application state and start fresh. This is the R6 clean-slate wipe procedure.
+
+### Full Clean-Slate Wipe
+
+To completely reset the application:
+
+1. **Quit the app** completely (exit all instances)
+2. **Remove all data directories**:
+   ```bash
+   rm -rf ~/tutoratlas /tmp/atlas-test
+   rm -rf ~/.tutoratlas/dev
+   ```
+3. **Relaunch** the app
+
+This removes all persisted state, database files, logs, traces, and cached data.
+
+### Surgical Database-Only Wipe
+
+If you only need to reset the database state without removing logs and other artifacts:
+
+```bash
+rm -f ~/.tutoratlas/dev/state.sqlite
+```
+
+Then restart the app. This is faster and preserves your trace files and other debugging artifacts.
+
+### When To Use
+
+Use a clean-slate wipe when:
+
+- testing initial setup flows
+- debugging state corruption issues
+- verifying default behavior
+- reproducing bugs from a clean state
+- clearing out test data between development sessions
+
 ## How To Think About Adding Tracing To Future Code
 
 ### Prefer Boundaries Over Tiny Helpers
