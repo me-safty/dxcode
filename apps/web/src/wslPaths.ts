@@ -8,6 +8,16 @@ export interface WslEnvironmentCandidate<TEnvironmentId extends string = string>
   readonly backendId: string;
 }
 
+export interface WslEnvironmentConfiguration {
+  readonly enabled: boolean;
+  readonly wslOnly: boolean;
+  readonly distro: string | null;
+  readonly distros: ReadonlyArray<{
+    readonly name: string;
+    readonly isDefault: boolean;
+  }>;
+}
+
 export interface WslProjectSelection<TEnvironmentId extends string = string> extends WslUncPath {
   readonly environmentId: TEnvironmentId;
 }
@@ -50,6 +60,45 @@ export function resolveWslProjectSelection<TEnvironmentId extends string>(
   const exact = wslCandidates.find(
     (candidate) => candidate.backendId.toLowerCase() === `wsl:${parsed.distro}`.toLowerCase(),
   );
-  const candidate = exact ?? (wslCandidates.length === 1 ? wslCandidates[0] : undefined);
-  return candidate ? { ...parsed, environmentId: candidate.environmentId } : null;
+  return exact ? { ...parsed, environmentId: exact.environmentId } : null;
+}
+
+export function applyWslEnvironmentConfiguration<TEnvironmentId extends string>(
+  candidates: ReadonlyArray<WslEnvironmentCandidate<TEnvironmentId>>,
+  primaryEnvironmentId: TEnvironmentId | null,
+  configuration: WslEnvironmentConfiguration | null,
+): ReadonlyArray<WslEnvironmentCandidate<TEnvironmentId>> {
+  if (!configuration) {
+    return candidates;
+  }
+
+  const selectedDistro =
+    configuration.distro ?? configuration.distros.find((distro) => distro.isDefault)?.name;
+  const installedDistro = configuration.distros.find(
+    (distro) => distro.name.toLowerCase() === selectedDistro?.toLowerCase(),
+  );
+  if (!installedDistro) {
+    return candidates;
+  }
+
+  const concreteBackendId = `wsl:${installedDistro.name}`;
+  const resolvedCandidates = candidates.map((candidate) =>
+    candidate.backendId.toLowerCase() === "wsl:default"
+      ? { ...candidate, backendId: concreteBackendId }
+      : candidate,
+  );
+
+  if (
+    configuration.enabled &&
+    configuration.wslOnly &&
+    primaryEnvironmentId !== null &&
+    !resolvedCandidates.some((candidate) => candidate.environmentId === primaryEnvironmentId)
+  ) {
+    return [
+      ...resolvedCandidates,
+      { environmentId: primaryEnvironmentId, backendId: concreteBackendId },
+    ];
+  }
+
+  return resolvedCandidates;
 }

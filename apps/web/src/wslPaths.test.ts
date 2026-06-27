@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseWslUncPath, resolveWslProjectSelection } from "./wslPaths";
+import {
+  applyWslEnvironmentConfiguration,
+  parseWslUncPath,
+  resolveWslProjectSelection,
+} from "./wslPaths";
 
 describe("parseWslUncPath", () => {
   it("parses wsl.localhost UNC paths into distro and POSIX path", () => {
@@ -37,16 +41,20 @@ describe("resolveWslProjectSelection", () => {
     });
   });
 
-  it("uses the only WSL backend for a default-distro instance", () => {
+  it("does not route to the only WSL backend when its distro is unknown", () => {
     expect(
       resolveWslProjectSelection("\\\\wsl.localhost\\Ubuntu\\home\\theo\\repo", [
         { environmentId: "env-wsl", backendId: "wsl:default" },
       ]),
-    ).toEqual({
-      distro: "Ubuntu",
-      environmentId: "env-wsl",
-      linuxPath: "/home/theo/repo",
-    });
+    ).toBeNull();
+  });
+
+  it("does not route to a sole WSL backend for a different distro", () => {
+    expect(
+      resolveWslProjectSelection("\\\\wsl.localhost\\Debian\\home\\theo\\repo", [
+        { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu" },
+      ]),
+    ).toBeNull();
   });
 
   it("does not guess when multiple WSL backends fail to match", () => {
@@ -56,5 +64,46 @@ describe("resolveWslProjectSelection", () => {
         { environmentId: "env-ubuntu", backendId: "wsl:Ubuntu" },
       ]),
     ).toBeNull();
+  });
+});
+
+describe("applyWslEnvironmentConfiguration", () => {
+  const ubuntuConfiguration = {
+    enabled: true,
+    wslOnly: false,
+    distro: null,
+    distros: [
+      { name: "Debian", isDefault: false },
+      { name: "Ubuntu", isDefault: true },
+    ],
+  };
+
+  it("resolves a default-distro backend to its installed distro", () => {
+    expect(
+      applyWslEnvironmentConfiguration(
+        [{ environmentId: "env-wsl", backendId: "wsl:default" }],
+        "env-primary",
+        ubuntuConfiguration,
+      ),
+    ).toEqual([{ environmentId: "env-wsl", backendId: "wsl:Ubuntu" }]);
+  });
+
+  it("represents the primary environment as WSL in WSL-only mode", () => {
+    expect(
+      applyWslEnvironmentConfiguration([], "env-primary", {
+        ...ubuntuConfiguration,
+        wslOnly: true,
+      }),
+    ).toEqual([{ environmentId: "env-primary", backendId: "wsl:Ubuntu" }]);
+  });
+
+  it("does not represent the primary environment for a missing configured distro", () => {
+    expect(
+      applyWslEnvironmentConfiguration([], "env-primary", {
+        ...ubuntuConfiguration,
+        wslOnly: true,
+        distro: "Fedora",
+      }),
+    ).toEqual([]);
   });
 });

@@ -82,7 +82,11 @@ import { getLatestThreadForProject } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newProjectId } from "../lib/utils";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
-import { parseWslUncPath, resolveWslProjectSelection } from "../wslPaths";
+import {
+  applyWslEnvironmentConfiguration,
+  parseWslUncPath,
+  resolveWslProjectSelection,
+} from "../wslPaths";
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
@@ -1574,12 +1578,17 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
     if (parseWslUncPath(pickedPath)) {
+      const desktopWslState = await window.desktopBridge?.getWslState().catch(() => null);
       const selection = resolveWslProjectSelection(
         pickedPath,
-        environments.flatMap((environment) => {
-          const backendId = desktopLocalBackendId(environment.entry.target);
-          return backendId ? [{ environmentId: environment.environmentId, backendId }] : [];
-        }),
+        applyWslEnvironmentConfiguration(
+          environments.flatMap((environment) => {
+            const backendId = desktopLocalBackendId(environment.entry.target);
+            return backendId ? [{ environmentId: environment.environmentId, backendId }] : [];
+          }),
+          primaryEnvironmentId,
+          desktopWslState ?? null,
+        ),
       );
       if (!selection) {
         toastManager.add(
@@ -1609,6 +1618,7 @@ function OpenCommandPaletteDialog(props: {
     handleAddProject,
     handleAddProjectForEnvironment,
     isPickingProjectFolder,
+    primaryEnvironmentId,
   ]);
 
   return (
