@@ -6,10 +6,10 @@ import { EnvironmentId, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts"
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  createDesktopSecondaryBootstrapsReader,
   desktopLocalBackendId,
   desktopLocalConnectionId,
   isDesktopLocalConnectionTarget,
-  readDesktopSecondaryBootstrapsResult,
 } from "./desktopLocal";
 
 describe("desktop local connection identity", () => {
@@ -39,18 +39,18 @@ describe("desktop local connection identity", () => {
 
 describe("desktop local topology reads", () => {
   it("distinguishes a successful empty topology from a read failure", () => {
-    expect(
-      readDesktopSecondaryBootstrapsResult({ getLocalEnvironmentBootstraps: () => [] }),
-    ).toEqual({ _tag: "Success", bootstraps: [] });
+    let readBootstraps = () => [];
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => readBootstraps(),
+    }));
+
+    expect(reader.readResult()).toEqual({ _tag: "Success", bootstraps: [] });
 
     const cause = new Error("IPC unavailable");
-    expect(
-      readDesktopSecondaryBootstrapsResult({
-        getLocalEnvironmentBootstraps: () => {
-          throw cause;
-        },
-      }),
-    ).toEqual({ _tag: "Failure", cause });
+    readBootstraps = () => {
+      throw cause;
+    };
+    expect(reader.readResult()).toEqual({ _tag: "Failure", cause });
   });
 
   it("filters the primary bootstrap from successful topology reads", () => {
@@ -61,17 +61,47 @@ describe("desktop local topology reads", () => {
       wsBaseUrl: "ws://127.0.0.1:4000",
     };
 
-    expect(
-      readDesktopSecondaryBootstrapsResult({
-        getLocalEnvironmentBootstraps: () => [
-          {
-            ...secondary,
-            id: PRIMARY_LOCAL_ENVIRONMENT_ID,
-            label: "Windows",
-          },
-          secondary,
-        ],
-      }),
-    ).toEqual({ _tag: "Success", bootstraps: [secondary] });
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => [
+        {
+          ...secondary,
+          id: PRIMARY_LOCAL_ENVIRONMENT_ID,
+          label: "Windows",
+        },
+        secondary,
+      ],
+    }));
+
+    expect(reader.readResult()).toEqual({ _tag: "Success", bootstraps: [secondary] });
+  });
+
+  it("retains the last successful snapshot only until another read succeeds", () => {
+    const secondary = {
+      id: "wsl:Ubuntu",
+      label: "WSL: Ubuntu",
+      httpBaseUrl: "http://127.0.0.1:4000",
+      wsBaseUrl: "ws://127.0.0.1:4000",
+    };
+    let readBootstraps = () => [secondary];
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => readBootstraps(),
+    }));
+
+    const connectedSnapshot = reader.readSnapshot();
+    expect(connectedSnapshot).toEqual([secondary]);
+
+    readBootstraps = () => {
+      throw new Error("IPC unavailable");
+    };
+    expect(reader.readSnapshot()).toBe(connectedSnapshot);
+
+    readBootstraps = () => [];
+    const removedSnapshot = reader.readSnapshot();
+    expect(removedSnapshot).toEqual([]);
+
+    readBootstraps = () => {
+      throw new Error("IPC unavailable again");
+    };
+    expect(reader.readSnapshot()).toBe(removedSnapshot);
   });
 });

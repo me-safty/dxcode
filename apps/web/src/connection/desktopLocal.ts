@@ -48,31 +48,57 @@ export type DesktopSecondaryBootstrapsRead =
       readonly cause: unknown;
     };
 
-export function readDesktopSecondaryBootstrapsResult(
-  bridge: Pick<DesktopBridge, "getLocalEnvironmentBootstraps"> | undefined = window.desktopBridge,
-): DesktopSecondaryBootstrapsRead {
-  if (bridge === undefined) {
-    return { _tag: "Success", bootstraps: [] };
-  }
-  try {
-    return {
-      _tag: "Success",
-      bootstraps: bridge
-        .getLocalEnvironmentBootstraps()
-        .filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID),
-    };
-  } catch (cause) {
-    return { _tag: "Failure", cause };
-  }
+export interface DesktopSecondaryBootstrapsReader {
+  readonly readResult: () => DesktopSecondaryBootstrapsRead;
+  readonly readSnapshot: () => ReadonlyArray<DesktopEnvironmentBootstrap>;
 }
 
 /**
- * Read the desktop's secondary local backends (everything except the primary)
- * from the bridge. Returns an empty list off-desktop or if the bridge throws.
- * Shared by the connection platform source and the renderer's poller so both
- * read the same host topology from one place.
+ * Build a topology reader whose snapshot advances only after successful bridge
+ * reads. A successful empty read is authoritative; a thrown read preserves the
+ * previous snapshot so UI consumers cannot temporarily disagree with the
+ * platform's retained registrations.
  */
+export function createDesktopSecondaryBootstrapsReader(
+  resolveBridge: () => Pick<DesktopBridge, "getLocalEnvironmentBootstraps"> | undefined,
+): DesktopSecondaryBootstrapsReader {
+  let snapshot: ReadonlyArray<DesktopEnvironmentBootstrap> = [];
+
+  const readResult = (): DesktopSecondaryBootstrapsRead => {
+    const bridge = resolveBridge();
+    if (bridge === undefined) {
+      snapshot = [];
+      return { _tag: "Success", bootstraps: snapshot };
+    }
+    try {
+      snapshot = bridge
+        .getLocalEnvironmentBootstraps()
+        .filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID);
+      return { _tag: "Success", bootstraps: snapshot };
+    } catch (cause) {
+      return { _tag: "Failure", cause };
+    }
+  };
+
+  return {
+    readResult,
+    readSnapshot: () => {
+      const result = readResult();
+      return result._tag === "Success" ? result.bootstraps : snapshot;
+    },
+  };
+}
+
+const desktopSecondaryBootstrapsReader = createDesktopSecondaryBootstrapsReader(
+  () => window.desktopBridge,
+);
+
+/** Read the topology while preserving failures for platform cache policy. */
+export function readDesktopSecondaryBootstrapsResult(): DesktopSecondaryBootstrapsRead {
+  return desktopSecondaryBootstrapsReader.readResult();
+}
+
+/** Read the latest successful topology snapshot for renderer consumers. */
 export function readDesktopSecondaryBootstraps(): ReadonlyArray<DesktopEnvironmentBootstrap> {
-  const result = readDesktopSecondaryBootstrapsResult();
-  return result._tag === "Success" ? result.bootstraps : [];
+  return desktopSecondaryBootstrapsReader.readSnapshot();
 }
