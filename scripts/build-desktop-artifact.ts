@@ -882,16 +882,16 @@ export function createStageWorkspaceConfig(
 ): typeof StageWorkspaceConfig.Type {
   const hostOs = platform === "mac" ? "darwin" : platform === "win" ? "win32" : "linux";
   const hostCpu = arch === "universal" ? ["arm64", "x64"] : [arch];
-  // Windows artifacts also bundle the WSL (Linux x64) backend, which loads
+  // Windows artifacts also bundle the same-architecture WSL Linux backend, which loads
   // Linux-native optional deps at runtime (e.g. @yuuang/ffi-rs-linux-x64-gnu).
-  // Pull the linux-x64 (glibc) variants in addition to the host platform's so
+  // Pull the Linux (glibc) variants in addition to the host platform's so
   // they ship in the asar; without them the WSL backend crash-loops on require
   // ("Cannot find module '@yuuang/ffi-rs-linux-x64-gnu'").
   if (platform === "win") {
     return {
       supportedArchitectures: {
         os: Array.from(new Set([hostOs, "linux"])),
-        cpu: Array.from(new Set([...hostCpu, "x64"])),
+        cpu: hostCpu,
         libc: ["glibc"],
       },
     };
@@ -1697,14 +1697,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.arch,
       serverPackageJson.dependencies["@ff-labs/fff-node"],
     ),
-    // Windows artifacts also bundle the WSL (Linux x64) backend, which loads the
+    // Windows artifacts also bundle the same-architecture WSL Linux backend, which loads the
     // fff native binary through ffi-rs. The platform fff binary above is the
-    // host's (win32), so promote the Linux x64 fff binaries too; without them
-    // file-finding in WSL fails to load @ff-labs/fff-bin-linux-x64-gnu.
+    // host's (win32), so promote the matching Linux fff binaries too; without
+    // them file-finding in WSL fails to load its Linux native package.
     ...(options.platform === "win"
       ? resolveFffNativeDependencies(
           "linux",
-          "x64",
+          options.arch,
           serverPackageJson.dependencies["@ff-labs/fff-node"],
         )
       : {}),

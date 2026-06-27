@@ -210,7 +210,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         cpu: ["x64"],
       },
     });
-    // Windows artifacts also bundle the WSL (Linux x64, glibc) backend, so the
+    // Windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
     // staged install must fetch its native optional deps (e.g. ffi-rs) too.
     assert.deepStrictEqual(createStageWorkspaceConfig("win", "x64"), {
       supportedArchitectures: {
@@ -222,7 +222,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(createStageWorkspaceConfig("win", "arm64"), {
       supportedArchitectures: {
         os: ["win32", "linux"],
-        cpu: ["arm64", "x64"],
+        cpu: ["arm64"],
         libc: ["glibc"],
       },
     });
@@ -439,6 +439,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
     assert.deepStrictEqual(resolveFffNativeDependencies("win", "x64", "0.9.4"), {
       "@ff-labs/fff-bin-win32-x64": "0.9.4",
+    });
+    assert.deepStrictEqual(resolveFffNativeDependencies("linux", "x64", "0.9.4"), {
+      "@ff-labs/fff-bin-linux-x64-gnu": "0.9.4",
+      "@ff-labs/fff-bin-linux-x64-musl": "0.9.4",
     });
     assert.deepStrictEqual(resolveFffNativeDependencies("linux", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.4",
