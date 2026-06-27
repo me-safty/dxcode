@@ -24,21 +24,6 @@ export function getDesktopUrl(isDevelopment: boolean): string {
   return `${getDesktopOrigin(isDevelopment)}/`;
 }
 
-export function registerDesktopSchemePrivileges(isDevelopment: boolean): void {
-  Electron.protocol.registerSchemesAsPrivileged([
-    {
-      scheme: getDesktopScheme(isDevelopment),
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-        stream: true,
-      },
-    },
-  ]);
-}
-
 export class ElectronProtocolRegistrationError extends Schema.TaggedErrorClass<ElectronProtocolRegistrationError>()(
   "ElectronProtocolRegistrationError",
   {
@@ -150,7 +135,6 @@ async function proxyRequest(
     headers.delete(name);
   }
   const init: RequestInit = {
-    cache: "no-store",
     method: request.method,
     headers,
   };

@@ -18,7 +18,6 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-
 const installSteps: ReadonlyArray<{
   readonly stage: RelayClientInstallProgressStage;
   readonly label: string;

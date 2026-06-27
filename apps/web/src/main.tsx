@@ -1,9 +1,9 @@
-import * as React from "react";
-import * as ReactDOM from "react-dom/client";
-import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
+import React from "react";
+import ReactDOM from "react-dom/client";
 import { ClerkProvider } from "@clerk/react";
 import { passkeys } from "@clerk/electron/passkeys";
 import { ClerkProvider as ElectronClerkProvider } from "@clerk/electron/react";
+import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
 import "@fontsource-variable/dm-sans/index.css";
 import "@fontsource/jetbrains-mono/400.css";
@@ -31,23 +31,20 @@ const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string
 
 const app = <AppRoot router={router} />;
 
-const AuthWrapper = (props: { children: React.ReactNode }) =>
-  clerkPublishableKey && hasCloudPublicConfig() ? (
-    isElectron ? (
-      <ElectronClerkProvider publishableKey={clerkPublishableKey} passkeys={passkeys}>
-        <ManagedRelayAuthProvider>{props.children}</ManagedRelayAuthProvider>
-      </ElectronClerkProvider>
-    ) : (
-      <ClerkProvider publishableKey={clerkPublishableKey}>
-        <ManagedRelayAuthProvider>{props.children}</ManagedRelayAuthProvider>
-      </ClerkProvider>
-    )
-  ) : (
-    props.children
-  );
-
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <AuthWrapper>{app}</AuthWrapper>
+    {clerkPublishableKey && hasCloudPublicConfig() ? (
+      isElectron ? (
+        <ElectronClerkProvider publishableKey={clerkPublishableKey} passkeys={passkeys}>
+          <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
+        </ElectronClerkProvider>
+      ) : (
+        <ClerkProvider publishableKey={clerkPublishableKey}>
+          <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
+        </ClerkProvider>
+      )
+    ) : (
+      app
+    )}
   </React.StrictMode>,
 );

@@ -3,22 +3,15 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { handleMock, netFetchMock, registerSchemesAsPrivilegedMock, unhandleMock } = vi.hoisted(
-  () => ({
-    handleMock: vi.fn(),
-    netFetchMock: vi.fn(),
-    registerSchemesAsPrivilegedMock: vi.fn(),
-    unhandleMock: vi.fn(),
-  }),
-);
+const { handleMock, netFetchMock, unhandleMock } = vi.hoisted(() => ({
+  handleMock: vi.fn(),
+  netFetchMock: vi.fn(),
+  unhandleMock: vi.fn(),
+}));
 
 vi.mock("electron", () => ({
   net: { fetch: netFetchMock },
-  protocol: {
-    handle: handleMock,
-    registerSchemesAsPrivileged: registerSchemesAsPrivilegedMock,
-    unhandle: unhandleMock,
-  },
+  protocol: { handle: handleMock, unhandle: unhandleMock },
 }));
 
 import * as ElectronProtocol from "./ElectronProtocol.ts";
@@ -27,29 +20,7 @@ describe("ElectronProtocol", () => {
   beforeEach(() => {
     handleMock.mockReset();
     netFetchMock.mockReset();
-    registerSchemesAsPrivilegedMock.mockReset();
     unhandleMock.mockReset();
-  });
-
-  it("registers the desktop scheme as a secure standard scheme", () => {
-    ElectronProtocol.registerDesktopSchemePrivileges(true);
-
-    assert.deepEqual(registerSchemesAsPrivilegedMock.mock.calls, [
-      [
-        [
-          {
-            scheme: "t3code-dev",
-            privileges: {
-              standard: true,
-              secure: true,
-              supportFetchAPI: true,
-              corsEnabled: true,
-              stream: true,
-            },
-          },
-        ],
-      ],
-    ]);
   });
 
   it.effect("proxies the stable renderer origin to the current app server", () =>
@@ -101,7 +72,7 @@ describe("ElectronProtocol", () => {
             "font-src 'self' t3code-dev: data:",
           );
         }),
-      ).pipe(Effect.provide(ElectronProtocol.layer));
+      );
 
       assert.deepEqual(
         handleMock.mock.calls.map((call) => call[0]),
@@ -114,51 +85,7 @@ describe("ElectronProtocol", () => {
       assert.isNull(forwardedHeaders.get("referer"));
       assert.isNull(forwardedHeaders.get("sec-fetch-site"));
       assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
-    }),
-  );
-
-  it.effect("returns proxied response bodies without buffering them first", () =>
-    Effect.gen(function* () {
-      let handler: ((request: Request) => Promise<Response>) | undefined;
-      handleMock.mockImplementation((_scheme, nextHandler) => {
-        handler = nextHandler;
-      });
-      const chunk = new TextEncoder().encode("streamed");
-      netFetchMock.mockResolvedValue(
-        new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(chunk);
-            },
-          }),
-        ),
-      );
-
-      const response = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const protocol = yield* ElectronProtocol.ElectronProtocol;
-          yield* protocol.registerDesktopProtocol({
-            scheme: "t3code-dev",
-            targetOrigin: new URL("http://127.0.0.1:3773/"),
-            backendOrigin: new URL("http://127.0.0.1:3774/"),
-            clerkFrontendApiHostname: undefined,
-          });
-          assert.isDefined(handler);
-          return yield* Effect.raceFirst(
-            Effect.promise(() => handler!(new Request("t3code-dev://app/large-asset"))),
-            Effect.sleep("250 millis").pipe(
-              Effect.andThen(Effect.die(new Error("proxy response was buffered"))),
-            ),
-          );
-        }),
-      ).pipe(Effect.provide(ElectronProtocol.layer));
-
-      const reader = response.body?.getReader();
-      assert.isDefined(reader);
-      const firstChunk = yield* Effect.promise(() => reader!.read());
-      assert.deepEqual(firstChunk.value, chunk);
-      yield* Effect.promise(() => reader!.cancel());
-    }),
+    }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
   it.effect("rejects custom protocol requests for another host", () =>
@@ -179,11 +106,11 @@ describe("ElectronProtocol", () => {
           });
           return yield* Effect.promise(() => handler!(new Request("t3code://other/")));
         }),
-      ).pipe(Effect.provide(ElectronProtocol.layer));
+      );
 
       assert.equal(response.status, 404);
       assert.equal(netFetchMock.mock.calls.length, 0);
-    }),
+    }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
   it.effect("retries transient renderer target failures", () =>
