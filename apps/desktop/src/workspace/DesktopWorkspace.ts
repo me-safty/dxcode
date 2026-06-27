@@ -8,6 +8,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { bootstrapAtlasSkills } from "./bootstrapAtlasSkills.ts";
 
 export class DesktopWorkspaceError extends Data.TaggedError("DesktopWorkspaceError")<{
   readonly cause: PlatformError.PlatformError;
@@ -64,6 +65,9 @@ export const layer = Layer.effect(
 
     // Workspace root comes from environment (e.g., ~/tutoratlas)
     const workspaceRoot = environment.workspaceRoot;
+
+    // Bootstrap Atlas skills directories on layer initialization
+    yield* bootstrapAtlasSkills({ fileSystem, path, workspaceRoot });
 
     return DesktopWorkspace.of({
       ensureStudentWorkspace: (input) =>
