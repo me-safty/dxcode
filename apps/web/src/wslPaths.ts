@@ -90,12 +90,16 @@ function resolveConfiguredWslBackend(
     return { backendId: WSL_DEFAULT_BACKEND_ID, runningDistro: null };
   }
 
+  const configuredDistro = configuration.distro.trim();
+  if (configuredDistro.length === 0) {
+    return null;
+  }
+
   const installedDistro = configuration.distros.find(
-    (distro) => distro.name.toLowerCase() === configuration.distro?.toLowerCase(),
+    (distro) => distro.name.toLowerCase() === configuredDistro.toLowerCase(),
   );
-  return installedDistro
-    ? { backendId: `wsl:${installedDistro.name}`, runningDistro: installedDistro.name }
-    : null;
+  const resolvedDistro = installedDistro?.name ?? configuredDistro;
+  return { backendId: `wsl:${resolvedDistro}`, runningDistro: resolvedDistro };
 }
 
 export function resolveProjectPickerTarget<TEnvironmentId extends string>(input: {

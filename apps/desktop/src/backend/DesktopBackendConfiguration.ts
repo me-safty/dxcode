@@ -92,6 +92,8 @@ const DESKTOP_BACKEND_ENV_NAMES = [
 // URL-shaped values (colons / slashes) is unreliable.
 const WSL_FORWARDED_ENV_NAMES = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"] as const;
 
+const WSL_SERVER_SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
   Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
 
@@ -169,7 +171,7 @@ interface SharedBootstrapInput {
   readonly observabilitySettings: BackendObservabilitySettings;
 }
 
-interface WslPreflightOutcome {
+interface WslPreflightSuccess {
   readonly _tag: "Ready";
   readonly runningDistro: string;
   readonly linuxEntryPath: string;
@@ -178,6 +180,9 @@ interface WslPreflightOutcome {
   // doesn't fall through to a different/old node than the one node-pty was
   // built against.
   readonly nodePath: string;
+  // PATH captured from the same login shell after the shared resolver loaded
+  // version managers. The launch forwards this value directly without a shell.
+  readonly resolvedPath: string;
 }
 
 interface WslPreflightFailure {
@@ -196,7 +201,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
   readonly windowsRepoRoot: string;
   readonly allowBuild: boolean;
 }): Effect.fn.Return<
-  WslPreflightOutcome | WslPreflightFailure,
+  WslPreflightSuccess | WslPreflightFailure,
   never,
   DesktopWslEnvironment.DesktopWslEnvironment | FileSystem.FileSystem
 > {
@@ -279,6 +284,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     runningDistro,
     linuxEntryPath: linuxEntry.value,
     nodePath: nodePtyResult.nodePath,
+    resolvedPath: nodePtyResult.resolvedPath,
   } as const;
 });
 
@@ -514,15 +520,13 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   // for provider updates, and the installed CLIs themselves (e.g. `codex`). Those
   // live in the resolved Node's bin dir, which `wsl.exe -- node` does NOT put on
   // the process PATH, so `npm install -g ...` fails with NotFound. Pass the
-  // environment assignment and command as distinct argv values through `env`
-  // and `wsl.exe --exec` instead of embedding a script in `bash -c`: wsl.exe
-  // re-quotes shell command lines and can corrupt quotes before Bash sees them.
-  // A direct exec also leaves stdin untouched for the bootstrap envelope and
-  // still runs the exact version-managed Node node-pty was built against (not a
-  // bare `node`), regardless of PATH ordering.
+  // user PATH entries captured by the login-shell preflight. Every dynamic
+  // value is a separate argv entry under `wsl.exe --exec`; no shell command is
+  // involved, so Windows cannot mangle nested quotes and stdin remains reserved
+  // for the bootstrap envelope.
   const lastSlash = preflight.nodePath.lastIndexOf("/");
   const nodeBinDir = lastSlash > 0 ? preflight.nodePath.slice(0, lastSlash) : "/usr/bin";
-  const launchPathPrefix = `${nodeBinDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+  const launchPath = `${nodeBinDir}:${WSL_SERVER_SYSTEM_PATH}:${preflight.resolvedPath}`;
 
   return {
     ...baseConfig,
@@ -530,7 +534,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
       ...distroArgs,
       "--exec",
       "env",
-      `PATH=${launchPathPrefix}`,
+      `PATH=${launchPath}`,
       preflight.nodePath,
       preflight.linuxEntryPath,
       "--bootstrap-fd",

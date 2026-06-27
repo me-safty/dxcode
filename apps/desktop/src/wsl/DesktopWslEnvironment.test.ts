@@ -15,6 +15,7 @@ import {
   formatMissingToolsReason,
   formatNodePtyProbeFailureReason,
   parseNodePath,
+  parseResolvedPath,
   parseToolchainReport,
   probeWslDistros,
 } from "./DesktopWslEnvironment.ts";
@@ -159,6 +160,26 @@ describe("parseNodePath", () => {
   it("ignores surrounding noise and trims whitespace", () => {
     const stdout = ["some preamble noise", "  nodePath:/usr/bin/node  ", "trailing"].join("\n");
     expect(parseNodePath(stdout)).toBe("/usr/bin/node");
+  });
+});
+
+describe("parseResolvedPath", () => {
+  it("preserves spaces and apostrophes in the resolved login-shell PATH", () => {
+    const resolvedPath = "/home/test user/bin:/opt/test's tools/bin:/usr/bin:/bin";
+    expect(parseResolvedPath(`nodePath:/usr/bin/node\nresolvedPath:${resolvedPath}\n`)).toBe(
+      resolvedPath,
+    );
+  });
+
+  it("accepts CRLF output without retaining the carriage return", () => {
+    expect(parseResolvedPath("resolvedPath:/usr/local/bin:/usr/bin\r\n")).toBe(
+      "/usr/local/bin:/usr/bin",
+    );
+  });
+
+  it("returns null when the resolved PATH is absent or empty", () => {
+    expect(parseResolvedPath("nodePath:/usr/bin/node\n")).toBeNull();
+    expect(parseResolvedPath("resolvedPath:\n")).toBeNull();
   });
 });
 

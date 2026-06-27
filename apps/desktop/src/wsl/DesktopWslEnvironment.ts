@@ -30,7 +30,7 @@ export interface EnsureWslNodePtyOptions {
 }
 
 export type EnsureWslNodePtyResult =
-  | { readonly ok: true; readonly nodePath: string }
+  | { readonly ok: true; readonly nodePath: string; readonly resolvedPath: string }
   | { readonly ok: false; readonly reason: string };
 
 export class DesktopWslDistroListError extends Schema.TaggedErrorClass<DesktopWslDistroListError>()(
@@ -177,7 +177,8 @@ export const formatNodePtyProbeFailureReason = (exitCode: number): string | null
 
 const NODE_PTY_PROBE_SCRIPT = (
   linuxServerDir: string,
-) => `echo "nodePath:$(command -v node 2>/dev/null)"
+) => `printf 'nodePath:%s\\n' "$(command -v node 2>/dev/null)"
+printf 'resolvedPath:%s\\n' "$PATH"
 cd ${shellQuote(linuxServerDir)} && node <<'NODE' >/dev/null 2>&1
 // The server bundle externalizes its deps to node_modules, and the WSL Node
 // can't read inside app.asar, so confirm those deps are unpacked on the real
@@ -273,6 +274,17 @@ export const parseNodePath = (stdout: string): string | null => {
   return path ?? null;
 };
 
+// Captures the login-shell PATH after the shared resolver has loaded version
+// managers. Preserve the value byte-for-byte apart from a Windows-style CR so
+// paths containing spaces or apostrophes can be forwarded as one env argv.
+export const parseResolvedPath = (stdout: string): string | null => {
+  const prefix = "resolvedPath:";
+  const line = stdout.split("\n").find((candidate) => candidate.startsWith(prefix));
+  if (line === undefined) return null;
+  const resolvedPath = line.slice(prefix.length).replace(/\r$/, "");
+  return resolvedPath.length > 0 ? resolvedPath : null;
+};
+
 export const formatMissingToolsReason = (
   report: ToolchainReport,
   requiredRange: string | null,
@@ -343,6 +355,7 @@ const ensureNodePtyImpl = (
       options,
     );
     const nodePath = parseNodePath(probe.stdout);
+    const resolvedPath = parseResolvedPath(probe.stdout);
 
     // No node at all, even after the shared resolver repaired PATH. Surface
     // the specific, actionable toolchain message rather than a confusing
@@ -361,6 +374,13 @@ const ensureNodePtyImpl = (
       return { ok: false, reason } as const;
     }
 
+    if (resolvedPath === null) {
+      return {
+        ok: false,
+        reason: "WSL login-shell PATH could not be resolved during backend preflight.",
+      } as const;
+    }
+
     // Server dependencies (e.g. "effect") couldn't be resolved on the WSL
     // filesystem — a packaging regression, since the server bundle needs its
     // node_modules unpacked from the asar. Fatal so wsl-only mode falls back to
@@ -374,7 +394,7 @@ const ensureNodePtyImpl = (
       } as const;
     }
 
-    if (probe.exitCode === 0) return { ok: true, nodePath } as const;
+    if (probe.exitCode === 0) return { ok: true, nodePath, resolvedPath } as const;
 
     if (options.allowBuild !== true) {
       const packagedProbeFailure = formatNodePtyProbeFailureReason(probe.exitCode);
@@ -429,7 +449,7 @@ const ensureNodePtyImpl = (
       BUILD_TIMEOUT,
       options,
     );
-    if (build.exitCode === 0) return { ok: true, nodePath } as const;
+    if (build.exitCode === 0) return { ok: true, nodePath, resolvedPath } as const;
     const trimmedTail = `${build.stdout}${build.stderr}`.trim().slice(-500);
     return {
       ok: false,

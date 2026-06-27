@@ -174,12 +174,22 @@ describe("applyWslEnvironmentConfiguration", () => {
     });
   });
 
-  it("does not represent the primary environment for a missing configured distro", () => {
+  it("keeps a configured distro authoritative when discovery does not contain it", () => {
     expect(
       applyWslEnvironmentConfiguration([], "env-primary", {
         ...ubuntuConfiguration,
         wslOnly: true,
         distro: "Fedora",
+      }),
+    ).toEqual([{ environmentId: "env-primary", backendId: "wsl:Fedora", runningDistro: "Fedora" }]);
+  });
+
+  it("does not synthesize a backend for an empty configured distro name", () => {
+    expect(
+      applyWslEnvironmentConfiguration([], "env-primary", {
+        ...ubuntuConfiguration,
+        wslOnly: true,
+        distro: "  ",
       }),
     ).toEqual([]);
   });
@@ -203,6 +213,28 @@ describe("resolveProjectPickerTarget", () => {
         primaryEnvironmentId: "env-primary",
         desktopInstanceId: null,
         wslConfiguration: ubuntuConfiguration,
+      }),
+    ).toBe("wsl:Ubuntu-22.04");
+  });
+
+  it("routes a configured distro while discovery is temporarily empty", () => {
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-primary",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: null,
+        wslConfiguration: { ...ubuntuConfiguration, distro: "ubuntu-22.04", distros: [] },
+      }),
+    ).toBe("wsl:ubuntu-22.04");
+  });
+
+  it("uses installed casing when discovery finds the configured distro", () => {
+    expect(
+      resolveProjectPickerTarget({
+        browseEnvironmentId: "env-primary",
+        primaryEnvironmentId: "env-primary",
+        desktopInstanceId: null,
+        wslConfiguration: { ...ubuntuConfiguration, distro: "ubuntu-22.04" },
       }),
     ).toBe("wsl:Ubuntu-22.04");
   });
