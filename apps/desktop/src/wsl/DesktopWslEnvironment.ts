@@ -23,6 +23,8 @@ const PROBE_TIMEOUT = Duration.seconds(10);
 const TOOLCHAIN_TIMEOUT = Duration.seconds(10);
 const BUILD_TIMEOUT = Duration.minutes(5);
 const USER_HOME_TIMEOUT = Duration.seconds(5);
+const TOOLCHAIN_TRANSPORT_RETRY_LIMIT = 12;
+const BUILD_TRANSPORT_RETRY_LIMIT = 2;
 
 export interface EnsureWslNodePtyOptions {
   readonly allowBuild?: boolean;
@@ -31,7 +33,12 @@ export interface EnsureWslNodePtyOptions {
 
 export type EnsureWslNodePtyResult =
   | { readonly ok: true; readonly nodePath: string; readonly resolvedPath: string }
-  | { readonly ok: false; readonly reason: string; readonly fatal: boolean };
+  | {
+      readonly ok: false;
+      readonly reason: string;
+      readonly fatal: boolean;
+      readonly retryLimit?: number;
+    };
 
 export class DesktopWslDistroListError extends Schema.TaggedErrorClass<DesktopWslDistroListError>()(
   "DesktopWslDistroListError",
@@ -414,7 +421,12 @@ const ensureNodePtyImpl = (
         toolchainCheck.transportFailure,
       );
       if (toolchainTransportFailure !== null) {
-        return { ok: false, reason: toolchainTransportFailure, fatal: true } as const;
+        return {
+          ok: false,
+          reason: toolchainTransportFailure,
+          fatal: false,
+          retryLimit: TOOLCHAIN_TRANSPORT_RETRY_LIMIT,
+        } as const;
       }
       const report = parseToolchainReport(toolchainCheck.stdout);
       const reason =
@@ -465,7 +477,12 @@ const ensureNodePtyImpl = (
       toolchainCheck.transportFailure,
     );
     if (toolchainTransportFailure !== null) {
-      return { ok: false, reason: toolchainTransportFailure, fatal: true } as const;
+      return {
+        ok: false,
+        reason: toolchainTransportFailure,
+        fatal: false,
+        retryLimit: TOOLCHAIN_TRANSPORT_RETRY_LIMIT,
+      } as const;
     }
     const report = parseToolchainReport(toolchainCheck.stdout);
 
@@ -509,7 +526,12 @@ const ensureNodePtyImpl = (
     );
     const buildTransportFailure = formatWslShellTransportFailureReason(build.transportFailure);
     if (buildTransportFailure !== null) {
-      return { ok: false, reason: buildTransportFailure, fatal: true } as const;
+      return {
+        ok: false,
+        reason: buildTransportFailure,
+        fatal: false,
+        retryLimit: BUILD_TRANSPORT_RETRY_LIMIT,
+      } as const;
     }
     if (build.exitCode === 0) return { ok: true, nodePath, resolvedPath } as const;
     const trimmedTail = `${build.stdout}${build.stderr}`.trim().slice(-500);

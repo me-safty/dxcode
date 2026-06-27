@@ -579,6 +579,41 @@ describe("DesktopBackendManager", () => {
     ),
   );
 
+  it.effect("surfaces a bounded transient preflight failure after its retry limit", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const failures: string[] = [];
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() => Effect.die("unexpected backend spawn")),
+        );
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer,
+          config: {
+            ...baseConfig,
+            preflightFailure: Option.some({
+              reason: "WSL toolchain probe timed out",
+              fatal: false,
+              retryLimit: 3,
+            }),
+          },
+          onPreflightFailed: (reason) =>
+            Effect.sync(() => {
+              failures.push(reason);
+            }),
+        });
+
+        yield* instance.start;
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.deepEqual(failures, []);
+
+        yield* TestClock.adjust(Duration.seconds(1));
+        assert.deepEqual(failures, ["WSL toolchain probe timed out"]);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
   it.effect("cancels a scheduled restart when start is requested manually", () =>
     Effect.scoped(
       Effect.gen(function* () {
