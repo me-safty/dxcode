@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Ndjson from "effect/unstable/encoding/Ndjson";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -21,11 +22,14 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import {
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
+  DesktopTelemetryControlMessage,
+  type DesktopTelemetryControlMessage as DesktopTelemetryControlMessageValue,
 } from "@t3tools/contracts";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
@@ -34,6 +38,7 @@ const DEFAULT_BACKEND_READINESS_TIMEOUT = Duration.minutes(1);
 const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
 const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(2);
+const DEFAULT_BACKEND_OUTPUT_DRAIN_TIMEOUT = Duration.millis(250);
 const BACKEND_READINESS_PATH = "/.well-known/t3/environment";
 
 type BackendProcessLayerServices = ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient;
@@ -172,6 +177,10 @@ export const BackendProcessError = Schema.Union([
 export type BackendProcessError = typeof BackendProcessError.Type;
 
 interface RunBackendProcessOptions extends DesktopBackendStartConfig {
+  readonly desktopTelemetryStream: Stream.Stream<Uint8Array>;
+  readonly onDesktopTelemetryControl?: (
+    message: DesktopTelemetryControlMessageValue,
+  ) => Effect.Effect<void>;
   readonly readinessTimeout?: Duration.Duration;
   readonly onStarted?: (pid: number) => Effect.Effect<void>;
   readonly onReady?: () => Effect.Effect<void>;
@@ -327,6 +336,7 @@ function drainBackendOutput(
 }
 
 const encodeBootstrapJson = Schema.encodeEffect(Schema.fromJsonString(DesktopBackendBootstrap));
+const decodeDesktopTelemetryControl = Schema.decodeUnknownEffect(DesktopTelemetryControlMessage);
 
 export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   options: RunBackendProcessOptions,
@@ -345,6 +355,23 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     ),
   );
   const onOutput = options.onOutput ?? (() => Effect.void);
+  const additionalFds: Record<`fd${number}`, ChildProcess.AdditionalFdConfig> = {
+    fd3: {
+      type: "input",
+      stream: Stream.encodeText(Stream.make(`${bootstrapJson}\n`)),
+    },
+  };
+  if (options.bootstrap.desktopTelemetryFd !== undefined) {
+    additionalFds[`fd${options.bootstrap.desktopTelemetryFd}`] = {
+      type: "input",
+      stream: options.desktopTelemetryStream,
+    };
+  }
+  if (options.bootstrap.desktopTelemetryControlFd !== undefined) {
+    additionalFds[`fd${options.bootstrap.desktopTelemetryControlFd}`] = {
+      type: "output",
+    };
+  }
   const command = ChildProcess.make(
     options.executablePath,
     [options.entryPath, "--bootstrap-fd", "3"],
@@ -359,12 +386,7 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
       stderr: options.captureOutput ? "pipe" : "inherit",
       killSignal: "SIGTERM",
       forceKillAfter: DEFAULT_BACKEND_TERMINATE_GRACE,
-      additionalFds: {
-        fd3: {
-          type: "input",
-          stream: Stream.encodeText(Stream.make(`${bootstrapJson}\n`)),
-        },
-      },
+      additionalFds,
     },
   );
 
@@ -380,8 +402,35 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
         }),
     ),
   );
+  const outputFibers: Array<Fiber.Fiber<void, never>> = [];
 
   yield* options.onStarted?.(handle.pid) ?? Effect.void;
+  if (
+    options.bootstrap.desktopTelemetryControlFd !== undefined &&
+    options.onDesktopTelemetryControl !== undefined
+  ) {
+    const controlFd = options.bootstrap.desktopTelemetryControlFd;
+    const handleControl = options.onDesktopTelemetryControl;
+    yield* handle.getOutputFd(controlFd).pipe(
+      Stream.pipeThroughChannel(Ndjson.decode({ ignoreEmptyLines: true })),
+      Stream.mapEffect((message) => decodeDesktopTelemetryControl(message)),
+      Stream.runForEach(handleControl),
+      Effect.catchCause((cause) =>
+        logBackendManagerWarning("desktop telemetry control stream stopped", {
+          fd: controlFd,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+      Effect.ensuring(
+        handleControl({
+          version: 1,
+          type: "setDiagnosticsDemand",
+          enabled: false,
+        }),
+      ),
+      Effect.forkScoped,
+    );
+  }
   if (options.captureOutput) {
     const outputContext = {
       executablePath: options.executablePath,
@@ -391,20 +440,22 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
       pid: Number(handle.pid),
     };
     const onOutputFailure = options.onOutputFailure ?? (() => Effect.void);
-    yield* drainBackendOutput(
-      outputContext,
-      "stdout",
-      handle.stdout,
-      onOutput,
-      onOutputFailure,
-    ).pipe(Effect.forkScoped);
-    yield* drainBackendOutput(
-      outputContext,
-      "stderr",
-      handle.stderr,
-      onOutput,
-      onOutputFailure,
-    ).pipe(Effect.forkScoped);
+    outputFibers.push(
+      yield* drainBackendOutput(
+        outputContext,
+        "stdout",
+        handle.stdout,
+        onOutput,
+        onOutputFailure,
+      ).pipe(Effect.forkScoped),
+      yield* drainBackendOutput(
+        outputContext,
+        "stderr",
+        handle.stderr,
+        onOutput,
+        onOutputFailure,
+      ).pipe(Effect.forkScoped),
+    );
   }
   yield* waitForHttpReady({
     executablePath: options.executablePath,
@@ -420,7 +471,7 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     Effect.forkScoped,
   );
 
-  const exitCode = yield* handle.exitCode.pipe(
+  const exit = yield* handle.exitCode.pipe(
     Effect.mapError(
       (cause) =>
         new BackendProcessExitStatusError({
@@ -432,7 +483,16 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
           cause,
         }),
     ),
+    Effect.exit,
   );
+  yield* Effect.forEach(outputFibers, Fiber.await, {
+    concurrency: "unbounded",
+    discard: true,
+  }).pipe(Effect.timeout(DEFAULT_BACKEND_OUTPUT_DRAIN_TIMEOUT), Effect.ignore);
+  if (Exit.isFailure(exit)) {
+    return yield* Effect.failCause(exit.cause);
+  }
+  const exitCode = exit.value;
   return {
     code: Option.some(exitCode),
     reason: `code=${exitCode}`,
@@ -445,6 +505,7 @@ export const make = Effect.gen(function* () {
   const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
   const backendOutputLog = yield* DesktopObservability.DesktopBackendOutputLog;
   const desktopState = yield* DesktopState.DesktopState;
+  const desktopTelemetryPublisher = yield* DesktopTelemetryPublisher.DesktopTelemetryPublisher;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
@@ -581,10 +642,13 @@ export const make = Effect.gen(function* () {
 
               if (isCurrentRun) {
                 if (Option.isSome(pid)) {
-                  yield* backendOutputLog.writeSessionBoundary({
-                    phase: "END",
-                    details: `pid=${pid.value} ${reason}`,
-                  });
+                  if (nextState.desiredRunning) {
+                    yield* backendOutputLog.persistFailure({
+                      details: `pid=${pid.value} ${reason}`,
+                    });
+                  } else {
+                    yield* backendOutputLog.discardSession;
+                  }
                 }
                 yield* Ref.set(desktopState.backendReady, false);
               }
@@ -598,13 +662,14 @@ export const make = Effect.gen(function* () {
 
         const program = runBackendProcess({
           ...config.value,
+          desktopTelemetryStream: desktopTelemetryPublisher.encoded,
+          onDesktopTelemetryControl: desktopTelemetryPublisher.handleControl,
           onStarted: Effect.fn("desktop.backendManager.onStarted")(function* (pid) {
             yield* updateActiveRun(runId, (run) => ({
               ...run,
               pid: Option.some(pid),
             }));
-            yield* backendOutputLog.writeSessionBoundary({
-              phase: "START",
+            yield* backendOutputLog.beginSession({
               details: `pid=${pid} port=${config.value.bootstrap.port} cwd=${config.value.cwd}`,
             });
           }),
@@ -637,10 +702,16 @@ export const make = Effect.gen(function* () {
               ),
             );
           }),
-          onReadinessFailure: (error) =>
-            logBackendManagerWarning("backend readiness check failed during bootstrap", {
-              error,
-            }),
+          onReadinessFailure: Effect.fn("desktop.backendManager.onReadinessFailure")(
+            function* (error) {
+              yield* logBackendManagerWarning("backend readiness check failed during bootstrap", {
+                error,
+              });
+              yield* backendOutputLog.persistFailure({
+                details: error.message,
+              });
+            },
+          ),
           onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
           onOutputFailure: (error) => logBackendManagerError(error.message, { error }),
         }).pipe(
@@ -761,7 +832,7 @@ export const make = Effect.gen(function* () {
     });
     yield* Option.match(active, {
       onNone: () => Effect.void,
-      onSome: (run) => closeRun(run, options),
+      onSome: (run) => closeRun(run, options).pipe(Effect.andThen(backendOutputLog.discardSession)),
     });
   });
 

@@ -1,6 +1,7 @@
 import {
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
+  DesktopTelemetryControlMessage,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
@@ -26,12 +27,16 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
   Schema.fromJsonString(DesktopBackendBootstrap),
 );
 const isBackendProcessError = Schema.is(DesktopBackendManager.BackendProcessError);
+const encodeDesktopTelemetryControl = Schema.encodeSync(
+  Schema.fromJsonString(DesktopTelemetryControlMessage),
+);
 
 const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "/electron",
@@ -47,6 +52,8 @@ const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
     desktopBootstrapToken: "token",
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
+    desktopTelemetryFd: 4,
+    desktopTelemetryControlFd: 5,
   },
   httpBaseUrl: new URL("http://127.0.0.1:3773"),
   captureOutput: true,
@@ -63,6 +70,7 @@ function makeProcess(options?: {
   readonly stderr?: Stream.Stream<Uint8Array, PlatformError.PlatformError>;
   readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>;
   readonly kill?: ChildProcessSpawner.ChildProcessHandle["kill"];
+  readonly getOutputFd?: ChildProcessSpawner.ChildProcessHandle["getOutputFd"];
 }): ChildProcessSpawner.ChildProcessHandle {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(123),
@@ -74,7 +82,7 @@ function makeProcess(options?: {
     kill: options?.kill ?? (() => Effect.void),
     stdin: Sink.drain,
     getInputFd: () => Sink.drain,
-    getOutputFd: () => Stream.empty,
+    getOutputFd: options?.getOutputFd ?? (() => Stream.empty),
     unref: Effect.succeed(Effect.void),
   });
 }
@@ -111,6 +119,9 @@ function makeManagerLayer(input: {
   readonly backendOutputLog?: Partial<DesktopObservability.DesktopBackendOutputLog["Service"]>;
   readonly desktopState?: DesktopState.DesktopState["Service"];
   readonly desktopWindow?: Partial<DesktopWindow.DesktopWindow["Service"]>;
+  readonly desktopTelemetryPublisher?: Partial<
+    DesktopTelemetryPublisher.DesktopTelemetryPublisher["Service"]
+  >;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
 }) {
   return DesktopBackendManager.layer.pipe(
@@ -124,12 +135,21 @@ function makeManagerLayer(input: {
         }),
         input.spawnerLayer,
         input.httpClientLayer ?? healthyHttpClientLayer,
+        Layer.succeed(DesktopTelemetryPublisher.DesktopTelemetryPublisher, {
+          latest: Effect.succeed(Option.none()),
+          changes: Stream.empty,
+          encoded: Stream.empty,
+          handleControl: () => Effect.void,
+          ...input.desktopTelemetryPublisher,
+        }),
         input.desktopState
           ? Layer.succeed(DesktopState.DesktopState, input.desktopState)
           : DesktopState.layer,
         Layer.succeed(DesktopObservability.DesktopBackendOutputLog, {
-          writeSessionBoundary: () => Effect.void,
+          beginSession: () => Effect.void,
           writeOutputChunk: () => Effect.void,
+          persistFailure: () => Effect.void,
+          discardSession: Effect.void,
           ...input.backendOutputLog,
         } satisfies DesktopObservability.DesktopBackendOutputLog["Service"]),
         Layer.succeed(DesktopWindow.DesktopWindow, {
@@ -205,8 +225,7 @@ describe("DesktopBackendManager", () => {
           }).pipe(Effect.andThen(Deferred.succeed(ready, void 0))),
         },
         backendOutputLog: {
-          writeSessionBoundary: ({ phase }) =>
-            phase === "END" ? Queue.offer(exited, void 0).pipe(Effect.asVoid) : Effect.void,
+          persistFailure: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
         },
       });
 
@@ -229,6 +248,8 @@ describe("DesktopBackendManager", () => {
         assert.equal(spawnedCommand.options.stderr, "pipe");
         assert.equal(spawnedCommand.options.killSignal, "SIGTERM");
         assert.isDefined(spawnedCommand.options.forceKillAfter);
+        assert.equal(spawnedCommand.options.additionalFds?.fd4?.type, "input");
+        assert.equal(spawnedCommand.options.additionalFds?.fd5?.type, "output");
         assert.equal(
           Duration.toMillis(Duration.fromInputUnsafe(spawnedCommand.options.forceKillAfter)),
           2_000,
@@ -288,6 +309,7 @@ describe("DesktopBackendManager", () => {
       );
       const error = yield* DesktopBackendManager.runBackendProcess({
         ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
         bootstrap: {
           ...baseConfig.bootstrap,
           port: 0,
@@ -327,7 +349,10 @@ describe("DesktopBackendManager", () => {
         ChildProcessSpawner.ChildProcessSpawner,
         ChildProcessSpawner.make(() => Effect.fail(spawnCause)),
       );
-      const error = yield* DesktopBackendManager.runBackendProcess(baseConfig).pipe(
+      const error = yield* DesktopBackendManager.runBackendProcess({
+        ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
+      }).pipe(
         Effect.flip,
         Effect.scoped,
         Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)),
@@ -368,7 +393,10 @@ describe("DesktopBackendManager", () => {
           ),
         ),
       );
-      const error = yield* DesktopBackendManager.runBackendProcess(baseConfig).pipe(
+      const error = yield* DesktopBackendManager.runBackendProcess({
+        ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
+      }).pipe(
         Effect.flip,
         Effect.scoped,
         Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)),
@@ -412,6 +440,7 @@ describe("DesktopBackendManager", () => {
 
       const exit = yield* DesktopBackendManager.runBackendProcess({
         ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
         onOutputFailure: (error) => Deferred.succeed(reported, error).pipe(Effect.asVoid),
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)));
       const error = yield* Deferred.await(reported);
@@ -451,6 +480,7 @@ describe("DesktopBackendManager", () => {
 
       const exit = yield* DesktopBackendManager.runBackendProcess({
         ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
         onOutput: () => Effect.fail(outputCause),
         onOutputFailure: (error) => Deferred.succeed(reported, error).pipe(Effect.asVoid),
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)));
@@ -473,6 +503,88 @@ describe("DesktopBackendManager", () => {
         `Failed to handle ${chunk.byteLength} bytes from stdout of desktop backend process 123.`,
       );
       assert.notInclude(error.message, "output-handler-secret-sentinel");
+    }),
+  );
+
+  it.effect("routes desktop telemetry control messages from fd5 to the publisher", () =>
+    Effect.gen(function* () {
+      const handled = yield* Deferred.make<boolean>();
+      const controlMessage = encodeDesktopTelemetryControl({
+        version: 1,
+        type: "setDiagnosticsDemand",
+        enabled: true,
+      });
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            makeProcess({
+              getOutputFd: (fd) =>
+                fd === 5 ? Stream.encodeText(Stream.make(`${controlMessage}\n`)) : Stream.empty,
+              exitCode: Deferred.await(handled).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+            }),
+          ),
+        ),
+      );
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        desktopTelemetryPublisher: {
+          handleControl: (message) =>
+            Deferred.succeed(handled, message.enabled).pipe(Effect.asVoid),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.isTrue(yield* Deferred.await(handled));
+      }).pipe(Effect.provide(managerLayer));
+    }),
+  );
+
+  it.effect("drains trailing child output before persisting an unexpected exit", () =>
+    Effect.gen(function* () {
+      const persistedOutput = yield* Deferred.make<ReadonlyArray<string>>();
+      const outputDrainStarted = yield* Deferred.make<void>();
+      const outputChunks = yield* Ref.make<Array<string>>([]);
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            makeProcess({
+              stdout: Stream.fromEffect(
+                Deferred.succeed(outputDrainStarted, void 0).pipe(
+                  Effect.andThen(Effect.sleep(Duration.millis(50))),
+                  Effect.as(new TextEncoder().encode("trailing output\n")),
+                ),
+              ),
+              exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+            }),
+          ),
+        ),
+      );
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+        backendOutputLog: {
+          writeOutputChunk: (_streamName, chunk) =>
+            Ref.update(outputChunks, (current) => [...current, new TextDecoder().decode(chunk)]),
+          persistFailure: () =>
+            Ref.get(outputChunks).pipe(
+              Effect.flatMap((chunks) => Deferred.succeed(persistedOutput, chunks)),
+              Effect.asVoid,
+            ),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        yield* Deferred.await(outputDrainStarted);
+        yield* TestClock.adjust(Duration.millis(50));
+
+        assert.deepEqual(yield* Deferred.await(persistedOutput), ["trailing output\n"]);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
   );
 
@@ -513,8 +625,7 @@ describe("DesktopBackendManager", () => {
           }).pipe(Effect.andThen(Deferred.succeed(ready, void 0))),
         },
         backendOutputLog: {
-          writeSessionBoundary: ({ phase }) =>
-            phase === "END" ? Queue.offer(exited, void 0).pipe(Effect.asVoid) : Effect.void,
+          persistFailure: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
         },
       });
 
@@ -547,6 +658,8 @@ describe("DesktopBackendManager", () => {
       const ready = yield* Deferred.make<void>();
       const backendReady = yield* Ref.make(false);
       const quitting = yield* Ref.make(false);
+      let persistedFailureCount = 0;
+      let discardedSessionCount = 0;
 
       const spawnerLayer = Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
@@ -578,6 +691,15 @@ describe("DesktopBackendManager", () => {
         desktopWindow: {
           handleBackendReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
         },
+        backendOutputLog: {
+          persistFailure: () =>
+            Effect.sync(() => {
+              persistedFailureCount += 1;
+            }),
+          discardSession: Effect.sync(() => {
+            discardedSessionCount += 1;
+          }),
+        },
       });
 
       yield* Effect.gen(function* () {
@@ -597,6 +719,8 @@ describe("DesktopBackendManager", () => {
         yield* manager.stop();
         assert.equal(startCount, 1);
         assert.equal(closedCount, 1);
+        assert.equal(persistedFailureCount, 0);
+        assert.equal(discardedSessionCount, 1);
 
         const stoppedSnapshot = yield* manager.snapshot;
         assert.isFalse(yield* Ref.get(backendReady));
@@ -610,6 +734,7 @@ describe("DesktopBackendManager", () => {
   it.effect("restarts an unexpectedly exited backend with the Effect clock", () =>
     Effect.gen(function* () {
       const starts = yield* Queue.unbounded<number>();
+      const failures = yield* Queue.unbounded<string>();
       let startCount = 0;
 
       const spawnerLayer = Layer.succeed(
@@ -629,6 +754,9 @@ describe("DesktopBackendManager", () => {
       const managerLayer = makeManagerLayer({
         spawnerLayer,
         httpClientLayer: httpClientLayer(() => Effect.never),
+        backendOutputLog: {
+          persistFailure: ({ details }) => Queue.offer(failures, details).pipe(Effect.asVoid),
+        },
       });
 
       yield* Effect.gen(function* () {
@@ -636,6 +764,7 @@ describe("DesktopBackendManager", () => {
         yield* manager.start;
 
         assert.equal(yield* Queue.take(starts), 1);
+        assert.equal(yield* Queue.take(failures), "pid=123 code=1");
 
         yield* TestClock.adjust(Duration.millis(499));
         assert.equal(yield* Queue.size(starts), 0);
@@ -692,6 +821,13 @@ describe("DesktopBackendManager", () => {
         yield* manager.start;
 
         assert.equal(yield* Queue.take(starts), 1);
+        let restartScheduled = false;
+        while (!restartScheduled) {
+          restartScheduled = (yield* manager.snapshot).restartScheduled;
+          if (!restartScheduled) {
+            yield* Effect.yieldNow;
+          }
+        }
 
         yield* manager.start;
         assert.equal(yield* Queue.take(starts), 2);
