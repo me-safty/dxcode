@@ -1,6 +1,6 @@
 import type { VcsManagedWorktree, WorktreeCleanupScope } from "@t3tools/contracts";
 
-import type { Thread } from "./types";
+import type { ThreadShell } from "./types";
 
 function normalizeWorktreePath(path: string | null): string | null {
   const trimmed = path?.trim();
@@ -14,8 +14,8 @@ function normalizeWorktreePath(path: string | null): string | null {
 }
 
 export function getOrphanedWorktreePathForThread(
-  threads: readonly Thread[],
-  threadId: Thread["id"],
+  threads: ReadonlyArray<Pick<ThreadShell, "id" | "worktreePath">>,
+  threadId: ThreadShell["id"],
 ): string | null {
   const targetThread = threads.find((thread) => thread.id === threadId);
   if (!targetThread) {
