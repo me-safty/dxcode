@@ -49,6 +49,12 @@ If OTLP is not configured, metrics still exist in-process, but you will not have
 
 Provider event NDJSON files still exist for provider runtime streams. Those are separate from the main server trace file.
 
+### Known Benign Log Messages
+
+Some error messages appear in logs but can be safely ignored:
+
+- **R2 VSync errors on Linux**: `ERROR:ui/gl/gl_surface_presentation_helper.cc:260` is benign noise on Linux systems. This is a known Chromium/Electron rendering issue that does not affect functionality.
+
 ## Run The Server In Instrumented Mode
 
 There are two useful modes:
@@ -168,7 +174,7 @@ The trace file is the fastest way to inspect raw span data.
 Tail it:
 
 ```bash
-tail -f "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+tail -f "$TUTORATLAS_HOME/userdata/logs/server.trace.ndjson"
 ```
 
 In monorepo dev, use:
@@ -185,7 +191,7 @@ jq -c 'select(.exit._tag != "Success") | {
   durationMs,
   exit,
   attributes
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TUTORATLAS_HOME/userdata/logs/server.trace.ndjson"
 ```
 
 Show slow spans:
@@ -196,7 +202,7 @@ jq -c 'select(.durationMs > 1000) | {
   durationMs,
   traceId,
   spanId
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TUTORATLAS_HOME/userdata/logs/server.trace.ndjson"
 ```
 
 Inspect embedded log events:
@@ -213,7 +219,7 @@ jq -c 'select(any(.events[]?; .attributes["effect.logLevel"] != null)) | {
         level: .attributes["effect.logLevel"]
       }
   ]
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TUTORATLAS_HOME/userdata/logs/server.trace.ndjson"
 ```
 
 Follow one trace:
@@ -224,7 +230,7 @@ jq -r 'select(.traceId == "TRACE_ID_HERE") | [
   .spanId,
   (.parentSpanId // "-"),
   .durationMs
-] | @tsv' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+] | @tsv' "$TUTORATLAS_HOME/userdata/logs/server.trace.ndjson"
 ```
 
 Filter orchestration commands:
@@ -235,7 +241,7 @@ jq -c 'select(.attributes["orchestration.command_type"] != null) | {
   durationMs,
   commandType: .attributes["orchestration.command_type"],
   aggregateKind: .attributes["orchestration.aggregate_kind"]
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TUTORATLAS_HOME/userdata/logs/server.trace.ndjson"
 ```
 
 Filter git activity:
@@ -250,7 +256,7 @@ jq -c 'select(.attributes["git.operation"] != null) | {
     .events[]
     | select(.name == "git.hook.started" or .name == "git.hook.finished")
   ]
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TUTORATLAS_HOME/userdata/logs/server.trace.ndjson"
 ```
 
 ### Use Tempo When You Need A Real Trace Viewer
@@ -364,6 +370,44 @@ Usually one of these is true:
 - Grafana is looking at the wrong time range or service name
 
 If the local NDJSON file is updating, local tracing is working. The problem is almost always OTLP export configuration or process startup.
+
+## Reset State (Clean-Slate Wipe)
+
+Sometimes you need to completely wipe all application state and start fresh. This is the R6 clean-slate wipe procedure.
+
+### Full Clean-Slate Wipe
+
+To completely reset the application:
+
+1. **Quit the app** completely (exit all instances)
+2. **Remove all data directories**:
+   ```bash
+   rm -rf ~/tutoratlas /tmp/atlas-test
+   rm -rf ~/.tutoratlas/dev
+   ```
+3. **Relaunch** the app
+
+This removes all persisted state, database files, logs, traces, and cached data.
+
+### Surgical Database-Only Wipe
+
+If you only need to reset the database state without removing logs and other artifacts:
+
+```bash
+rm -f ~/.tutoratlas/dev/state.sqlite
+```
+
+Then restart the app. This is faster and preserves your trace files and other debugging artifacts.
+
+### When To Use
+
+Use a clean-slate wipe when:
+
+- testing initial setup flows
+- debugging state corruption issues
+- verifying default behavior
+- reproducing bugs from a clean state
+- clearing out test data between development sessions
 
 ## How To Think About Adding Tracing To Future Code
 

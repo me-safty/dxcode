@@ -84,7 +84,6 @@ import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoute
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
-  buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
   type CommandPaletteActionItem,
@@ -100,7 +99,6 @@ import {
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
-import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
 import { useServerKeybindings } from "../rpc/serverState";
 import { resolveShortcutCommand } from "../keybindings";
@@ -625,59 +623,6 @@ function OpenCommandPaletteDialog() {
     ],
   );
 
-  const projectSearchItems = useMemo(
-    () =>
-      buildProjectActionItems({
-        projects,
-        valuePrefix: "project",
-        icon: (project) => (
-          <ProjectFavicon
-            environmentId={project.environmentId}
-            cwd={project.cwd}
-            className={ITEM_ICON_CLASS}
-          />
-        ),
-        runProject: openProjectFromSearch,
-      }),
-    [openProjectFromSearch, projects],
-  );
-
-  const projectThreadItems = useMemo(
-    () =>
-      buildProjectActionItems({
-        projects,
-        valuePrefix: "new-thread-in",
-        shortcutCommand: "chat.new",
-        icon: (project) => (
-          <ProjectFavicon
-            environmentId={project.environmentId}
-            cwd={project.cwd}
-            className={ITEM_ICON_CLASS}
-          />
-        ),
-        runProject: async (project) => {
-          await startNewThreadInProjectFromContext(
-            {
-              activeDraftThread,
-              activeThread,
-              defaultProjectRef,
-              defaultThreadEnvMode: settings.defaultThreadEnvMode,
-              handleNewThread,
-            },
-            scopeProjectRef(project.environmentId, project.id),
-          );
-        },
-      }),
-    [
-      activeDraftThread,
-      activeThread,
-      defaultProjectRef,
-      handleNewThread,
-      projects,
-      settings.defaultThreadEnvMode,
-    ],
-  );
-
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
@@ -996,47 +941,7 @@ function OpenCommandPaletteDialog() {
         },
       });
     }
-
-    actionItems.push({
-      kind: "submenu",
-      value: "action:new-thread-in",
-      searchTerms: ["new thread", "project", "pick", "choose", "select"],
-      title: "New thread in...",
-      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
-    });
   }
-
-  false &&
-    actionItems.push({
-      kind: "action",
-      value: "action:add-project",
-      searchTerms: [
-        "add project",
-        "folder",
-        "directory",
-        "browse",
-        "clone",
-        "remote",
-        "repository",
-        "repo",
-        "git",
-        "github",
-        "gitlab",
-        "bitbucket",
-        "azure",
-        "devops",
-        "url",
-        "environment",
-      ],
-      title: "Add project",
-      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
-      keepOpen: true,
-      run: async () => {
-        openAddProjectFlow();
-      },
-    });
 
   actionItems.push({
     kind: "action",
@@ -1056,7 +961,7 @@ function OpenCommandPaletteDialog() {
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
-    projectSearchItems: projectSearchItems,
+    projectSearchItems: [],
     threadSearchItems: allThreadItems,
   });
 
