@@ -197,6 +197,12 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         }
         return window.desktopBridge.ensureStudentWorkspace(input);
       },
+      deleteStudentWorkspace: async (input) => {
+        if (!window.desktopBridge) {
+          throw new Error("Student workspace deletion is only available in desktop mode");
+        }
+        return window.desktopBridge.deleteStudentWorkspace(input);
+      },
     },
   };
 }

@@ -105,12 +105,13 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       env: {
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
+        T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
       },
       bootstrap: {
         mode: "desktop",
         noBrowser: true,
         port: backendExposure.port,
-        t3Home: environment.baseDir,
+        tutoratlasHome: environment.baseDir,
         host: backendExposure.bindHost,
         desktopBootstrapToken: input.bootstrapToken,
         tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,

@@ -920,16 +920,29 @@ export const OpenPathResultSchema = Schema.Struct({
 export type OpenPathResult = typeof OpenPathResultSchema.Type;
 
 export const EnsureStudentWorkspaceInputSchema = Schema.Struct({
-  studentId: StudentId,
+  name: Schema.String,
+  id: StudentId,
 });
 export type EnsureStudentWorkspaceInput = typeof EnsureStudentWorkspaceInputSchema.Type;
 
 export const EnsureStudentWorkspaceResultSchema = Schema.Struct({
   success: Schema.Boolean,
   workspacePath: Schema.NullOr(Schema.String),
+  workspaceFolder: Schema.NullOr(Schema.String),
   error: Schema.optionalKey(Schema.String),
 });
 export type EnsureStudentWorkspaceResult = typeof EnsureStudentWorkspaceResultSchema.Type;
+
+export const DeleteStudentWorkspaceInputSchema = Schema.Struct({
+  workspaceFolder: Schema.String,
+});
+export type DeleteStudentWorkspaceInput = typeof DeleteStudentWorkspaceInputSchema.Type;
+
+export const DeleteStudentWorkspaceResultSchema = Schema.Struct({
+  success: Schema.Boolean,
+  error: Schema.optionalKey(Schema.String),
+});
+export type DeleteStudentWorkspaceResult = typeof DeleteStudentWorkspaceResultSchema.Type;
 
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
@@ -994,6 +1007,7 @@ export interface DesktopBridge {
   renderMarkdownToPdf: (input: RenderMarkdownToPdfInput) => Promise<RenderMarkdownToPdfResult>;
   openPath: (input: OpenPathInput) => Promise<OpenPathResult>;
   ensureStudentWorkspace: (input: EnsureStudentWorkspaceInput) => Promise<EnsureStudentWorkspaceResult>;
+  deleteStudentWorkspace: (input: DeleteStudentWorkspaceInput) => Promise<DeleteStudentWorkspaceResult>;
   /**
    * Desktop-only preview surface. Present iff the renderer is hosted by the
    * Electron desktop build; web builds have `preview === undefined`.
@@ -1128,6 +1142,7 @@ export interface LocalApi {
     renderMarkdownToPdf: (input: RenderMarkdownToPdfInput) => Promise<RenderMarkdownToPdfResult>;
     openPath: (input: OpenPathInput) => Promise<OpenPathResult>;
     ensureStudentWorkspace: (input: EnsureStudentWorkspaceInput) => Promise<EnsureStudentWorkspaceResult>;
+    deleteStudentWorkspace: (input: DeleteStudentWorkspaceInput) => Promise<DeleteStudentWorkspaceResult>;
   };
 }
 

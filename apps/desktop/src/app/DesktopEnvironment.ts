@@ -55,6 +55,7 @@ export interface DesktopEnvironmentShape {
   readonly appRoot: string;
   readonly backendEntryPath: string;
   readonly backendCwd: string;
+  readonly workspaceRoot: string;
   readonly preloadPath: string;
   readonly appUpdateYmlPath: string;
   readonly devServerUrl: Option.Option<URL>;
@@ -153,7 +154,10 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
       : input.platform === "darwin"
         ? path.join(homeDirectory, "Library", "Application Support")
         : Option.getOrElse(config.xdgConfigHome, () => path.join(homeDirectory, ".config"));
-  const baseDir = Option.getOrElse(config.t3Home, () => path.join(homeDirectory, ".t3"));
+  const baseDir = Option.getOrElse(config.tutoratlasHome, () => path.join(homeDirectory, ".tutoratlas"));
+  const workspaceRoot = Option.getOrElse(config.tutoratlasWorkspace, () =>
+    path.join(homeDirectory, "tutoratlas"),
+  );
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
   const branding = resolveDesktopAppBranding({
@@ -190,7 +194,8 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
     rootDir,
     appRoot,
     backendEntryPath: path.join(appRoot, "apps/server/dist/bin.mjs"),
-    backendCwd: input.isPackaged ? homeDirectory : appRoot,
+    backendCwd: workspaceRoot,
+    workspaceRoot,
     preloadPath: path.join(input.dirname, "preload.cjs"),
     appUpdateYmlPath: input.isPackaged
       ? path.join(resourcesPath, "app-update.yml")
