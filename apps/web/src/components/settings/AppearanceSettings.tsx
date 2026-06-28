@@ -1,0 +1,454 @@
+import {
+  ClipboardCopyIcon,
+  CopyIcon,
+  DownloadIcon,
+  PencilIcon,
+  Trash2Icon,
+  UploadIcon,
+} from "lucide-react";
+import { type ChangeEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
+
+import { useTheme } from "../../hooks/useTheme";
+import { cn } from "../../lib/utils";
+import {
+  addCustomTheme,
+  deleteCustomTheme,
+  duplicateTheme,
+  findTheme,
+  getAllThemes,
+  restoreActiveThemes,
+  themeSupportsVariant,
+  updateCustomTheme,
+} from "../../themes/registry";
+import { copyThemeToClipboard, downloadTheme, importThemeFromFile } from "../../themes/transport";
+import type { ThemeDefinition } from "../../themes/types";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { stackedThreadToast, toastManager } from "../ui/toast";
+import {
+  SettingResetButton,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
+import { ThemeEditor } from "./ThemeEditor";
+
+const COLOR_MODE_OPTIONS = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+] as const;
+
+export function AppearanceSettingsPanel() {
+  const {
+    theme,
+    setTheme,
+    resolvedTheme,
+    activeLightThemeId,
+    activeDarkThemeId,
+    setActiveLightTheme,
+    setActiveDarkTheme,
+  } = useTheme();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ThemeDefinition | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  void refreshTick;
+
+  const themes = useMemo(() => getAllThemes(), [refreshTick]);
+  const lightThemes = useMemo(
+    () => themes.filter((entry) => themeSupportsVariant(entry, "light")),
+    [themes],
+  );
+  const darkThemes = useMemo(
+    () => themes.filter((entry) => themeSupportsVariant(entry, "dark")),
+    [themes],
+  );
+  const editing =
+    editingId !== null && draft !== null ? { source: findTheme(editingId), draft } : null;
+  const pendingDeleteTheme = pendingDeleteId ? findTheme(pendingDeleteId) : null;
+
+  const refresh = useCallback(() => setRefreshTick((tick) => tick + 1), []);
+
+  const startEditing = useCallback((target: ThemeDefinition) => {
+    setEditingId(target.id);
+    setDraft(target);
+  }, []);
+
+  const handleDuplicate = useCallback(
+    (target: ThemeDefinition) => {
+      const copy = duplicateTheme(target);
+      addCustomTheme(copy);
+      setEditingId(copy.id);
+      setDraft(copy);
+      refresh();
+    },
+    [refresh],
+  );
+
+  const handleSave = useCallback(() => {
+    if (!editing) return;
+    updateCustomTheme(editing.source.id, editing.draft);
+    setEditingId(null);
+    setDraft(null);
+    refresh();
+    // The edited theme may occupy an active slot — re-apply so the change is reflected.
+    restoreActiveThemes();
+  }, [editing, refresh]);
+
+  const handleCancel = useCallback(() => {
+    setEditingId(null);
+    setDraft(null);
+  }, []);
+
+  const confirmDelete = useCallback(() => {
+    if (!pendingDeleteId) return;
+    if (editingId === pendingDeleteId) {
+      setEditingId(null);
+      setDraft(null);
+    }
+    deleteCustomTheme(pendingDeleteId);
+    setPendingDeleteId(null);
+    refresh();
+    // deleteCustomTheme resets any slot it occupied to default; re-apply to reflect that.
+    restoreActiveThemes();
+  }, [editingId, pendingDeleteId, refresh]);
+
+  const handleExport = useCallback((target: ThemeDefinition) => {
+    try {
+      downloadTheme(target);
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not export theme",
+          description: error instanceof Error ? error.message : "Download failed.",
+        }),
+      );
+    }
+  }, []);
+
+  const handleCopyJson = useCallback(async (target: ThemeDefinition) => {
+    try {
+      await copyThemeToClipboard(target);
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: "Copied theme JSON",
+          description: `${target.name} is ready to paste.`,
+        }),
+      );
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not copy theme",
+          description: error instanceof Error ? error.message : "Clipboard write failed.",
+        }),
+      );
+    }
+  }, []);
+
+  const handleImportClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleImportChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      try {
+        const result = await importThemeFromFile(file, { collision: "rename" });
+        // Assign the import to whichever color-mode slot(s) its palette supports.
+        if (themeSupportsVariant(result.theme, "light")) setActiveLightTheme(result.theme.id);
+        if (themeSupportsVariant(result.theme, "dark")) setActiveDarkTheme(result.theme.id);
+        refresh();
+        toastManager.add(
+          stackedThreadToast({
+            type: "success",
+            title: `Imported "${result.theme.name}"`,
+            description:
+              result.action === "renamed"
+                ? `An existing theme used the same id, so it was imported as "${result.theme.id}".`
+                : "Theme imported and applied.",
+          }),
+        );
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not import theme",
+            description: error instanceof Error ? error.message : "Invalid theme file.",
+          }),
+        );
+      }
+    },
+    [refresh, setActiveLightTheme, setActiveDarkTheme],
+  );
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Theme">
+        <SettingsRow
+          title="Light theme"
+          description="Palette used when the app is in light mode."
+          control={
+            <Select
+              value={activeLightThemeId}
+              onValueChange={(value) => {
+                if (typeof value === "string") setActiveLightTheme(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-56" aria-label="Light theme">
+                <SelectValue>{findTheme(activeLightThemeId).name}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {lightThemes.map((entry) => (
+                  <SelectItem hideIndicator key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          title="Dark theme"
+          description="Palette used when the app is in dark mode."
+          control={
+            <Select
+              value={activeDarkThemeId}
+              onValueChange={(value) => {
+                if (typeof value === "string") setActiveDarkTheme(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-56" aria-label="Dark theme">
+                <SelectValue>{findTheme(activeDarkThemeId).name}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {darkThemes.map((entry) => (
+                  <SelectItem hideIndicator key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          title="Color mode"
+          description="Choose between light, dark, or following the system preference."
+          resetAction={
+            theme !== "system" ? (
+              <SettingResetButton label="color mode" onClick={() => setTheme("system")} />
+            ) : null
+          }
+          control={
+            <Select
+              value={theme}
+              onValueChange={(value) => {
+                if (value === "system" || value === "light" || value === "dark") {
+                  setTheme(value);
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Color mode">
+                <SelectValue>
+                  {COLOR_MODE_OPTIONS.find((option) => option.value === theme)?.label ?? "System"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {COLOR_MODE_OPTIONS.map((option) => (
+                  <SelectItem hideIndicator key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Manage themes"
+        headerAction={
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="sr-only"
+              onChange={handleImportChange}
+              aria-hidden
+              tabIndex={-1}
+            />
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={handleImportClick}
+              aria-label="Import a theme from file"
+              title="Import a theme from disk"
+              className="text-muted-foreground"
+            >
+              <UploadIcon className="size-3.5" />
+              Import
+            </Button>
+          </>
+        }
+      >
+        <div>
+          {themes.map((entry, index) => {
+            const isEditing = editingId === entry.id;
+            const isActiveLight = entry.id === activeLightThemeId;
+            const isActiveDark = entry.id === activeDarkThemeId;
+            return (
+              <Fragment key={entry.id}>
+                <div
+                  className={cn(
+                    "flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5",
+                    index > 0 ? "border-t border-border/60" : "",
+                  )}
+                >
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="truncate text-sm font-medium text-foreground"
+                        title={entry.name}
+                      >
+                        {entry.name}
+                      </span>
+                      <Badge variant="outline" size="sm">
+                        {entry.builtIn ? "Built-in" : "Custom"}
+                      </Badge>
+                      {isActiveLight ? (
+                        <Badge variant="secondary" size="sm">
+                          Light
+                        </Badge>
+                      ) : null}
+                      {isActiveDark ? (
+                        <Badge variant="secondary" size="sm">
+                          Dark
+                        </Badge>
+                      ) : null}
+                    </span>
+                    {entry.description ? (
+                      <span
+                        className="truncate text-xs text-muted-foreground/80"
+                        title={entry.description}
+                      >
+                        {entry.description}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {!entry.builtIn ? (
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={`Edit ${entry.name}`}
+                        title="Edit"
+                        onClick={() => startEditing(entry)}
+                        className="text-muted-foreground"
+                      >
+                        <PencilIcon className="size-3.5" />
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Duplicate ${entry.name}`}
+                      title="Duplicate"
+                      onClick={() => handleDuplicate(entry)}
+                      className="text-muted-foreground"
+                    >
+                      <CopyIcon className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Export ${entry.name}`}
+                      title="Export"
+                      onClick={() => handleExport(entry)}
+                      className="text-muted-foreground"
+                    >
+                      <DownloadIcon className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Copy ${entry.name} JSON`}
+                      title="Copy JSON"
+                      onClick={() => void handleCopyJson(entry)}
+                      className="text-muted-foreground"
+                    >
+                      <ClipboardCopyIcon className="size-3.5" />
+                    </Button>
+                    {!entry.builtIn ? (
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={`Delete ${entry.name}`}
+                        title="Delete"
+                        onClick={() => setPendingDeleteId(entry.id)}
+                        className="text-destructive-foreground"
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                {isEditing && editing ? (
+                  <ThemeEditor
+                    source={editing.source}
+                    draft={editing.draft}
+                    onDraftChange={(next) => setDraft(next)}
+                    onSave={handleSave}
+                    onCancel={handleCancel}
+                    resolvedVariant={resolvedTheme}
+                  />
+                ) : null}
+              </Fragment>
+            );
+          })}
+        </div>
+      </SettingsSection>
+
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteId(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete custom theme?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDeleteTheme
+                ? `"${pendingDeleteTheme.name}" will be removed permanently. This action cannot be undone.`
+                : "This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button variant="destructive" onClick={confirmDelete}>
+              Delete theme
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </SettingsPageContainer>
+  );
+}

@@ -3,11 +3,25 @@ import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
+import {
+  ACTIVE_DARK_THEME_STORAGE_KEY,
+  ACTIVE_LIGHT_THEME_STORAGE_KEY,
+  CUSTOM_THEMES_STORAGE_KEY,
+  DEFAULT_THEME_ID,
+  getActiveDarkThemeId,
+  getActiveLightThemeId,
+  restoreActiveThemes,
+  setActiveDarkThemeId,
+  setActiveLightThemeId,
+} from "../themes/registry";
+
 const ThemePreference = Schema.Literals(["light", "dark", "system"]);
 type Theme = typeof ThemePreference.Type;
 type ThemeSnapshot = {
   theme: Theme;
   systemDark: boolean;
+  activeLightThemeId: string;
+  activeDarkThemeId: string;
 };
 
 type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
@@ -17,6 +31,8 @@ const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
   theme: "system",
   systemDark: false,
+  activeLightThemeId: DEFAULT_THEME_ID,
+  activeDarkThemeId: DEFAULT_THEME_ID,
 };
 const THEME_COLOR_META_NAME = "theme-color";
 const DYNAMIC_THEME_COLOR_SELECTOR = `meta[name="${THEME_COLOR_META_NAME}"][data-dynamic-theme-color="true"]`;
@@ -54,7 +70,7 @@ export const isDesktopThemeSyncError = Schema.is(DesktopThemeSyncError);
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
 let lastDesktopTheme: Theme | null = null;
-let lastAppliedTheme: ThemeSnapshot | null = null;
+let lastAppliedTheme: { theme: Theme; systemDark: boolean } | null = null;
 let themeStorageReadFailure: ThemeStorageError | null = null;
 
 function emitChange() {
@@ -187,6 +203,7 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   const isDark = theme === "dark" || (theme === "system" && systemDark);
   document.documentElement.classList.toggle("dark", isDark);
   lastAppliedTheme = { theme, systemDark };
+  restoreActiveThemes();
   syncBrowserChromeTheme();
   syncDesktopTheme(theme);
   if (suppressTransitions) {
@@ -241,12 +258,20 @@ function getSnapshot(): ThemeSnapshot {
   if (typeof window === "undefined") return DEFAULT_THEME_SNAPSHOT;
   const theme = getStored();
   const systemDark = theme === "system" ? getSystemDark() : false;
+  const activeLightThemeId = getActiveLightThemeId();
+  const activeDarkThemeId = getActiveDarkThemeId();
 
-  if (lastSnapshot && lastSnapshot.theme === theme && lastSnapshot.systemDark === systemDark) {
+  if (
+    lastSnapshot &&
+    lastSnapshot.theme === theme &&
+    lastSnapshot.systemDark === systemDark &&
+    lastSnapshot.activeLightThemeId === activeLightThemeId &&
+    lastSnapshot.activeDarkThemeId === activeDarkThemeId
+  ) {
     return lastSnapshot;
   }
 
-  lastSnapshot = { theme, systemDark };
+  lastSnapshot = { theme, systemDark, activeLightThemeId, activeDarkThemeId };
   return lastSnapshot;
 }
 
@@ -268,7 +293,12 @@ function subscribe(listener: () => void): () => void {
 
   // Listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) {
+    if (
+      e.key === STORAGE_KEY ||
+      e.key === ACTIVE_LIGHT_THEME_STORAGE_KEY ||
+      e.key === ACTIVE_DARK_THEME_STORAGE_KEY ||
+      e.key === CUSTOM_THEMES_STORAGE_KEY
+    ) {
       themeStorageReadFailure = null;
       applyTheme(getStored(), true);
       emitChange();
@@ -286,6 +316,8 @@ function subscribe(listener: () => void): () => void {
 export function useTheme() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const theme = snapshot.theme;
+  const activeLightThemeId = snapshot.activeLightThemeId;
+  const activeDarkThemeId = snapshot.activeDarkThemeId;
 
   const resolvedTheme: "light" | "dark" =
     theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
@@ -315,10 +347,32 @@ export function useTheme() {
     emitChange();
   }, []);
 
+  const setActiveLightTheme = useCallback((id: string) => {
+    if (typeof window === "undefined") return;
+    setActiveLightThemeId(id);
+    applyTheme(getStored(), true);
+    emitChange();
+  }, []);
+
+  const setActiveDarkTheme = useCallback((id: string) => {
+    if (typeof window === "undefined") return;
+    setActiveDarkThemeId(id);
+    applyTheme(getStored(), true);
+    emitChange();
+  }, []);
+
   // Keep DOM in sync on mount/change
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
-  return { theme, setTheme, resolvedTheme } as const;
+  return {
+    theme,
+    setTheme,
+    resolvedTheme,
+    activeLightThemeId,
+    activeDarkThemeId,
+    setActiveLightTheme,
+    setActiveDarkTheme,
+  } as const;
 }

@@ -1,15 +1,32 @@
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 
+import { findTheme, getActiveDarkThemeId, getActiveLightThemeId } from "../themes/registry";
+
 export const DIFF_THEME_NAMES = {
   light: "pierre-light",
   dark: "pierre-dark",
 } as const;
 
-export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
+/**
+ * A Shiki theme id for code highlighting. Either one of the app's generic Pierre
+ * themes or a bundled Shiki theme (e.g. "catppuccin-mocha") contributed by the
+ * active palette via its `syntax` mapping.
+ */
+export type DiffThemeName = string;
 
-export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
-  return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
+/**
+ * Resolve the syntax-highlighting theme for the current color mode. The active
+ * palette for that mode picks the Shiki theme (so Catppuccin renders with
+ * `catppuccin-*`, Rosé Pine with `rose-pine*`, etc., matching each project's own
+ * highlighting guidelines); palettes without a dedicated syntax theme fall back
+ * to the generic Pierre theme.
+ */
+export function resolveDiffThemeName(mode: "light" | "dark"): DiffThemeName {
+  const activeId = mode === "dark" ? getActiveDarkThemeId() : getActiveLightThemeId();
+  const syntax = findTheme(activeId).syntax?.[mode];
+  if (syntax) return syntax;
+  return mode === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
 }
 
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;

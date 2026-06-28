@@ -7,7 +7,9 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 
 export class DiffWorkerError extends Schema.TaggedErrorClass<DiffWorkerError>()("DiffWorkerError", {
   operation: Schema.Literals(["create-worker", "get-render-options", "set-render-options"]),
-  themeName: Schema.Literals(["pierre-light", "pierre-dark"]),
+  // A Shiki theme id: a generic Pierre theme or a palette-contributed bundled theme
+  // (e.g. "catppuccin-mocha"). Kept wide to match resolveDiffThemeName's return type.
+  themeName: Schema.String,
   cause: Schema.Defect(),
 }) {
   override get message(): string {

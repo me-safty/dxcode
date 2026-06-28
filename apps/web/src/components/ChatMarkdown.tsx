@@ -272,24 +272,31 @@ function estimateHighlightedSize(html: string, code: string): number {
   return Math.max(html.length * 2, code.length * 3);
 }
 
-function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
-  const cached = highlighterPromiseCache.get(language);
+function getHighlighterPromise(
+  language: string,
+  themeName: DiffThemeName,
+): Promise<DiffsHighlighter> {
+  // The shared highlighter is a singleton that accumulates themes lazily, so the
+  // cache key must include the active syntax theme: switching palettes needs a
+  // fresh getSharedHighlighter call to load the newly-requested bundled theme.
+  const cacheKey = `${language} ${themeName}`;
+  const cached = highlighterPromiseCache.get(cacheKey);
   if (cached) return cached;
 
   const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+    themes: [themeName],
     langs: [language as SupportedLanguages],
     preferredHighlighter: "shiki-js",
   }).catch((err) => {
-    highlighterPromiseCache.delete(language);
+    highlighterPromiseCache.delete(cacheKey);
     if (language === "text") {
       // "text" itself failed — Shiki cannot initialize at all, surface the error
       throw err;
     }
     // Language not supported by Shiki — fall back to "text"
-    return getHighlighterPromise("text");
+    return getHighlighterPromise("text", themeName);
   });
-  highlighterPromiseCache.set(language, promise);
+  highlighterPromiseCache.set(cacheKey, promise);
   return promise;
 }
 
@@ -682,7 +689,7 @@ function UncachedShikiCodeBlock({
   cacheKey,
   isStreaming,
 }: UncachedShikiCodeBlockProps) {
-  const highlighter = use(getHighlighterPromise(language));
+  const highlighter = use(getHighlighterPromise(language, themeName));
   const highlightedHtml = useMemo(() => {
     try {
       return highlighter.codeToHtml(code, { lang: language, theme: themeName });
