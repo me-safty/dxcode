@@ -426,8 +426,6 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     : environment.appRoot;
   const wslEntryPath = environment.path.join(wslAppRoot, "apps/server/dist/bin.mjs");
 
-  yield* wslEnvironment.preWarm(input.distro);
-
   const preflight = yield* runWslPreflight({
     distro: input.distro,
     windowsEntryPath: wslEntryPath,
@@ -609,6 +607,7 @@ export const make = Effect.gen(function* () {
     const backendExposure = yield* serverExposure.backendConfig;
     const persistedSettings = yield* settings.get;
     const shared = yield* sharedInputs;
+    yield* wslEnvironment.preWarm(persistedSettings.wslDistro);
     return yield* resolveWslStartConfig({
       ...shared,
       port: backendExposure.port,
