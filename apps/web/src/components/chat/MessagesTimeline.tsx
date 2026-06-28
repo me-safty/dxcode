@@ -105,6 +105,11 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+import type { ChatViewT3workExtensionProps } from "~/t3work/t3work-chatViewExtensions";
+import {
+  findActiveWorkflowInputMessageId,
+  T3workSystemTimelineRow,
+} from "~/t3work/chat/t3work-SystemTimelineRow";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -126,6 +131,9 @@ interface TimelineRowSharedState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
+  activeWorkflowInputMessageId: string | null;
+  onSubmitRecipeCardAction?: ChatViewT3workExtensionProps["onSubmitRecipeCardAction"];
+  dispatchWorkflowDecision?: ChatViewT3workExtensionProps["dispatchWorkflowDecision"];
   onToggleWorkGroup: (groupId: string, anchorElement?: HTMLElement) => void;
 }
 
@@ -171,6 +179,8 @@ interface MessagesTimelineProps {
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
   contentInsetEndAdjustment: number;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onSubmitRecipeCardAction?: ChatViewT3workExtensionProps["onSubmitRecipeCardAction"];
+  dispatchWorkflowDecision?: ChatViewT3workExtensionProps["dispatchWorkflowDecision"];
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +213,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onAnchorSizeChanged,
   contentInsetEndAdjustment,
   onIsAtEndChange,
+  onSubmitRecipeCardAction,
+  dispatchWorkflowDecision,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
@@ -339,6 +351,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
   }, [listRef, onIsAtEndChange]);
 
+  const activeWorkflowInputMessageId = useMemo(
+    () => findActiveWorkflowInputMessageId(timelineEntries),
+    [timelineEntries],
+  );
+
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
@@ -353,6 +370,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      activeWorkflowInputMessageId,
+      onSubmitRecipeCardAction,
+      dispatchWorkflowDecision,
       onToggleWorkGroup,
     }),
     [
@@ -367,6 +387,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      activeWorkflowInputMessageId,
+      onSubmitRecipeCardAction,
+      dispatchWorkflowDecision,
       onToggleWorkGroup,
     ],
   );
@@ -444,6 +467,24 @@ type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
+function SystemTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const ctx = use(TimelineRowCtx);
+
+  return (
+    <T3workSystemTimelineRow
+      message={row.message}
+      threadRef={ctx.threadRef}
+      activeWorkflowInputMessageId={ctx.activeWorkflowInputMessageId}
+      {...(ctx.onSubmitRecipeCardAction
+        ? { onSubmitRecipeCardAction: ctx.onSubmitRecipeCardAction }
+        : {})}
+      {...(ctx.dispatchWorkflowDecision
+        ? { dispatchWorkflowDecision: ctx.dispatchWorkflowDecision }
+        : {})}
+    />
+  );
+}
+
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
@@ -468,6 +509,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
+      ) : null}
+      {row.kind === "message" && row.message.role === "system" ? (
+        <SystemTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
