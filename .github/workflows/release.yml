@@ -254,16 +254,25 @@ jobs:
 
   # node-pty publishes no Linux prebuilt and the WSL backend runs under the
   # distro's own (Linux) Node, which can't load the Windows/Electron binary. We
-  # build the Linux pty.node here, on Linux, and hand it to the Windows packaging
-  # job — the Windows artifact then ships a ready WSL backend binary with no
-  # cross-compiling and no first-launch compiler/node-gyp/network on the user's
-  # machine. node-pty is N-API, so one binary works across all WSL Node versions.
+  # build the Linux pty.node here, on native Linux runners, and hand it to the
+  # Windows packaging job — each Windows artifact then ships a same-architecture
+  # WSL backend binary with no cross-compiling and no first-launch
+  # compiler/node-gyp/network on the user's machine. node-pty is N-API, so one
+  # binary per CPU architecture works across all WSL Node versions.
   build_wsl_node_pty:
-    name: Build WSL node-pty (linux-x64)
+    name: Build WSL node-pty (linux-${{ matrix.arch }})
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: blacksmith-8vcpu-ubuntu-2404
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -278,10 +287,15 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Build node-pty linux-x64 prebuild
+      - name: Build node-pty linux-${{ matrix.arch }} prebuild
         shell: bash
         run: |
           set -euo pipefail
+          actual_arch="$(node -p "process.arch")"
+          if [[ "$actual_arch" != "${{ matrix.arch }}" ]]; then
+            echo "Runner Node architecture $actual_arch does not match expected ${{ matrix.arch }}." >&2
+            exit 1
+          fi
           # Resolve node-pty from apps/server (where it's a dependency) and build
           # its native binary from source for Linux. node-addon-api resolves from
           # node-pty's own dependency tree, so node-gyp has everything it needs.
@@ -292,10 +306,10 @@ jobs:
           cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
           file wsl-prebuild/pty.node
 
-      - name: Upload node-pty linux-x64 prebuild
+      - name: Upload node-pty linux-${{ matrix.arch }} prebuild
         uses: actions/upload-artifact@v7
         with:
-          name: wsl-node-pty-x64
+          name: wsl-node-pty-${{ matrix.arch }}
           path: wsl-prebuild/pty.node
           if-no-files-found: error
 
@@ -384,7 +398,7 @@ jobs:
         if: matrix.platform == 'win'
         uses: actions/download-artifact@v7
         with:
-          name: wsl-node-pty-x64
+          name: wsl-node-pty-${{ matrix.arch }}
           path: wsl-prebuild
 
       - name: Install Spectre-mitigated MSVC libs
