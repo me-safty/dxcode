@@ -9,6 +9,7 @@ import {
   deriveFileChangeDisplayFiles,
   deriveMessagesTimelineRows,
   deriveToolWorkEntryHeading,
+  deriveWorkEntryDisplay,
   deriveWorkEntryPreview,
   filterChangedFilesWithoutInlineDiff,
   getRenderableCommandOutputLines,
@@ -677,6 +678,53 @@ describe("activity detail expansion", () => {
         "/Users/example/t3code",
       ),
     ).toBe("t3code/apps/web/src/components/chat/MessagesTimeline.tsx");
+  });
+
+  it("derives compact work entry display text for expandable rows", () => {
+    expect(
+      deriveWorkEntryDisplay(
+        buildWorkLogEntry({
+          label: "Ran command complete",
+          command: "vp test",
+        }),
+        undefined,
+      ),
+    ).toEqual({
+      heading: "Ran command",
+      preview: "vp test",
+      displayText: "Ran command - vp test",
+    });
+
+    expect(
+      deriveWorkEntryDisplay(
+        buildWorkLogEntry({
+          label: "Ran command",
+          detail: "ran command completed",
+        }),
+        undefined,
+      ),
+    ).toEqual({
+      heading: "Ran command",
+      preview: null,
+      displayText: "Ran command",
+    });
+
+    expect(
+      deriveWorkEntryDisplay(
+        buildWorkLogEntry({
+          label: "Changed files",
+          itemType: "file_change",
+          command: "apply_patch",
+          detail: "Updated files",
+          changedFiles: ["/Users/example/t3code/apps/web/src/session-logic.ts"],
+        }),
+        "/Users/example/t3code",
+      ),
+    ).toEqual({
+      heading: "Changed files",
+      preview: "t3code/apps/web/src/session-logic.ts",
+      displayText: "Changed files - t3code/apps/web/src/session-logic.ts",
+    });
   });
 
   it("only toggles expandable work rows from row-level keyboard events", () => {
