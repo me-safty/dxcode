@@ -69,7 +69,10 @@ export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | un
 export const codexSessionAppServerArgs = (
   appServerArgs: ReadonlyArray<string> | undefined,
   launchArgs: string | undefined,
-) => (appServerArgs ? ["app-server", ...appServerArgs] : codexAppServerArgs(launchArgs));
+) => {
+  const launchAppServerArgs = codexAppServerArgs(launchArgs);
+  return appServerArgs ? [...launchAppServerArgs, ...appServerArgs] : launchAppServerArgs;
+};
 
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,

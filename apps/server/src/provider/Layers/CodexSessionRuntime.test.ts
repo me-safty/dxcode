@@ -228,6 +228,23 @@ describe("codexSessionAppServerArgs", () => {
       "model=gpt-5",
     ]);
   });
+
+  it("keeps launch args when explicit app-server args are provided", () => {
+    NodeAssert.deepStrictEqual(
+      codexSessionAppServerArgs(
+        ["-c", "mcp_servers.t3-code.url=http://127.0.0.1/mcp"],
+        "--strict-config --enable foo",
+      ),
+      [
+        "app-server",
+        "--strict-config",
+        "--enable",
+        "foo",
+        "-c",
+        "mcp_servers.t3-code.url=http://127.0.0.1/mcp",
+      ],
+    );
+  });
 });
 
 describe("isRecoverableThreadResumeError", () => {
