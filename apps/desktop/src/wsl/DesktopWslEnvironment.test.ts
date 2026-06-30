@@ -310,6 +310,33 @@ describe("ensureNodePtyImpl: WSL Node engine-range preflight (#3611)", () => {
       ),
     ));
 
+  it("rejects (fail closed) when a range is required but the probe didn't report a version (bot-flagged fix)", () =>
+    Effect.gen(function* () {
+      const result = yield* ensureNodePtyImpl(
+        "Ubuntu",
+        "C:\\repo",
+        windowsToWslPath,
+        { nodeEngineRange: "^22.16 || ^23.11 || >=24.10" },
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.fatal).toBe(true);
+        expect(result.reason).toContain("^22.16 || ^23.11 || >=24.10");
+      }
+    }).pipe(
+      Effect.provideService(
+        ChildProcessSpawner.ChildProcessSpawner,
+        makeProbeSpawner(
+          // No nodeVersion: line at all -- the probe omitted/failed to
+          // report it even though node itself resolved fine.
+          [
+            "nodePath:/home/josh/.nvm/versions/node/v18.20.8/bin/node",
+            "resolvedPath:/home/josh/.nvm/versions/node/v18.20.8/bin:/usr/bin",
+          ].join("\n"),
+        ),
+      ),
+    ));
+
   it("does not false-positive when the resolved Node satisfies nodeEngineRange (happy path unchanged)", () =>
     Effect.gen(function* () {
       const result = yield* ensureNodePtyImpl(

@@ -493,16 +493,26 @@ export const ensureNodePtyImpl = (
       // above) behind a Node-version error in the rare case both are true.
       const nodeVersion = parseNodeVersion(probe.stdout);
       const requiredRange = options.nodeEngineRange?.trim() || null;
-      if (
-        requiredRange !== null &&
-        nodeVersion !== null &&
-        !satisfiesSemverRange(nodeVersion, requiredRange)
-      ) {
-        return {
-          ok: false,
-          reason: `Found Node.js v${nodeVersion} at ${nodePath}, which does not satisfy the required range ${requiredRange}. Activate a supported version (e.g. nvm alias default 22 && nvm use 22) and restart T3 Code.`,
-          fatal: true,
-        } as const;
+      if (requiredRange !== null) {
+        if (nodeVersion === null) {
+          // A range is required but the probe didn't report a version --
+          // fail closed rather than silently letting an unchecked Node
+          // through (the exact failure class this check exists to catch).
+          // Fatal/bounded like the mismatch case below, so a one-off probe
+          // hiccup still gets a few retries before falling back.
+          return {
+            ok: false,
+            reason: `Could not determine the WSL Node.js version, which is required to satisfy ${requiredRange}. The version probe did not report a version; please report this if it persists.`,
+            fatal: true,
+          } as const;
+        }
+        if (!satisfiesSemverRange(nodeVersion, requiredRange)) {
+          return {
+            ok: false,
+            reason: `Found Node.js v${nodeVersion} at ${nodePath}, which does not satisfy the required range ${requiredRange}. Activate a supported version (e.g. nvm alias default 22 && nvm use 22) and restart T3 Code.`,
+            fatal: true,
+          } as const;
+        }
       }
       return { ok: true, nodePath, resolvedPath } as const;
     }

@@ -236,6 +236,13 @@ interface BackendManagerState {
   // Consecutive bounded/fatal preflight failures, reset on a clean or
   // unbounded-transient preflight. restartAttempt counts all restarts.
   readonly preflightFailureAttempt: number;
+  // Consecutive post-spawn exits that never reached readiness for this
+  // instance, reset on a successful onReady or a fresh start from a
+  // stopped state. Deliberately separate from restartAttempt, which also
+  // counts pre-spawn preflight retries (e.g. WSL cold-start) -- using
+  // restartAttempt for the never-ready cap would let ordinary transient
+  // preflight retries trip it well before 5 actual post-spawn failures.
+  readonly neverReadyAttempt: number;
   readonly restartFiber: Option.Option<Fiber.Fiber<void, never>>;
   readonly nextRunId: number;
 }
@@ -247,6 +254,7 @@ const initialState: BackendManagerState = {
   active: Option.none(),
   restartAttempt: 0,
   preflightFailureAttempt: 0,
+  neverReadyAttempt: 0,
   restartFiber: Option.none(),
   nextRunId: 1,
 };
@@ -487,6 +495,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
 
         const resetFatalPreflightCounter =
           !current.desiredRunning && current.preflightFailureAttempt > 0;
+        const resetNeverReadyCounter = !current.desiredRunning && current.neverReadyAttempt > 0;
         yield* cancelRestart;
         yield* Ref.update(state, (latest) => ({
           ...latest,
@@ -494,6 +503,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           ready: false,
           config: Option.some(config.value),
           preflightFailureAttempt: resetFatalPreflightCounter ? 0 : latest.preflightFailureAttempt,
+          neverReadyAttempt: resetNeverReadyCounter ? 0 : latest.neverReadyAttempt,
         }));
 
         const preflightFailure = config.value.preflightFailure;
@@ -616,6 +626,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
                     ...latest,
                     active: Option.none<ActiveBackendRun>(),
                     ready: false,
+                    neverReadyAttempt: latest.neverReadyAttempt + 1,
                   };
                   return [
                     {
@@ -653,15 +664,15 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
                 // backend crash-looping for an unrelated reason.
                 if (
                   config.value.bootstrapDelivery === "stdin" &&
-                  nextState.restartAttempt >= MAX_PREFLIGHT_FAILURE_ATTEMPTS
+                  nextState.neverReadyAttempt >= MAX_PREFLIGHT_FAILURE_ATTEMPTS
                 ) {
                   yield* logInstanceError(
                     "backend exited repeatedly before becoming ready; surfacing and falling back",
-                    { reason, attempt: nextState.restartAttempt },
+                    { reason, attempt: nextState.neverReadyAttempt },
                   );
                   const shouldRestart = yield* (
                     spec.onPreflightFailed?.({
-                      reason: `backend process exited ${nextState.restartAttempt} times in a row without becoming ready (last: ${reason})`,
+                      reason: `backend process exited ${nextState.neverReadyAttempt} times in a row without becoming ready (last: ${reason})`,
                       fatal: true,
                     }) ?? Effect.succeed(false)
                   );
@@ -706,6 +717,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
                 {
                   ...latest,
                   restartAttempt: 0,
+                  neverReadyAttempt: 0,
                   ready: true,
                 },
               ] as const;

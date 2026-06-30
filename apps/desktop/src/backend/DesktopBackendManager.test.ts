@@ -817,6 +817,139 @@ describe("DesktopBackendManager", () => {
       ),
   );
 
+  it.effect(
+    "pre-spawn transient preflight retries do not count toward the never-ready cap (bot-flagged fix)",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const starts = yield* Queue.unbounded<number>();
+          let startCount = 0;
+          const failures: Array<{ reason: string; fatal: boolean }> = [];
+          const stillColdStarting = yield* Ref.make(true);
+
+          const spawnerLayer = Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.sync(() => {
+                startCount += 1;
+                return makeProcess({
+                  exitCode: Queue.offer(starts, startCount).pipe(
+                    Effect.as(ChildProcessSpawner.ExitCode(0)),
+                  ),
+                });
+              }),
+            ),
+          );
+
+          const instance = yield* makeTestInstance({
+            spawnerLayer,
+            configResolve: Ref.get(stillColdStarting).pipe(
+              Effect.map((coldStarting) =>
+                coldStarting
+                  ? {
+                      ...baseConfig,
+                      bootstrapDelivery: "stdin",
+                      preflightFailure: Option.some({
+                        reason: "WSL is still cold-starting",
+                        fatal: false,
+                      }),
+                    }
+                  : { ...baseConfig, bootstrapDelivery: "stdin" },
+              ),
+            ),
+            httpClientLayer: httpClientLayer(() => Effect.never),
+            onPreflightFailed: (failure) =>
+              Effect.sync(() => {
+                failures.push(failure);
+              }).pipe(Effect.as(false)),
+          });
+
+          yield* instance.start;
+
+          // Several transient (unbounded, pre-spawn) preflight retries -- the
+          // process never spawns during this window, so the general restart
+          // counter climbs well past MAX_PREFLIGHT_FAILURE_ATTEMPTS, but the
+          // never-ready cap must not be affected by any of this.
+          for (let i = 0; i < 8; i++) {
+            yield* TestClock.adjust(Duration.seconds(10));
+          }
+          assert.equal(yield* Queue.size(starts), 0);
+          assert.deepEqual(failures, []);
+
+          // Cold start finishes: preflight goes clean and the process
+          // actually spawns, but exits before ever becoming ready, repeatedly.
+          yield* Ref.set(stillColdStarting, false);
+          for (let i = 0; i < 10; i++) {
+            yield* TestClock.adjust(Duration.seconds(10));
+          }
+
+          // Must take its own fresh 5 consecutive post-spawn never-ready
+          // exits -- not fire on the first one because the pre-spawn retries
+          // had already elevated an unrelated counter.
+          assert.equal(failures.length, 1);
+          assert.equal(failures[0]?.fatal, true);
+          assert.isTrue(startCount >= 5 && startCount <= 7);
+        }).pipe(Effect.provide(TestClock.layer())),
+      ),
+  );
+
+  it.effect(
+    "a fresh start after the never-ready cap fires gets a new retry budget (bot-flagged fix)",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const starts = yield* Queue.unbounded<number>();
+          let startCount = 0;
+          const failures: Array<{ reason: string; fatal: boolean }> = [];
+
+          const spawnerLayer = Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.sync(() => {
+                startCount += 1;
+                return makeProcess({
+                  exitCode: Queue.offer(starts, startCount).pipe(
+                    Effect.as(ChildProcessSpawner.ExitCode(0)),
+                  ),
+                });
+              }),
+            ),
+          );
+
+          const instance = yield* makeTestInstance({
+            spawnerLayer,
+            config: { ...baseConfig, bootstrapDelivery: "stdin" },
+            httpClientLayer: httpClientLayer(() => Effect.never),
+            onPreflightFailed: (failure) =>
+              Effect.sync(() => {
+                failures.push(failure);
+              }).pipe(Effect.as(false)),
+          });
+
+          yield* instance.start;
+          for (let i = 0; i < 10; i++) {
+            yield* TestClock.adjust(Duration.seconds(10));
+          }
+          assert.equal(failures.length, 1);
+          assert.equal((yield* instance.snapshot).desiredRunning, false);
+
+          const startCountAtTrip = startCount;
+
+          // Restarting after the cap fired (without ever calling stop())
+          // must not immediately re-trip on the very next failure because a
+          // stale counter survived from before.
+          yield* instance.start;
+          for (let i = 0; i < 10; i++) {
+            yield* TestClock.adjust(Duration.seconds(10));
+          }
+
+          assert.equal(failures.length, 2);
+          const spawnsSinceRestart = startCount - startCountAtTrip;
+          assert.isTrue(spawnsSinceRestart >= 5 && spawnsSinceRestart <= 7);
+        }).pipe(Effect.provide(TestClock.layer())),
+      ),
+  );
+
   it.effect("cancels a scheduled restart when start is requested manually", () =>
     Effect.scoped(
       Effect.gen(function* () {
