@@ -146,7 +146,10 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { runProjectScriptInTerminal } from "~/projectScriptTerminals";
+import {
+  releaseProjectActionTerminalReservationsSeenRunning,
+  runProjectScriptInTerminal,
+} from "~/projectScriptTerminals";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useEnvironmentSettings } from "../hooks/useSettings";
@@ -996,10 +999,6 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
-  const waitForProjectActionTerminalReady = useAtomCommand(
-    projectActionTerminalEnvironment.waitForInputReady,
-    "project action terminal wait for input ready",
-  );
   const requireProjectActionTerminalReady = useAtomCommand(
     projectActionTerminalEnvironment.requireInputReady,
     { label: "project action terminal require input ready", reportFailure: false },
@@ -1258,6 +1257,12 @@ function ChatViewContent(props: ChatViewProps) {
     environmentId: activeThread?.environmentId ?? null,
     threadId: activeThreadId,
   });
+  useEffect(() => {
+    releaseProjectActionTerminalReservationsSeenRunning({
+      runningTerminalIds,
+      reservedTerminalIds: projectActionTerminalLaunchReservationsRef.current,
+    });
+  }, [runningTerminalIds]);
   const activeThreadKnownSessionsRaw = useKnownTerminalSessions({
     environmentId: activeThread?.environmentId ?? null,
     threadId: activeThreadId,
@@ -2516,7 +2521,7 @@ function ChatViewContent(props: ChatViewProps) {
         },
         openTerminal: (input) => openTerminal({ environmentId, input }),
         writeTerminal: (input) => writeTerminal({ environmentId, input }),
-        waitForInputReady: (input) => waitForProjectActionTerminalReady({ environmentId, input }),
+        waitForInputReady: (input) => requireProjectActionTerminalReady({ environmentId, input }),
         requireInputReady: (input) => requireProjectActionTerminalReady({ environmentId, input }),
       });
       if (runResult._tag === "Failure") {
@@ -2547,7 +2552,6 @@ function ChatViewContent(props: ChatViewProps) {
       requireProjectActionTerminalReady,
       terminalUiState.terminalIds,
       terminalUiAvailable,
-      waitForProjectActionTerminalReady,
       writeTerminal,
     ],
   );
