@@ -11,6 +11,7 @@ import {
   failPanelFileDiffLoad,
   formatRelativeDate,
   mergeChangeGroups,
+  stashIdentityKey,
   vcsPanelSnapshotFingerprint,
 } from "./SourceControlPanel.logic";
 
@@ -218,6 +219,30 @@ describe("SourceControlPanel working-tree presentation logic", () => {
     const then = new Date(now - 360 * 24 * 60 * 60 * 1000).toISOString();
 
     expect(formatRelativeDate(then, now)).toBe("11 months ago");
+  });
+});
+
+describe("SourceControlPanel stash identity", () => {
+  it("uses the stash commit hash instead of the positional ref when available", () => {
+    expect(
+      stashIdentityKey({
+        refName: "stash@{0}",
+        sha: "abc123",
+        createdAt: "2026-06-30T13:00:00Z",
+        message: "WIP on main: abc123 change",
+      }),
+    ).toBe("sha:abc123");
+  });
+
+  it("falls back to the positional ref for stashes without a hash", () => {
+    expect(
+      stashIdentityKey({
+        refName: "stash@{0}",
+        sha: null,
+        createdAt: null,
+        message: "stash@{0}",
+      }),
+    ).toBe("ref:stash@{0}");
   });
 });
 
