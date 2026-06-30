@@ -78,11 +78,12 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   path: '/archived',
   getParentRoute: () => SettingsRoute,
 } as any)
-const ProjectsEnvironmentIdProjectIdRoute = ProjectsEnvironmentIdProjectIdRouteImport.update({
-  id: '/projects/$environmentId/$projectId',
-  path: '/projects/$environmentId/$projectId',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const ProjectsEnvironmentIdProjectIdRoute =
+  ProjectsEnvironmentIdProjectIdRouteImport.update({
+    id: '/projects/$environmentId/$projectId',
+    path: '/projects/$environmentId/$projectId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -99,7 +100,6 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
-  '/projects/$environmentId/$projectId': typeof ProjectsEnvironmentIdProjectIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -109,11 +109,11 @@ export interface FileRoutesByFullPath {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$environmentId/$projectId': typeof ProjectsEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
-  '/projects/$environmentId/$projectId': typeof ProjectsEnvironmentIdProjectIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -124,13 +124,13 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$environmentId/$projectId': typeof ProjectsEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
-  '/projects/$environmentId/$projectId': typeof ProjectsEnvironmentIdProjectIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -141,6 +141,7 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$environmentId/$projectId': typeof ProjectsEnvironmentIdProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -148,7 +149,6 @@ export interface FileRouteTypes {
     | '/'
     | '/pair'
     | '/settings'
-    | '/projects/$environmentId/$projectId'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -158,11 +158,11 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/projects/$environmentId/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/pair'
     | '/settings'
-    | '/projects/$environmentId/$projectId'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -173,12 +173,12 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/projects/$environmentId/$projectId'
   id:
     | '__root__'
     | '/_chat'
     | '/pair'
     | '/settings'
-    | '/projects/$environmentId/$projectId'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -189,6 +189,7 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/projects/$environmentId/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {

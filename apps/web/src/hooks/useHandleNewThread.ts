@@ -27,7 +27,7 @@ import {
 } from "../logicalProject";
 import { readThreadShell, useProjects, useServerConfigs, useThread } from "../state/entities";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
-import { resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadRouteTarget, type ThreadRouteTargetParams } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
@@ -200,7 +200,7 @@ export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const routeTarget = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
+    select: (params: ThreadRouteTargetParams) => resolveThreadRouteTarget(params),
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const activeThread = useThread(routeThreadRef);

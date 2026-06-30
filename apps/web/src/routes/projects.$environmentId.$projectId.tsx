@@ -1,6 +1,8 @@
 import { ArrowLeftIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { createFileRoute, redirect, useCanGoBack, useNavigate } from "@tanstack/react-router";
+import type { AuthGateBeforeLoadArgs } from "./-authGateRouteContext";
 import { createDefaultModelSelection, createModelSelection } from "@t3tools/shared/model";
+import { useAtomValue } from "@effect/atom-react";
 import {
   mapAtomCommandResult,
   settlePromise,
@@ -23,15 +25,9 @@ import type {
 import { DEFAULT_MODEL } from "@t3tools/contracts";
 import type { ReactNode } from "react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 
 import { cn } from "../lib/utils";
 import { ensureLocalApi, readLocalApi } from "../localApi";
-import {
-  selectProjectsAcrossEnvironments,
-  selectThreadsAcrossEnvironments,
-  useStore,
-} from "../store";
 import { Button } from "../components/ui/button";
 import {
   NumberField,
@@ -58,16 +54,13 @@ import {
 import { toastManager, stackedThreadToast } from "../components/ui/toast";
 import { DraftInput } from "../components/ui/draft-input";
 import { isElectron } from "../env";
-import { useServerKeybindings, useServerProviders } from "../rpc/serverState";
-import { usePrimaryEnvironmentId } from "../environments/primary";
-import { useSavedEnvironmentRuntimeStore } from "../environments/runtime";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../components/ProjectScriptsControl";
 import { commandForProjectScript, nextProjectScriptId } from "../projectScripts";
 import { syncProjectScriptKeybinding } from "../lib/projectScriptKeybindings";
-import { useSettings } from "../hooks/useSettings";
+import { usePrimarySettings } from "../hooks/useSettings";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionForInstance,
@@ -84,6 +77,9 @@ import { ProviderInstanceIcon } from "../components/chat/ProviderInstanceIcon";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
+import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
 
 const PROVIDER_LABELS: Record<SourceControlProviderKind, string> = {
   github: "GitHub",
@@ -176,41 +172,37 @@ function ProjectRouteView() {
   const { environmentId, projectId } = Route.useParams();
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const threads = useStore(useShallow(selectThreadsAcrossEnvironments));
+  const projects = useProjects();
+  const threads = useThreadShells();
   const project = projects.find(
     (candidate) => candidate.environmentId === environmentId && candidate.id === projectId,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const primaryProviders = useServerProviders();
-  const keybindings = useServerKeybindings();
-  const primarySettings = useSettings();
+  const primaryProviders = useAtomValue(primaryServerProvidersAtom);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const primarySettings = usePrimarySettings();
+  const serverConfigs = useServerConfigs();
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const updateProjectSettings = useAtomCommand(projectEnvironment.updateSettings, {
     reportFailure: false,
   });
-  const remoteRuntimeState = useSavedEnvironmentRuntimeStore((state) =>
-    project?.environmentId ? state.byId[project.environmentId] : null,
-  );
+  const projectServerConfig = project?.environmentId
+    ? (serverConfigs.get(project.environmentId) ?? null)
+    : null;
   const settings = useMemo(
     () =>
       project?.environmentId && project.environmentId !== primaryEnvironmentId
         ? {
             ...primarySettings,
-            ...remoteRuntimeState?.serverConfig?.settings,
+            ...projectServerConfig?.settings,
           }
         : primarySettings,
-    [
-      primaryEnvironmentId,
-      primarySettings,
-      project?.environmentId,
-      remoteRuntimeState?.serverConfig?.settings,
-    ],
+    [primaryEnvironmentId, primarySettings, project?.environmentId, projectServerConfig?.settings],
   );
   const serverProviders =
     project?.environmentId && project.environmentId !== primaryEnvironmentId
-      ? (remoteRuntimeState?.serverConfig?.providers ?? primaryProviders)
+      ? (projectServerConfig?.providers ?? primaryProviders)
       : primaryProviders;
   const providerInstanceEntries = useMemo(
     () =>
@@ -647,11 +639,11 @@ function ProjectRouteView() {
       const willDeleteThreads = projectThreadCount > 0;
       const message = [
         willDeleteThreads
-          ? `Remove project "${project.name}" and delete its ${projectThreadCount} thread${
+          ? `Remove project "${project.title}" and delete its ${projectThreadCount} thread${
               projectThreadCount === 1 ? "" : "s"
             }?`
-          : `Remove project "${project.name}"?`,
-        `Path: ${project.cwd}`,
+          : `Remove project "${project.title}"?`,
+        `Path: ${project.workspaceRoot}`,
         willDeleteThreads
           ? "This permanently clears conversation history for every related thread."
           : "This removes only this project entry.",
@@ -1400,7 +1392,7 @@ function openExternalUrl(url: string, title: string) {
 }
 
 export const Route = createFileRoute("/projects/$environmentId/$projectId")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context }: AuthGateBeforeLoadArgs) => {
     if (
       context.authGateState.status !== "authenticated" &&
       context.authGateState.status !== "hosted-static"

@@ -382,13 +382,13 @@ export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
 export const WsProjectsGetDetailsRpc = Rpc.make(WS_METHODS.projectsGetDetails, {
   payload: ProjectDetailsInput,
   success: ProjectDetails,
-  error: ProjectDetailsError,
+  error: Schema.Union([ProjectDetailsError, EnvironmentAuthorizationError]),
 });
 
 export const WsProjectsUpdateSettingsRpc = Rpc.make(WS_METHODS.projectsUpdateSettings, {
   payload: ProjectUpdateSettingsInput,
   success: ProjectSettings,
-  error: ProjectDetailsError,
+  error: Schema.Union([ProjectDetailsError, EnvironmentAuthorizationError]),
 });
 
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
