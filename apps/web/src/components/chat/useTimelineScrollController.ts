@@ -5,6 +5,20 @@ import { type LegendListRef } from "@legendapp/list/react";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { getAnchoredTurnMetrics, type TimelineScrollMode } from "./timelineScrollAnchoring";
 
+const TIMELINE_SCROLL_KEYBOARD_NAVIGATION_KEYS = new Set([
+  "ArrowDown",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
+
+export function isTimelineScrollKeyboardNavigationKey(key: string): boolean {
+  return TIMELINE_SCROLL_KEYBOARD_NAVIGATION_KEYS.has(key);
+}
+
 export interface TimelineScrollController {
   readonly showScrollToBottom: boolean;
   readonly scrollToEnd: (animated?: boolean) => void;
@@ -139,8 +153,15 @@ export function useTimelineScrollController({
       timelineScrollModeRef.current = "following-end";
       liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
       pendingTimelineAnchorRef.current = null;
+      positionedTimelineAnchorRef.current = null;
+      settledTimelineAnchorRef.current = null;
       activeTimelineAnchorIndexRef.current = null;
+      pendingAnchorScrollRestoreRef.current = null;
       cleanupAnchorPositioning();
+      if (anchorScrollRestoreFrameRef.current !== null) {
+        cancelAnimationFrame(anchorScrollRestoreFrameRef.current);
+        anchorScrollRestoreFrameRef.current = null;
+      }
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
       void listRef.current?.scrollToEnd?.({ animated });
@@ -155,7 +176,30 @@ export function useTimelineScrollController({
       if (!scrollNode) {
         return;
       }
+      const isAnchorIgnoredEvent = (event: Event) =>
+        event.target instanceof Element &&
+        scrollNode.contains(event.target) &&
+        event.target.closest("[data-scroll-anchor-ignore]") !== null;
       const handleManualNavigation = () => {
+        cancelForManualNavigationRef.current();
+      };
+      const handlePointerDown = (event: PointerEvent) => {
+        if (isAnchorIgnoredEvent(event)) {
+          return;
+        }
+        cancelForManualNavigationRef.current();
+      };
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (
+          event.defaultPrevented ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.altKey ||
+          !isTimelineScrollKeyboardNavigationKey(event.key) ||
+          isAnchorIgnoredEvent(event)
+        ) {
+          return;
+        }
         cancelForManualNavigationRef.current();
       };
       scrollNode.addEventListener("wheel", handleManualNavigation, {
@@ -164,13 +208,15 @@ export function useTimelineScrollController({
       scrollNode.addEventListener("touchmove", handleManualNavigation, {
         passive: true,
       });
-      scrollNode.addEventListener("pointerdown", handleManualNavigation, {
+      scrollNode.addEventListener("pointerdown", handlePointerDown, {
         passive: true,
       });
+      scrollNode.addEventListener("keydown", handleKeyDown);
       removeListeners = () => {
         scrollNode.removeEventListener("wheel", handleManualNavigation);
         scrollNode.removeEventListener("touchmove", handleManualNavigation);
-        scrollNode.removeEventListener("pointerdown", handleManualNavigation);
+        scrollNode.removeEventListener("pointerdown", handlePointerDown);
+        scrollNode.removeEventListener("keydown", handleKeyDown);
       };
     });
 
