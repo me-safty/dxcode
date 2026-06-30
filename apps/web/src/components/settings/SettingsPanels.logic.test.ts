@@ -1,12 +1,17 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ThreadId,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  archivedThreadSelectionKey,
+  buildArchivedThreadSelectionKeys,
   buildProviderInstanceUpdatePatch,
+  pruneArchivedThreadSelection,
   formatDiagnosticsDescription,
 } from "./SettingsPanels.logic";
 
@@ -100,5 +105,64 @@ describe("buildProviderInstanceUpdatePatch", () => {
 
     expect(patch.providerInstances?.[instanceId]).toEqual(nextInstance);
     expect(patch.providers).toBeUndefined();
+  });
+});
+
+describe("archived thread selection helpers", () => {
+  it("scopes selection keys by environment and thread", () => {
+    const threadId = ThreadId.make("thread-1");
+
+    expect(
+      archivedThreadSelectionKey({
+        environmentId: EnvironmentId.make("environment-a"),
+        threadId,
+      }),
+    ).toBe("environment-a:thread-1");
+    expect(
+      archivedThreadSelectionKey({
+        environmentId: EnvironmentId.make("environment-b"),
+        threadId,
+      }),
+    ).toBe("environment-b:thread-1");
+  });
+
+  it("keeps duplicate thread ids distinct across environments", () => {
+    const threadId = ThreadId.make("thread-1");
+    const selected = new Set([
+      archivedThreadSelectionKey({
+        environmentId: EnvironmentId.make("environment-a"),
+        threadId,
+      }),
+      archivedThreadSelectionKey({
+        environmentId: EnvironmentId.make("environment-b"),
+        threadId,
+      }),
+    ]);
+
+    expect(selected.size).toBe(2);
+  });
+
+  it("builds select-all keys from scoped archived threads", () => {
+    expect(
+      buildArchivedThreadSelectionKeys([
+        {
+          environmentId: EnvironmentId.make("environment-a"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        {
+          environmentId: EnvironmentId.make("environment-b"),
+          threadId: ThreadId.make("thread-1"),
+        },
+      ]),
+    ).toEqual(["environment-a:thread-1", "environment-b:thread-1"]);
+  });
+
+  it("prunes selections that are no longer present in archived snapshots", () => {
+    const selected = new Set(["environment-a:thread-1", "environment-a:thread-2"]);
+    const available = new Set(["environment-a:thread-2", "environment-b:thread-1"]);
+
+    expect([...pruneArchivedThreadSelection(selected, available)]).toEqual([
+      "environment-a:thread-2",
+    ]);
   });
 });

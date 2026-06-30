@@ -1,11 +1,42 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type {
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceConfig,
   ProviderInstanceId,
   ServerSettings,
+  ThreadId,
   UnifiedSettings,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+
+export type ArchivedThreadSelectionItem = {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+};
+
+export function archivedThreadSelectionKey(input: ArchivedThreadSelectionItem): string {
+  return scopedThreadKey(scopeThreadRef(input.environmentId, input.threadId));
+}
+
+export function buildArchivedThreadSelectionKeys(
+  threads: ReadonlyArray<ArchivedThreadSelectionItem>,
+): ReadonlyArray<string> {
+  return threads.map(archivedThreadSelectionKey);
+}
+
+export function pruneArchivedThreadSelection(
+  selectedKeys: ReadonlySet<string>,
+  availableKeys: ReadonlySet<string>,
+): Set<string> {
+  const next = new Set<string>();
+  for (const key of selectedKeys) {
+    if (availableKeys.has(key)) {
+      next.add(key);
+    }
+  }
+  return next;
+}
 
 function collapseOtelSignalsUrl(input: {
   readonly tracesUrl: string;

@@ -1,6 +1,13 @@
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveX,
+  LoaderIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   defaultInstanceIdForDriver,
@@ -11,7 +18,7 @@ import {
   type ProviderInstanceId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
@@ -37,7 +44,11 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -59,7 +70,17 @@ import { usePrimaryEnvironment } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -76,8 +97,10 @@ import {
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import {
+  buildArchivedThreadSelectionKeys,
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
+  pruneArchivedThreadSelection,
 } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
@@ -1422,7 +1445,13 @@ export function ProviderSettingsPanel() {
 
 export function ArchivedThreadsPanel() {
   const projects = useProjects();
-  const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
+  const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
+  const { unarchiveThread, confirmAndDeleteThread, deleteThread } = useThreadActions();
+  const [selectedArchivedThreadKeys, setSelectedArchivedThreadKeys] = useState(
+    () => new Set<string>(),
+  );
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkActionPending, setBulkActionPending] = useState<"delete" | "unarchive" | null>(null);
   const environmentIds = useMemo(
     () => [...new Set(projects.map((project) => project.environmentId))],
     [projects],
@@ -1483,6 +1512,167 @@ export function ArchivedThreadsPanel() {
     }
     return groups;
   }, [archivedSnapshots]);
+
+  const archivedThreadEntries = useMemo(
+    () =>
+      archivedGroups.flatMap(({ threads: projectThreads }) =>
+        projectThreads.map((thread) => {
+          const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+          return {
+            key: scopedThreadKey(threadRef),
+            threadRef,
+          };
+        }),
+      ),
+    [archivedGroups],
+  );
+
+  const archivedThreadSelectionKeys = useMemo(
+    () =>
+      buildArchivedThreadSelectionKeys(
+        archivedThreadEntries.map((entry) => ({
+          environmentId: entry.threadRef.environmentId,
+          threadId: entry.threadRef.threadId,
+        })),
+      ),
+    [archivedThreadEntries],
+  );
+  const archivedThreadSelectionKeySet = useMemo(
+    () => new Set(archivedThreadSelectionKeys),
+    [archivedThreadSelectionKeys],
+  );
+  const archivedThreadSelectionKeySignature = archivedThreadSelectionKeys.join("\0");
+
+  useEffect(() => {
+    setSelectedArchivedThreadKeys((previous) => {
+      const next = pruneArchivedThreadSelection(previous, archivedThreadSelectionKeySet);
+      if (next.size === previous.size && [...next].every((key) => previous.has(key))) {
+        return previous;
+      }
+      return next;
+    });
+  }, [archivedThreadSelectionKeySet, archivedThreadSelectionKeySignature]);
+
+  const selectedArchivedThreadEntries = useMemo(
+    () => archivedThreadEntries.filter((entry) => selectedArchivedThreadKeys.has(entry.key)),
+    [archivedThreadEntries, selectedArchivedThreadKeys],
+  );
+  const selectedArchivedThreadCount = selectedArchivedThreadEntries.length;
+  const isArchiveBulkActionPending = bulkActionPending !== null;
+  const allArchivedThreadsSelected =
+    archivedThreadEntries.length > 0 &&
+    selectedArchivedThreadCount === archivedThreadEntries.length;
+  const someArchivedThreadsSelected =
+    selectedArchivedThreadCount > 0 && !allArchivedThreadsSelected;
+
+  const clearSelectedArchivedThreads = useCallback(() => {
+    setSelectedArchivedThreadKeys(new Set());
+  }, []);
+
+  const toggleArchivedThreadSelection = useCallback((threadKey: string, checked: boolean) => {
+    setSelectedArchivedThreadKeys((previous) => {
+      const next = new Set(previous);
+      if (checked) {
+        next.add(threadKey);
+      } else {
+        next.delete(threadKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const executeBulkUnarchiveArchivedThreads = useCallback(async () => {
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    const totalCount = selectedArchivedThreadEntries.length;
+    let failedCount = 0;
+    let lastErrorMessage = "An error occurred.";
+    setBulkActionPending("unarchive");
+    try {
+      for (const entry of selectedArchivedThreadEntries) {
+        const result = await unarchiveThread(entry.threadRef);
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            failedCount += 1;
+            lastErrorMessage = error instanceof Error ? error.message : "An error occurred.";
+          }
+        }
+      }
+      clearSelectedArchivedThreads();
+      refreshArchivedThreads();
+      if (failedCount > 0) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: `Failed to unarchive ${failedCount} of ${totalCount} threads`,
+            description: lastErrorMessage,
+          }),
+        );
+      }
+    } finally {
+      setBulkActionPending(null);
+    }
+  }, [
+    bulkActionPending,
+    clearSelectedArchivedThreads,
+    refreshArchivedThreads,
+    selectedArchivedThreadEntries,
+    unarchiveThread,
+  ]);
+
+  const executeBulkDeleteArchivedThreads = useCallback(async () => {
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    const totalCount = selectedArchivedThreadEntries.length;
+    const deletedThreadKeys = new Set(selectedArchivedThreadEntries.map((entry) => entry.key));
+    let failedCount = 0;
+    let lastErrorMessage = "An error occurred.";
+    setBulkActionPending("delete");
+    try {
+      for (const entry of selectedArchivedThreadEntries) {
+        const result = await deleteThread(entry.threadRef, { deletedThreadKeys });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            failedCount += 1;
+            lastErrorMessage = error instanceof Error ? error.message : "An error occurred.";
+          }
+        }
+      }
+      clearSelectedArchivedThreads();
+      refreshArchivedThreads();
+      if (failedCount > 0) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: `Failed to delete ${failedCount} of ${totalCount} threads`,
+            description: lastErrorMessage,
+          }),
+        );
+      }
+    } finally {
+      setBulkActionPending(null);
+    }
+  }, [
+    bulkActionPending,
+    clearSelectedArchivedThreads,
+    deleteThread,
+    refreshArchivedThreads,
+    selectedArchivedThreadEntries,
+  ]);
+
+  const requestBulkDeleteArchivedThreads = useCallback(() => {
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    if (confirmThreadDelete) {
+      setBulkDeleteDialogOpen(true);
+      return;
+    }
+    void executeBulkDeleteArchivedThreads();
+  }, [
+    bulkActionPending,
+    confirmThreadDelete,
+    executeBulkDeleteArchivedThreads,
+    selectedArchivedThreadEntries.length,
+  ]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
@@ -1559,85 +1749,179 @@ export function ArchivedThreadsPanel() {
           />
         </SettingsSection>
       ) : (
-        archivedGroups.map(({ project, threads: projectThreads }) => (
-          <SettingsSection
-            key={project.id}
-            title={project.name}
-            icon={<ProjectFavicon environmentId={project.environmentId} cwd={project.cwd} />}
-          >
-            {projectThreads.map((thread) => (
-              <SettingsRow
-                key={thread.id}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void (async () => {
-                    const result = await settlePromise(() =>
-                      handleArchivedThreadContextMenu(
-                        scopeThreadRef(thread.environmentId, thread.id),
-                        {
-                          x: event.clientX,
-                          y: event.clientY,
-                        },
-                      ),
+        <div className="flex flex-col gap-3">
+          <div className="flex h-10 items-center justify-between gap-3 border-b border-border/60 px-4 sm:px-5">
+            <div className="flex min-w-0 items-center">
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <Checkbox
+                  checked={allArchivedThreadsSelected}
+                  indeterminate={someArchivedThreadsSelected}
+                  disabled={isArchiveBulkActionPending}
+                  aria-label="Select all archived threads"
+                  onCheckedChange={(checked) => {
+                    setSelectedArchivedThreadKeys(
+                      checked === true ? new Set(archivedThreadSelectionKeys) : new Set(),
                     );
-                    if (result._tag === "Failure") {
-                      const error = squashAtomCommandFailure(result);
-                      toastManager.add(
-                        stackedThreadToast({
-                          type: "error",
-                          title: "Archived thread action failed",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        }),
-                      );
-                    }
-                  })();
-                }}
-                title={thread.title}
-                description={
-                  <>
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
-                  </>
-                }
-                control={
+                  }}
+                />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
+                  Select all
+                </span>
+              </label>
+            </div>
+            <div className="flex shrink-0 items-center justify-end gap-2">
+              {selectedArchivedThreadCount > 0 ? (
+                <>
                   <Button
                     type="button"
-                    variant="outline"
                     size="sm"
+                    variant="destructive"
                     className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
-                    onClick={() => {
-                      void (async () => {
-                        const result = await unarchiveThread(
-                          scopeThreadRef(thread.environmentId, thread.id),
-                        );
-                        if (result._tag === "Success") {
-                          refreshArchivedThreads();
-                          return;
-                        }
-                        if (!isAtomCommandInterrupted(result)) {
-                          const error = squashAtomCommandFailure(result);
-                          toastManager.add(
-                            stackedThreadToast({
-                              type: "error",
-                              title: "Failed to unarchive thread",
-                              description:
-                                error instanceof Error ? error.message : "An error occurred.",
-                            }),
-                          );
-                        }
-                      })();
-                    }}
+                    disabled={isArchiveBulkActionPending}
+                    onClick={requestBulkDeleteArchivedThreads}
+                  >
+                    <Trash2Icon className="size-3.5" />
+                    <span>Delete ({selectedArchivedThreadCount})</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                    disabled={isArchiveBulkActionPending}
+                    onClick={() => void executeBulkUnarchiveArchivedThreads()}
                   >
                     <ArchiveX className="size-3.5" />
-                    <span>Unarchive</span>
+                    <span>Unarchive ({selectedArchivedThreadCount})</span>
                   </Button>
-                }
-              />
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-8">
+            {archivedGroups.map(({ project, threads: projectThreads }) => (
+              <SettingsSection
+                key={`${project.environmentId}:${project.id}`}
+                title={project.name}
+                icon={<ProjectFavicon environmentId={project.environmentId} cwd={project.cwd} />}
+              >
+                {projectThreads.map((thread) => {
+                  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+                  const threadKey = scopedThreadKey(threadRef);
+                  return (
+                    <SettingsRow
+                      key={threadKey}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        void (async () => {
+                          const result = await settlePromise(() =>
+                            handleArchivedThreadContextMenu(threadRef, {
+                              x: event.clientX,
+                              y: event.clientY,
+                            }),
+                          );
+                          if (result._tag === "Failure") {
+                            const error = squashAtomCommandFailure(result);
+                            toastManager.add(
+                              stackedThreadToast({
+                                type: "error",
+                                title: "Archived thread action failed",
+                                description:
+                                  error instanceof Error ? error.message : "An error occurred.",
+                              }),
+                            );
+                          }
+                        })();
+                      }}
+                      title={
+                        <label className="inline-flex min-w-0 cursor-pointer items-center gap-2">
+                          <Checkbox
+                            checked={selectedArchivedThreadKeys.has(threadKey)}
+                            disabled={isArchiveBulkActionPending}
+                            aria-label={`Select ${thread.title}`}
+                            onCheckedChange={(checked) =>
+                              toggleArchivedThreadSelection(threadKey, checked === true)
+                            }
+                          />
+                          <span className="truncate">{thread.title}</span>
+                        </label>
+                      }
+                      description={
+                        <>
+                          Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                          {" \u00b7 Created "}
+                          {formatRelativeTimeLabel(thread.createdAt)}
+                        </>
+                      }
+                      control={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                          disabled={isArchiveBulkActionPending}
+                          onClick={() => {
+                            void (async () => {
+                              const result = await unarchiveThread(threadRef);
+                              if (result._tag === "Success") {
+                                refreshArchivedThreads();
+                                return;
+                              }
+                              if (!isAtomCommandInterrupted(result)) {
+                                const error = squashAtomCommandFailure(result);
+                                toastManager.add(
+                                  stackedThreadToast({
+                                    type: "error",
+                                    title: "Failed to unarchive thread",
+                                    description:
+                                      error instanceof Error ? error.message : "An error occurred.",
+                                  }),
+                                );
+                              }
+                            })();
+                          }}
+                        >
+                          <ArchiveX className="size-3.5" />
+                          <span>Unarchive</span>
+                        </Button>
+                      }
+                    />
+                  );
+                })}
+              </SettingsSection>
             ))}
-          </SettingsSection>
-        ))
+          </div>
+
+          <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+            <AlertDialogPopup>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Delete {selectedArchivedThreadCount} archived thread
+                  {selectedArchivedThreadCount === 1 ? "" : "s"}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently clears conversation history for the selected archived threads.
+                  This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+                <Button
+                  variant="destructive"
+                  disabled={isArchiveBulkActionPending}
+                  onClick={() => {
+                    void executeBulkDeleteArchivedThreads().finally(() =>
+                      setBulkDeleteDialogOpen(false),
+                    );
+                  }}
+                >
+                  Delete threads
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogPopup>
+          </AlertDialog>
+        </div>
       )}
     </SettingsPageContainer>
   );
