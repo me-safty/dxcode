@@ -95,7 +95,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
     });
 
     const cleanup = () => {
-      stream.removeListener("error", handleError);
+      input.removeListener("error", handleError);
       input.removeListener("line", handleLine);
       input.removeListener("close", handleClose);
       input.close();
@@ -113,13 +113,22 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
     // DesktopBackendManager.ts's runBackendProcess): a readline interface
     // left idling on a never-closing, wsl.exe-relayed stdin pipe can surface
     // a spurious EAGAIN 'error' event on that stream well after the envelope
-    // was already read. Node's readline.Interface registers its own internal
-    // 'error' listener on the input stream and re-emits onto itself
-    // (node:internal/readline/interface.js); since nothing here ever
-    // listened for 'error' on the *interface*, an unhandled 'error' event on
-    // an EventEmitter is fatal and crashes the process. Calling cleanup()
-    // synchronously closes the readline interface and destroys the stream
-    // before that can happen.
+    // was already read.
+    //
+    // The error listener is registered on the readline *interface* (`input`),
+    // not the raw `stream`, and deliberately not on both. Node's
+    // readline.Interface attaches its own internal 'error' listener to the
+    // input stream at construction time and, on error, re-emits onto itself
+    // (node:internal/readline/interface.js); that internal listener runs
+    // before any listener registered on `stream` afterward, and a thrown
+    // exception from one stream listener prevents later ones on the same
+    // stream from running at all -- so a `stream.once("error", ...)`
+    // registered here would never fire for an error that happens before the
+    // first line ever arrives (verified directly: an error emitted on
+    // `stream` before any "line"/"close" event is an uncaught exception with
+    // only a stream-level listener, since readline's re-emit-with-no-listener
+    // on the interface throws first). Listening on `input` instead receives
+    // the same re-emitted error reliably, exactly once, in every case.
     const handleError = (error: Error) => {
       cleanup();
       if (isUnavailableBootstrapFdError(error)) {
@@ -158,7 +167,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       resume(Effect.succeedNone);
     };
 
-    stream.once("error", handleError);
+    input.once("error", handleError);
     input.once("line", handleLine);
     input.once("close", handleClose);
 
