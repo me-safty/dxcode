@@ -1442,6 +1442,7 @@ export function ProviderSettingsPanel() {
 export function ArchivedThreadsPanel() {
   const projects = useProjects();
   const { unarchiveThread, confirmAndDeleteThread, deleteThread } = useThreadActions();
+  const confirmThreadDelete = usePrimarySettings((settings) => settings.confirmThreadDelete);
   const [selectedArchivedThreadKeys, setSelectedArchivedThreadKeys] = useState(
     () => new Set<string>(),
   );
@@ -1686,8 +1687,12 @@ export function ArchivedThreadsPanel() {
 
   const requestBulkDeleteArchivedThreads = useCallback(() => {
     if (selectedArchivedThreadEntries.length === 0 || bulkActionPendingRef.current !== null) return;
-    setBulkDeleteDialogOpen(true);
-  }, [selectedArchivedThreadEntries.length]);
+    if (confirmThreadDelete) {
+      setBulkDeleteDialogOpen(true);
+      return;
+    }
+    void executeBulkDeleteArchivedThreads();
+  }, [confirmThreadDelete, executeBulkDeleteArchivedThreads, selectedArchivedThreadEntries.length]);
 
   const requestBulkUnarchiveArchivedThreads = useCallback(() => {
     if (selectedArchivedThreadEntries.length === 0 || bulkActionPendingRef.current !== null) return;
