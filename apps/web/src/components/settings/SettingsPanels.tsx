@@ -1448,6 +1448,7 @@ export function ArchivedThreadsPanel() {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkUnarchiveDialogOpen, setBulkUnarchiveDialogOpen] = useState(false);
   const [bulkActionPending, setBulkActionPending] = useState<"delete" | "unarchive" | null>(null);
+  const bulkActionPendingRef = useRef<"delete" | "unarchive" | null>(null);
   const environmentIds = useMemo(
     () => [...new Set(projects.map((project) => project.environmentId))],
     [projects],
@@ -1578,10 +1579,13 @@ export function ArchivedThreadsPanel() {
   }, []);
 
   const executeBulkUnarchiveArchivedThreads = useCallback(async () => {
-    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPendingRef.current !== null) {
+      return;
+    }
     const totalCount = selectedArchivedThreadEntries.length;
     let failedCount = 0;
     let lastErrorMessage = "An error occurred.";
+    bulkActionPendingRef.current = "unarchive";
     setBulkActionPending("unarchive");
     try {
       for (const entry of selectedArchivedThreadEntries) {
@@ -1606,10 +1610,10 @@ export function ArchivedThreadsPanel() {
         );
       }
     } finally {
+      bulkActionPendingRef.current = null;
       setBulkActionPending(null);
     }
   }, [
-    bulkActionPending,
     clearSelectedArchivedThreads,
     refreshArchivedThreads,
     selectedArchivedThreadEntries,
@@ -1617,11 +1621,14 @@ export function ArchivedThreadsPanel() {
   ]);
 
   const executeBulkDeleteArchivedThreads = useCallback(async () => {
-    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPendingRef.current !== null) {
+      return;
+    }
     const totalCount = selectedArchivedThreadEntries.length;
     const deletedThreadKeys = new Set(selectedArchivedThreadEntries.map((entry) => entry.key));
     let failedCount = 0;
     let lastErrorMessage = "An error occurred.";
+    bulkActionPendingRef.current = "delete";
     setBulkActionPending("delete");
     try {
       for (const entry of selectedArchivedThreadEntries) {
@@ -1646,10 +1653,10 @@ export function ArchivedThreadsPanel() {
         );
       }
     } finally {
+      bulkActionPendingRef.current = null;
       setBulkActionPending(null);
     }
   }, [
-    bulkActionPending,
     clearSelectedArchivedThreads,
     deleteThread,
     refreshArchivedThreads,
@@ -1657,14 +1664,14 @@ export function ArchivedThreadsPanel() {
   ]);
 
   const requestBulkDeleteArchivedThreads = useCallback(() => {
-    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPendingRef.current !== null) return;
     setBulkDeleteDialogOpen(true);
-  }, [bulkActionPending, selectedArchivedThreadEntries.length]);
+  }, [selectedArchivedThreadEntries.length]);
 
   const requestBulkUnarchiveArchivedThreads = useCallback(() => {
-    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPendingRef.current !== null) return;
     setBulkUnarchiveDialogOpen(true);
-  }, [bulkActionPending, selectedArchivedThreadEntries.length]);
+  }, [selectedArchivedThreadEntries.length]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
