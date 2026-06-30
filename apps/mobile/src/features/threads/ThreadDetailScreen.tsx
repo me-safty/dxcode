@@ -1,5 +1,4 @@
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
-import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type {
   ApprovalRequestId,
@@ -17,7 +16,7 @@ import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import * as Haptics from "expo-haptics";
 import { useHeaderHeight } from "expo-router/build/react-navigation/elements";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { View, type GestureResponderEvent } from "react-native";
+import { View, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -225,12 +224,14 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const composerOverlapHeight = composerChrome + composerBottomInset;
   const activeWorkIndicatorHeight = props.activeWorkStartedAt ? WORKING_INDICATOR_HEIGHT : 0;
   const estimatedOverlayHeight = composerOverlapHeight + activeWorkIndicatorHeight + 8;
-  const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
-    listRef,
-    composerOverlayRef,
-    estimatedOverlayHeight,
-  );
-  const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
+  const [composerOverlayHeight, setComposerOverlayHeight] = useState(estimatedOverlayHeight);
+  const contentBottomInset = Math.max(estimatedOverlayHeight, composerOverlayHeight);
+  const onComposerLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = event.nativeEvent.layout.height;
+    setComposerOverlayHeight((current) =>
+      Math.abs(current - nextHeight) < 0.5 ? current : nextHeight,
+    );
+  }, []);
   const showContent = props.showContent ?? true;
   const layoutVariant = props.layoutVariant ?? "compact";
   const isSplitLayout = layoutVariant === "split";
@@ -272,8 +273,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   useEffect(() => {
     setAnchorMessageId(null);
     lastScrolledAnchorMessageIdRef.current = null;
-    freeze.set(false);
-  }, [freeze, selectedThreadKey]);
+  }, [selectedThreadKey]);
 
   useEffect(() => {
     if (
@@ -291,7 +291,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
         return;
       }
       lastScrolledAnchorMessageIdRef.current = anchorMessageId;
-      void scrollMessageToEnd({ animated: true, closeKeyboard: false }).catch(() => {
+      const scrollPromise = listRef.current?.scrollToEnd({ animated: true });
+      if (!scrollPromise) {
+        lastScrolledAnchorMessageIdRef.current = null;
+        return;
+      }
+      void scrollPromise.catch(() => {
         if (
           selectedThreadKeyRef.current !== targetThreadKey ||
           lastScrolledAnchorMessageIdRef.current !== anchorMessageId
@@ -299,18 +304,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           return;
         }
         lastScrolledAnchorMessageIdRef.current = null;
-        freeze.set(false);
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [
-    anchorMessageId,
-    freeze,
-    contentPresentationKind,
-    selectedThreadFeed,
-    scrollMessageToEnd,
-    selectedThreadKey,
-  ]);
+  }, [anchorMessageId, contentPresentationKind, selectedThreadFeed, selectedThreadKey]);
 
   const handleSendMessage = useCallback(async () => {
     const targetThreadKey = selectedThreadKey;
@@ -379,11 +376,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               agentLabel={agentLabel}
               latestTurn={props.selectedThread.latestTurn}
               listRef={listRef}
-              freeze={freeze}
               anchorMessageId={anchorMessageId}
-              contentInsetEndAdjustment={contentInsetEndAdjustment}
               contentTopInset={headerHeight}
-              contentBottomInset={estimatedOverlayHeight}
+              contentBottomInset={contentBottomInset}
               layoutVariant={layoutVariant}
               skills={selectedProviderSkills}
             />

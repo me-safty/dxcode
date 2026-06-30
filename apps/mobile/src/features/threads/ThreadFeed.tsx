@@ -1,5 +1,5 @@
 import * as Haptics from "expo-haptics";
-import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
+import { KeyboardAvoidingLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
 import type { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
@@ -37,7 +37,6 @@ import {
 import { TouchableOpacity } from "react-native-gesture-handler";
 import ImageViewing from "react-native-image-viewing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { SharedValue } from "react-native-reanimated";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
@@ -100,9 +99,7 @@ export interface ThreadFeedProps {
   readonly agentLabel: string;
   readonly latestTurn: ThreadFeedLatestTurn | null;
   readonly listRef: RefObject<LegendListRef | null>;
-  readonly freeze: SharedValue<boolean>;
   readonly anchorMessageId: MessageId | null;
-  readonly contentInsetEndAdjustment: SharedValue<number>;
   readonly contentTopInset?: number;
   readonly contentBottomInset?: number;
   readonly layoutVariant?: LayoutVariant;
@@ -1452,15 +1449,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   return (
     <>
       <View style={{ flex: 1 }}>
-        <KeyboardAwareLegendList
+        <KeyboardAvoidingLegendList<ThreadFeedEntry>
           ref={props.listRef}
           key={props.threadId}
           style={{ flex: 1 }}
           automaticallyAdjustsScrollIndicatorInsets={false}
           scrollIndicatorInsets={{ top: topContentInset, bottom: 0 }}
+          safeAreaInsetBottom={insets.bottom}
           {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-          contentInsetEndAdjustment={props.contentInsetEndAdjustment}
-          freeze={props.freeze}
           maintainScrollAtEnd={
             disclosureToggleSettling
               ? false
@@ -1483,12 +1479,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           }
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
-          keyboardLiftBehavior="whenAtEnd"
           estimatedItemSize={180}
           initialScrollAtEnd
           ListHeaderComponent={<View style={{ height: topContentInset }} />}
           contentContainerStyle={{
             paddingTop: 12,
+            paddingBottom: bottomContentInset,
             paddingHorizontal: horizontalPadding,
           }}
         />
