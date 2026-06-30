@@ -15,8 +15,103 @@ const TIMELINE_SCROLL_KEYBOARD_NAVIGATION_KEYS = new Set([
   " ",
 ]);
 
+const TIMELINE_SCROLL_LISTENER_SETUP_MAX_ATTEMPTS = 12;
+
 export function isTimelineScrollKeyboardNavigationKey(key: string): boolean {
   return TIMELINE_SCROLL_KEYBOARD_NAVIGATION_KEYS.has(key);
+}
+
+export function scheduleTimelineManualNavigationListeners({
+  cancelFrame = cancelAnimationFrame,
+  getScrollNode,
+  maxAttempts = TIMELINE_SCROLL_LISTENER_SETUP_MAX_ATTEMPTS,
+  onManualNavigation,
+  requestFrame = requestAnimationFrame,
+}: {
+  readonly cancelFrame?: (handle: number) => void;
+  readonly getScrollNode: () => HTMLElement | null;
+  readonly maxAttempts?: number;
+  readonly onManualNavigation: () => void;
+  readonly requestFrame?: (callback: FrameRequestCallback) => number;
+}): () => void {
+  let frame: number | null = null;
+  let removeListeners: (() => void) | null = null;
+  let cancelled = false;
+
+  const installListeners = (scrollNode: HTMLElement) => {
+    const isAnchorIgnoredEvent = (event: Event) =>
+      event.target instanceof Element &&
+      scrollNode.contains(event.target) &&
+      event.target.closest("[data-scroll-anchor-ignore]") !== null;
+    const handleManualNavigation = () => {
+      onManualNavigation();
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isAnchorIgnoredEvent(event)) {
+        return;
+      }
+      onManualNavigation();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        !isTimelineScrollKeyboardNavigationKey(event.key) ||
+        isAnchorIgnoredEvent(event)
+      ) {
+        return;
+      }
+      onManualNavigation();
+    };
+    scrollNode.addEventListener("wheel", handleManualNavigation, {
+      passive: true,
+    });
+    scrollNode.addEventListener("touchmove", handleManualNavigation, {
+      passive: true,
+    });
+    scrollNode.addEventListener("pointerdown", handlePointerDown, {
+      passive: true,
+    });
+    scrollNode.addEventListener("keydown", handleKeyDown);
+    removeListeners = () => {
+      scrollNode.removeEventListener("wheel", handleManualNavigation);
+      scrollNode.removeEventListener("touchmove", handleManualNavigation);
+      scrollNode.removeEventListener("pointerdown", handlePointerDown);
+      scrollNode.removeEventListener("keydown", handleKeyDown);
+    };
+  };
+
+  const scheduleSetup = (remainingAttempts: number) => {
+    frame = requestFrame(() => {
+      frame = null;
+      if (cancelled || removeListeners !== null) {
+        return;
+      }
+
+      const scrollNode = getScrollNode();
+      if (!scrollNode) {
+        if (remainingAttempts > 0) {
+          scheduleSetup(remainingAttempts - 1);
+        }
+        return;
+      }
+
+      installListeners(scrollNode);
+    });
+  };
+
+  scheduleSetup(maxAttempts);
+
+  return () => {
+    cancelled = true;
+    if (frame !== null) {
+      cancelFrame(frame);
+      frame = null;
+    }
+    removeListeners?.();
+  };
 }
 
 export interface TimelineScrollController {
@@ -170,61 +265,11 @@ export function useTimelineScrollController({
   );
 
   useEffect(() => {
-    let removeListeners: (() => void) | null = null;
-    const frame = requestAnimationFrame(() => {
-      const scrollNode = listRef.current?.getScrollableNode();
-      if (!scrollNode) {
-        return;
-      }
-      const isAnchorIgnoredEvent = (event: Event) =>
-        event.target instanceof Element &&
-        scrollNode.contains(event.target) &&
-        event.target.closest("[data-scroll-anchor-ignore]") !== null;
-      const handleManualNavigation = () => {
-        cancelForManualNavigationRef.current();
-      };
-      const handlePointerDown = (event: PointerEvent) => {
-        if (isAnchorIgnoredEvent(event)) {
-          return;
-        }
-        cancelForManualNavigationRef.current();
-      };
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if (
-          event.defaultPrevented ||
-          event.metaKey ||
-          event.ctrlKey ||
-          event.altKey ||
-          !isTimelineScrollKeyboardNavigationKey(event.key) ||
-          isAnchorIgnoredEvent(event)
-        ) {
-          return;
-        }
-        cancelForManualNavigationRef.current();
-      };
-      scrollNode.addEventListener("wheel", handleManualNavigation, {
-        passive: true,
-      });
-      scrollNode.addEventListener("touchmove", handleManualNavigation, {
-        passive: true,
-      });
-      scrollNode.addEventListener("pointerdown", handlePointerDown, {
-        passive: true,
-      });
-      scrollNode.addEventListener("keydown", handleKeyDown);
-      removeListeners = () => {
-        scrollNode.removeEventListener("wheel", handleManualNavigation);
-        scrollNode.removeEventListener("touchmove", handleManualNavigation);
-        scrollNode.removeEventListener("pointerdown", handlePointerDown);
-        scrollNode.removeEventListener("keydown", handleKeyDown);
-      };
+    return scheduleTimelineManualNavigationListeners({
+      getScrollNode: () => listRef.current?.getScrollableNode() ?? null,
+      onManualNavigation: () => cancelForManualNavigationRef.current(),
     });
-
-    return () => {
-      cancelAnimationFrame(frame);
-      removeListeners?.();
-    };
-  }, [activeThreadId, listRef]);
+  }, [activeThreadId, listRef, timelineEntries.length]);
 
   const onAnchorReady = useCallback(
     (messageId: MessageId, anchorIndex: number) => {

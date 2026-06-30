@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vite-plus/test";
-import { isTimelineScrollKeyboardNavigationKey } from "./useTimelineScrollController";
+import { describe, expect, it, vi } from "vite-plus/test";
+import {
+  isTimelineScrollKeyboardNavigationKey,
+  scheduleTimelineManualNavigationListeners,
+} from "./useTimelineScrollController";
 
 describe("timeline scroll controller", () => {
   it("recognizes keyboard keys that can move the timeline scroll position", () => {
@@ -16,5 +19,55 @@ describe("timeline scroll controller", () => {
     expect(isTimelineScrollKeyboardNavigationKey("Enter")).toBe(false);
     expect(isTimelineScrollKeyboardNavigationKey("Escape")).toBe(false);
     expect(isTimelineScrollKeyboardNavigationKey("a")).toBe(false);
+  });
+
+  it("retries manual navigation listener setup when the scroll node mounts late", () => {
+    const frames: FrameRequestCallback[] = [];
+    const listeners = new Map<string, Set<EventListener>>();
+    const onManualNavigation = vi.fn();
+    let scrollNode: HTMLElement | null = null;
+
+    const node = {
+      addEventListener: (type: string, listener: EventListener) => {
+        const typeListeners = listeners.get(type) ?? new Set<EventListener>();
+        typeListeners.add(listener);
+        listeners.set(type, typeListeners);
+      },
+      removeEventListener: (type: string, listener: EventListener) => {
+        listeners.get(type)?.delete(listener);
+      },
+    } as HTMLElement;
+
+    const cleanup = scheduleTimelineManualNavigationListeners({
+      getScrollNode: () => scrollNode,
+      maxAttempts: 2,
+      onManualNavigation,
+      requestFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelFrame: () => {},
+    });
+
+    expect(frames).toHaveLength(1);
+    frames.shift()?.(0);
+    expect(listeners.get("wheel")).toBeUndefined();
+    expect(frames).toHaveLength(1);
+
+    scrollNode = node;
+    frames.shift()?.(0);
+    expect(listeners.get("wheel")?.size).toBe(1);
+    expect(listeners.get("touchmove")?.size).toBe(1);
+    expect(listeners.get("pointerdown")?.size).toBe(1);
+    expect(listeners.get("keydown")?.size).toBe(1);
+
+    listeners.get("wheel")?.forEach((listener) => listener({} as Event));
+    expect(onManualNavigation).toHaveBeenCalledOnce();
+
+    cleanup();
+    expect(listeners.get("wheel")?.size).toBe(0);
+    expect(listeners.get("touchmove")?.size).toBe(0);
+    expect(listeners.get("pointerdown")?.size).toBe(0);
+    expect(listeners.get("keydown")?.size).toBe(0);
   });
 });
