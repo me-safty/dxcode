@@ -36,11 +36,9 @@ import {
   createModelSelection,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
-import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
-import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import {
   lazy,
@@ -85,6 +83,7 @@ import {
   isLatestTurnSettled,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
+import { useTimelineScrollController } from "./chat/useTimelineScrollController";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
@@ -1097,7 +1096,6 @@ function ChatViewContent(props: ChatViewProps) {
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -1151,17 +1149,22 @@ function ChatViewContent(props: ChatViewProps) {
   const legendListRef = useRef<LegendListRef | null>(null);
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
-  const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
   useLayoutEffect(() => {
-    if (!composerOverlayElement) return;
+    if (!composerOverlayElement) {
+      setComposerOverlayHeight((currentHeight) => (currentHeight === 0 ? currentHeight : 0));
+      return;
+    }
 
     const updateHeight = () => {
-      const nextHeight = Math.ceil(composerOverlayElement.getBoundingClientRect().height);
+      const nextHeight = Math.max(
+        0,
+        Math.ceil(composerOverlayElement.getBoundingClientRect().height),
+      );
       setComposerOverlayHeight((currentHeight) =>
         currentHeight === nextHeight ? currentHeight : nextHeight,
       );
@@ -2013,7 +2016,6 @@ function ChatViewContent(props: ChatViewProps) {
         : // Spread only fires for the few messages that actually changed;
           // unchanged ones early-return their original reference.
           // In-place mutation would break React's immutable state contract.
-          // oxlint-disable-next-line no-map-spread
           messages.map((message) => {
             if (
               message.role !== "user" ||
@@ -3157,106 +3159,25 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
-  // Scrolling is explicit so streamed timeline updates never take control away
-  // from the user after the newly sent row has been positioned once.
-  const scrollToEnd = useCallback((animated = false) => {
-    void legendListRef.current?.scrollToEnd?.({ animated });
-  }, []);
-  const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
-  const settledTimelineAnchorRef = useRef<MessageId | null>(null);
-  const pendingAnchorScrollRestoreRef = useRef<{
-    readonly messageId: MessageId;
-    readonly offset: number;
-  } | null>(null);
-  const anchorScrollRestoreFrameRef = useRef<number | null>(null);
-  const onTimelineAnchorReady = useCallback((messageId: MessageId, anchorIndex: number) => {
-    if (positionedTimelineAnchorRef.current === messageId) {
-      return;
-    }
-    positionedTimelineAnchorRef.current = messageId;
-    settledTimelineAnchorRef.current = null;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (positionedTimelineAnchorRef.current !== messageId) {
-          return;
-        }
-        const list = legendListRef.current;
-        if (!list) {
-          return;
-        }
-        const scrollNode = list.getScrollableNode();
-        let finished = false;
-        const finishAnimatedPositioning = () => {
-          if (finished) {
-            return;
-          }
-          finished = true;
-          window.clearTimeout(fallbackTimer);
-          scrollNode.removeEventListener("scrollend", finishAnimatedPositioning);
-          if (positionedTimelineAnchorRef.current !== messageId) {
-            return;
-          }
-          const scrollOffset = list.getState().scroll;
-          void list.scrollToOffset({ offset: scrollOffset, animated: false });
-          settledTimelineAnchorRef.current = messageId;
-        };
-        const fallbackTimer = window.setTimeout(finishAnimatedPositioning, 750);
-        scrollNode.addEventListener("scrollend", finishAnimatedPositioning, { once: true });
-        void list.scrollToIndex({
-          index: anchorIndex,
-          animated: true,
-          viewPosition: 0,
-          viewOffset: CHAT_LIST_ANCHOR_OFFSET,
-        });
-      });
-    });
-  }, []);
-  const onTimelineAnchorSizeChanged = useCallback((messageId: MessageId) => {
-    if (settledTimelineAnchorRef.current !== messageId) {
-      return;
-    }
-    const scrollOffset = legendListRef.current?.getState().scroll;
-    if (scrollOffset === undefined) {
-      return;
-    }
-    if (pendingAnchorScrollRestoreRef.current === null) {
-      pendingAnchorScrollRestoreRef.current = { messageId, offset: scrollOffset };
-    }
-    if (anchorScrollRestoreFrameRef.current !== null) {
-      return;
-    }
-    anchorScrollRestoreFrameRef.current = requestAnimationFrame(() => {
-      anchorScrollRestoreFrameRef.current = null;
-      const pending = pendingAnchorScrollRestoreRef.current;
-      pendingAnchorScrollRestoreRef.current = null;
-      if (pending && settledTimelineAnchorRef.current === pending.messageId) {
-        void legendListRef.current?.scrollToOffset({ offset: pending.offset, animated: false });
-      }
-    });
-  }, []);
-
-  // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
-  // thread switches.  LegendList fires scroll events with isAtEnd=false while
-  // initialScrollAtEnd is settling; hiding is always immediate.
-  const showScrollDebouncer = useRef(
-    new Debouncer(() => setShowScrollToBottom(true), { wait: 150 }),
-  );
-  const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
-    if (isAtEndRef.current === isAtEnd) return;
-    isAtEndRef.current = isAtEnd;
-    if (isAtEnd) {
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
-    } else {
-      showScrollDebouncer.current.maybeExecute();
-    }
-  }, []);
+  const {
+    showScrollToBottom,
+    scrollToEnd,
+    cancelForManualNavigation: cancelTimelineLiveFollowForUserNavigation,
+    onAnchorReady: onTimelineAnchorReady,
+    onAnchorSizeChanged: onTimelineAnchorSizeChanged,
+    onIsAtEndChange,
+    prepareAnchorForMessage: prepareTimelineAnchorForMessage,
+    resetForThread: resetTimelineScrollForThread,
+  } = useTimelineScrollController({
+    activeThreadId,
+    composerOverlayHeight,
+    listRef: legendListRef,
+    timelineEntries,
+  });
 
   useEffect(() => {
     setPullRequestDialogState(null);
-    isAtEndRef.current = true;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
+    resetTimelineScrollForThread();
     if (planSidebarOpenOnNextThreadRef.current) {
       planSidebarOpenOnNextThreadRef.current = false;
       if (activeThreadRef) {
@@ -3265,8 +3186,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     planSidebarDismissedForTurnRef.current = null;
     // activeThreadRef resets transitively with the active thread.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeThread?.id]);
+  }, [activeThread?.id, resetTimelineScrollForThread]);
 
   // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
   // Don't auto-open for plans carried over from a previous turn (the user can open manually).
@@ -3814,9 +3734,7 @@ function ChatViewContent(props: ChatViewProps) {
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
-    isAtEndRef.current = true;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
+    prepareTimelineAnchorForMessage(messageIdForSend);
     setTimelineAnchor({
       threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
       messageId: messageIdForSend,
@@ -4247,9 +4165,7 @@ function ChatViewContent(props: ChatViewProps) {
       setThreadError(threadIdForSend, null);
 
       // Position this sent row once LegendList has measured the anchored tail.
-      isAtEndRef.current = true;
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
+      prepareTimelineAnchorForMessage(messageIdForSend);
       setTimelineAnchor({
         threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
         messageId: messageIdForSend,
@@ -4357,6 +4273,7 @@ function ChatViewContent(props: ChatViewProps) {
       autoOpenPlanSidebar,
       environmentId,
       composerRef,
+      prepareTimelineAnchorForMessage,
     ],
   );
 
@@ -4877,9 +4794,10 @@ function ChatViewContent(props: ChatViewProps) {
                 onAnchorSizeChanged={onTimelineAnchorSizeChanged}
                 contentInsetEndAdjustment={composerOverlayHeight}
                 onIsAtEndChange={onIsAtEndChange}
+                onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
               />
 
-              {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
+              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
               {showScrollToBottom && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
@@ -4887,11 +4805,13 @@ function ChatViewContent(props: ChatViewProps) {
                 >
                   <button
                     type="button"
+                    aria-label="Scroll to end"
+                    title="Scroll to end"
                     onClick={() => scrollToEnd(true)}
                     className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    Scroll to bottom
+                    Scroll to end
                   </button>
                 </div>
               )}
@@ -4907,7 +4827,7 @@ function ChatViewContent(props: ChatViewProps) {
                 aria-hidden="true"
                 className="chat-composer-horizontal-inset pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 sm:top-2"
               >
-                <div className="relative mx-auto h-full w-full max-w-208 overflow-clip rounded-t-[20px]">
+                <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
                   <div className="chat-composer-shared-blur absolute -inset-8" />
                 </div>
               </div>
