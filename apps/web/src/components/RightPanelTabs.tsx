@@ -24,7 +24,6 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
-import { shouldCloseRightPanelTabOnAuxClick } from "./RightPanelTabs.logic";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -333,12 +332,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     [props],
   );
   const handleTabMouseDown = useCallback((event: ReactMouseEvent) => {
-    if (!shouldCloseRightPanelTabOnAuxClick(event.button)) return;
+    if (event.button !== 1) return;
     event.preventDefault();
   }, []);
   const handleTabAuxClick = useCallback(
     (event: ReactMouseEvent, surface: RightPanelSurface) => {
-      if (!shouldCloseRightPanelTabOnAuxClick(event.button)) return;
+      if (event.button !== 1) return;
       event.preventDefault();
       event.stopPropagation();
       props.onCloseSurface(surface);
