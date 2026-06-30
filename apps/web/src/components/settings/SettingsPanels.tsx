@@ -1566,6 +1566,10 @@ export function ArchivedThreadsPanel() {
     setSelectedArchivedThreadKeys(new Set());
   }, []);
 
+  const retainSelectedArchivedThreadKeys = useCallback((threadKeys: ReadonlySet<string>) => {
+    setSelectedArchivedThreadKeys(new Set(threadKeys));
+  }, []);
+
   const toggleArchivedThreadSelection = useCallback((threadKey: string, checked: boolean) => {
     setSelectedArchivedThreadKeys((previous) => {
       const next = new Set(previous);
@@ -1583,6 +1587,7 @@ export function ArchivedThreadsPanel() {
       return;
     }
     const totalCount = selectedArchivedThreadEntries.length;
+    const unsuccessfulThreadKeys = new Set<string>();
     let failedCount = 0;
     let lastErrorMessage = "An error occurred.";
     bulkActionPendingRef.current = "unarchive";
@@ -1591,6 +1596,7 @@ export function ArchivedThreadsPanel() {
       for (const entry of selectedArchivedThreadEntries) {
         const result = await unarchiveThread(entry.threadRef);
         if (result._tag === "Failure") {
+          unsuccessfulThreadKeys.add(entry.key);
           if (!isAtomCommandInterrupted(result)) {
             const error = squashAtomCommandFailure(result);
             failedCount += 1;
@@ -1598,7 +1604,11 @@ export function ArchivedThreadsPanel() {
           }
         }
       }
-      clearSelectedArchivedThreads();
+      if (unsuccessfulThreadKeys.size === 0) {
+        clearSelectedArchivedThreads();
+      } else {
+        retainSelectedArchivedThreadKeys(unsuccessfulThreadKeys);
+      }
       refreshArchivedThreads();
       if (failedCount > 0) {
         toastManager.add(
@@ -1615,6 +1625,7 @@ export function ArchivedThreadsPanel() {
     }
   }, [
     clearSelectedArchivedThreads,
+    retainSelectedArchivedThreadKeys,
     refreshArchivedThreads,
     selectedArchivedThreadEntries,
     unarchiveThread,
@@ -1626,14 +1637,19 @@ export function ArchivedThreadsPanel() {
     }
     const totalCount = selectedArchivedThreadEntries.length;
     const deletedThreadKeys = new Set(selectedArchivedThreadEntries.map((entry) => entry.key));
+    const unsuccessfulThreadKeys = new Set<string>();
     let failedCount = 0;
     let lastErrorMessage = "An error occurred.";
     bulkActionPendingRef.current = "delete";
     setBulkActionPending("delete");
     try {
       for (const entry of selectedArchivedThreadEntries) {
-        const result = await deleteThread(entry.threadRef, { deletedThreadKeys });
+        const result = await deleteThread(entry.threadRef, {
+          deletedThreadKeys,
+          ignorePostDeleteCleanupFailure: true,
+        });
         if (result._tag === "Failure") {
+          unsuccessfulThreadKeys.add(entry.key);
           if (!isAtomCommandInterrupted(result)) {
             const error = squashAtomCommandFailure(result);
             failedCount += 1;
@@ -1641,7 +1657,11 @@ export function ArchivedThreadsPanel() {
           }
         }
       }
-      clearSelectedArchivedThreads();
+      if (unsuccessfulThreadKeys.size === 0) {
+        clearSelectedArchivedThreads();
+      } else {
+        retainSelectedArchivedThreadKeys(unsuccessfulThreadKeys);
+      }
       refreshArchivedThreads();
       if (failedCount > 0) {
         toastManager.add(
@@ -1659,6 +1679,7 @@ export function ArchivedThreadsPanel() {
   }, [
     clearSelectedArchivedThreads,
     deleteThread,
+    retainSelectedArchivedThreadKeys,
     refreshArchivedThreads,
     selectedArchivedThreadEntries,
   ]);
