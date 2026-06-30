@@ -44,11 +44,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
-import {
-  useClientSettings,
-  usePrimarySettings,
-  useUpdatePrimarySettings,
-} from "../../hooks/useSettings";
+import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -1445,12 +1441,12 @@ export function ProviderSettingsPanel() {
 
 export function ArchivedThreadsPanel() {
   const projects = useProjects();
-  const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
   const { unarchiveThread, confirmAndDeleteThread, deleteThread } = useThreadActions();
   const [selectedArchivedThreadKeys, setSelectedArchivedThreadKeys] = useState(
     () => new Set<string>(),
   );
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkUnarchiveDialogOpen, setBulkUnarchiveDialogOpen] = useState(false);
   const [bulkActionPending, setBulkActionPending] = useState<"delete" | "unarchive" | null>(null);
   const environmentIds = useMemo(
     () => [...new Set(projects.map((project) => project.environmentId))],
@@ -1662,17 +1658,13 @@ export function ArchivedThreadsPanel() {
 
   const requestBulkDeleteArchivedThreads = useCallback(() => {
     if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
-    if (confirmThreadDelete) {
-      setBulkDeleteDialogOpen(true);
-      return;
-    }
-    void executeBulkDeleteArchivedThreads();
-  }, [
-    bulkActionPending,
-    confirmThreadDelete,
-    executeBulkDeleteArchivedThreads,
-    selectedArchivedThreadEntries.length,
-  ]);
+    setBulkDeleteDialogOpen(true);
+  }, [bulkActionPending, selectedArchivedThreadEntries.length]);
+
+  const requestBulkUnarchiveArchivedThreads = useCallback(() => {
+    if (selectedArchivedThreadEntries.length === 0 || bulkActionPending !== null) return;
+    setBulkUnarchiveDialogOpen(true);
+  }, [bulkActionPending, selectedArchivedThreadEntries.length]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
@@ -1789,7 +1781,7 @@ export function ArchivedThreadsPanel() {
                     variant="outline"
                     className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
                     disabled={isArchiveBulkActionPending}
-                    onClick={() => void executeBulkUnarchiveArchivedThreads()}
+                    onClick={requestBulkUnarchiveArchivedThreads}
                   >
                     <ArchiveX className="size-3.5" />
                     <span>Unarchive ({selectedArchivedThreadCount})</span>
@@ -1917,6 +1909,34 @@ export function ArchivedThreadsPanel() {
                   }}
                 >
                   Delete threads
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogPopup>
+          </AlertDialog>
+
+          <AlertDialog open={bulkUnarchiveDialogOpen} onOpenChange={setBulkUnarchiveDialogOpen}>
+            <AlertDialogPopup>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Unarchive {selectedArchivedThreadCount} archived thread
+                  {selectedArchivedThreadCount === 1 ? "" : "s"}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This restores the selected archived threads to their project thread lists.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+                <Button
+                  variant="default"
+                  disabled={isArchiveBulkActionPending}
+                  onClick={() => {
+                    void executeBulkUnarchiveArchivedThreads().finally(() =>
+                      setBulkUnarchiveDialogOpen(false),
+                    );
+                  }}
+                >
+                  Unarchive threads
                 </Button>
               </AlertDialogFooter>
             </AlertDialogPopup>
