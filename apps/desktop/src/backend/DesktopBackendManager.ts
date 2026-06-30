@@ -336,7 +336,7 @@ const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   );
   const onOutput = options.onOutput ?? (() => Effect.void);
   const bootstrapStream = Stream.make(`${bootstrapJson}\n`).pipe(
-    Stream.concat(Stream.never),
+    options.bootstrapDelivery === "stdin" ? Stream.concat(Stream.never) : (s) => s,
     Stream.encodeText,
   );
   const command = ChildProcess.make(options.executablePath, options.args, {
