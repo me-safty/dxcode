@@ -284,6 +284,13 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   };
 }
 
+export const T3CODE_CODEX_LAUNCH_ARGS_ENV = "T3CODE_CODEX_LAUNCH_ARGS";
+
+export const resolveCodexLaunchArgs = (
+  launchArgs?: string,
+  environment: NodeJS.ProcessEnv = process.env,
+) => environment[T3CODE_CODEX_LAUNCH_ARGS_ENV]?.trim() || launchArgs?.trim() || "";
+
 export const codexAppServerArgs = (launchArgs?: string) =>
   launchArgs?.trim() ? ["app-server", ...launchArgs.trim().split(/\s+/)] : ["app-server"];
 
@@ -534,7 +541,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const probeResult = yield* probe({
     binaryPath: codexSettings.binaryPath,
     homePath: codexSettings.homePath,
-    launchArgs: codexSettings.launchArgs,
+    launchArgs: resolveCodexLaunchArgs(codexSettings.launchArgs, resolvedEnvironment),
     cwd: process.cwd(),
     customModels: codexSettings.customModels,
     environment: resolvedEnvironment,
