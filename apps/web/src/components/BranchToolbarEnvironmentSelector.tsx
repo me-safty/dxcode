@@ -7,7 +7,7 @@ import { cn } from "../lib/utils";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
-  THREAD_DETAILS_PANEL_ROW_CLASS,
+  THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 import {
   Select,
@@ -79,7 +79,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       <SelectTrigger
         variant="ghost"
         size={displayMode === "panel" ? "default" : "xs"}
-        className={cn("font-medium", displayMode === "panel" && THREAD_DETAILS_PANEL_ROW_CLASS)}
+        className={cn(
+          "font-medium",
+          displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
+        )}
         aria-label="Run on"
       >
         {activeEnvironment?.isPrimary ? (

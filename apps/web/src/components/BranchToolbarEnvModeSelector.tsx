@@ -4,7 +4,7 @@ import { cn } from "../lib/utils";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
-  THREAD_DETAILS_PANEL_ROW_CLASS,
+  THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 
 import {
@@ -109,7 +109,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
               size={displayMode === "panel" ? "default" : "xs"}
               className={cn(
                 "font-medium",
-                displayMode === "panel" && THREAD_DETAILS_PANEL_ROW_CLASS,
+                displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
               )}
               aria-label="Workspace"
             />

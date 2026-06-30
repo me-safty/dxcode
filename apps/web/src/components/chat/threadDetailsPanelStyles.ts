@@ -19,6 +19,8 @@ const THREAD_DETAILS_PANEL_SPLIT_BUTTON_SURFACE_CLASS = `${THREAD_DETAILS_PANEL_
 
 export const THREAD_DETAILS_PANEL_ROW_CLASS = `h-9 w-full justify-start gap-2.5 rounded-lg border-transparent bg-transparent px-2.5 text-[13px] font-medium text-foreground/80 sm:h-9 sm:text-[13px] ${THREAD_DETAILS_PANEL_ROW_SURFACE_CLASS}`;
 
+export const THREAD_DETAILS_PANEL_SELECT_ROW_CLASS = `${THREAD_DETAILS_PANEL_ROW_CLASS} before:pointer-events-none before:absolute before:inset-0`;
+
 export const THREAD_DETAILS_PANEL_LINK_ROW_CLASS = `flex h-9 min-w-0 flex-1 cursor-pointer items-center justify-start gap-2.5 rounded-lg border border-transparent bg-transparent px-2.5 text-left text-[13px] font-medium text-foreground/80 disabled:cursor-not-allowed disabled:opacity-55 sm:h-9 sm:text-[13px] ${THREAD_DETAILS_PANEL_ROW_SURFACE_CLASS}`;
 
 export const THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS = `group/thread-details-link flex w-full items-center rounded-lg transition-colors ${THREAD_DETAILS_PANEL_HOVER_SURFACE_CLASS}`;
