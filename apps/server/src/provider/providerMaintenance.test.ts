@@ -42,7 +42,7 @@ const nativePackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
   npmPackageName: "@example/native-package-tool",
   homebrewFormula: "native-package-tool",
   nativeUpdate: {
-    executable: "native-package-tool",
+    defaultExecutable: "native-package-tool",
     args: ["update"],
     lockKey: "native-package-tool-native",
     isCommandPath: isNativeTestCommandPath("/.local/bin/native-package-tool"),
@@ -53,7 +53,7 @@ const scopedPackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
   npmPackageName: "@example/scoped-package-tool",
   homebrewFormula: "example/tap/scoped-package-tool",
   nativeUpdate: {
-    executable: "scoped-package-tool",
+    defaultExecutable: "scoped-package-tool",
     args: ["upgrade"],
     lockKey: "scoped-package-tool-native",
     isCommandPath: isNativeTestCommandPath("/.scoped-package-tool/bin/scoped-package-tool"),

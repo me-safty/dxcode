@@ -79,7 +79,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
   npmPackageName: "@openai/codex",
   homebrewFormula: "codex",
   nativeUpdate: {
-    executable: "codex",
+    defaultExecutable: "codex",
     args: ["update"],
     lockKey: "codex-native",
     isCommandPath: isCodexStandaloneCommandPath,

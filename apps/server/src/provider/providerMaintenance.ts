@@ -68,7 +68,7 @@ export interface PackageManagedProviderMaintenanceDefinition {
   readonly npmPackageName: string;
   readonly homebrewFormula: string | null;
   readonly nativeUpdate: {
-    readonly executable: string;
+    readonly defaultExecutable: string;
     readonly args: ReadonlyArray<string>;
     readonly lockKey: string;
     readonly isCommandPath: (commandPath: string) => boolean;
@@ -210,7 +210,7 @@ function makeNativeProviderMaintenanceCapabilities(
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-    updateExecutable: options?.updateExecutable ?? definition.nativeUpdate.executable,
+    updateExecutable: options?.updateExecutable ?? definition.nativeUpdate.defaultExecutable,
     updateArgs: definition.nativeUpdate.args,
     updateLockKey: definition.nativeUpdate.lockKey,
   });
@@ -293,7 +293,7 @@ export function resolvePackageManagedProviderMaintenance(
         makeNativeProviderMaintenanceCapabilities(definition, {
           updateExecutable: hasPathSeparator(binaryPath)
             ? resolvedCommandPath
-            : nativeUpdate.executable,
+            : nativeUpdate.defaultExecutable,
         }) ?? makeNpmGlobalProviderMaintenanceCapabilities(definition)
       );
     }
