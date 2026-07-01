@@ -105,6 +105,14 @@ export function useProjects(): ReadonlyArray<EnvironmentProject> {
   return useAtomValue(environmentProjects.projectsAtom);
 }
 
+export function useAllProjects(): ReadonlyArray<EnvironmentProject> {
+  return useAtomValue(environmentProjects.allProjectsAtom);
+}
+
+export function useStandaloneProjects(): ReadonlyArray<EnvironmentProject> {
+  return useAtomValue(environmentProjects.standaloneProjectsAtom);
+}
+
 export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {
   return useAtomValue(environmentServerConfigsAtom);
 }

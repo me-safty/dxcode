@@ -96,6 +96,7 @@ describe("add project shared logic", () => {
       {
         environmentId: other,
         id: ProjectId.make("same-path-other-env"),
+        kind: "workspace",
         title: "Other",
         workspaceRoot: "/repo",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -107,6 +108,7 @@ describe("add project shared logic", () => {
       {
         environmentId: env,
         id: ProjectId.make("project"),
+        kind: "workspace",
         title: "Repo",
         workspaceRoot: "/repo/",
         createdAt: "2026-01-01T00:00:00.000Z",

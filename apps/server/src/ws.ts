@@ -46,6 +46,7 @@ import {
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   EnvironmentAuthorizationError,
+  STANDALONE_CHAT_PROJECT_ID,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -809,7 +810,46 @@ const makeWsRpcLayer = (
                 );
             });
 
+          const ensureStandaloneProject = Effect.fnUntraced(function* () {
+            const existing = yield* projectionSnapshotQuery.getProjectShellById(
+              STANDALONE_CHAT_PROJECT_ID,
+            );
+            if (Option.isSome(existing)) {
+              if (existing.value.kind !== "standalone") {
+                return yield* new OrchestrationDispatchCommandError({
+                  message: "Reserved chat project id is already used by a workspace project.",
+                });
+              }
+              return;
+            }
+
+            const createdAt = yield* nowIso;
+            yield* orchestrationEngine.dispatch({
+              type: "project.create",
+              commandId: yield* serverCommandId("bootstrap-standalone-project-create"),
+              projectId: STANDALONE_CHAT_PROJECT_ID,
+              kind: "standalone",
+              title: "Chat",
+              workspaceRoot: config.chatWorkspaceDir,
+              createWorkspaceRootIfMissing: true,
+              defaultModelSelection: bootstrap?.createThread?.modelSelection ?? null,
+              createdAt,
+            });
+          });
+
           const bootstrapProgram = Effect.gen(function* () {
+            if (bootstrap?.ensureStandaloneProject) {
+              if (
+                bootstrap.createThread &&
+                bootstrap.createThread.projectId !== STANDALONE_CHAT_PROJECT_ID
+              ) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message: "Standalone chat bootstrap must target the reserved chat project.",
+                });
+              }
+              yield* ensureStandaloneProject();
+            }
+
             if (bootstrap?.createThread) {
               yield* orchestrationEngine.dispatch({
                 type: "thread.create",

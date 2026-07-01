@@ -1,8 +1,7 @@
 import { memo } from "react";
-import { Alert, AlertAction, AlertDescription } from "../ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
 import { CircleAlertIcon, XIcon } from "lucide-react";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
@@ -13,19 +12,15 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
 }) {
   if (!error) return null;
   return (
-    <div className="pt-3 mx-auto max-w-3xl">
-      <Alert variant="error">
+    <div className="mx-auto w-full max-w-5xl px-3 pt-3 sm:px-5">
+      <Alert variant="error" className="[&>div]:items-start">
         <CircleAlertIcon />
-        <Tooltip>
-          <TooltipTrigger render={<AlertDescription className="line-clamp-3" />}>
-            {error}
-          </TooltipTrigger>
-          <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap">
-            {error}
-          </TooltipPopup>
-        </Tooltip>
+        <AlertTitle>Message failed</AlertTitle>
+        <AlertDescription className="whitespace-pre-wrap leading-relaxed wrap-anywhere">
+          {error}
+        </AlertDescription>
         {onDismiss && (
-          <AlertAction>
+          <AlertAction className="pt-0.5">
             <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
               <XIcon className="text-destructive" />
             </Button>

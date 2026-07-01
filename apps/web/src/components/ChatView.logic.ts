@@ -193,6 +193,13 @@ export function resolveSendEnvMode(input: {
   return input.isGitRepo ? input.requestedEnvMode : "local";
 }
 
+export function shouldIncludeTurnStartBootstrap(input: {
+  readonly isLocalDraftThread: boolean;
+  readonly hasBaseBranchForWorktree: boolean;
+}): boolean {
+  return input.isLocalDraftThread || input.hasBaseBranchForWorktree;
+}
+
 export function cloneComposerImageForRetry(
   image: ComposerImageAttachment,
 ): ComposerImageAttachment {

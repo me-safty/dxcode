@@ -15,6 +15,7 @@ const isProjectSetupScriptOperationError = Schema.is(
 
 const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationProject => ({
   id: ProjectId.make("project-1"),
+  kind: "workspace",
   title: "Project",
   workspaceRoot: "/repo/project",
   defaultModelSelection: null,

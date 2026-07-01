@@ -7,6 +7,7 @@ import {
   FolderPlusIcon,
   Globe2Icon,
   LoaderIcon,
+  MessageSquareIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -45,6 +46,7 @@ import {
   type ContextMenuItem,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
+  STANDALONE_CHAT_PROJECT_ID,
   type ScopedThreadRef,
   type ResolvedKeybindingsConfig,
   type SidebarProjectGroupingMode,
@@ -109,7 +111,7 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useNewChatHandler, useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -353,6 +355,27 @@ interface SidebarThreadRowProps {
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
+}
+
+function useAttemptArchiveThread(
+  archiveThread: ReturnType<typeof useThreadActions>["archiveThread"],
+) {
+  return useCallback(
+    async (threadRef: ScopedThreadRef) => {
+      const result = await archiveThread(threadRef);
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to archive thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    },
+    [archiveThread],
+  );
 }
 
 export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -1961,22 +1984,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [createThreadForProjectMember, project.groupedProjectCount, project.memberProjects],
   );
 
-  const attemptArchiveThread = useCallback(
-    async (threadRef: ScopedThreadRef) => {
-      const result = await archiveThread(threadRef);
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Failed to archive thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      }
-    },
-    [archiveThread],
-  );
+  const attemptArchiveThread = useAttemptArchiveThread(archiveThread);
 
   const cancelRename = useCallback(() => {
     setRenamingThreadKey(null);
@@ -2866,6 +2874,193 @@ interface SidebarProjectsContentProps {
   projectsLength: number;
 }
 
+interface SidebarChatThreadRowProps {
+  thread: SidebarThreadSummary;
+  isActive: boolean;
+  isMobile: boolean;
+  setOpenMobile: (open: boolean) => void;
+  appSettingsConfirmThreadArchive: boolean;
+  confirmingArchiveThreadKey: string | null;
+  setConfirmingArchiveThreadKey: React.Dispatch<React.SetStateAction<string | null>>;
+  confirmArchiveButtonRefs: React.RefObject<Map<string, HTMLButtonElement>>;
+  attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+}
+
+const SidebarChatThreadRow = memo(function SidebarChatThreadRow({
+  thread,
+  isActive,
+  isMobile,
+  setOpenMobile,
+  appSettingsConfirmThreadArchive,
+  confirmingArchiveThreadKey,
+  setConfirmingArchiveThreadKey,
+  confirmArchiveButtonRefs,
+  attemptArchiveThread,
+}: SidebarChatThreadRowProps) {
+  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+  const threadKey = scopedThreadKey(threadRef);
+  const isThreadRunning =
+    thread.session?.status === "running" && thread.session.activeTurnId != null;
+  const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
+  const threadMetaClassName = isConfirmingArchive
+    ? "pointer-events-none opacity-0"
+    : !isThreadRunning
+      ? "pointer-events-none transition-opacity duration-150 group-hover/chat-thread:opacity-0 group-focus-within/chat-thread:opacity-0"
+      : "pointer-events-none";
+
+  const clearConfirmingArchive = useCallback(() => {
+    setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
+  }, [setConfirmingArchiveThreadKey, threadKey]);
+  const handleMouseLeave = useCallback(() => {
+    clearConfirmingArchive();
+  }, [clearConfirmingArchive]);
+  const handleBlurCapture = useCallback(
+    (event: React.FocusEvent<HTMLLIElement>) => {
+      const currentTarget = event.currentTarget;
+      requestAnimationFrame(() => {
+        if (currentTarget.contains(document.activeElement)) {
+          return;
+        }
+        clearConfirmingArchive();
+      });
+    },
+    [clearConfirmingArchive],
+  );
+  const handleLinkClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+  const handleConfirmArchiveRef = useCallback(
+    (element: HTMLButtonElement | null) => {
+      if (element) {
+        confirmArchiveButtonRefs.current.set(threadKey, element);
+      } else {
+        confirmArchiveButtonRefs.current.delete(threadKey);
+      }
+    },
+    [confirmArchiveButtonRefs, threadKey],
+  );
+  const stopPropagationOnPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+    },
+    [],
+  );
+  const handleConfirmArchiveClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearConfirmingArchive();
+      void attemptArchiveThread(threadRef);
+    },
+    [attemptArchiveThread, clearConfirmingArchive, threadRef],
+  );
+  const handleStartArchiveConfirmation = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setConfirmingArchiveThreadKey(threadKey);
+      requestAnimationFrame(() => {
+        confirmArchiveButtonRefs.current.get(threadKey)?.focus();
+      });
+    },
+    [confirmArchiveButtonRefs, setConfirmingArchiveThreadKey, threadKey],
+  );
+  const handleArchiveImmediateClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void attemptArchiveThread(threadRef);
+    },
+    [attemptArchiveThread, threadRef],
+  );
+
+  return (
+    <SidebarMenuItem
+      className="group/chat-thread relative"
+      data-thread-item
+      onMouseLeave={handleMouseLeave}
+      onBlurCapture={handleBlurCapture}
+    >
+      <SidebarMenuButton
+        render={
+          <Link
+            to="/$environmentId/$threadId"
+            params={buildThreadRouteParams(threadRef)}
+            onClick={handleLinkClick}
+          />
+        }
+        size="sm"
+        isActive={isActive}
+        data-testid={`chat-thread-row-${thread.id}`}
+        className="relative isolate gap-2 px-2 py-1.5 pr-8 text-xs"
+      >
+        <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
+        <span className="min-w-0 flex-1 truncate text-left">{thread.title}</span>
+        <span
+          className={`shrink-0 text-[10px] tabular-nums text-muted-foreground/40 ${threadMetaClassName}`}
+        >
+          {formatRelativeTimeLabel(
+            thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+          )}
+        </span>
+      </SidebarMenuButton>
+      {isConfirmingArchive ? (
+        <button
+          ref={handleConfirmArchiveRef}
+          type="button"
+          data-thread-selection-safe
+          data-testid={`chat-thread-archive-confirm-${thread.id}`}
+          aria-label={`Confirm archive ${thread.title}`}
+          className="absolute top-1/2 right-1 z-10 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-md bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
+          onPointerDown={stopPropagationOnPointerDown}
+          onClick={handleConfirmArchiveClick}
+        >
+          Confirm
+        </button>
+      ) : !isThreadRunning ? (
+        appSettingsConfirmThreadArchive ? (
+          <div className="pointer-events-none absolute top-1/2 right-0.5 z-10 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/chat-thread:pointer-events-auto group-hover/chat-thread:opacity-100 group-focus-within/chat-thread:pointer-events-auto group-focus-within/chat-thread:opacity-100">
+            <button
+              type="button"
+              data-thread-selection-safe
+              data-testid={`chat-thread-archive-${thread.id}`}
+              aria-label={`Archive ${thread.title}`}
+              className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+              onPointerDown={stopPropagationOnPointerDown}
+              onClick={handleStartArchiveConfirmation}
+            >
+              <ArchiveIcon className="size-3.5" />
+            </button>
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <div className="pointer-events-none absolute top-1/2 right-0.5 z-10 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/chat-thread:pointer-events-auto group-hover/chat-thread:opacity-100 group-focus-within/chat-thread:pointer-events-auto group-focus-within/chat-thread:opacity-100">
+                  <button
+                    type="button"
+                    data-thread-selection-safe
+                    data-testid={`chat-thread-archive-${thread.id}`}
+                    aria-label={`Archive ${thread.title}`}
+                    className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                    onPointerDown={stopPropagationOnPointerDown}
+                    onClick={handleArchiveImmediateClick}
+                  >
+                    <ArchiveIcon className="size-3.5" />
+                  </button>
+                </div>
+              }
+            />
+            <TooltipPopup side="top">Archive</TooltipPopup>
+          </Tooltip>
+        )
+      ) : null}
+    </SidebarMenuItem>
+  );
+});
+
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
   props: SidebarProjectsContentProps,
 ) {
@@ -2931,6 +3126,46 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     },
     [updateSettings],
   );
+  const chatThreads = useThreadShells();
+  const handleNewChat = useNewChatHandler();
+  const { environments } = useEnvironments();
+  const primaryChatEnvironmentId = usePrimaryEnvironmentId();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const appSettingsConfirmThreadArchive = useClientSettings<boolean>(
+    (settings) => settings.confirmThreadArchive,
+  );
+  const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
+  const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const attemptArchiveThread = useAttemptArchiveThread(archiveThread);
+  const chatEnvironmentId = primaryChatEnvironmentId ?? environments[0]?.environmentId ?? null;
+  const visibleChatThreads = useMemo(
+    () =>
+      sortThreads(
+        chatThreads.filter(
+          (thread) => thread.projectId === STANDALONE_CHAT_PROJECT_ID && thread.archivedAt === null,
+        ),
+        "updated_at",
+      ),
+    [chatThreads],
+  );
+  const previewChatThreads = visibleChatThreads.slice(0, threadPreviewCount);
+  const handleCreateChat = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void (async () => {
+      const created = await handleNewChat(chatEnvironmentId);
+      if (!created) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not create chat",
+            description: "No environment is available.",
+          }),
+        );
+      }
+    })();
+  }, [chatEnvironmentId, handleNewChat, isMobile, setOpenMobile]);
 
   return (
     <SidebarContent className="gap-0">
@@ -2981,6 +3216,49 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         </SidebarGroup>
       ) : null}
       <LocalSecondaryStatus />
+      <SidebarGroup className="px-2 py-2">
+        <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Chat
+          </span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="New chat"
+                  className="inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  disabled={chatEnvironmentId === null}
+                  onClick={handleCreateChat}
+                />
+              }
+            >
+              <SquarePenIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="right">New chat</TooltipPopup>
+          </Tooltip>
+        </div>
+        <SidebarMenu>
+          {previewChatThreads.map((thread) => {
+            const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+            const threadKey = scopedThreadKey(threadRef);
+            return (
+              <SidebarChatThreadRow
+                key={threadKey}
+                thread={thread}
+                isActive={routeThreadKey === threadKey}
+                isMobile={isMobile}
+                setOpenMobile={setOpenMobile}
+                appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+                confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+                setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+                confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+                attemptArchiveThread={attemptArchiveThread}
+              />
+            );
+          })}
+        </SidebarMenu>
+      </SidebarGroup>
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
@@ -3101,7 +3379,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
 export default function Sidebar() {
   const projects = useProjects();
-  const sidebarThreads = useThreadShells();
+  const allSidebarThreads = useThreadShells();
+  const sidebarThreads = useMemo(
+    () => allSidebarThreads.filter((thread) => thread.projectId !== STANDALONE_CHAT_PROJECT_ID),
+    [allSidebarThreads],
+  );
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);

@@ -797,6 +797,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: ProjectId.make("project-1"),
     environmentId: localEnvironmentId,
+    kind: "workspace",
     title: "Project",
     workspaceRoot: "/tmp/project",
     repositoryIdentity: null,

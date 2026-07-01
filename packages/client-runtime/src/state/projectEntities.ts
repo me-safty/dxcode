@@ -28,6 +28,24 @@ export function createEnvironmentProjectAtoms(input: {
     ).pipe(Atom.withLabel(`environment-projects:${environmentId}`)),
   );
 
+  const environmentVisibleProjectsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make(
+      (get): ReadonlyArray<OrchestrationProjectShell> =>
+        get(environmentProjectsAtom(environmentId)).filter(
+          (project) => project.kind !== "standalone",
+        ),
+    ).pipe(Atom.withLabel(`environment-visible-projects:${environmentId}`)),
+  );
+
+  const environmentStandaloneProjectsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make(
+      (get): ReadonlyArray<OrchestrationProjectShell> =>
+        get(environmentProjectsAtom(environmentId)).filter(
+          (project) => project.kind === "standalone",
+        ),
+    ).pipe(Atom.withLabel(`environment-standalone-projects:${environmentId}`)),
+  );
+
   const environmentProjectIndexAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get): ReadonlyMap<ProjectId, OrchestrationProjectShell> => {
       const projects = get(environmentProjectsAtom(environmentId));
@@ -41,7 +59,7 @@ export function createEnvironmentProjectAtoms(input: {
   const environmentProjectRefsAtom = Atom.family((environmentId: EnvironmentId) => {
     let previous: ReadonlyArray<ScopedProjectRef> = [];
     return Atom.make((get) => {
-      const next = get(environmentProjectsAtom(environmentId)).map((project) => ({
+      const next = get(environmentVisibleProjectsAtom(environmentId)).map((project) => ({
         environmentId,
         projectId: project.id,
       }));
@@ -94,12 +112,46 @@ export function createEnvironmentProjectAtoms(input: {
     return previousProjects;
   }).pipe(Atom.withLabel("environment-project-list"));
 
+  let previousAllProjects: ReadonlyArray<EnvironmentProject> = [];
+  const allProjectsAtom = Atom.make((get) => {
+    const next: EnvironmentProject[] = [];
+    for (const environmentId of get(input.catalogValueAtom).entries.keys()) {
+      for (const project of get(environmentProjectsAtom(environmentId))) {
+        next.push(scopeProject(environmentId, project));
+      }
+    }
+    if (arrayElementsEqual(previousAllProjects, next)) {
+      return previousAllProjects;
+    }
+    previousAllProjects = next;
+    return previousAllProjects;
+  }).pipe(Atom.withLabel("environment-all-project-list"));
+
+  let previousStandaloneProjects: ReadonlyArray<EnvironmentProject> = [];
+  const standaloneProjectsAtom = Atom.make((get) => {
+    const next: EnvironmentProject[] = [];
+    for (const environmentId of get(input.catalogValueAtom).entries.keys()) {
+      for (const project of get(environmentStandaloneProjectsAtom(environmentId))) {
+        next.push(scopeProject(environmentId, project));
+      }
+    }
+    if (arrayElementsEqual(previousStandaloneProjects, next)) {
+      return previousStandaloneProjects;
+    }
+    previousStandaloneProjects = next;
+    return previousStandaloneProjects;
+  }).pipe(Atom.withLabel("environment-standalone-project-list"));
+
   return {
     environmentProjectsAtom,
+    environmentVisibleProjectsAtom,
+    environmentStandaloneProjectsAtom,
     environmentProjectIndexAtom,
     environmentProjectRefsAtom,
     projectRefsAtom,
     projectsAtom,
+    allProjectsAtom,
+    standaloneProjectsAtom,
     projectAtom: (ref: ScopedProjectRef) => projectAtomFamily(projectKey(ref)),
   };
 }

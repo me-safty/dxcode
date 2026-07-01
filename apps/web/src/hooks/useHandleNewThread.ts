@@ -6,6 +6,8 @@ import {
 import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_SERVER_SETTINGS,
+  STANDALONE_CHAT_PROJECT_ID,
+  type EnvironmentId,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
@@ -187,6 +189,31 @@ export function useNewThreadHandler() {
   );
 }
 
+export function useNewChatHandler() {
+  const projects = useProjects();
+  const serverConfigs = useServerConfigs();
+  const handleNewThread = useNewThreadHandler();
+
+  return useCallback(
+    async (environmentId?: EnvironmentId | null): Promise<boolean> => {
+      const targetEnvironmentId =
+        environmentId ?? projects[0]?.environmentId ?? serverConfigs.keys().next().value ?? null;
+      if (!targetEnvironmentId) {
+        return false;
+      }
+
+      await handleNewThread(scopeProjectRef(targetEnvironmentId, STANDALONE_CHAT_PROJECT_ID), {
+        branch: null,
+        envMode: "local",
+        startFromOrigin: false,
+        worktreePath: null,
+      });
+      return true;
+    },
+    [handleNewThread, projects, serverConfigs],
+  );
+}
+
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const routeTarget = useParams({
@@ -216,6 +243,7 @@ export function useHandleNewThread() {
     });
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
+  const handleNewChat = useNewChatHandler();
 
   return {
     activeDraftThread,
@@ -223,6 +251,7 @@ export function useHandleNewThread() {
     defaultProjectRef: orderedProjects[0]
       ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
       : null,
+    handleNewChat,
     handleNewThread,
     routeThreadRef,
   };

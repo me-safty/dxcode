@@ -30,6 +30,7 @@ import { createEnvironmentThreadShellAtoms } from "./threadShell.ts";
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const PROJECT_ID = ProjectId.make("project-1");
 const OTHER_PROJECT_ID = ProjectId.make("project-2");
+const CHAT_PROJECT_ID = ProjectId.make("mognet-chat");
 const THREAD_ID = ThreadId.make("thread-1");
 const OTHER_THREAD_ID = ThreadId.make("thread-2");
 
@@ -109,6 +110,7 @@ const SNAPSHOT: OrchestrationShellSnapshot = {
   projects: [
     {
       id: PROJECT_ID,
+      kind: "workspace",
       title: "Project",
       workspaceRoot: "/repo",
       repositoryIdentity: null,
@@ -119,6 +121,7 @@ const SNAPSHOT: OrchestrationShellSnapshot = {
     },
     {
       id: OTHER_PROJECT_ID,
+      kind: "workspace",
       title: "Other project",
       workspaceRoot: "/other-repo",
       repositoryIdentity: null,
@@ -147,9 +150,9 @@ function shellState(snapshot: OrchestrationShellSnapshot): EnvironmentShellState
   };
 }
 
-function makeHarness() {
+function makeHarness(snapshot: OrchestrationShellSnapshot = SNAPSHOT) {
   const shellStateAtoms = Atom.family((_environmentId: EnvironmentId) =>
-    Atom.make(AsyncResult.success(shellState(SNAPSHOT))),
+    Atom.make(AsyncResult.success(shellState(snapshot))),
   );
   const threadStateAtoms = Atom.family((_key: string) =>
     Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)),
@@ -225,6 +228,42 @@ describe("environment entity projections", () => {
       worktreePath: "/repo/current-worktree",
     });
     expect(merged?.messages).toBe(messages);
+  });
+
+  it("hides standalone projects from visible project collections", () => {
+    const standaloneProject = {
+      id: CHAT_PROJECT_ID,
+      kind: "standalone",
+      title: "Chat",
+      workspaceRoot: "/tmp/chat",
+      repositoryIdentity: null,
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    } as const;
+    const harness = makeHarness({
+      ...SNAPSHOT,
+      projects: [...SNAPSHOT.projects, standaloneProject],
+    });
+    const visibleProjects = harness.registry.get(harness.projects.projectsAtom);
+    const allProjects = harness.registry.get(harness.projects.allProjectsAtom);
+    const standaloneProjects = harness.registry.get(harness.projects.standaloneProjectsAtom);
+    const chatProject = harness.registry.get(
+      harness.projects.projectAtom({
+        environmentId: ENVIRONMENT_ID,
+        projectId: CHAT_PROJECT_ID,
+      }),
+    );
+
+    expect(visibleProjects.map((project) => project.id)).toEqual([PROJECT_ID, OTHER_PROJECT_ID]);
+    expect(allProjects.map((project) => project.id)).toEqual([
+      PROJECT_ID,
+      OTHER_PROJECT_ID,
+      CHAT_PROJECT_ID,
+    ]);
+    expect(standaloneProjects.map((project) => project.id)).toEqual([CHAT_PROJECT_ID]);
+    expect(chatProject?.kind).toBe("standalone");
   });
 
   it("preserves untouched project and thread identities across unrelated shell updates", () => {

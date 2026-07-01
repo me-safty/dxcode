@@ -27,6 +27,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
+  STANDALONE_CHAT_PROJECT_ID,
   ThreadId,
   WS_METHODS,
   WsRpcGroup,
@@ -139,6 +140,7 @@ const makeDefaultOrchestrationReadModel = () => {
     projects: [
       {
         id: defaultProjectId,
+        kind: "workspace" as const,
         title: "Default Project",
         workspaceRoot: "/tmp/default-project",
         defaultModelSelection,
@@ -3981,6 +3983,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         projects: [
           {
             id: ProjectId.make("project-a"),
+            kind: "workspace" as const,
             title: "Project A",
             workspaceRoot: "/tmp/project-a",
             defaultModelSelection,
@@ -4147,6 +4150,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 type: "project.created",
                 payload: {
                   projectId: defaultProjectId,
+                  kind: "workspace",
                   title: "Default Project",
                   workspaceRoot: "/tmp/default-project",
                   defaultModelSelection,
@@ -4786,6 +4790,196 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           assert.equal(finalCommand.bootstrap, undefined);
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("bootstraps projectless chat turns with a hidden standalone project", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const createWorktree = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
+          Effect.die("projectless chat should not create a worktree"),
+      );
+      const runForThread = vi.fn(
+        (
+          _: Parameters<
+            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+          >[0],
+        ) => Effect.succeed({ status: "no-script" as const }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+          projectSetupScriptRunner: {
+            runForThread,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-chat-turn-start"),
+            threadId: ThreadId.make("thread-chat"),
+            message: {
+              messageId: MessageId.make("msg-chat"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              ensureStandaloneProject: true,
+              createThread: {
+                projectId: STANDALONE_CHAT_PROJECT_ID,
+                title: "Chat",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+            },
+            createdAt,
+          }),
+        ),
+      );
+
+      assert.equal(response.sequence, 3);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["project.create", "thread.create", "thread.turn.start"],
+      );
+      const projectCommand = dispatchedCommands[0];
+      assertTrue(projectCommand?.type === "project.create");
+      if (projectCommand?.type === "project.create") {
+        assert.equal(projectCommand.projectId, STANDALONE_CHAT_PROJECT_ID);
+        assert.equal(projectCommand.kind, "standalone");
+        assert.equal(projectCommand.title, "Chat");
+        assert.equal(projectCommand.createWorkspaceRootIfMissing, true);
+        assert.include(projectCommand.workspaceRoot, "chat-workspace");
+      }
+      const threadCommand = dispatchedCommands[1];
+      assertTrue(threadCommand?.type === "thread.create");
+      if (threadCommand?.type === "thread.create") {
+        assert.equal(threadCommand.projectId, STANDALONE_CHAT_PROJECT_ID);
+        assert.equal(threadCommand.branch, null);
+        assert.equal(threadCommand.worktreePath, null);
+      }
+      const turnCommand = dispatchedCommands[2];
+      assertTrue(turnCommand?.type === "thread.turn.start");
+      if (turnCommand?.type === "thread.turn.start") {
+        assert.equal(turnCommand.bootstrap, undefined);
+      }
+      assert.equal(createWorktree.mock.calls.length, 0);
+      assert.equal(runForThread.mock.calls.length, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("allows standalone project ensure bootstrap on existing chat follow-up turns", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const createWorktree = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
+          Effect.die("projectless chat follow-up should not create a worktree"),
+      );
+      const runForThread = vi.fn(
+        (
+          _: Parameters<
+            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+          >[0],
+        ) => Effect.succeed({ status: "no-script" as const }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+          projectSetupScriptRunner: {
+            runForThread,
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: STANDALONE_CHAT_PROJECT_ID,
+                  kind: "standalone" as const,
+                  title: "Chat",
+                  workspaceRoot: "/tmp/chat-workspace",
+                  defaultModelSelection,
+                  scripts: [],
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                  deletedAt: null,
+                }),
+              ),
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-chat-follow-up-turn-start"),
+            threadId: ThreadId.make("thread-chat"),
+            message: {
+              messageId: MessageId.make("msg-chat-follow-up"),
+              role: "user",
+              text: "second message",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              ensureStandaloneProject: true,
+            },
+            createdAt,
+          }),
+        ),
+      );
+
+      assert.equal(response.sequence, 1);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.turn.start"],
+      );
+      const turnCommand = dispatchedCommands[0];
+      assertTrue(turnCommand?.type === "thread.turn.start");
+      if (turnCommand?.type === "thread.turn.start") {
+        assert.equal(turnCommand.bootstrap, undefined);
+      }
+      assert.equal(createWorktree.mock.calls.length, 0);
+      assert.equal(runForThread.mock.calls.length, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("records setup-script failures without aborting bootstrap turn start", () =>

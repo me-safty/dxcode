@@ -46,10 +46,12 @@ interface ChatHeaderProps {
 export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined;
   readonly activeThreadEnvironmentId: EnvironmentId;
+  readonly openInCwd: string | null;
   readonly primaryEnvironmentId: EnvironmentId | null;
 }): boolean {
   return (
     Boolean(input.activeProjectName) &&
+    Boolean(input.openInCwd) &&
     input.primaryEnvironmentId !== null &&
     input.activeThreadEnvironmentId === input.primaryEnvironmentId
   );
@@ -78,6 +80,7 @@ export const ChatHeader = memo(function ChatHeader({
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
+    openInCwd,
     primaryEnvironmentId,
   });
   return (
@@ -130,7 +133,7 @@ export const ChatHeader = memo(function ChatHeader({
             />
           </>
         )}
-        {activeProjectName && (
+        {activeProjectName && gitCwd && (
           <GitActionsControl
             gitCwd={gitCwd}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}

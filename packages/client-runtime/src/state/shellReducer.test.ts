@@ -14,6 +14,7 @@ const baseSnapshot: OrchestrationShellSnapshot = {
 
 const stubProject = {
   id: ProjectId.make("project-1"),
+  kind: "workspace",
   title: "Test Project",
   workspaceRoot: "/workspace/test",
   repositoryIdentity: null,

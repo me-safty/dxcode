@@ -36,6 +36,7 @@ const seedReadModel = Effect.gen(function* () {
     metadata: {},
     payload: {
       projectId: asProjectId("project-delete"),
+      kind: "workspace",
       title: "Project Delete",
       workspaceRoot: "/tmp/project-delete",
       defaultModelSelection: null,

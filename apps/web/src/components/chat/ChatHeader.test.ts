@@ -11,6 +11,7 @@ describe("shouldShowOpenInPicker", () => {
       shouldShowOpenInPicker({
         activeProjectName: "codething-mvp",
         activeThreadEnvironmentId: primaryEnvironmentId,
+        openInCwd: "/repo",
         primaryEnvironmentId,
       }),
     ).toBe(true);
@@ -21,6 +22,7 @@ describe("shouldShowOpenInPicker", () => {
       shouldShowOpenInPicker({
         activeProjectName: "codething-mvp",
         activeThreadEnvironmentId: EnvironmentId.make("environment-remote"),
+        openInCwd: "/repo",
         primaryEnvironmentId: null,
       }),
     ).toBe(false);
@@ -31,6 +33,7 @@ describe("shouldShowOpenInPicker", () => {
       shouldShowOpenInPicker({
         activeProjectName: "codething-mvp",
         activeThreadEnvironmentId: EnvironmentId.make("environment-remote"),
+        openInCwd: "/repo",
         primaryEnvironmentId,
       }),
     ).toBe(false);
@@ -41,6 +44,18 @@ describe("shouldShowOpenInPicker", () => {
       shouldShowOpenInPicker({
         activeProjectName: undefined,
         activeThreadEnvironmentId: primaryEnvironmentId,
+        openInCwd: "/repo",
+        primaryEnvironmentId,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides the picker when there is no workspace cwd", () => {
+    expect(
+      shouldShowOpenInPicker({
+        activeProjectName: "Chat",
+        activeThreadEnvironmentId: primaryEnvironmentId,
+        openInCwd: null,
         primaryEnvironmentId,
       }),
     ).toBe(false);

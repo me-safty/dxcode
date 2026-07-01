@@ -14,6 +14,7 @@ import {
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveSendEnvMode,
+  shouldIncludeTurnStartBootstrap,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
 
@@ -244,6 +245,32 @@ describe("getStartedThreadModelChangeBlockReason", () => {
       description:
         "This provider does not allow switching models after a conversation has started.",
     });
+  });
+});
+
+describe("shouldIncludeTurnStartBootstrap", () => {
+  it("includes bootstrap for draft promotion and worktree setup", () => {
+    expect(
+      shouldIncludeTurnStartBootstrap({
+        isLocalDraftThread: true,
+        hasBaseBranchForWorktree: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldIncludeTurnStartBootstrap({
+        isLocalDraftThread: false,
+        hasBaseBranchForWorktree: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("omits bootstrap for existing follow-up turns", () => {
+    expect(
+      shouldIncludeTurnStartBootstrap({
+        isLocalDraftThread: false,
+        hasBaseBranchForWorktree: false,
+      }),
+    ).toBe(false);
   });
 });
 

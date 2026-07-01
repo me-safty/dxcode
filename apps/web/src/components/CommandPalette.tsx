@@ -471,7 +471,7 @@ function OpenCommandPaletteDialog(props: {
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironment = usePrimaryEnvironment();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewChat, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
   const threads = useThreadShells();
@@ -961,6 +961,26 @@ function OpenCommandPaletteDialog(props: {
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  actionItems.push({
+    kind: "action",
+    value: "action:new-chat",
+    searchTerms: ["new chat", "chat", "standalone", "projectless", "draft"],
+    title: "New chat",
+    icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      const created = await handleNewChat(defaultAddProjectEnvironmentId);
+      if (!created) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not create chat",
+            description: "No environment is available.",
+          }),
+        );
+      }
+    },
+  });
 
   if (projects.length > 0) {
     const activeProjectTitle = currentProjectId
