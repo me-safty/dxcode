@@ -51,6 +51,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   FetchHttpClient,
@@ -118,7 +119,7 @@ import {
   ServerEnvironment,
   type ServerEnvironmentShape,
 } from "./environment/Services/ServerEnvironment.ts";
-import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
+import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -504,7 +505,7 @@ const buildAppUnderTest = (options?: {
     const gitManagerLayer = Layer.mock(GitManager)({
       ...options?.layers?.gitManager,
     });
-    const workspaceEntriesLayer = WorkspaceEntriesLive.pipe(
+    const workspaceEntriesLayer = WorkspaceEntries.layer.pipe(
       Layer.provide(WorkspacePathsLive),
       Layer.provideMerge(vcsDriverRegistryLayer),
     );
@@ -579,6 +580,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mock(ExternalLauncher.ExternalLauncher)({
+          resolveAvailableEditors: () => Effect.succeed([]),
           ...options?.layers?.externalLauncher,
         }),
       ),
@@ -4353,7 +4355,43 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.isAtLeast(response.entries.length, 1);
       assert.isTrue(response.entries.some((entry) => entry.path === "needle-file.ts"));
       assert.equal(response.truncated, false);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("routes websocket rpc projects.listEntries and projects.readFile", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-files-" });
+      yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "src", "index.ts"),
+        "export const answer = 42;\n",
+      );
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            listing: client[WS_METHODS.projectsListEntries]({ cwd: workspaceDir }),
+            file: client[WS_METHODS.projectsReadFile]({
+              cwd: workspaceDir,
+              relativePath: "src/index.ts",
+            }),
+          }),
+        ),
+      );
+
+      assert.isTrue(response.listing.entries.some((entry) => entry.path === "src/index.ts"));
+      assert.deepEqual(response.file, {
+        relativePath: "src/index.ts",
+        contents: "export const answer = 42;\n",
+        byteLength: 26,
+        truncated: false,
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("routes websocket rpc projects.searchEntries excludes gitignored files", () =>
@@ -4410,7 +4448,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.entries.length, 0);
       assert.equal(response.truncated, false);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("routes websocket rpc projects.searchEntries errors", () =>
@@ -5880,6 +5918,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     () =>
       Effect.gen(function* () {
         const dispatchedCommands: Array<OrchestrationCommand> = [];
+        const bootstrapGitOperations: string[] = [];
         const refreshStatus = vi.fn((_: string) =>
           Effect.succeed({
             isRepo: true,
@@ -5898,13 +5937,33 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             pr: null,
           }),
         );
+        const fetchRemote = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriverShape["fetchRemote"]>[0]) =>
+            Effect.sync(() => {
+              bootstrapGitOperations.push("fetch");
+            }),
+        );
+        const fetchedOriginCommit = "0123456789abcdef0123456789abcdef01234567";
+        const resolveRemoteTrackingCommit = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriverShape["resolveRemoteTrackingCommit"]>[0]) =>
+            Effect.sync(() => {
+              bootstrapGitOperations.push("resolve-remote-commit");
+              return {
+                commitSha: fetchedOriginCommit,
+                remoteRefName: "origin/main",
+              };
+            }),
+        );
         const createWorktree = vi.fn(
           (_: Parameters<GitVcsDriver.GitVcsDriverShape["createWorktree"]>[0]) =>
-            Effect.succeed({
-              worktree: {
-                refName: "t3code/bootstrap-refName",
-                path: "/tmp/bootstrap-worktree",
-              },
+            Effect.sync(() => {
+              bootstrapGitOperations.push("create-worktree");
+              return {
+                worktree: {
+                  refName: "t3code/bootstrap-refName",
+                  path: "/tmp/bootstrap-worktree",
+                },
+              };
             }),
         );
         const runForThread = vi.fn(
@@ -5921,6 +5980,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         yield* buildAppUnderTest({
           layers: {
             gitVcsDriver: {
+              fetchRemote,
+              resolveRemoteTrackingCommit,
               createWorktree,
             },
             vcsStatusBroadcaster: {
@@ -5972,6 +6033,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
                   branch: "t3code/bootstrap-refName",
+                  startFromOrigin: true,
                 },
                 runSetupScript: true,
               },
@@ -5993,10 +6055,24 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
-          refName: "main",
+          refName: fetchedOriginCommit,
           newRefName: "t3code/bootstrap-refName",
           path: null,
         });
+        assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
+          cwd: "/tmp/project",
+          remoteName: "origin",
+        });
+        assert.deepEqual(resolveRemoteTrackingCommit.mock.calls[0]?.[0], {
+          cwd: "/tmp/project",
+          refName: "main",
+          fallbackRemoteName: "origin",
+        });
+        assert.deepEqual(bootstrapGitOperations, [
+          "fetch",
+          "resolve-remote-commit",
+          "create-worktree",
+        ]);
         assert.deepEqual(runForThread.mock.calls[0]?.[0], {
           threadId: ThreadId.make("thread-bootstrap"),
           projectId: defaultProjectId,

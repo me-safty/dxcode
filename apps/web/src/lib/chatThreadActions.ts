@@ -1,5 +1,12 @@
-import { scopeProjectRef } from "@t3tools/client-runtime";
-import type { EnvironmentId, ProjectId, ScopedProjectRef } from "@t3tools/contracts";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  type EnvironmentId,
+  type ProjectId,
+  type ProviderInteractionMode,
+  type RuntimeMode,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import type { DraftThreadEnvMode } from "../composerDraftStore";
 
 interface ThreadContextLike {
@@ -11,6 +18,7 @@ interface ThreadContextLike {
 
 interface DraftThreadContextLike extends ThreadContextLike {
   envMode: DraftThreadEnvMode;
+  startFromOrigin: boolean;
 }
 
 interface NewThreadHandler {
@@ -20,6 +28,7 @@ interface NewThreadHandler {
       branch?: string | null;
       worktreePath?: string | null;
       envMode?: DraftThreadEnvMode;
+      startFromOrigin?: boolean;
     },
   ): Promise<void>;
 }
@@ -32,6 +41,23 @@ export interface ChatThreadActionContext {
   readonly defaultProjectRef: ScopedProjectRef | null;
   readonly defaultThreadEnvMode: DraftThreadEnvMode;
   readonly handleNewThread: NewThreadHandler;
+}
+
+export function resolveNewDraftStartFromOrigin(input: {
+  envMode: DraftThreadEnvMode;
+  newWorktreesStartFromOrigin: boolean;
+}): boolean {
+  return input.envMode === "worktree" && input.newWorktreesStartFromOrigin;
+}
+
+export function buildNewDraftExecutionDefaults(defaultRuntimeMode: RuntimeMode): {
+  runtimeMode: RuntimeMode;
+  interactionMode: ProviderInteractionMode;
+} {
+  return {
+    runtimeMode: defaultRuntimeMode,
+    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+  };
 }
 
 export function resolveThreadActionProjectRef(
@@ -57,6 +83,9 @@ function buildContextualThreadOptions(context: ChatThreadActionContext): NewThre
     envMode:
       context.activeDraftThread?.envMode ??
       (context.activeThread?.worktreePath ? "worktree" : "local"),
+    ...(context.activeDraftThread
+      ? { startFromOrigin: context.activeDraftThread.startFromOrigin }
+      : {}),
   };
 }
 

@@ -68,6 +68,7 @@ function makeFakeBrowserWindow() {
     once: vi.fn(),
     restore: vi.fn(),
     setBackgroundColor: vi.fn(),
+    setAutoHideCursor: vi.fn(),
     setTitle: vi.fn(),
     setTitleBarOverlay: vi.fn(),
     show: vi.fn(),
@@ -78,6 +79,7 @@ function makeFakeBrowserWindow() {
     window: window as unknown as Electron.BrowserWindow,
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
+    setAutoHideCursor: window.setAutoHideCursor,
     webContentsListeners,
   };
 }
@@ -134,10 +136,17 @@ function makeTestLayer(input: {
   readonly window: Electron.BrowserWindow;
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
+  readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
   readonly openedExternalUrls?: unknown[];
 }) {
   const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
-    create: () => Ref.update(input.createCount, (count) => count + 1).pipe(Effect.as(input.window)),
+    create: (options) =>
+      Effect.sync(() => {
+        input.createdWindowOptions?.push(options);
+      }).pipe(
+        Effect.andThen(Ref.update(input.createCount, (count) => count + 1)),
+        Effect.as(input.window),
+      ),
     main: Ref.get(input.mainWindow),
     currentMainOrFirst: Ref.get(input.mainWindow),
     focusedMainOrFirst: Ref.get(input.mainWindow),
@@ -182,19 +191,19 @@ describe("DesktopWindow", () => {
   it("recognizes only same-origin renderer navigations", () => {
     assert.isTrue(
       DesktopWindow.isSameOriginRendererNavigation({
-        applicationUrl: "http://127.0.0.1:3773/",
-        navigationUrl: "http://127.0.0.1:3773/settings/connections",
+        applicationUrl: "t3code://app/",
+        navigationUrl: "t3code://app/settings/connections",
       }),
     );
     assert.isFalse(
       DesktopWindow.isSameOriginRendererNavigation({
-        applicationUrl: "http://127.0.0.1:3773/",
+        applicationUrl: "t3code://app/",
         navigationUrl: "https://accounts.microsoft.com/oauth",
       }),
     );
     assert.isFalse(
       DesktopWindow.isSameOriginRendererNavigation({
-        applicationUrl: "http://127.0.0.1:3773/",
+        applicationUrl: "t3code://app/",
         navigationUrl: "not a url",
       }),
     );
@@ -205,10 +214,12 @@ describe("DesktopWindow", () => {
       const fakeWindow = makeFakeBrowserWindow();
       const createCount = yield* Ref.make(0);
       const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
       const layer = makeTestLayer({
         window: fakeWindow.window,
         createCount,
         mainWindow,
+        createdWindowOptions,
       });
 
       yield* Effect.gen(function* () {
@@ -218,7 +229,9 @@ describe("DesktopWindow", () => {
 
         yield* desktopWindow.handleBackendReady;
         assert.equal(yield* Ref.get(createCount), 1);
-        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["http://127.0.0.1:5733/"]);
+        assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor);
+        assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
+        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
       }).pipe(Effect.provide(layer));
     }),

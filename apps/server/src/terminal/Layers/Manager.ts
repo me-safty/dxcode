@@ -5,11 +5,13 @@ import {
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
+  type TerminalResizeInput,
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
   type TerminalSummary,
 } from "@t3tools/contracts";
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -312,10 +314,7 @@ function enqueueProcessEvent(
   return true;
 }
 
-function defaultShellResolver(
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
+function defaultShellResolver(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
   if (platform === "win32") {
     return "pwsh.exe";
   }
@@ -324,7 +323,7 @@ function defaultShellResolver(
 
 function normalizeShellCommand(
   value: string | undefined,
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform,
 ): string | null {
   if (!value) return null;
   const trimmed = value.trim();
@@ -360,7 +359,7 @@ function joinWindowsPath(...parts: ReadonlyArray<string>): string {
 
 function shellCandidateFromCommand(
   command: string | null,
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform,
 ): ShellCandidate | null {
   if (!command || command.length === 0) return null;
   const shellName = basenameForPlatform(command, platform).toLowerCase();
@@ -411,8 +410,8 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
 
 function resolveShellCandidates(
   shellResolver: () => string,
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
 ): ShellCandidate[] {
   const requested = shellCandidateFromCommand(
     normalizeShellCommand(shellResolver(), platform),
@@ -512,6 +511,9 @@ function windowsInspectSubprocess(
   return Effect.gen(function* () {
     const processRunner = yield* ProcessRunner.ProcessRunner;
     return yield* processRunner.run({
+      // powershell.exe is a real executable — never spawn it through cmd.exe
+      // shell mode, which would re-tokenize the `-Command` payload (pipes,
+      // semicolons) before PowerShell ever sees it.
       command: "powershell.exe",
       args: ["-NoProfile", "-NonInteractive", "-Command", command],
       timeout: "1500 millis",
@@ -976,7 +978,6 @@ interface TerminalManagerOptions {
   historyLineLimit?: number;
   ptyAdapter: PtyAdapterShape;
   shellResolver?: () => string;
-  platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   subprocessInspector?: TerminalSubprocessInspector;
   subprocessPollIntervalMs?: number;
@@ -1014,7 +1015,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const logsDir = options.logsDir;
     const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
-    const platform = options.platform ?? process.platform;
+    const platform = yield* HostProcessPlatform;
+    // Terminals must inherit the user's full environment (minus the blocklist
+    // applied in createTerminalSpawnEnv) — an allowlist here silently strips
+    // things like PSModulePath, DISPLAY, proxies, and toolchain variables.
+    // `options.env` is the test seam.
     const baseEnv = options.env ?? process.env;
     const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
     const processRunner = yield* ProcessRunner.ProcessRunner;
@@ -2321,21 +2326,24 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       yield* Effect.sync(() => process.write(input.data));
     });
 
-    const resize: TerminalManagerShape["resize"] = Effect.fn("terminal.resize")(function* (input) {
-      const terminalId = input.terminalId;
-      const session = yield* requireSession(input.threadId, terminalId);
-      const process = session.process;
-      if (!process || session.status !== "running") {
-        return yield* new TerminalNotRunningError({
-          threadId: input.threadId,
-          terminalId,
-        });
+    const resizeLocked = Effect.fn("terminal.resize")(function* (input: TerminalResizeInput) {
+      const session = yield* getSession(input.threadId, input.terminalId);
+      // ResizeObserver traffic can already be in flight when the UI closes the session.
+      if (Option.isNone(session)) {
+        return;
       }
-      session.cols = input.cols;
-      session.rows = input.rows;
-      session.updatedAt = yield* nowIso;
+      const process = session.value.process;
+      if (!process || session.value.status !== "running") {
+        return;
+      }
+      session.value.cols = input.cols;
+      session.value.rows = input.rows;
+      session.value.updatedAt = yield* nowIso;
       yield* Effect.sync(() => process.resize(input.cols, input.rows));
     });
+
+    const resize: TerminalManagerShape["resize"] = (input) =>
+      withThreadLock(input.threadId, resizeLocked(input));
 
     const clear: TerminalManagerShape["clear"] = (input) =>
       withThreadLock(

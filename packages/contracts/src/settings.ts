@@ -40,7 +40,7 @@ export type SidebarThreadPreviewCount = typeof SidebarThreadPreviewCount.Type;
 export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6;
 
 export const ClientSettingsSchema = Schema.Struct({
-  autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   defaultRuntimeMode: RuntimeMode.pipe(
@@ -368,6 +368,7 @@ export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   automaticGitFetchInterval: Schema.DurationFromMillis.pipe(
     Schema.withDecodingDefault(
       Effect.succeed(Duration.toMillis(DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL)),
@@ -375,6 +376,12 @@ export const ServerSettings = Schema.Struct({
   ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
+  ),
+  defaultRuntimeMode: RuntimeMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
+  ),
+  newWorktreesStartFromOrigin: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
@@ -482,8 +489,11 @@ const OpenCodeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
+  enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
+  newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(

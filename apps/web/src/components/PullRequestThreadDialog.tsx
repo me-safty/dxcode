@@ -1,4 +1,5 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -7,10 +8,11 @@ import {
   usePreparePullRequestThreadAction,
   usePullRequestResolution,
 } from "~/lib/sourceControlActions";
-import { useVcsStatus } from "~/lib/vcsStatusState";
 import { cn } from "~/lib/utils";
 import { parsePullRequestReference } from "~/pullRequestReference";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
+import { useEnvironmentQuery } from "~/state/query";
+import { vcsEnvironment } from "~/state/vcs";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -31,7 +33,10 @@ interface PullRequestThreadDialogProps {
   cwd: string | null;
   initialReference: string | null;
   onOpenChange: (open: boolean) => void;
-  onPrepared: (input: { branch: string; worktreePath: string | null }) => Promise<void> | void;
+  onPrepared: (input: {
+    branch: string;
+    worktreePath: string | null;
+  }) => Promise<boolean> | boolean;
 }
 
 export function PullRequestThreadDialog({
@@ -52,20 +57,20 @@ export function PullRequestThreadDialog({
     { wait: 450 },
     (debouncerState) => ({ isPending: debouncerState.isPending }),
   );
-  const { data: gitStatus } = useVcsStatus({ environmentId, cwd });
+  const { data: gitStatus } = useEnvironmentQuery(
+    cwd === null
+      ? null
+      : vcsEnvironment.status({
+          environmentId,
+          input: { cwd },
+        }),
+  );
   const sourceControlPresentation = useMemo(
     () => getSourceControlPresentation(gitStatus?.sourceControlProvider),
     [gitStatus?.sourceControlProvider],
   );
   const terminology = sourceControlPresentation.terminology;
   const SourceControlIcon = sourceControlPresentation.Icon;
-
-  useEffect(() => {
-    if (!open) return;
-    setReference(initialReference ?? "");
-    setReferenceDirty(false);
-    setPreparingMode(null);
-  }, [initialReference, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -137,20 +142,26 @@ export function PullRequestThreadDialog({
         return;
       }
       setPreparingMode(mode);
-      try {
-        const result = await preparePullRequestThreadAction.run({
-          reference: parsedReference,
-          mode,
-          ...(mode === "worktree" ? { threadId } : {}),
-        });
-        await onPrepared({
-          branch: result.branch,
-          worktreePath: result.worktreePath,
-        });
-        onOpenChange(false);
-      } finally {
-        setPreparingMode(null);
+      const result = await preparePullRequestThreadAction.run({
+        reference: parsedReference,
+        mode,
+        ...(mode === "worktree" ? { threadId } : {}),
+      });
+      setPreparingMode(null);
+      if (result._tag === "Failure") {
+        if (isAtomCommandInterrupted(result)) {
+          preparePullRequestThreadAction.resetError();
+        }
+        return;
       }
+      const prepared = await onPrepared({
+        branch: result.value.branch,
+        worktreePath: result.value.worktreePath,
+      });
+      if (!prepared) {
+        return;
+      }
+      onOpenChange(false);
     },
     [
       cwd,
@@ -173,9 +184,7 @@ export function PullRequestThreadDialog({
   const errorMessage =
     validationMessage ??
     (resolvedPullRequest === null && pullRequestResolution.error
-      ? pullRequestResolution.error instanceof Error
-        ? pullRequestResolution.error.message
-        : `Failed to resolve ${terminology.singular}.`
+      ? pullRequestResolution.error
       : preparePullRequestThreadAction.error instanceof Error
         ? preparePullRequestThreadAction.error.message
         : preparePullRequestThreadAction.error
