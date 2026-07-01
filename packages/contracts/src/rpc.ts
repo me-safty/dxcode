@@ -144,6 +144,7 @@ import {
   ScheduledTaskListResult,
   ScheduledTaskRunNowInput,
   ScheduledTaskRunNowResult,
+  ScheduledTaskSetEnabledInput,
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
@@ -236,6 +237,7 @@ export const WS_METHODS = {
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
+  scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
   scheduledTasksRunNow: "scheduledTasks.runNow",
 
@@ -753,6 +755,12 @@ export const WsScheduledTasksUpsertRpc = Rpc.make(WS_METHODS.scheduledTasksUpser
   error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
 });
 
+export const WsScheduledTasksSetEnabledRpc = Rpc.make(WS_METHODS.scheduledTasksSetEnabled, {
+  payload: ScheduledTaskSetEnabledInput,
+  success: ScheduledTaskMutationResult,
+  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
+});
+
 export const WsScheduledTasksDeleteRpc = Rpc.make(WS_METHODS.scheduledTasksDelete, {
   payload: ScheduledTaskDeleteInput,
   success: ScheduledTaskDeleteResult,
@@ -788,6 +796,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,
+  WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
   WsScheduledTasksRunNowRpc,
   WsCloudGetRelayClientStatusRpc,

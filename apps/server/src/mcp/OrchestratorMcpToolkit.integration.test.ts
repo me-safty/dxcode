@@ -459,6 +459,8 @@ describe("orchestrator MCP toolkit", () => {
                   ]);
                   return { task };
                 }),
+              setEnabled: () =>
+                Effect.die("ScheduledTaskService.setEnabled is unused in this test"),
               delete: (input) =>
                 Ref.update(scheduledStore, (all) =>
                   all.filter((candidate) => candidate.id !== input.id),

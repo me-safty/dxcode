@@ -328,6 +328,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.scheduledTasksList, AuthOrchestrationReadScope],
   [WS_METHODS.scheduledTasksSubscribe, AuthOrchestrationReadScope],
   [WS_METHODS.scheduledTasksUpsert, AuthOrchestrationOperateScope],
+  [WS_METHODS.scheduledTasksSetEnabled, AuthOrchestrationOperateScope],
   [WS_METHODS.scheduledTasksDelete, AuthOrchestrationOperateScope],
   [WS_METHODS.scheduledTasksRunNow, AuthOrchestrationOperateScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
@@ -1040,6 +1041,11 @@ const makeWsRpcLayer = (
         [WS_METHODS.scheduledTasksUpsert]: (input) =>
           observeRpcEffect(WS_METHODS.scheduledTasksUpsert, scheduledTasks.upsert(input), {
             "rpc.aggregate": "scheduledTasks",
+          }),
+        [WS_METHODS.scheduledTasksSetEnabled]: (input) =>
+          observeRpcEffect(WS_METHODS.scheduledTasksSetEnabled, scheduledTasks.setEnabled(input), {
+            "rpc.aggregate": "scheduledTasks",
+            "scheduled_task.id": input.id,
           }),
         [WS_METHODS.scheduledTasksDelete]: (input) =>
           observeRpcEffect(WS_METHODS.scheduledTasksDelete, scheduledTasks.delete(input), {

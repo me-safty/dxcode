@@ -11,6 +11,7 @@ import {
   type ScheduledTaskMutationResult,
   type ScheduledTaskRunNowInput,
   type ScheduledTaskRunNowResult,
+  type ScheduledTaskSetEnabledInput,
   type ScheduledTaskUpsertInput,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -73,6 +74,10 @@ export class ScheduledTaskService extends Context.Service<
     readonly subscribeList: () => Stream.Stream<ScheduledTaskListResult, ScheduledTaskError>;
     readonly upsert: (
       input: ScheduledTaskUpsertInput,
+    ) => Effect.Effect<ScheduledTaskMutationResult, ScheduledTaskError>;
+    /** Partial update flipping only the enabled flag; never touches other fields. */
+    readonly setEnabled: (
+      input: ScheduledTaskSetEnabledInput,
     ) => Effect.Effect<ScheduledTaskMutationResult, ScheduledTaskError>;
     readonly delete: (
       input: ScheduledTaskDeleteInput,
@@ -739,6 +744,29 @@ export const layer = Layer.effect(
         return { task };
       });
 
+    const setEnabled: ScheduledTaskService["Service"]["setEnabled"] = (input) =>
+      Effect.gen(function* () {
+        const existing = yield* loadTask(input.id);
+        if (existing.enabled === input.enabled) return { task: existing };
+        const now = yield* localNow;
+        const next = nextRunAt({ enabled: input.enabled, schedule: existing.schedule }, now);
+        yield* sql`
+          UPDATE scheduled_tasks
+          SET enabled = ${input.enabled ? 1 : 0},
+              next_run_at = ${next},
+              updated_at = ${iso(now)}
+          WHERE task_id = ${input.id}
+        `.pipe(
+          Effect.mapError((cause) =>
+            taskError("Could not update schedule task.", { taskId: input.id, cause }),
+          ),
+        );
+        yield* notifyChanged;
+        return {
+          task: { ...existing, enabled: input.enabled, nextRunAt: next, updatedAt: iso(now) },
+        };
+      });
+
     const deleteTask: ScheduledTaskService["Service"]["delete"] = (input) =>
       deleteRow(input.id).pipe(Effect.andThen(notifyChanged), Effect.as({ id: input.id }));
 
@@ -753,6 +781,13 @@ export const layer = Layer.effect(
         return { task: next };
       });
 
-    return ScheduledTaskService.of({ list, subscribeList, upsert, delete: deleteTask, runNow });
+    return ScheduledTaskService.of({
+      list,
+      subscribeList,
+      upsert,
+      setEnabled,
+      delete: deleteTask,
+      runNow,
+    });
   }),
 );

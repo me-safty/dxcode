@@ -1,12 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { CalendarClockIcon, PlayIcon, Settings2Icon } from "lucide-react";
 import { useState } from "react";
-import type {
-  EnvironmentId,
-  ScheduledTask,
-  ScheduledTaskUpsertInput,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ScheduledTask, ThreadId } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -33,24 +28,6 @@ const STATUS_DOT_CLASS: Record<ScheduledTask["lastRunStatus"], string> = {
   failed: "bg-destructive",
 };
 
-function upsertInputFromTask(task: ScheduledTask, enabled: boolean): ScheduledTaskUpsertInput {
-  return {
-    id: task.id,
-    title: task.title,
-    prompt: task.prompt,
-    enabled,
-    schedule: task.schedule,
-    projectId: task.projectId,
-    threadId: task.threadId,
-    workspaceStrategy: task.workspaceStrategy,
-    modelSelection: task.modelSelection,
-    runtimeMode: task.runtimeMode,
-    interactionMode: task.interactionMode,
-    createdBy: task.createdBy,
-    creationSource: task.creationSource,
-  };
-}
-
 /**
  * Thread details panel section listing the automations (scheduled tasks) bound
  * to this thread. Fed by the live scheduled-task subscription, so run status
@@ -64,7 +41,7 @@ export function ThreadAutomationsPanel(props: {
   const tasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
   );
-  const upsertTask = useAtomCommand(serverEnvironment.upsertScheduledTask, {
+  const setTaskEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
     label: "thread automation toggle",
   });
   const runTaskNow = useAtomCommand(serverEnvironment.runScheduledTaskNow, {
@@ -76,7 +53,10 @@ export function ThreadAutomationsPanel(props: {
   const boundTasks = (tasksQuery.data?.tasks ?? []).filter(
     (task) => task.threadId === props.threadId,
   );
-  if (boundTasks.length === 0) return null;
+  // A load error must not look like "no automations" — this thread may have
+  // tasks whose controls would silently vanish. Only hide the section when we
+  // positively know there is nothing bound to it.
+  if (tasksQuery.error === null && boundTasks.length === 0) return null;
 
   const reportFailure = (title: string, error: unknown) => {
     toastManager.add(
@@ -91,9 +71,11 @@ export function ThreadAutomationsPanel(props: {
   const toggleEnabled = async (task: ScheduledTask, enabled: boolean) => {
     if (busyTaskId !== null) return;
     setBusyTaskId(task.id);
-    const result = await upsertTask({
+    // Partial update: only the enabled flag changes, so a toggle can never
+    // revert concurrent edits made to the task elsewhere.
+    const result = await setTaskEnabled({
       environmentId: props.environmentId,
-      input: upsertInputFromTask(task, enabled),
+      input: { id: task.id, enabled },
     });
     setBusyTaskId(null);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
@@ -144,6 +126,12 @@ export function ThreadAutomationsPanel(props: {
           <TooltipPopup>Manage schedule tasks</TooltipPopup>
         </Tooltip>
       </div>
+
+      {tasksQuery.error !== null ? (
+        <p className="px-2.5 py-1.5 text-[11px] text-destructive">
+          Could not load automations: {tasksQuery.error}
+        </p>
+      ) : null}
 
       <ul className="m-0 list-none p-0">
         {boundTasks.map((task) => (
