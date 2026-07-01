@@ -118,6 +118,10 @@ export function makeProviderMaintenanceCapabilities(input: {
   };
 }
 
+function makeProviderMaintenanceUpdateActionKey(update: ProviderMaintenanceCommandAction): string {
+  return [update.lockKey, update.executable, ...update.args].join(" ");
+}
+
 export function makeManualOnlyProviderMaintenanceCapabilities(input: {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
@@ -424,6 +428,9 @@ export function createProviderVersionAdvisory(input: {
     currentVersion: input.currentVersion,
     latestVersion,
     updateCommand: capabilities.update?.command ?? null,
+    ...(capabilities.update
+      ? { updateActionKey: makeProviderMaintenanceUpdateActionKey(capabilities.update) }
+      : {}),
     canUpdate: capabilities.update !== null,
     checkedAt: input.checkedAt ?? null,
     message: advisory.message,
