@@ -6,6 +6,7 @@ import {
   Files,
   GitBranch,
   Globe2,
+  type LucideIcon,
   Plus,
   TerminalSquare,
   X,
@@ -16,6 +17,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -68,11 +70,13 @@ const SURFACE_DISABLED_REASONS = {
   sourceControl: "Version Control is only available when a project is open in a Git repository.",
 } as const;
 
+type AddPanelSurfaceId = "source-control" | "browser" | "terminal" | "files" | "diff";
+
 type AddPanelSurfaceAction = {
-  readonly id: "source-control" | "browser" | "terminal" | "files" | "diff";
+  readonly id: AddPanelSurfaceId;
   readonly label: string;
   readonly description: string;
-  readonly icon: typeof GitBranch;
+  readonly icon: LucideIcon;
   readonly available: boolean;
   readonly disabledReason?: string;
   readonly onClick: () => void;
@@ -80,19 +84,40 @@ type AddPanelSurfaceAction = {
 
 type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
 
-function buildAddSurfaceActions(props: {
-  onAddBrowser: () => void;
-  onAddTerminal: () => void;
-  onAddDiff: () => void;
-  onAddFiles: () => void;
-  onAddSourceControl: () => void;
-  browserAvailable: boolean;
-  diffAvailable: boolean;
-  filesAvailable: boolean;
-  sourceControlAvailable: boolean;
-}): AddPanelSurfaceAction[] {
-  return [
-    {
+type AddPanelSurfaceActionProps = Pick<
+  RightPanelTabsProps,
+  | "onAddBrowser"
+  | "onAddTerminal"
+  | "onAddDiff"
+  | "onAddFiles"
+  | "onAddSourceControl"
+  | "browserAvailable"
+  | "diffAvailable"
+  | "filesAvailable"
+  | "sourceControlAvailable"
+>;
+
+export const ADD_SURFACE_EMPTY_STATE_ORDER: readonly AddPanelSurfaceId[] = [
+  "source-control",
+  "browser",
+  "terminal",
+  "files",
+  "diff",
+];
+
+export const ADD_SURFACE_MENU_ORDER: readonly AddPanelSurfaceId[] = [
+  "browser",
+  "terminal",
+  "files",
+  "diff",
+  "source-control",
+];
+
+function buildAddSurfaceActionMap(
+  props: AddPanelSurfaceActionProps,
+): Readonly<Record<AddPanelSurfaceId, AddPanelSurfaceAction>> {
+  return {
+    "source-control": {
       id: "source-control",
       label: "Version Control",
       description: "Review repository changes and sync state.",
@@ -101,7 +126,7 @@ function buildAddSurfaceActions(props: {
       disabledReason: SURFACE_DISABLED_REASONS.sourceControl,
       onClick: props.onAddSourceControl,
     },
-    {
+    browser: {
       id: "browser",
       label: "Browser",
       description: "Open a local app or URL.",
@@ -110,7 +135,7 @@ function buildAddSurfaceActions(props: {
       disabledReason: SURFACE_DISABLED_REASONS.browser,
       onClick: props.onAddBrowser,
     },
-    {
+    terminal: {
       id: "terminal",
       label: "Terminal",
       description: "Start a shell in this workspace.",
@@ -118,7 +143,7 @@ function buildAddSurfaceActions(props: {
       available: true,
       onClick: props.onAddTerminal,
     },
-    {
+    files: {
       id: "files",
       label: "Files",
       description: "Browse and read workspace files.",
@@ -127,7 +152,7 @@ function buildAddSurfaceActions(props: {
       disabledReason: SURFACE_DISABLED_REASONS.files,
       onClick: props.onAddFiles,
     },
-    {
+    diff: {
       id: "diff",
       label: "Diff",
       description: "Review changes in this thread.",
@@ -136,7 +161,15 @@ function buildAddSurfaceActions(props: {
       disabledReason: SURFACE_DISABLED_REASONS.diff,
       onClick: props.onAddDiff,
     },
-  ];
+  };
+}
+
+export function buildAddSurfaceActions(
+  props: AddPanelSurfaceActionProps,
+  order: readonly AddPanelSurfaceId[] = ADD_SURFACE_EMPTY_STATE_ORDER,
+): readonly AddPanelSurfaceAction[] {
+  const actions = buildAddSurfaceActionMap(props);
+  return order.map((id) => actions[id]);
 }
 
 function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
@@ -150,7 +183,7 @@ function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement })
 
 function SurfaceMenuItem(props: {
   available: boolean;
-  disabledReason?: string;
+  disabledReason: string | undefined;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -192,7 +225,7 @@ function RightPanelEmptyState(props: { actions: readonly AddPanelSurfaceAction[]
             if (action.available) {
               return (
                 <button
-                  key={action.label}
+                  key={action.id}
                   type="button"
                   onClick={action.onClick}
                   className="flex min-h-28 w-full flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left transition hover:border-border hover:bg-accent/60"
@@ -201,22 +234,26 @@ function RightPanelEmptyState(props: { actions: readonly AddPanelSurfaceAction[]
                 </button>
               );
             }
-            const disabledCard = (
+            const disabledCard = (className?: string) => (
               <button
-                key={action.id}
                 type="button"
-                className="flex min-h-28 w-full cursor-not-allowed flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left opacity-40"
-                aria-disabled="true"
+                disabled
+                className={cn(
+                  "flex min-h-28 w-full cursor-not-allowed flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left opacity-40",
+                  className,
+                )}
               >
                 {content}
               </button>
             );
-            if (!action.disabledReason) return disabledCard;
+            if (!action.disabledReason) {
+              return <div key={action.id}>{disabledCard()}</div>;
+            }
             return (
               <DisabledReasonTooltip
                 key={action.id}
                 reason={action.disabledReason}
-                trigger={disabledCard}
+                trigger={<span className="block w-full">{disabledCard()}</span>}
               />
             );
           })}
@@ -317,7 +354,34 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
-  const addSurfaceActions = buildAddSurfaceActions(props);
+  const emptyStateActions = useMemo(
+    () => buildAddSurfaceActions(props, ADD_SURFACE_EMPTY_STATE_ORDER),
+    [
+      props.browserAvailable,
+      props.diffAvailable,
+      props.filesAvailable,
+      props.sourceControlAvailable,
+      props.onAddBrowser,
+      props.onAddDiff,
+      props.onAddFiles,
+      props.onAddSourceControl,
+      props.onAddTerminal,
+    ],
+  );
+  const menuActions = useMemo(
+    () => buildAddSurfaceActions(props, ADD_SURFACE_MENU_ORDER),
+    [
+      props.browserAvailable,
+      props.diffAvailable,
+      props.filesAvailable,
+      props.sourceControlAvailable,
+      props.onAddBrowser,
+      props.onAddDiff,
+      props.onAddFiles,
+      props.onAddSourceControl,
+      props.onAddTerminal,
+    ],
+  );
 
   const handleTabContextMenu = useCallback(
     async (event: ReactMouseEvent, surface: RightPanelSurface) => {
@@ -487,15 +551,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   <Plus className="size-4" />
                 </MenuTrigger>
                 <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
-                  {addSurfaceActions.map((action) => {
+                  {menuActions.map((action) => {
                     const Icon = action.icon;
                     return (
                       <SurfaceMenuItem
                         key={action.id}
                         available={action.available}
-                        {...(action.disabledReason
-                          ? { disabledReason: action.disabledReason }
-                          : {})}
+                        disabledReason={action.disabledReason}
                         onClick={action.onClick}
                       >
                         <Icon />
@@ -512,7 +574,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {props.activeSurfaceId === null ? (
-          <RightPanelEmptyState actions={addSurfaceActions} />
+          <RightPanelEmptyState actions={emptyStateActions} />
         ) : (
           props.children
         )}

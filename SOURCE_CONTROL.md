@@ -35,7 +35,7 @@ Primary implementation files:
 
 Version Control is a singleton right-panel surface with kind `source-control`. Users open it from the existing right-panel surface picker; it is not duplicated into the main chat header, project sidebar, or conversation timeline. Availability is project/repository based: the surface is enabled when a thread or draft-thread ref exists for right-panel state and the active project resolves to a repository cwd.
 
-Version Control uses the shared right-panel tab shell, including the standard context menu and middle-click tab close behavior. `RightPanelTabs` keeps add-surface labels, descriptions, icons, availability, disabled reasons, and callbacks in a single local action list used by both the empty state and the add-surface menu, so the Version Control entry does not need duplicated host-shell metadata.
+Version Control uses the shared right-panel tab shell, including the standard context menu, middle-click tab close behavior, and centralized add-surface metadata in `RightPanelTabs` for both the empty state and the add-surface menu.
 
 `ChatView` keys the mounted `SourceControlPanel` by active environment, thread, and effective Git cwd. Switching between conversations, projects, or worktrees therefore creates a fresh panel instance for that context instead of letting repository state from the previous thread bleed into the next one. The panel pairs that remount boundary with a bounded in-memory state cache keyed by environment, thread, cwd, and worktree path, so returning to a previously opened Version Control panel can render its last snapshot and UI state immediately while the normal refresh/fetch path updates it in the background.
 
