@@ -22,6 +22,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -163,33 +164,55 @@ export const layer = Layer.effect(
     const changesPubSub = yield* PubSub.unbounded<void>();
     const notifyChanged = PubSub.publish(changesPubSub, undefined).pipe(Effect.asVoid);
 
+    const selectAllRows = () => sql<ScheduledTaskRow>`
+      SELECT
+        task_id,
+        title,
+        prompt,
+        enabled,
+        schedule_json,
+        project_id,
+        thread_id,
+        workspace_strategy_json,
+        model_selection_json,
+        runtime_mode,
+        interaction_mode,
+        created_by,
+        creation_source,
+        created_at,
+        updated_at,
+        next_run_at,
+        last_run_at,
+        last_run_status,
+        last_run_error,
+        run_count
+      FROM scheduled_tasks
+      ORDER BY updated_at DESC, task_id ASC
+    `;
+
+    // Strict decode for the API surface: a corrupt row is a visible error.
     const listRows = Effect.fn("ScheduledTaskService.listRows")(function* () {
-      const rows = yield* sql<ScheduledTaskRow>`
-        SELECT
-          task_id,
-          title,
-          prompt,
-          enabled,
-          schedule_json,
-          project_id,
-          thread_id,
-          workspace_strategy_json,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          created_by,
-          creation_source,
-          created_at,
-          updated_at,
-          next_run_at,
-          last_run_at,
-          last_run_status,
-          last_run_error,
-          run_count
-        FROM scheduled_tasks
-        ORDER BY updated_at DESC, task_id ASC
-      `;
+      const rows = yield* selectAllRows();
       return yield* Effect.forEach(rows, decodeRow, { concurrency: 1 });
+    });
+
+    // Lenient decode for the scheduler: one corrupt row must never halt the
+    // poll loop or crash recovery for every other task — skip it and log.
+    const listTasksLenient = Effect.fn("ScheduledTaskService.listTasksLenient")(function* () {
+      const rows = yield* selectAllRows();
+      const tasks: ScheduledTask[] = [];
+      for (const row of rows) {
+        const decoded = yield* Effect.result(decodeRow(row));
+        if (Result.isSuccess(decoded)) {
+          tasks.push(decoded.success);
+        } else {
+          yield* Effect.logWarning("Skipping undecodable schedule task row", {
+            taskId: row.task_id,
+            cause: decoded.failure,
+          });
+        }
+      }
+      return tasks;
     });
 
     const getRows = (id: ScheduledTaskId) => sql<ScheduledTaskRow>`
@@ -518,7 +541,7 @@ export const layer = Layer.effect(
     });
 
     const runDueTasks = Effect.fn("ScheduledTaskService.runDueTasks")(function* () {
-      const tasks = yield* listRows().pipe(
+      const tasks = yield* listTasksLenient().pipe(
         Effect.mapError((cause) => taskError("Could not list schedule tasks.", { cause })),
       );
       const now = yield* localNow;
@@ -553,21 +576,43 @@ export const layer = Layer.effect(
     // releaseStuckRun). Schedules are JSON, so this is per-row Effect work
     // rather than a single UPDATE.
     yield* Effect.gen(function* () {
-      const tasks = yield* listRows();
-      const stuck = tasks.filter((task) => task.lastRunStatus === "running");
+      const rows = yield* selectAllRows();
+      const stuck = rows.filter((row) => row.last_run_status === "running");
       if (stuck.length === 0) return;
       const now = yield* localNow;
       yield* Effect.forEach(
         stuck,
-        (task) => sql`
-          UPDATE scheduled_tasks
-          SET last_run_status = 'failed',
-              last_run_error = 'Run was interrupted by a server restart.',
-              next_run_at = ${nextRunAt(task, now)},
-              updated_at = ${iso(now)},
-              run_count = run_count + 1
-          WHERE task_id = ${task.id} AND last_run_status = 'running'
-        `,
+        (row) =>
+          Effect.gen(function* () {
+            const decoded = yield* Effect.result(decodeRow(row));
+            if (Result.isSuccess(decoded)) {
+              yield* sql`
+                UPDATE scheduled_tasks
+                SET last_run_status = 'failed',
+                    last_run_error = 'Run was interrupted by a server restart.',
+                    next_run_at = ${nextRunAt(decoded.success, now)},
+                    updated_at = ${iso(now)},
+                    run_count = run_count + 1
+                WHERE task_id = ${row.task_id} AND last_run_status = 'running'
+              `;
+              return;
+            }
+            // The schedule cannot be decoded, so the next occurrence cannot
+            // be computed — still release the row so it is not stuck in
+            // 'running' (the lenient poller skips it, so it cannot re-fire).
+            yield* Effect.logWarning(
+              "Recovering undecodable schedule task row without rescheduling",
+              { taskId: row.task_id, cause: decoded.failure },
+            );
+            yield* sql`
+              UPDATE scheduled_tasks
+              SET last_run_status = 'failed',
+                  last_run_error = 'Run was interrupted by a server restart.',
+                  updated_at = ${iso(now)},
+                  run_count = run_count + 1
+              WHERE task_id = ${row.task_id} AND last_run_status = 'running'
+            `;
+          }),
         { concurrency: 1, discard: true },
       );
       yield* notifyChanged;
