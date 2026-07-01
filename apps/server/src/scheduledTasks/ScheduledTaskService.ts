@@ -423,55 +423,67 @@ export const layer = Layer.effect(
       return yield* Effect.gen(function* () {
         const startedAt = yield* localNow;
         const startedAtIso = iso(startedAt);
-        yield* markRunning(task.id, startedAtIso);
+
+        // The in-memory snapshot may be stale: re-read before touching run
+        // state. The task may have been deleted, paused, or postponed since
+        // the poll loaded it — none of those may fire.
+        const active = yield* findTask(task.id);
+        if (active === null) return task;
+        if (
+          trigger === "scheduled" &&
+          (!active.enabled ||
+            active.nextRunAt === null ||
+            DateTime.toEpochMillis(DateTime.makeUnsafe(active.nextRunAt)) >
+              DateTime.toEpochMillis(startedAt))
+        ) {
+          return active;
+        }
+
+        yield* markRunning(active.id, startedAtIso);
         yield* notifyChanged;
 
-        // The in-memory snapshot may be stale: if the task was deleted since
-        // it was loaded, markRunning updated nothing — do not dispatch a run
-        // for a task that no longer exists.
-        const preflight = yield* findTask(task.id);
-        if (preflight === null) return task;
-
-        const fireKey = `${task.id}:${DateTime.toEpochMillis(startedAt)}:${trigger}`;
+        const fireKey = `${active.id}:${DateTime.toEpochMillis(startedAt)}:${trigger}`;
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
-        const prompt = automationPrompt(task);
+        // Dispatch from the fresh row so prompt/model/binding edits made
+        // after the poll read are honoured.
+        const prompt = automationPrompt(active);
 
         // Effect.exit (not Effect.result) so defects and interruptions in the
         // dispatch are also captured and recorded as a failed run instead of
         // aborting before markCompleted.
         const result =
-          task.threadId === null
+          active.threadId === null
             ? yield* Effect.exit(
                 threadLaunch.launch({
                   commandId,
-                  projectId: task.projectId,
-                  title: task.title,
-                  modelSelection: task.modelSelection,
-                  runtimeMode: task.runtimeMode,
-                  interactionMode: task.interactionMode,
-                  workspaceStrategy: task.workspaceStrategy,
+                  projectId: active.projectId,
+                  title: active.title,
+                  modelSelection: active.modelSelection,
+                  runtimeMode: active.runtimeMode,
+                  interactionMode: active.interactionMode,
+                  workspaceStrategy: active.workspaceStrategy,
                   initialMessage: {
                     messageId,
                     text: prompt,
                     attachments: [],
                   },
-                  createdBy: task.createdBy,
-                  creationSource: task.creationSource,
+                  createdBy: active.createdBy,
+                  creationSource: active.creationSource,
                 }),
               )
             : yield* Effect.exit(
                 threadManagement.sendToThread({
-                  projectId: task.projectId,
+                  projectId: active.projectId,
                   commandId,
-                  threadId: ThreadId.make(task.threadId),
+                  threadId: ThreadId.make(active.threadId),
                   messageId,
                   text: prompt,
                   attachments: [],
-                  modelSelection: task.modelSelection,
+                  modelSelection: active.modelSelection,
                   mode: "auto",
-                  createdBy: task.createdBy,
-                  creationSource: task.creationSource,
+                  createdBy: active.createdBy,
+                  creationSource: active.creationSource,
                 }),
               );
 
