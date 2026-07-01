@@ -437,7 +437,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
       provider: driver("nativePackageTool"),
       packageName: "@example/native-package-tool",
       update: {
-        command: "/custom/.local/bin/native-package-tool update",
+        command: "native-package-tool update",
 
         executable: "/custom/.local/bin/native-package-tool",
 

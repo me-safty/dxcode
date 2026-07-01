@@ -183,7 +183,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(work!.snapshot.maintenanceCapabilities).toMatchObject({
         packageName: "@openai/codex",
         update: {
-          command: "/home/julius/codex-home/packages/standalone/current/codex update",
+          command: "codex update",
           executable: "/home/julius/codex-home/packages/standalone/current/codex",
           args: ["update"],
           lockKey: "codex-native",

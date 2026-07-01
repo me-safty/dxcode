@@ -97,6 +97,7 @@ function nonEmptyString(value: unknown): string | null {
 export function makeProviderMaintenanceCapabilities(input: {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
+  readonly updateCommand?: string | null;
   readonly updateExecutable: string | null;
   readonly updateArgs: ReadonlyArray<string>;
   readonly updateLockKey: string | null;
@@ -105,7 +106,7 @@ export function makeProviderMaintenanceCapabilities(input: {
     input.updateExecutable === null || input.updateLockKey === null
       ? null
       : {
-          command: [input.updateExecutable, ...input.updateArgs].join(" "),
+          command: input.updateCommand ?? [input.updateExecutable, ...input.updateArgs].join(" "),
           executable: input.updateExecutable,
           args: input.updateArgs,
           lockKey: input.updateLockKey,
@@ -200,6 +201,7 @@ function makeHomebrewProviderMaintenanceCapabilities(
 function makeNativeProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
   options?: {
+    readonly updateCommand?: string;
     readonly updateExecutable?: string;
   },
 ): ProviderMaintenanceCapabilities | null {
@@ -210,6 +212,7 @@ function makeNativeProviderMaintenanceCapabilities(
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
+    updateCommand: options?.updateCommand ?? null,
     updateExecutable: options?.updateExecutable ?? definition.nativeUpdate.defaultExecutable,
     updateArgs: definition.nativeUpdate.args,
     updateLockKey: definition.nativeUpdate.lockKey,
@@ -291,6 +294,7 @@ export function resolvePackageManagedProviderMaintenance(
     ) {
       return (
         makeNativeProviderMaintenanceCapabilities(definition, {
+          updateCommand: [nativeUpdate.defaultExecutable, ...nativeUpdate.args].join(" "),
           updateExecutable: hasPathSeparator(binaryPath)
             ? resolvedCommandPath
             : nativeUpdate.defaultExecutable,
