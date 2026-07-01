@@ -161,7 +161,10 @@ export const layer = Layer.effect(
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const activeRuns = yield* Ref.make<ReadonlySet<ScheduledTaskId>>(new Set());
-    const changesPubSub = yield* PubSub.unbounded<void>();
+    // Sliding(1) coalesces the dirty-signal: every notification triggers a
+    // full list() re-emit anyway, so a slow subscriber only ever needs the
+    // latest signal — an unbounded backlog would just grow memory.
+    const changesPubSub = yield* PubSub.sliding<void>(1);
     const notifyChanged = PubSub.publish(changesPubSub, undefined).pipe(Effect.asVoid);
 
     const selectAllRows = () => sql<ScheduledTaskRow>`
@@ -387,11 +390,17 @@ export const layer = Layer.effect(
     const releaseStuckRun = (task: ScheduledTask, message: string) =>
       Effect.gen(function* () {
         const now = yield* localNow;
+        // Compute the next occurrence from the current row so a schedule
+        // edited while the run was in flight is honoured; fall back to the
+        // run's snapshot only if the re-read itself fails.
+        const reread = yield* Effect.result(findTask(task.id));
+        if (Result.isSuccess(reread) && reread.success === null) return; // deleted — nothing to release
+        const source = Result.isSuccess(reread) && reread.success !== null ? reread.success : task;
         yield* sql`
           UPDATE scheduled_tasks
           SET last_run_status = 'failed',
               last_run_error = ${message},
-              next_run_at = ${nextRunAt(task, now)},
+              next_run_at = ${nextRunAt(source, now)},
               updated_at = ${iso(now)},
               run_count = run_count + 1
           WHERE task_id = ${task.id} AND last_run_status = 'running'
@@ -431,7 +440,14 @@ export const layer = Layer.effect(
         // state. The task may have been deleted, paused, or postponed since
         // the poll loaded it — none of those may fire.
         const active = yield* findTask(task.id);
-        if (active === null) return task;
+        if (active === null) {
+          // A manual run on a just-deleted task must fail loudly, not report
+          // a successful run that never dispatched.
+          if (trigger === "manual") {
+            return yield* taskError("Schedule task not found.", { taskId: task.id });
+          }
+          return task;
+        }
         if (
           trigger === "scheduled" &&
           (!active.enabled ||
