@@ -622,7 +622,7 @@ const makeWsRpcLayer = (
             Stream.fromSubscription(subscription).pipe(
               Stream.buffer({
                 capacity: ORCHESTRATION_DOMAIN_EVENT_SUBSCRIPTION_BUFFER_CAPACITY,
-                strategy: "sliding",
+                strategy: "suspend",
               }),
             ),
           ),
