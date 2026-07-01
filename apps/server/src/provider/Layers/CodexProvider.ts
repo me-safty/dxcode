@@ -310,7 +310,7 @@ export const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> => {
         quoted = true;
       } else if (char === "\\" && quote === '"') {
         const next = input[index + 1];
-        if (next !== undefined) {
+        if (next !== undefined && ['"', "\\", "$", "`"].includes(next)) {
           current += next;
           index++;
         } else {
@@ -333,7 +333,7 @@ export const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> => {
       }
     } else if (char === "\\") {
       const next = input[index + 1];
-      if (next !== undefined) {
+      if (next !== undefined && /\s/.test(next)) {
         current += next;
         index++;
       } else {

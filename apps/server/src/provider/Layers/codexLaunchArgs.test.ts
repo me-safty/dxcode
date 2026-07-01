@@ -38,6 +38,13 @@ describe("codexLaunchArgv", () => {
       ["--config", "model=gpt 5", "--enable", "foo bar", "--config=profile=work profile"],
     );
   });
+
+  it("preserves literal backslashes in path values", () => {
+    NodeAssert.deepStrictEqual(
+      codexLaunchArgv(String.raw`--config cacheDir=C:\Users\me --config "quoted=C:\Users\me"`),
+      ["--config", String.raw`cacheDir=C:\Users\me`, "--config", String.raw`quoted=C:\Users\me`],
+    );
+  });
 });
 
 describe("codexAppServerArgs", () => {
