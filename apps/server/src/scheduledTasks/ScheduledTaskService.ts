@@ -64,24 +64,22 @@ interface ScheduledTaskRow {
   readonly run_count: number;
 }
 
-export interface ScheduledTaskServiceShape {
-  readonly list: () => Effect.Effect<ScheduledTaskListResult, ScheduledTaskError>;
-  /** Emits the full task list on subscribe and again after every change (CRUD, run transitions, reschedules). */
-  readonly subscribeList: () => Stream.Stream<ScheduledTaskListResult, ScheduledTaskError>;
-  readonly upsert: (
-    input: ScheduledTaskUpsertInput,
-  ) => Effect.Effect<ScheduledTaskMutationResult, ScheduledTaskError>;
-  readonly delete: (
-    input: ScheduledTaskDeleteInput,
-  ) => Effect.Effect<ScheduledTaskDeleteResult, ScheduledTaskError>;
-  readonly runNow: (
-    input: ScheduledTaskRunNowInput,
-  ) => Effect.Effect<ScheduledTaskRunNowResult, ScheduledTaskError>;
-}
-
 export class ScheduledTaskService extends Context.Service<
   ScheduledTaskService,
-  ScheduledTaskServiceShape
+  {
+    readonly list: () => Effect.Effect<ScheduledTaskListResult, ScheduledTaskError>;
+    /** Emits the full task list on subscribe and again after every change (CRUD, run transitions, reschedules). */
+    readonly subscribeList: () => Stream.Stream<ScheduledTaskListResult, ScheduledTaskError>;
+    readonly upsert: (
+      input: ScheduledTaskUpsertInput,
+    ) => Effect.Effect<ScheduledTaskMutationResult, ScheduledTaskError>;
+    readonly delete: (
+      input: ScheduledTaskDeleteInput,
+    ) => Effect.Effect<ScheduledTaskDeleteResult, ScheduledTaskError>;
+    readonly runNow: (
+      input: ScheduledTaskRunNowInput,
+    ) => Effect.Effect<ScheduledTaskRunNowResult, ScheduledTaskError>;
+  }
 >()("t3/scheduledTasks/ScheduledTaskService") {}
 
 function taskError(message: string, input?: { taskId?: ScheduledTaskId; cause?: unknown }) {
@@ -568,13 +566,13 @@ export const layer = Layer.effect(
       Effect.forkScoped,
     );
 
-    const list: ScheduledTaskServiceShape["list"] = () =>
+    const list: ScheduledTaskService["Service"]["list"] = () =>
       listRows().pipe(
         Effect.map((tasks) => ({ tasks })),
         Effect.mapError((cause) => taskError("Could not list schedule tasks.", { cause })),
       );
 
-    const subscribeList: ScheduledTaskServiceShape["subscribeList"] = () =>
+    const subscribeList: ScheduledTaskService["Service"]["subscribeList"] = () =>
       Stream.unwrap(
         Effect.gen(function* () {
           // Subscribe before taking the snapshot so a change landing between
@@ -587,7 +585,7 @@ export const layer = Layer.effect(
         }),
       );
 
-    const upsert: ScheduledTaskServiceShape["upsert"] = (input) =>
+    const upsert: ScheduledTaskService["Service"]["upsert"] = (input) =>
       Effect.gen(function* () {
         const now = yield* localNow;
         const uuid =
@@ -634,10 +632,10 @@ export const layer = Layer.effect(
         return { task };
       });
 
-    const deleteTask: ScheduledTaskServiceShape["delete"] = (input) =>
+    const deleteTask: ScheduledTaskService["Service"]["delete"] = (input) =>
       deleteRow(input.id).pipe(Effect.andThen(notifyChanged), Effect.as({ id: input.id }));
 
-    const runNow: ScheduledTaskServiceShape["runNow"] = (input: ScheduledTaskRunNowInput) =>
+    const runNow: ScheduledTaskService["Service"]["runNow"] = (input: ScheduledTaskRunNowInput) =>
       Effect.gen(function* () {
         const task = yield* loadTask(input.id);
         const next = yield* runTask(task, "manual").pipe(
