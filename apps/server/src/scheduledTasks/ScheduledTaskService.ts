@@ -750,17 +750,23 @@ export const layer = Layer.effect(
         if (existing.enabled === input.enabled) return { task: existing };
         const now = yield* localNow;
         const next = nextRunAt({ enabled: input.enabled, schedule: existing.schedule }, now);
-        yield* sql`
+        // RETURNING so a task deleted between the load and this UPDATE is a
+        // visible not-found error, not a false success.
+        const updated = yield* sql<{ task_id: string }>`
           UPDATE scheduled_tasks
           SET enabled = ${input.enabled ? 1 : 0},
               next_run_at = ${next},
               updated_at = ${iso(now)}
           WHERE task_id = ${input.id}
+          RETURNING task_id
         `.pipe(
           Effect.mapError((cause) =>
             taskError("Could not update schedule task.", { taskId: input.id, cause }),
           ),
         );
+        if (updated.length === 0) {
+          return yield* taskError("Schedule task not found.", { taskId: input.id });
+        }
         yield* notifyChanged;
         return {
           task: { ...existing, enabled: input.enabled, nextRunAt: next, updatedAt: iso(now) },
