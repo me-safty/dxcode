@@ -55,9 +55,9 @@ describe("scheduled task schedule calculation", () => {
     // A run hours past its slot is skipped and rescheduled instead.
     expect(isMissedFixedTimeRun(fixedTime, dueAt, pastGrace)).toBe(true);
     // Interval schedules always catch up with a single run, never skip.
-    expect(
-      isMissedFixedTimeRun({ type: "interval", everyMs: 60_000 }, dueAt, pastGrace),
-    ).toBe(false);
+    expect(isMissedFixedTimeRun({ type: "interval", everyMs: 60_000 }, dueAt, pastGrace)).toBe(
+      false,
+    );
   });
 
   it("compares schedules structurally", () => {
@@ -106,7 +106,10 @@ describe("scheduled task schedule calculation", () => {
       ),
     ).toBe(false);
     expect(
-      isSameSchedule({ type: "interval", everyMs: 60_000 }, { type: "fixed_time", timeOfDay: "09:00" }),
+      isSameSchedule(
+        { type: "interval", everyMs: 60_000 },
+        { type: "fixed_time", timeOfDay: "09:00" },
+      ),
     ).toBe(false);
   });
 });

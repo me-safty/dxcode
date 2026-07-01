@@ -147,10 +147,7 @@ export function ThreadAutomationsPanel(props: {
 
       <ul className="m-0 list-none p-0">
         {boundTasks.map((task) => (
-          <li
-            key={task.id}
-            className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5"
-          >
+          <li key={task.id} className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5">
             <CalendarClockIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
