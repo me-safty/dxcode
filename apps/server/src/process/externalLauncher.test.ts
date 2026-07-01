@@ -191,6 +191,51 @@ it.effect("launches an installed terminal with cwd arguments", () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.effect("launches Ghostty on macOS through the app bundle", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const homeDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-ghostty-home-" });
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-terminals-" });
+    const openPath = path.join(binDir, "open");
+    yield* fileSystem.makeDirectory(path.join(homeDir, "Applications", "Ghostty.app"), {
+      recursive: true,
+    });
+    yield* fileSystem.writeFileString(openPath, "#!/bin/sh\n");
+    yield* fileSystem.chmod(openPath, 0o755);
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      yield* launcher.launchTerminal({
+        terminal: "ghostty",
+        cwd: "/Users/me/workspace with spaces",
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "darwin",
+          env: { HOME: homeDir, PATH: binDir },
+          resolveExecutable: (command) => (command === "open" ? openPath : command),
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(spawned.command, "open");
+    assert.deepEqual(spawned.args, [
+      "-na",
+      "Ghostty.app",
+      "--args",
+      "--working-directory=/Users/me/workspace with spaces",
+    ]);
+    assert.equal(spawned.options.detached, true);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("discovers terminals through the service API", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;

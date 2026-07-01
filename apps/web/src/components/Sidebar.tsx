@@ -2765,11 +2765,11 @@ function SidebarBrand() {
       to="/"
     >
       <MognetBrandMark />
-      <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
-        Mognet
+      <span className="truncate text-sm font-medium tracking-normal text-muted-foreground">
+        mognet
       </span>
       {stageLabel ? (
-        <span className="sidebar-brand-stage shrink-0 items-center whitespace-nowrap rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+        <span className="sidebar-brand-stage shrink-0 items-center whitespace-nowrap rounded-[5px] border border-border/70 bg-muted/50 px-1.5 py-0.5 font-mono text-[8px] font-medium uppercase tracking-[0.08em] text-muted-foreground/70">
           {stageLabel}
         </span>
       ) : null}
@@ -2789,32 +2789,12 @@ function useSidebarStageLabel() {
 
 function MognetBrandMark() {
   return (
-    <svg
+    <span
       aria-hidden="true"
-      className="size-5 shrink-0 overflow-visible"
-      fill="none"
-      focusable="false"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
+      className="shrink-0 font-mono text-[13px] font-medium leading-none tracking-normal text-primary"
     >
-      <path
-        d="M6.1 15.7c0-1.48.35-2.8 1.02-3.88L5.72 9.2c-.26-.48.18-1.02.7-.86l2.92.87A6.04 6.04 0 0 1 12 8.57c.96 0 1.86.22 2.66.64l2.92-.87c.52-.16.96.38.7.86l-1.4 2.62c.67 1.08 1.02 2.4 1.02 3.88 0 3.05-2.2 4.66-5.9 4.66s-5.9-1.61-5.9-4.66Z"
-        fill="#f4efe4"
-      />
-      <path
-        d="M12.08 8.7c1.02-1.74.96-3.1.08-4.26"
-        stroke="#f4efe4"
-        strokeLinecap="round"
-        strokeWidth="1.7"
-      />
-      <circle cx="11.96" cy="4.18" fill="#f87171" r="1.58" />
-      <path
-        d="M8.18 4.72a5.72 5.72 0 0 1 7.64 0M6.56 2.9a8.12 8.12 0 0 1 10.88 0"
-        stroke="#2dd4bf"
-        strokeLinecap="round"
-        strokeWidth="1.35"
-      />
-    </svg>
+      ~ $
+    </span>
   );
 }
 

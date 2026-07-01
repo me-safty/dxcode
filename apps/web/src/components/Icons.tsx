@@ -481,6 +481,103 @@ export const Zed: Icon = (props) => {
   );
 };
 
+export const TerminalAppIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#1F2937" />
+    <rect x="13" y="18" width="74" height="56" rx="8" fill="#111827" />
+    <path d="M28 38L40 50L28 62" stroke="#7DD3FC" strokeWidth="7" strokeLinecap="round" />
+    <path d="M48 62H70" stroke="#A7F3D0" strokeWidth="7" strokeLinecap="round" />
+  </svg>
+);
+
+export const ITermIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#2563EB" />
+    <rect x="15" y="19" width="70" height="58" rx="9" fill="#0B1020" />
+    <path d="M31 39L42 50L31 61" stroke="#E5E7EB" strokeWidth="7" strokeLinecap="round" />
+    <path d="M51 61H69" stroke="#60A5FA" strokeWidth="7" strokeLinecap="round" />
+  </svg>
+);
+
+export const GhosttyIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#111111" />
+    <path
+      d="M50 17C32.7 17 22 29.4 22 49.2V73c0 5 5.8 7.8 9.7 4.7L39 72l7.3 5.7a6 6 0 0 0 7.4 0L61 72l7.3 5.7C72.2 80.8 78 78 78 73V49.2C78 29.4 67.3 17 50 17Z"
+      fill="#F4F0E8"
+    />
+    <circle cx="39" cy="46" r="5" fill="#111111" />
+    <circle cx="61" cy="46" r="5" fill="#111111" />
+    <path d="M43 60C46.7 63 53.3 63 57 60" stroke="#111111" strokeWidth="5" strokeLinecap="round" />
+  </svg>
+);
+
+export const WarpIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#5B5CF6" />
+    <path
+      d="M21 31H35L43 58L52 31H64L73 58L81 31H91L77 73H64L57.5 51L50 73H37L21 31Z"
+      fill="#F8FAFC"
+    />
+  </svg>
+);
+
+export const WezTermIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#1E293B" />
+    <path d="M58 11L25 56H49L42 89L76 43H52L58 11Z" fill="#FBBF24" />
+    <path d="M25 33H15V76H37" stroke="#38BDF8" strokeWidth="7" strokeLinecap="round" />
+  </svg>
+);
+
+export const AlacrittyIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#111827" />
+    <path d="M50 15L83 80H68L61 66H39L32 80H17L50 15Z" fill="#F97316" />
+    <path d="M45 55H55L50 40L45 55Z" fill="#111827" />
+  </svg>
+);
+
+export const KittyIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#3B0764" />
+    <path d="M25 32L36 19L47 32H53L64 19L75 32V76H25V32Z" fill="#F5D0FE" />
+    <rect x="34" y="44" width="32" height="18" rx="4" fill="#581C87" />
+    <path d="M40 53H60" stroke="#F5D0FE" strokeWidth="5" strokeLinecap="round" />
+  </svg>
+);
+
+export const WindowsTerminalIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#111827" />
+    <rect x="16" y="20" width="68" height="52" rx="8" fill="#0F172A" />
+    <path d="M31 38L42 49L31 60" stroke="#22C55E" strokeWidth="7" strokeLinecap="round" />
+    <path d="M50 60H68" stroke="#E5E7EB" strokeWidth="7" strokeLinecap="round" />
+    <rect x="16" y="78" width="15" height="15" fill="#F25022" />
+    <rect x="34" y="78" width="15" height="15" fill="#7FBA00" />
+    <rect x="52" y="78" width="15" height="15" fill="#00A4EF" />
+    <rect x="70" y="78" width="15" height="15" fill="#FFB900" />
+  </svg>
+);
+
+export const GnomeTerminalIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#4C1D95" />
+    <rect x="16" y="22" width="68" height="56" rx="9" fill="#111827" />
+    <path d="M31 40L42 51L31 62" stroke="#A78BFA" strokeWidth="7" strokeLinecap="round" />
+    <path d="M51 62H68" stroke="#F9FAFB" strokeWidth="7" strokeLinecap="round" />
+  </svg>
+);
+
+export const KonsoleIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 100 100" fill="none">
+    <rect width="100" height="100" rx="22" fill="#0E7490" />
+    <rect x="15" y="21" width="70" height="58" rx="9" fill="#ECFEFF" />
+    <path d="M31 39L43 51L31 63" stroke="#0E7490" strokeWidth="7" strokeLinecap="round" />
+    <path d="M53 63H70" stroke="#164E63" strokeWidth="7" strokeLinecap="round" />
+  </svg>
+);
+
 export const OpenAI: Icon = ({ className, ...props }) => (
   <svg
     {...props}
