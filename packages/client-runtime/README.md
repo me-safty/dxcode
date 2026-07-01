@@ -1,7 +1,7 @@
 # Client Runtime
 
-Shared client behavior for web and mobile. Public APIs are organized by package
-subpath. The package intentionally has no root export.
+Shared client behavior for the web renderer and desktop shell. Public APIs are
+organized by package subpath. The package intentionally has no root export.
 
 ## Public subpaths
 
@@ -14,15 +14,14 @@ subpath. The package intentionally has no root export.
 | `operations`          | Multi-step application workflows                                 |
 | `operations/projects` | Multi-step project creation workflows                            |
 | `platform`            | Platform capability and persistence service contracts            |
-| `relay`               | Managed relay API and environment discovery                      |
 | `rpc`                 | HTTP/RPC clients, protocol, sessions, and subscriptions          |
 | `state/<domain>`      | Focused shared state, retention, reducers, and Atom constructors |
 
 ## Dependency direction
 
 Platform applications provide `platform` services. `connection` composes those
-capabilities with `authorization`, `relay`, and `rpc` to supervise environment
-sessions. Independent `state` modules consume the connection registry and expose
+capabilities with `authorization` and `rpc` to supervise environment sessions.
+Independent `state` modules consume the connection registry and expose
 focused state or Atom constructors to application-owned runtimes.
 
 Applications should import the narrowest relevant subpath. There is no broad
