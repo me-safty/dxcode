@@ -299,7 +299,14 @@ const TERMINAL_LAUNCHERS: ReadonlyArray<TerminalLaunchDefinition> = [
   },
   {
     id: "ghostty",
-    platforms: ["darwin", "linux"],
+    platforms: ["darwin"],
+    commands: ["open"],
+    macAppBundleNames: ["Ghostty.app"],
+    resolveArgs: (cwd) => ["-na", "Ghostty.app", "--args", `--working-directory=${cwd}`],
+  },
+  {
+    id: "ghostty",
+    platforms: ["linux"],
     commands: ["ghostty"],
     resolveArgs: (cwd) => [`--working-directory=${cwd}`],
   },
@@ -434,10 +441,12 @@ const buildAvailableTerminals = Effect.fn("externalLauncher.buildAvailableTermin
   const available: ExternalTerminalId[] = [];
 
   for (const terminal of EXTERNAL_TERMINALS) {
-    const definition = TERMINAL_LAUNCHERS.find((candidate) => candidate.id === terminal.id);
-    if (!definition) continue;
-    if (yield* isTerminalDefinitionAvailable(definition, platform, env)) {
-      available.push(definition.id);
+    const definitions = TERMINAL_LAUNCHERS.filter((candidate) => candidate.id === terminal.id);
+    for (const definition of definitions) {
+      if (yield* isTerminalDefinitionAvailable(definition, platform, env)) {
+        available.push(terminal.id);
+        break;
+      }
     }
   }
 
@@ -543,12 +552,13 @@ const resolveTerminalLaunch = Effect.fn("resolveTerminalLaunch")(function* (
     "externalLauncher.platform": platform,
   });
 
-  const definition = TERMINAL_LAUNCHERS.find((terminal) => terminal.id === input.terminal);
-  if (!definition) {
+  const definitions = TERMINAL_LAUNCHERS.filter((terminal) => terminal.id === input.terminal);
+  if (definitions.length === 0) {
     return yield* new ExternalLauncherUnknownTerminalError({ terminal: input.terminal });
   }
 
-  if (!definition.platforms.includes(platform)) {
+  const definition = definitions.find((terminal) => terminal.platforms.includes(platform));
+  if (!definition) {
     return yield* new ExternalLauncherUnsupportedTerminalError({ terminal: input.terminal });
   }
 

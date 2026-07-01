@@ -255,7 +255,7 @@ export default function ProjectScriptsControl({
             <TooltipTrigger
               render={
                 <Button
-                  size="xs"
+                  size="icon-xs"
                   variant="outline"
                   aria-label={`Run ${primaryScript.name}`}
                   onClick={() => onRunScript(primaryScript)}
@@ -263,9 +263,6 @@ export default function ProjectScriptsControl({
               }
             >
               <ScriptIcon icon={primaryScript.icon} />
-              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                {primaryScript.name}
-              </span>
             </TooltipTrigger>
             <TooltipPopup side="top">Run {primaryScript.name}</TooltipPopup>
           </Tooltip>
@@ -331,13 +328,15 @@ export default function ProjectScriptsControl({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button size="xs" variant="outline" aria-label="Add action" onClick={openAddDialog} />
+              <Button
+                size="icon-xs"
+                variant="outline"
+                aria-label="Add action"
+                onClick={openAddDialog}
+              />
             }
           >
             <PlusIcon className="size-3.5" />
-            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              Add action
-            </span>
           </TooltipTrigger>
           <TooltipPopup side="top">Add action</TooltipPopup>
         </Tooltip>

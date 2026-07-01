@@ -1658,7 +1658,8 @@ export default function GitActionsControl({
       {!isRepo ? (
         <Button
           variant="outline"
-          size="xs"
+          size="icon-xs"
+          aria-label={initAction.isPending ? "Initializing Git" : "Initialize Git"}
           disabled={initAction.isPending}
           onClick={() => {
             void (async () => {
@@ -1679,9 +1680,6 @@ export default function GitActionsControl({
           }}
         >
           <GitBranchPlusIcon className="size-3.5" aria-hidden />
-          <span className="ml-0.5">
-            {initAction.isPending ? "Initializing..." : "Initialize Git"}
-          </span>
         </Button>
       ) : (
         <Group aria-label="Git actions" className="shrink-0">
@@ -1692,8 +1690,9 @@ export default function GitActionsControl({
                 render={
                   <Button
                     aria-disabled="true"
+                    aria-label={quickAction.label}
                     className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
-                    size="xs"
+                    size="icon-xs"
                     variant="outline"
                   />
                 }
@@ -1702,9 +1701,6 @@ export default function GitActionsControl({
                   quickAction={quickAction}
                   SourceControlIcon={SourceControlIcon}
                 />
-                <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                  {quickAction.label}
-                </span>
               </PopoverTrigger>
               <PopoverPopup tooltipStyle side="bottom" align="start">
                 {quickActionDisabledReason}
@@ -1713,14 +1709,12 @@ export default function GitActionsControl({
           ) : (
             <Button
               variant="outline"
-              size="xs"
+              size="icon-xs"
+              aria-label={quickAction.label}
               disabled={isGitActionRunning || quickAction.disabled}
               onClick={runQuickAction}
             >
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
-              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                {quickAction.label}
-              </span>
             </Button>
           )}
           <GroupSeparator className="hidden @3xl/header-actions:block" />
