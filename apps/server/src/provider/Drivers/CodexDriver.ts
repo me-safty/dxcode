@@ -67,7 +67,10 @@ function isCodexStandaloneCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
   return (
     normalized.includes("/packages/standalone/") &&
-    (normalized.endsWith("/bin/codex") || normalized.endsWith("/bin/codex.exe"))
+    (normalized.endsWith("/bin/codex") ||
+      normalized.endsWith("/bin/codex.exe") ||
+      normalized.endsWith("/packages/standalone/current/codex") ||
+      normalized.endsWith("/packages/standalone/current/codex.exe"))
   );
 }
 
