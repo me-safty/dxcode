@@ -204,7 +204,7 @@ export function NewTaskDraftScreen(props: {
         subactions: [
           { id: "options:runtime:approval-required", title: "Approve actions" },
           { id: "options:runtime:auto-accept-edits", title: "Auto-accept edits" },
-          ...(flow.selectedModelOption?.providerDriver === "claudeAgent"
+          ...(flow.selectedModelOption?.supportsAutoRuntimeMode
             ? [{ id: "options:runtime:auto", title: "Auto" }]
             : []),
           { id: "options:runtime:full-access", title: "Full access" },
@@ -237,7 +237,7 @@ export function NewTaskDraftScreen(props: {
     [
       flow.interactionMode,
       flow.runtimeMode,
-      flow.selectedModelOption?.providerDriver,
+      flow.selectedModelOption?.supportsAutoRuntimeMode,
       providerOptionDescriptors,
     ],
   );

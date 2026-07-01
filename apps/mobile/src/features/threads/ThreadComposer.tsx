@@ -558,7 +558,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         subactions: [
           { id: "options:runtime:approval-required", title: "Approve actions" },
           { id: "options:runtime:auto-accept-edits", title: "Auto-accept edits" },
-          ...(currentModelOption?.providerDriver === "claudeAgent"
+          ...(currentModelOption?.supportsAutoRuntimeMode
             ? [{ id: "options:runtime:auto", title: "Auto" }]
             : []),
           { id: "options:runtime:full-access", title: "Full access" },
@@ -590,7 +590,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     ],
     [
       currentInteractionMode,
-      currentModelOption?.providerDriver,
+      currentModelOption?.supportsAutoRuntimeMode,
       currentRuntimeMode,
       providerOptionDescriptors,
     ],
