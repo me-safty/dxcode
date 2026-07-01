@@ -17,6 +17,7 @@ import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { VoiceModeView } from "~/components/voice/VoiceModeView";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
 function ChatRouteGlobalShortcuts() {
@@ -153,6 +154,7 @@ function ChatRouteLayout() {
     <>
       <ChatRouteGlobalShortcuts />
       <Outlet />
+      <VoiceModeView />
     </>
   );
 }

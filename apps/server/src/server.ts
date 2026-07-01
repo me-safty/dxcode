@@ -14,6 +14,9 @@ import {
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { sttRouteLayer, ttsRouteLayer } from "./speech/speechRoutes.ts";
+import * as SpeechToText from "./speech/SpeechToText.ts";
+import * as TextToSpeech from "./speech/TextToSpeech.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -239,6 +242,14 @@ const CheckpointingLayerLive = Layer.empty.pipe(
 
 const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
 
+// Local voice mode: whisper.cpp (STT) + Kokoro (TTS). Provides `ProcessRunner`
+// internally; its remaining requirements (ServerSettingsService plus the
+// platform FileSystem/Path/ChildProcessSpawner) are satisfied where this layer
+// is merged into the runtime dependency graph below.
+const SpeechLayerLive = Layer.mergeAll(SpeechToText.layer, TextToSpeech.layer).pipe(
+  Layer.provide(ProcessRunner.layer),
+);
+
 const TerminalLayerLive = TerminalManager.layer.pipe(
   Layer.provide(PtyAdapterLive),
   Layer.provide(PortScannerLayerLive),
@@ -312,7 +323,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // the rewritten registry reads snapshots off the instance registry and
   // no longer transitively provides it. Exposing it at the runtime level
   // keeps a single Live for all opencode consumers.
-  Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
+  // SpeechLayerLive is merged here (before ServerSettings) so its settings
+  // output flows into the speech services — later `provideMerge` entries feed
+  // earlier ones. Bundled with OpenCodeRuntime to stay within pipe's arg limit.
+  Layer.provideMerge(Layer.mergeAll(OpenCodeRuntime.OpenCodeRuntimeLive, SpeechLayerLive)),
   Layer.provideMerge(ServerSettings.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
@@ -356,6 +370,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     assetRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
+    sttRouteLayer,
+    ttsRouteLayer,
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(Layer.provide(PreviewAutomationBroker.layer), Layer.provide(browserApiCorsLayer));

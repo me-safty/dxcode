@@ -361,6 +361,107 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+// ── Local voice (speech-to-text + text-to-speech) ──────────────
+
+export const VoiceSubmitMode = Schema.Literals(["push-to-talk", "auto-silence"]);
+export type VoiceSubmitMode = typeof VoiceSubmitMode.Type;
+export const DEFAULT_VOICE_SUBMIT_MODE: VoiceSubmitMode = "push-to-talk";
+export const DEFAULT_SEND_PROMPT_CODEWORD = "send prompt";
+export const DEFAULT_KOKORO_VOICE = "af_heart";
+
+/**
+ * Local, self-hosted voice mode. Speech-to-text runs whisper.cpp and
+ * text-to-speech runs Kokoro, both as native processes on the server. The
+ * feature is OFF by default and only surfaces in the UI once enabled AND the
+ * required binary/model paths are set. Modeled on the provider binary-path
+ * settings above so it validates and renders through the same form machinery.
+ */
+export const SpeechSettings = makeProviderSettingsSchema(
+  {
+    sttEnabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Enable speech-to-text",
+        description: "Transcribe microphone audio locally with whisper.cpp.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
+    ttsEnabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Enable text-to-speech",
+        description: "Speak assistant replies aloud locally with Kokoro.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
+    whisperBinaryPath: makeBinaryPathSetting("whisper-cli").pipe(
+      Schema.annotateKey({
+        title: "whisper.cpp binary path",
+        description: "Path to the whisper.cpp `whisper-cli` (or `main`) binary.",
+        providerSettingsForm: { placeholder: "whisper-cli", clearWhenEmpty: "omit" },
+      }),
+    ),
+    whisperModelPath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "whisper.cpp model path",
+        description: "Path to a ggml whisper model (e.g. ggml-base.en.bin).",
+        providerSettingsForm: { placeholder: "/path/to/ggml-base.en.bin", clearWhenEmpty: "omit" },
+      }),
+    ),
+    kokoroCommand: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Kokoro command",
+        description:
+          "Command (or adapter script path) that reads text on stdin and writes a WAV to the output path argument.",
+        providerSettingsForm: { placeholder: "python /path/to/kokoro_adapter.py", clearWhenEmpty: "omit" },
+      }),
+    ),
+    kokoroModelPath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Kokoro model path",
+        description: "Optional path to the Kokoro model/voices file passed to the adapter.",
+        providerSettingsForm: { placeholder: "/path/to/kokoro.onnx", clearWhenEmpty: "omit" },
+      }),
+    ),
+    kokoroVoice: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed(DEFAULT_KOKORO_VOICE)),
+      Schema.annotateKey({
+        title: "Kokoro voice",
+        description: "Default Kokoro voice name.",
+        providerSettingsForm: { placeholder: DEFAULT_KOKORO_VOICE, clearWhenEmpty: "omit" },
+      }),
+    ),
+    sendPromptCodeword: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed(DEFAULT_SEND_PROMPT_CODEWORD)),
+      Schema.annotateKey({
+        title: "Send-prompt codeword",
+        description: "Say this phrase to submit the current transcript.",
+        providerSettingsForm: { placeholder: DEFAULT_SEND_PROMPT_CODEWORD, clearWhenEmpty: "omit" },
+      }),
+    ),
+    submitMode: VoiceSubmitMode.pipe(
+      Schema.withDecodingDefault(Effect.succeed(DEFAULT_VOICE_SUBMIT_MODE)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: [
+      "sttEnabled",
+      "ttsEnabled",
+      "whisperBinaryPath",
+      "whisperModelPath",
+      "kokoroCommand",
+      "kokoroModelPath",
+      "kokoroVoice",
+      "sendPromptCodeword",
+    ],
+  },
+);
+export type SpeechSettings = typeof SpeechSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
@@ -409,6 +510,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  speech: SpeechSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -514,6 +616,19 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  speech: Schema.optionalKey(
+    Schema.Struct({
+      sttEnabled: Schema.optionalKey(Schema.Boolean),
+      ttsEnabled: Schema.optionalKey(Schema.Boolean),
+      whisperBinaryPath: Schema.optionalKey(TrimmedString),
+      whisperModelPath: Schema.optionalKey(TrimmedString),
+      kokoroCommand: Schema.optionalKey(TrimmedString),
+      kokoroModelPath: Schema.optionalKey(TrimmedString),
+      kokoroVoice: Schema.optionalKey(TrimmedString),
+      sendPromptCodeword: Schema.optionalKey(TrimmedString),
+      submitMode: Schema.optionalKey(VoiceSubmitMode),
     }),
   ),
   providers: Schema.optionalKey(
