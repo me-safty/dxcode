@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
@@ -614,21 +615,27 @@ const makeWsRpcLayer = (
 
       const liveStreamBufferCapacity = 1_024;
 
-      const bufferLiveStream = <A>(stream: Stream.Stream<A, never, never>) =>
+      const bufferDomainEventStream = <A>(
+        makeStream: (events: Stream.Stream<OrchestrationEvent>) => Stream.Stream<A, never, never>,
+      ): Effect.Effect<Stream.Stream<A, never, never>, never, Scope.Scope> =>
         Effect.gen(function* () {
+          const subscription = yield* orchestrationEngine.subscribeDomainEvents;
           const queue = yield* Effect.acquireRelease(
             Queue.bounded<A>(liveStreamBufferCapacity),
             Queue.shutdown,
           );
-          yield* stream.pipe(
+          yield* makeStream(Stream.fromSubscription(subscription)).pipe(
             Stream.runForEach((item) => Queue.offer(queue, item).pipe(Effect.asVoid)),
             Effect.forkScoped,
           );
           return Stream.fromQueue(queue);
         });
 
-      const streamThreadDetailEvents = (threadId: ThreadId) =>
-        orchestrationEngine.streamDomainEvents.pipe(
+      const streamThreadDetailEvents = (
+        events: Stream.Stream<OrchestrationEvent>,
+        threadId: ThreadId,
+      ) =>
+        events.pipe(
           Stream.filter(
             (event) =>
               event.aggregateKind === "thread" &&
@@ -1092,8 +1099,8 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
             Effect.gen(function* () {
-              const bufferedLiveStream = yield* bufferLiveStream(
-                orchestrationEngine.streamDomainEvents.pipe(
+              const bufferedLiveStream = yield* bufferDomainEventStream((events) =>
+                events.pipe(
                   Stream.mapEffect(toShellStreamEvent),
                   Stream.flatMap((event) =>
                     Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
@@ -1149,8 +1156,8 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
-              const bufferedLiveStream = yield* bufferLiveStream(
-                streamThreadDetailEvents(input.threadId),
+              const bufferedLiveStream = yield* bufferDomainEventStream((events) =>
+                streamThreadDetailEvents(events, input.threadId),
               );
 
               const [threadDetail, snapshotSequence] = yield* Effect.all([

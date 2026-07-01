@@ -54,7 +54,6 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
-import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -681,6 +680,9 @@ const buildAppUnderTest = (options?: {
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 0 }),
           streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.flatMap(PubSub.unbounded<OrchestrationEvent>(), (pubsub) =>
+            PubSub.subscribe(pubsub),
+          ),
           ...options?.layers?.orchestrationEngine,
         }),
       ),
@@ -5586,8 +5588,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const now = "2026-01-01T00:00:00.000Z";
       const threadId = ThreadId.make("thread-racy-subscribe");
       const messageId = MessageId.make("message-racy-first-user");
+      const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+      const snapshotStarted = yield* Deferred.make<void>();
       const snapshotGate = yield* Deferred.make<void>();
-      const publishEvent = yield* Deferred.make<(event: OrchestrationEvent) => void>();
       const thread = {
         id: threadId,
         projectId: defaultProjectId,
@@ -5636,15 +5639,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         layers: {
           projectionSnapshotQuery: {
             getThreadDetailById: () =>
-              Deferred.await(snapshotGate).pipe(Effect.as(Option.some(thread))),
+              Deferred.succeed(snapshotStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(snapshotGate)),
+                Effect.as(Option.some(thread)),
+              ),
             getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 1 }),
           },
           orchestrationEngine: {
-            streamDomainEvents: Stream.callback<OrchestrationEvent>((queue) =>
-              Deferred.succeed(publishEvent, (event) => {
-                Queue.offerUnsafe(queue, event);
-              }),
-            ),
+            streamDomainEvents: Stream.fromPubSub(eventPubSub),
+            subscribeDomainEvents: PubSub.subscribe(eventPubSub),
           },
         },
       });
@@ -5656,7 +5659,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             const fiber = yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
               threadId,
             }).pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped);
-            (yield* Deferred.await(publishEvent))(userMessageEvent);
+            yield* Deferred.await(snapshotStarted);
+            yield* PubSub.publish(eventPubSub, userMessageEvent);
             yield* Deferred.succeed(snapshotGate, undefined);
             return Array.from(yield* Fiber.join(fiber));
           }),
@@ -5679,8 +5683,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const now = "2026-01-01T00:00:00.000Z";
       const projectId = ProjectId.make("project-racy-shell");
+      const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+      const snapshotStarted = yield* Deferred.make<void>();
       const snapshotGate = yield* Deferred.make<void>();
-      const publishEvent = yield* Deferred.make<(event: OrchestrationEvent) => void>();
       const project = {
         id: projectId,
         title: "Racy Shell Project",
@@ -5716,7 +5721,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         layers: {
           projectionSnapshotQuery: {
             getShellSnapshot: () =>
-              Deferred.await(snapshotGate).pipe(
+              Deferred.succeed(snapshotStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(snapshotGate)),
                 Effect.as({
                   snapshotSequence: 1,
                   projects: [],
@@ -5728,11 +5734,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.succeed(id === projectId ? Option.some(project) : Option.none()),
           },
           orchestrationEngine: {
-            streamDomainEvents: Stream.callback<OrchestrationEvent>((queue) =>
-              Deferred.succeed(publishEvent, (event) => {
-                Queue.offerUnsafe(queue, event);
-              }),
-            ),
+            streamDomainEvents: Stream.fromPubSub(eventPubSub),
+            subscribeDomainEvents: PubSub.subscribe(eventPubSub),
           },
         },
       });
@@ -5746,7 +5749,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Stream.runCollect,
               Effect.forkScoped,
             );
-            (yield* Deferred.await(publishEvent))(projectCreatedEvent);
+            yield* Deferred.await(snapshotStarted);
+            yield* PubSub.publish(eventPubSub, projectCreatedEvent);
             yield* Deferred.succeed(snapshotGate, undefined);
             return Array.from(yield* Fiber.join(fiber));
           }),
