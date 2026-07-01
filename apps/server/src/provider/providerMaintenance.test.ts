@@ -428,6 +428,26 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     });
   });
 
+  it("uses explicit native binary paths as the native update executable", () => {
+    expect(
+      nativePackageToolUpdate.resolve({
+        binaryPath: "/custom/.local/bin/native-package-tool",
+      }),
+    ).toEqual({
+      provider: driver("nativePackageTool"),
+      packageName: "@example/native-package-tool",
+      update: {
+        command: "/custom/.local/bin/native-package-tool update",
+
+        executable: "/custom/.local/bin/native-package-tool",
+
+        args: ["update"],
+
+        lockKey: "native-package-tool-native",
+      },
+    });
+  });
+
   it("switches scoped-package-tool to Homebrew updates when the binary resolves through Homebrew", () => {
     expect(
       scopedPackageToolUpdate.resolve({

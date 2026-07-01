@@ -135,7 +135,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
           displayName: "Codex (work)",
           enabled: false,
           config: makeCodexConfig({
-            binaryPath: "/home/julius/.codex/packages/standalone/current/bin/codex",
+            binaryPath: "/home/julius/codex-home/packages/standalone/current/bin/codex",
             homePath: "/home/julius/.codex",
             customModels: ["work-preview"],
           }),
@@ -183,8 +183,8 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(work!.snapshot.maintenanceCapabilities).toMatchObject({
         packageName: "@openai/codex",
         update: {
-          command: "codex update",
-          executable: "codex",
+          command: "/home/julius/codex-home/packages/standalone/current/bin/codex update",
+          executable: "/home/julius/codex-home/packages/standalone/current/bin/codex",
           args: ["update"],
           lockKey: "codex-native",
         },

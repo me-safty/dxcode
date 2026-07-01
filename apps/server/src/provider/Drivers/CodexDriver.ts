@@ -66,7 +66,7 @@ const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 function isCodexStandaloneCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
   return (
-    normalized.includes("/.codex/packages/standalone/") &&
+    normalized.includes("/packages/standalone/") &&
     (normalized.endsWith("/bin/codex") || normalized.endsWith("/bin/codex.exe"))
   );
 }
