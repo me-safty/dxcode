@@ -63,15 +63,36 @@ const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 const DRIVER_KIND = ProviderDriverKind.make("codex");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 
-function isCodexStandaloneCommandPath(commandPath: string): boolean {
+// The standalone installer's `current` entry is a symlink into `releases/`,
+// so the realpath of an on-PATH codex is the versioned binary — which sits
+// directly in the release dir, without a `bin/` segment.
+const CODEX_STANDALONE_RELEASE_BINARY_PATTERN =
+  /\/packages\/standalone\/releases\/[^/]+\/codex(?:\.exe)?$/;
+const CODEX_STANDALONE_ROOT_SEGMENT_PATTERN = /\/packages\/standalone\//i;
+
+export function isCodexStandaloneCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
   return (
     normalized.includes("/packages/standalone/") &&
     (normalized.endsWith("/bin/codex") ||
       normalized.endsWith("/bin/codex.exe") ||
       normalized.endsWith("/packages/standalone/current/codex") ||
-      normalized.endsWith("/packages/standalone/current/codex.exe"))
+      normalized.endsWith("/packages/standalone/current/codex.exe") ||
+      CODEX_STANDALONE_RELEASE_BINARY_PATTERN.test(normalized))
   );
+}
+
+export function deriveCodexStandaloneUpdateEnvironment(
+  commandPath: string,
+): Readonly<Record<string, string>> | null {
+  // `codex update` locates the standalone install via $CODEX_HOME, and the
+  // maintenance runner spawns with the server's own environment — pin
+  // CODEX_HOME to the install root the matched binary actually lives in.
+  const match = CODEX_STANDALONE_ROOT_SEGMENT_PATTERN.exec(commandPath.replaceAll("\\", "/"));
+  if (!match || match.index === 0) {
+    return null;
+  }
+  return { CODEX_HOME: commandPath.slice(0, match.index) };
 }
 
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
@@ -83,6 +104,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
     args: ["update"],
     lockKey: "codex-native",
     isCommandPath: isCodexStandaloneCommandPath,
+    deriveEnv: deriveCodexStandaloneUpdateEnvironment,
   },
 });
 

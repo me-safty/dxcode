@@ -48,6 +48,7 @@ export interface ProviderMaintenanceCommandAction {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   readonly lockKey: string;
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface ProviderMaintenanceCapabilityResolutionOptions {
@@ -72,6 +73,13 @@ export interface PackageManagedProviderMaintenanceDefinition {
     readonly args: ReadonlyArray<string>;
     readonly lockKey: string;
     readonly isCommandPath: (commandPath: string) => boolean;
+    /**
+     * Extra environment for the update spawn, derived from the command path
+     * that matched `isCommandPath`. The maintenance runner spawns with the
+     * server's own environment, so anything the updater needs beyond that
+     * (e.g. the install root of the matched binary) must be supplied here.
+     */
+    readonly deriveEnv?: (commandPath: string) => Readonly<Record<string, string>> | null;
   } | null;
 }
 
@@ -97,19 +105,20 @@ function nonEmptyString(value: unknown): string | null {
 export function makeProviderMaintenanceCapabilities(input: {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
-  readonly updateCommand?: string | null;
   readonly updateExecutable: string | null;
   readonly updateArgs: ReadonlyArray<string>;
   readonly updateLockKey: string | null;
+  readonly updateEnv?: Readonly<Record<string, string>> | null;
 }): ProviderMaintenanceCapabilities {
   const update =
     input.updateExecutable === null || input.updateLockKey === null
       ? null
       : {
-          command: input.updateCommand ?? [input.updateExecutable, ...input.updateArgs].join(" "),
+          command: [input.updateExecutable, ...input.updateArgs].join(" "),
           executable: input.updateExecutable,
           args: input.updateArgs,
           lockKey: input.updateLockKey,
+          ...(input.updateEnv ? { env: input.updateEnv } : {}),
         };
   return {
     provider: input.provider,
@@ -119,7 +128,19 @@ export function makeProviderMaintenanceCapabilities(input: {
 }
 
 function makeProviderMaintenanceUpdateActionKey(update: ProviderMaintenanceCommandAction): string {
-  return [update.lockKey, update.executable, ...update.args].join(" ");
+  // Opaque identity for "do these instances run the same update action?" —
+  // JSON keeps path/arg/env boundaries unambiguous where a plain join would
+  // alias (executables are user-controlled paths that may contain spaces).
+  return JSON.stringify([
+    update.lockKey,
+    update.executable,
+    update.args,
+    update.env
+      ? Object.entries(update.env).toSorted(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0,
+        )
+      : null,
+  ]);
 }
 
 export function makeManualOnlyProviderMaintenanceCapabilities(input: {
@@ -204,22 +225,19 @@ function makeHomebrewProviderMaintenanceCapabilities(
 
 function makeNativeProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
-  options?: {
-    readonly updateCommand?: string;
-    readonly updateExecutable?: string;
+  nativeUpdate: NonNullable<PackageManagedProviderMaintenanceDefinition["nativeUpdate"]>,
+  options: {
+    readonly updateExecutable: string;
+    readonly updateEnv: Readonly<Record<string, string>> | null;
   },
-): ProviderMaintenanceCapabilities | null {
-  if (!definition.nativeUpdate) {
-    return null;
-  }
-
+): ProviderMaintenanceCapabilities {
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-    updateCommand: options?.updateCommand ?? null,
-    updateExecutable: options?.updateExecutable ?? definition.nativeUpdate.defaultExecutable,
-    updateArgs: definition.nativeUpdate.args,
-    updateLockKey: definition.nativeUpdate.lockKey,
+    updateExecutable: options.updateExecutable,
+    updateArgs: nativeUpdate.args,
+    updateLockKey: nativeUpdate.lockKey,
+    updateEnv: options.updateEnv,
   });
 }
 
@@ -292,18 +310,18 @@ export function resolvePackageManagedProviderMaintenance(
     ];
 
     const nativeUpdate = definition.nativeUpdate;
-    if (
-      nativeUpdate &&
-      commandPaths.some((commandPath) => nativeUpdate.isCommandPath(commandPath))
-    ) {
-      return (
-        makeNativeProviderMaintenanceCapabilities(definition, {
-          updateCommand: [nativeUpdate.defaultExecutable, ...nativeUpdate.args].join(" "),
+    if (nativeUpdate) {
+      const nativeCommandPath = commandPaths.find((commandPath) =>
+        nativeUpdate.isCommandPath(commandPath),
+      );
+      if (nativeCommandPath !== undefined) {
+        return makeNativeProviderMaintenanceCapabilities(definition, nativeUpdate, {
           updateExecutable: hasPathSeparator(binaryPath)
             ? resolvedCommandPath
             : nativeUpdate.defaultExecutable,
-        }) ?? makeNpmGlobalProviderMaintenanceCapabilities(definition)
-      );
+          updateEnv: nativeUpdate.deriveEnv?.(nativeCommandPath) ?? null,
+        });
+      }
     }
     if (commandPaths.some(isVitePlusGlobalCommandPath)) {
       return makeVitePlusGlobalProviderMaintenanceCapabilities(definition);
