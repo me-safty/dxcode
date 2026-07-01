@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { dictationInsertText } from "./dictationInsert.ts";
+import { dictationInsertText } from "./dictationInsert";
 
 describe("dictationInsertText", () => {
   it("returns empty string for a blank chunk", () => {

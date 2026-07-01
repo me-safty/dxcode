@@ -6,7 +6,7 @@
  *   - a smoothed amplitude level for the animated orb,
  *   - a lightweight energy-based voice-activity detector that fires
  *     `onUtteranceEnd` with an encoded 16 kHz mono WAV when the speaker pauses,
- *   - manual `finishUtterance()` for push-to-talk.
+ *   - manual finishUtterance() to complete the current utterance.
  *
  * Kept framework-agnostic (no React) so it can be unit-reasoned in isolation.
  */
@@ -166,7 +166,7 @@ export class VoiceCaptureController {
     }
   }
 
-  /** Manually complete the current utterance (push-to-talk release). */
+  /** Complete the current utterance (called by the VAD silence path). */
   finishUtterance(): void {
     if (!this.speaking && this.chunks.length === 0) return;
     const durationMs = this.now() - this.utteranceStartAt;

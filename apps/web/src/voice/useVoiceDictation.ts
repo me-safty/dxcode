@@ -59,7 +59,7 @@ export function useVoiceDictation({
       { autoEndOnSilence: true },
     );
 
-    void capture.start().catch(() => setRecording(false));
+    void capture.start();
     return () => {
       void capture.stop();
     };

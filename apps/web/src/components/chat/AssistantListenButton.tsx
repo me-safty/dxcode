@@ -10,7 +10,7 @@ export function AssistantListenButton({ text }: { text: string }) {
   const settings = useAtomValue(primaryServerSettingsAtom);
   const voiceTts = useVoiceTts();
   if (!settings.speech.ttsEnabled) return null;
-  const speakable = markdownToSpeakable(text).trim();
+  const speakable = markdownToSpeakable(text);
   if (speakable.length === 0) return null;
   return (
     <Button

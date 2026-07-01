@@ -25,6 +25,7 @@ interface ComposerPrimaryActionsProps {
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
+  // Voice controls. Optional because the two pending-question call sites hit the early-return branch and never render the mic/mute buttons; only the main composer passes these.
   sttEnabled?: boolean;
   ttsEnabled?: boolean;
   recording?: boolean;
