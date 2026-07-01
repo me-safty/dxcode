@@ -240,6 +240,9 @@ export const layer = Layer.effect(
       return task;
     });
 
+    // Run-state columns (last_run_*, run_count) are intentionally absent from
+    // the conflict clause: they are owned by the run transitions below, and a
+    // concurrent settings save must not overwrite an in-flight increment.
     const saveTask = (task: ScheduledTask) =>
       sql`
         INSERT INTO scheduled_tasks (
@@ -300,11 +303,7 @@ export const layer = Layer.effect(
           interaction_mode = excluded.interaction_mode,
           creation_source = excluded.creation_source,
           updated_at = excluded.updated_at,
-          next_run_at = excluded.next_run_at,
-          last_run_at = excluded.last_run_at,
-          last_run_status = excluded.last_run_status,
-          last_run_error = excluded.last_run_error,
-          run_count = excluded.run_count
+          next_run_at = excluded.next_run_at
       `.pipe(
         Effect.mapError((cause) =>
           taskError("Could not save schedule task.", { taskId: task.id, cause }),
@@ -356,6 +355,22 @@ export const layer = Layer.effect(
         ),
       );
 
+    // Best-effort escape hatch: if anything fails between markRunning and
+    // markCompleted, flip the row back to 'failed' so runDueTasks does not
+    // skip the task forever (it filters out 'running' rows).
+    const releaseStuckRun = (id: ScheduledTaskId, message: string) =>
+      sql`
+        UPDATE scheduled_tasks
+        SET last_run_status = 'failed',
+            last_run_error = ${message}
+        WHERE task_id = ${id} AND last_run_status = 'running'
+      `.pipe(
+        Effect.andThen(notifyChanged),
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not release stuck schedule task run", { taskId: id, cause }),
+        ),
+      );
+
     const runTask = Effect.fn("ScheduledTaskService.runTask")(function* (
       task: ScheduledTask,
       trigger: "scheduled" | "manual",
@@ -379,14 +394,23 @@ export const layer = Layer.effect(
         yield* markRunning(task.id, startedAtIso);
         yield* notifyChanged;
 
+        // The in-memory snapshot may be stale: if the task was deleted since
+        // it was loaded, markRunning updated nothing — do not dispatch a run
+        // for a task that no longer exists.
+        const preflight = yield* findTask(task.id);
+        if (preflight === null) return task;
+
         const fireKey = `${task.id}:${DateTime.toEpochMillis(startedAt)}:${trigger}`;
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
         const prompt = automationPrompt(task);
 
+        // Effect.exit (not Effect.result) so defects and interruptions in the
+        // dispatch are also captured and recorded as a failed run instead of
+        // aborting before markCompleted.
         const result =
           task.threadId === null
-            ? yield* Effect.result(
+            ? yield* Effect.exit(
                 threadLaunch.launch({
                   commandId,
                   projectId: task.projectId,
@@ -404,7 +428,7 @@ export const layer = Layer.effect(
                   creationSource: task.creationSource,
                 }),
               )
-            : yield* Effect.result(
+            : yield* Effect.exit(
                 threadManagement.sendToThread({
                   projectId: task.projectId,
                   commandId,
@@ -422,7 +446,7 @@ export const layer = Layer.effect(
         const completedAt = yield* localNow;
         const runSucceeded = result._tag === "Success";
         const lastRunStatus = runSucceeded ? ("succeeded" as const) : ("failed" as const);
-        const lastRunError = runSucceeded ? null : errorMessage(result.failure);
+        const lastRunError = runSucceeded ? null : errorMessage(result.cause);
         // Re-read the task so the next run is computed from the schedule as it
         // is *now* (the user may have edited or deleted it while we ran).
         const current = yield* findTask(task.id);
@@ -448,6 +472,7 @@ export const layer = Layer.effect(
         }
         return completed;
       }).pipe(
+        Effect.onError((cause) => releaseStuckRun(task.id, errorMessage(cause))),
         Effect.ensuring(
           Ref.update(activeRuns, (active) => {
             const next = new Set(active);
@@ -539,9 +564,16 @@ export const layer = Layer.effect(
       );
 
     const subscribeList: ScheduledTaskServiceShape["subscribeList"] = () =>
-      Stream.concat(
-        Stream.fromEffect(list()),
-        Stream.fromPubSub(changesPubSub).pipe(Stream.mapEffect(() => list())),
+      Stream.unwrap(
+        Effect.gen(function* () {
+          // Subscribe before taking the snapshot so a change landing between
+          // the two is buffered by the subscription rather than dropped.
+          const subscription = yield* PubSub.subscribe(changesPubSub);
+          return Stream.concat(
+            Stream.fromEffect(list()),
+            Stream.fromSubscription(subscription).pipe(Stream.mapEffect(() => list())),
+          );
+        }),
       );
 
     const upsert: ScheduledTaskServiceShape["upsert"] = (input) =>

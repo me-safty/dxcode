@@ -75,6 +75,12 @@ interface DraftState {
   /** Not editable in the dialog, but preserved so editing an agent-created task keeps its modes. */
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
+  /**
+   * The task's original model selection. The picker only edits
+   * `instanceId:model`; keeping the source object preserves provider options
+   * (reasoning, temperature, …) when the model itself is left unchanged.
+   */
+  readonly baseModelSelection: ModelSelection | null;
 }
 
 /** JS day-of-week (0 = Sunday) rendered Monday-first, matching how people read a week. */
@@ -106,6 +112,7 @@ const EMPTY_DRAFT: DraftState = {
   modelKey: "",
   runtimeMode: "full-access",
   interactionMode: "default",
+  baseModelSelection: null,
 };
 
 /** Labelled field: a caption sitting above its control. */
@@ -179,10 +186,24 @@ export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
   return `${days} at ${schedule.timeOfDay}`;
 }
 
+/**
+ * Human label for a run timestamp. `formatRelativeTime` only handles the
+ * past, and `nextRunAt` is a future instant — render "in 5m" style labels
+ * for upcoming runs instead of a misleading "just now".
+ */
 export function relativeLabel(value: string | null): string {
   if (!value) return "Not scheduled";
-  const relative = formatRelativeTime(value);
-  return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
+  const diffMs = new Date(value).getTime() - Date.now();
+  if (diffMs <= 0) {
+    const relative = formatRelativeTime(value);
+    return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
+  }
+  const minutes = Math.ceil(diffMs / 60_000);
+  if (minutes < 2) return "in under a minute";
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `in ${hours}h`;
+  return `in ${Math.round(hours / 24)}d`;
 }
 
 function taskToDraft(task: ScheduledTask): DraftState {
@@ -214,6 +235,7 @@ function taskToDraft(task: ScheduledTask): DraftState {
     modelKey: modelKey(task.modelSelection),
     runtimeMode: task.runtimeMode,
     interactionMode: task.interactionMode,
+    baseModelSelection: task.modelSelection,
   };
 }
 
@@ -258,6 +280,7 @@ export function ScheduledTasksSettings() {
   );
   const [draft, setDraft] = useState<DraftState>(() => EMPTY_DRAFT);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const tasks = tasksQuery.data?.tasks ?? [];
   const selectedProjectTitle = projects.find((project) => project.id === draft.projectId)?.title;
 
@@ -302,12 +325,20 @@ export function ScheduledTasksSettings() {
   };
 
   const submit = useCallback(async () => {
-    if (!environment) return;
+    if (!environment || saving) return;
     const selection = splitModelKey(draft.modelKey || defaultModelKey);
     if (!draft.title.trim() || !draft.prompt.trim() || !draft.projectId || selection === null) {
       reportFailure("Schedule task is incomplete", "Add a title, prompt, project, and model.");
       return;
     }
+    // Keep the original selection object (with provider options) when the
+    // picker still points at the same instance+model.
+    const modelSelection =
+      draft.baseModelSelection !== null &&
+      draft.baseModelSelection.instanceId === selection.instanceId &&
+      draft.baseModelSelection.model === selection.model
+        ? draft.baseModelSelection
+        : selection;
     const workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy =
       draft.workspaceMode === "root"
         ? { type: "root" }
@@ -323,12 +354,14 @@ export function ScheduledTasksSettings() {
       projectId: draft.projectId as ProjectId,
       threadId: draft.threadId ? (draft.threadId as ThreadId) : null,
       workspaceStrategy,
-      modelSelection: selection,
+      modelSelection,
       runtimeMode: draft.runtimeMode,
       interactionMode: draft.interactionMode,
       creationSource: "web",
     };
+    setSaving(true);
     const result = await upsertTask({ environmentId: environment.environmentId, input });
+    setSaving(false);
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
         reportFailure("Could not save schedule task", squashAtomCommandFailure(result));
@@ -336,7 +369,7 @@ export function ScheduledTasksSettings() {
       return;
     }
     setDialogOpen(false);
-  }, [defaultModelKey, draft, environment, upsertTask]);
+  }, [defaultModelKey, draft, environment, saving, upsertTask]);
 
   const handleDelete = useCallback(
     async (task: ScheduledTask) => {
@@ -644,8 +677,14 @@ export function ScheduledTasksSettings() {
                           onClick={() =>
                             setDraft((current) => {
                               const weekdays = new Set(current.weekdays);
-                              if (weekdays.has(day)) weekdays.delete(day);
-                              else weekdays.add(day);
+                              if (weekdays.has(day)) {
+                                // Keep at least one day selected: an empty set
+                                // would silently persist as a daily schedule.
+                                if (weekdays.size === 1) return current;
+                                weekdays.delete(day);
+                              } else {
+                                weekdays.add(day);
+                              }
                               return { ...current, weekdays };
                             })
                           }
@@ -690,7 +729,7 @@ export function ScheduledTasksSettings() {
 
           <DialogFooter>
             <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-            <Button size="sm" onClick={() => void submit()}>
+            <Button size="sm" disabled={saving} onClick={() => void submit()}>
               {draft.editingId ? "Save task" : "Create task"}
             </Button>
           </DialogFooter>
