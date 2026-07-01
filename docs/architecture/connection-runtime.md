@@ -1,10 +1,10 @@
 # Connection Runtime
 
-The connection runtime is shared by web and mobile. It owns connectivity,
+The connection runtime is shared by the web renderer and desktop shell. It owns connectivity,
 authentication, retries, transport lifetime, cached environment data, and
 environment-scoped operations.
 
-Web and mobile mount this runtime once at the application root. There is no
+The web renderer mounts this runtime once at the application root. There is no
 legacy connection owner or supported mixed mode.
 
 ## Ownership
@@ -15,7 +15,7 @@ services:
 - `EnvironmentSupervisor` owns desired state, retry scheduling, and the active
   session scope.
 - `ConnectionBroker` prepares credentials and endpoints for primary, bearer,
-  relay, and SSH targets.
+  and SSH targets.
 - `RpcSessionFactory` performs one transport attempt. It does not retry.
 - `EnvironmentRpc` exposes the active session without leaking the transport.
 - `EnvironmentProjectCommands` and `EnvironmentThreadCommands` construct
@@ -71,18 +71,17 @@ Finite requests, durable subscriptions, and commands are separate APIs:
   data during a fast reconnect.
 - Domain atom factories route effects through the environment registry and
   resolve the current scoped service at execution time.
-- Web and mobile own their Atom runtimes, React hooks, and feature composition.
+- The web renderer owns its Atom runtime, React hooks, and feature composition.
 
 The Promise bridge exists only at the React/Atom boundary. Runtime and business
 logic remain Effect-native.
 
 ## Platform Layers
 
-Web and mobile provide:
+The web renderer and desktop shell provide:
 
 - network status and network-change streams;
 - application lifecycle wakeups;
-- cloud session credentials;
 - device identity;
 - platform registrations;
 - persistent catalog, credential, shell, and thread stores;
@@ -112,7 +111,7 @@ package intentionally has no root export.
 
 The application root mounts the shared connection application layer, creates
 its own Atom runtime, and selects the domain atom factories required by that
-platform. Web and mobile may expose different hooks and features without
+platform. The desktop shell may expose native hooks and features without
 changing connection ownership.
 
 Application code must not construct `WsTransport`, RPC clients, retry loops, or
@@ -130,8 +129,6 @@ Required coverage includes:
 - authentication wakeups;
 - involuntary close and reconnect;
 - explicit removal clearing all owned state;
-- relay token reuse and refresh;
-- progressive relay discovery;
 - shell and thread cache hydration;
 - durable subscriptions switching sessions;
 - command metadata and idempotent queued-command metadata.
