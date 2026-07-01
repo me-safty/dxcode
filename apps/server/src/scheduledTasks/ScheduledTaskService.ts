@@ -546,14 +546,32 @@ export const layer = Layer.effect(
     });
 
     // Recover from a crash or hard shutdown mid-run: rows stuck in 'running'
-    // would otherwise be skipped by the due-task filter forever.
-    yield* sql`
-      UPDATE scheduled_tasks
-      SET last_run_status = 'failed',
-          last_run_error = 'Run was interrupted by a server restart.'
-      WHERE last_run_status = 'running'
-    `.pipe(
-      Effect.andThen(notifyChanged),
+    // would otherwise be skipped by the due-task filter forever. The dispatch
+    // may already have gone out before the crash, so next_run_at must advance
+    // and run_count must count the attempt — otherwise the first poll after
+    // every restart re-fires the interrupted task (same rationale as
+    // releaseStuckRun). Schedules are JSON, so this is per-row Effect work
+    // rather than a single UPDATE.
+    yield* Effect.gen(function* () {
+      const tasks = yield* listRows();
+      const stuck = tasks.filter((task) => task.lastRunStatus === "running");
+      if (stuck.length === 0) return;
+      const now = yield* localNow;
+      yield* Effect.forEach(
+        stuck,
+        (task) => sql`
+          UPDATE scheduled_tasks
+          SET last_run_status = 'failed',
+              last_run_error = 'Run was interrupted by a server restart.',
+              next_run_at = ${nextRunAt(task, now)},
+              updated_at = ${iso(now)},
+              run_count = run_count + 1
+          WHERE task_id = ${task.id} AND last_run_status = 'running'
+        `,
+        { concurrency: 1, discard: true },
+      );
+      yield* notifyChanged;
+    }).pipe(
       Effect.catch((cause) =>
         Effect.logWarning("Could not reset interrupted schedule task runs", { cause }),
       ),
