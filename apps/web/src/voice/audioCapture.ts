@@ -18,7 +18,6 @@ export interface VoiceCaptureCallbacks {
   readonly onLevel?: (level: number) => void;
   /** Fired when speech is detected to have started (VAD). */
   readonly onSpeechStart?: () => void;
-  /** Fired with a complete utterance WAV (VAD silence or manual finish). */
   readonly onUtteranceEnd?: (wav: Uint8Array) => void;
   readonly onError?: (error: unknown) => void;
 }
@@ -88,7 +87,6 @@ export class VoiceCaptureController {
 
   private chunks: Int16Array[] = [];
   private speaking = false;
-  private forced = false;
   private smoothedLevel = 0;
   private lastVoiceAt = 0;
   private utteranceStartAt = 0;
@@ -142,7 +140,7 @@ export class VoiceCaptureController {
     this.smoothedLevel = this.smoothedLevel * 0.8 + Math.min(1, rms * 8) * 0.2;
     this.callbacks.onLevel?.(this.smoothedLevel);
 
-    const isVoice = this.forced || rms >= this.speechThreshold;
+    const isVoice = rms >= this.speechThreshold;
     const now = this.now();
 
     if (isVoice) {
@@ -168,18 +166,8 @@ export class VoiceCaptureController {
     }
   }
 
-  /** Start capturing everything until finishUtterance() (push-to-talk press). */
-  beginForcedUtterance(): void {
-    this.forced = true;
-    this.speaking = true;
-    this.utteranceStartAt = this.now();
-    this.chunks = [];
-    this.callbacks.onSpeechStart?.();
-  }
-
   /** Manually complete the current utterance (push-to-talk release). */
   finishUtterance(): void {
-    this.forced = false;
     if (!this.speaking && this.chunks.length === 0) return;
     const durationMs = this.now() - this.utteranceStartAt;
     const chunks = this.chunks;

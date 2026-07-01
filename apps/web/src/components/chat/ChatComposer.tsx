@@ -91,7 +91,6 @@ import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
@@ -324,8 +323,6 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           </Tooltip>
         </>
       ) : null}
-
-      <ComposerVoiceButton />
     </>
   );
 });
