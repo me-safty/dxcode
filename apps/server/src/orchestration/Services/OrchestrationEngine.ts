@@ -57,6 +57,10 @@ export interface OrchestrationEngineShape {
   /**
    * Acquire a scoped live-domain-event subscription before doing work that
    * depends on the subscription being attached.
+   *
+   * The returned subscription is released with the enclosing Scope. Callers
+   * should drain it promptly after snapshot work because unconsumed events
+   * accumulate according to the underlying PubSub subscription strategy.
    */
   readonly subscribeDomainEvents: Effect.Effect<
     PubSub.Subscription<OrchestrationEvent>,

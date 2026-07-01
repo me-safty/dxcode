@@ -358,6 +358,7 @@ const buildAppUnderTest = (options?: {
     const baseDir = options?.config?.baseDir ?? tempBaseDir;
     const devUrl = options?.config?.devUrl;
     const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl);
+    const orchestrationEventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
     const config: ServerConfig.ServerConfig["Service"] = {
       logLevel: "Info",
       traceMinLevel: "Info",
@@ -679,10 +680,8 @@ const buildAppUnderTest = (options?: {
         Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.empty,
-          subscribeDomainEvents: Effect.flatMap(PubSub.unbounded<OrchestrationEvent>(), (pubsub) =>
-            PubSub.subscribe(pubsub),
-          ),
+          streamDomainEvents: Stream.fromPubSub(orchestrationEventPubSub),
+          subscribeDomainEvents: PubSub.subscribe(orchestrationEventPubSub),
           ...options?.layers?.orchestrationEngine,
         }),
       ),
@@ -5695,6 +5694,32 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         createdAt: now,
         updatedAt: now,
       } satisfies OrchestrationProjectShell;
+      const staleProject = {
+        ...project,
+        id: ProjectId.make("project-racy-shell-stale"),
+        title: "Already Snapshotted Project",
+      } satisfies OrchestrationProjectShell;
+      const alreadySnapshottedEvent = {
+        sequence: 1,
+        eventId: EventId.make("event-racy-shell-stale-project"),
+        aggregateKind: "project" as const,
+        aggregateId: staleProject.id,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-racy-shell-stale-project"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        type: "project.created" as const,
+        payload: {
+          projectId: staleProject.id,
+          title: staleProject.title,
+          workspaceRoot: staleProject.workspaceRoot,
+          defaultModelSelection,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      } satisfies OrchestrationEvent;
       const projectCreatedEvent = {
         sequence: 2,
         eventId: EventId.make("event-racy-shell-project"),
@@ -5750,6 +5775,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.forkScoped,
             );
             yield* Deferred.await(snapshotStarted);
+            yield* PubSub.publish(eventPubSub, alreadySnapshottedEvent);
             yield* PubSub.publish(eventPubSub, projectCreatedEvent);
             yield* Deferred.succeed(snapshotGate, undefined);
             return Array.from(yield* Fiber.join(fiber));
