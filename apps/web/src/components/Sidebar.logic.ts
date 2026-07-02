@@ -188,6 +188,7 @@ export function resolveSidebarNewThreadEnvMode(input: {
 export function resolveSidebarNewThreadSeedContext(input: {
   projectId: string;
   defaultEnvMode: SidebarNewThreadEnvMode;
+  defaultStartFromOrigin: boolean;
   activeThread?: {
     projectId: string;
     branch: string | null;
@@ -209,6 +210,7 @@ export function resolveSidebarNewThreadSeedContext(input: {
   if (input.defaultEnvMode === "worktree") {
     return {
       envMode: "worktree",
+      startFromOrigin: input.defaultStartFromOrigin,
     };
   }
 

@@ -141,11 +141,14 @@ export function isLoopbackHostname(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(normalizeHostname(hostname));
 }
 
-function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): string {
-  const httpBaseUrl = primaryTarget.target.httpBaseUrl;
+function resolveLoopbackDevProxyBaseUrl(input: {
+  readonly primaryTarget: PrimaryEnvironmentTarget;
+  readonly targetBaseUrl: string;
+  readonly urlKind: PrimaryEnvironmentUrlKind;
+}): URL | null {
   const configuredDevServerUrl = import.meta.env.VITE_DEV_SERVER_URL?.trim();
   if (!configuredDevServerUrl) {
-    return httpBaseUrl;
+    return null;
   }
 
   const currentUrl = parseTargetUrl({
@@ -154,9 +157,9 @@ function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): str
     urlKind: "window-location-url",
   });
   const targetUrl = parseTargetUrl({
-    rawValue: httpBaseUrl,
-    source: primaryTarget.source,
-    urlKind: "http-base-url",
+    rawValue: input.targetBaseUrl,
+    source: input.primaryTarget.source,
+    urlKind: input.urlKind,
   });
   const devServerUrl = parseTargetUrl({
     rawValue: configuredDevServerUrl,
@@ -175,10 +178,34 @@ function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): str
     !isLoopbackHostname(currentUrl.hostname) ||
     !isLoopbackHostname(targetUrl.hostname)
   ) {
-    return httpBaseUrl;
+    return null;
   }
 
-  return currentUrl.origin;
+  return currentUrl;
+}
+
+function resolveHttpRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): string {
+  const proxyBaseUrl = resolveLoopbackDevProxyBaseUrl({
+    primaryTarget,
+    targetBaseUrl: primaryTarget.target.httpBaseUrl,
+    urlKind: "http-base-url",
+  });
+  return proxyBaseUrl ? new URL(proxyBaseUrl.origin).toString() : primaryTarget.target.httpBaseUrl;
+}
+
+function resolveWebSocketRequestBaseUrl(primaryTarget: PrimaryEnvironmentTarget): string {
+  const proxyBaseUrl = resolveLoopbackDevProxyBaseUrl({
+    primaryTarget,
+    targetBaseUrl: primaryTarget.target.wsBaseUrl,
+    urlKind: "websocket-base-url",
+  });
+  if (!proxyBaseUrl) {
+    return primaryTarget.target.wsBaseUrl;
+  }
+
+  const url = new URL(proxyBaseUrl.origin);
+  url.protocol = proxyBaseUrl.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
@@ -286,9 +313,16 @@ export function resolvePrimaryEnvironmentHttpUrl(
 }
 
 export function readPrimaryEnvironmentTarget(): PrimaryEnvironmentTarget {
-  return (
+  const resolved =
     resolveDesktopPrimaryTarget() ??
     resolveConfiguredPrimaryTarget() ??
-    resolveWindowOriginPrimaryTarget()
-  );
+    resolveWindowOriginPrimaryTarget();
+
+  return {
+    source: resolved.source,
+    target: {
+      httpBaseUrl: resolveHttpRequestBaseUrl(resolved),
+      wsBaseUrl: resolveWebSocketRequestBaseUrl(resolved),
+    },
+  };
 }

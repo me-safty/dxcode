@@ -471,8 +471,14 @@ function OpenCommandPaletteDialog(props: {
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironment = usePrimaryEnvironment();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewChat, handleNewThread } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    defaultProjectRef,
+    getNewThreadDefaults,
+    handleNewChat,
+    handleNewThread,
+  } = useHandleNewThread();
   const projects = useProjects();
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -686,6 +692,7 @@ function OpenCommandPaletteDialog(props: {
               activeDraftThread,
               activeThread: activeThread ?? undefined,
               defaultProjectRef,
+              getNewThreadDefaults,
               handleNewThread,
             },
             scopeProjectRef(project.environmentId, project.id),
@@ -1004,6 +1011,7 @@ function OpenCommandPaletteDialog(props: {
             activeDraftThread,
             activeThread: activeThread ?? undefined,
             defaultProjectRef,
+            getNewThreadDefaults,
             handleNewThread,
           });
         },

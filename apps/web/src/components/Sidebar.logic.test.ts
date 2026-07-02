@@ -266,6 +266,7 @@ describe("resolveSidebarNewThreadSeedContext", () => {
       resolveSidebarNewThreadSeedContext({
         projectId: "project-1",
         defaultEnvMode: "worktree",
+        defaultStartFromOrigin: true,
         activeThread: {
           projectId: "project-1",
           branch: "feature/existing",
@@ -281,6 +282,22 @@ describe("resolveSidebarNewThreadSeedContext", () => {
       }),
     ).toEqual({
       envMode: "worktree",
+      startFromOrigin: true,
+    });
+  });
+
+  it("carries an explicitly disabled origin default for default worktree mode", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "project-1",
+        defaultEnvMode: "worktree",
+        defaultStartFromOrigin: false,
+        activeThread: null,
+        activeDraftThread: null,
+      }),
+    ).toEqual({
+      envMode: "worktree",
+      startFromOrigin: false,
     });
   });
 
@@ -289,6 +306,7 @@ describe("resolveSidebarNewThreadSeedContext", () => {
       resolveSidebarNewThreadSeedContext({
         projectId: "project-1",
         defaultEnvMode: "local",
+        defaultStartFromOrigin: false,
         activeThread: {
           projectId: "project-1",
           branch: "effect-atom",
@@ -308,6 +326,7 @@ describe("resolveSidebarNewThreadSeedContext", () => {
       resolveSidebarNewThreadSeedContext({
         projectId: "project-1",
         defaultEnvMode: "local",
+        defaultStartFromOrigin: false,
         activeThread: {
           projectId: "project-1",
           branch: "effect-atom",
@@ -334,6 +353,7 @@ describe("resolveSidebarNewThreadSeedContext", () => {
       resolveSidebarNewThreadSeedContext({
         projectId: "project-2",
         defaultEnvMode: "worktree",
+        defaultStartFromOrigin: true,
         activeThread: {
           projectId: "project-1",
           branch: "effect-atom",
@@ -343,6 +363,7 @@ describe("resolveSidebarNewThreadSeedContext", () => {
       }),
     ).toEqual({
       envMode: "worktree",
+      startFromOrigin: true,
     });
   });
 });

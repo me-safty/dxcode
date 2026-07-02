@@ -28,11 +28,17 @@ interface NewThreadHandler {
 
 type NewThreadOptions = NonNullable<Parameters<NewThreadHandler>[1]>;
 
+export interface NewThreadDefaults {
+  readonly envMode: DraftThreadEnvMode;
+  readonly startFromOrigin: boolean;
+}
+
 export interface ChatThreadActionContext {
   readonly activeDraftThread: DraftThreadContextLike | null;
   readonly activeThread: ThreadContextLike | undefined;
   readonly defaultProjectRef: ScopedProjectRef | null;
   readonly handleNewThread: NewThreadHandler;
+  readonly getNewThreadDefaults?: (environmentId: EnvironmentId) => NewThreadDefaults;
 }
 
 export function resolveNewDraftStartFromOrigin(input: {
@@ -57,17 +63,59 @@ export function resolveThreadActionProjectRef(
   return context.defaultProjectRef;
 }
 
-function buildContextualThreadOptions(context: ChatThreadActionContext): NewThreadOptions {
+function threadMatchesProject(
+  thread: ThreadContextLike | null | undefined,
+  projectRef: ScopedProjectRef,
+) {
+  return (
+    thread?.environmentId === projectRef.environmentId && thread.projectId === projectRef.projectId
+  );
+}
+
+function resolveDefaultThreadOptions(
+  context: ChatThreadActionContext,
+  projectRef: ScopedProjectRef,
+): NewThreadOptions | null {
+  const defaults = context.getNewThreadDefaults?.(projectRef.environmentId) ?? null;
+  if (!defaults) {
+    return null;
+  }
+
   return {
-    branch: context.activeThread?.branch ?? context.activeDraftThread?.branch ?? null,
-    worktreePath:
-      context.activeThread?.worktreePath ?? context.activeDraftThread?.worktreePath ?? null,
-    envMode:
-      context.activeDraftThread?.envMode ??
-      (context.activeThread?.worktreePath ? "worktree" : "local"),
-    ...(context.activeDraftThread
-      ? { startFromOrigin: context.activeDraftThread.startFromOrigin }
-      : {}),
+    envMode: defaults.envMode,
+    startFromOrigin: defaults.startFromOrigin,
+  };
+}
+
+function buildContextualThreadOptions(
+  context: ChatThreadActionContext,
+  projectRef: ScopedProjectRef,
+): NewThreadOptions {
+  const defaultOptions = resolveDefaultThreadOptions(context, projectRef);
+  if (defaultOptions?.envMode === "worktree") {
+    return defaultOptions;
+  }
+
+  const activeDraftThread = threadMatchesProject(context.activeDraftThread, projectRef)
+    ? context.activeDraftThread
+    : null;
+  const activeThread = threadMatchesProject(context.activeThread, projectRef)
+    ? context.activeThread
+    : null;
+
+  if (!activeDraftThread && !activeThread) {
+    return defaultOptions ?? {};
+  }
+
+  return {
+    branch: activeThread?.branch ?? activeDraftThread?.branch ?? null,
+    worktreePath: activeThread?.worktreePath ?? activeDraftThread?.worktreePath ?? null,
+    envMode: activeDraftThread?.envMode ?? (activeThread?.worktreePath ? "worktree" : "local"),
+    ...(activeDraftThread
+      ? { startFromOrigin: activeDraftThread.startFromOrigin }
+      : defaultOptions?.startFromOrigin !== undefined
+        ? { startFromOrigin: defaultOptions.startFromOrigin }
+        : {}),
   };
 }
 
@@ -75,7 +123,7 @@ export async function startNewThreadInProjectFromContext(
   context: ChatThreadActionContext,
   projectRef: ScopedProjectRef,
 ): Promise<void> {
-  await context.handleNewThread(projectRef, buildContextualThreadOptions(context));
+  await context.handleNewThread(projectRef, buildContextualThreadOptions(context, projectRef));
 }
 
 export async function startNewThreadFromContext(

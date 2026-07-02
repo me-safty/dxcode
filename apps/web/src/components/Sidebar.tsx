@@ -115,6 +115,7 @@ import { useShortcutModifierState } from "../shortcutModifierState";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewChatHandler, useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -1924,6 +1925,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           ? readThreadShell(currentRouteTarget.threadRef)
           : null;
       const draftStore = useComposerDraftStore.getState();
+      const environmentSettings =
+        serverConfigs.get(member.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
       const currentActiveDraftThread =
         currentRouteTarget?.kind === "server"
           ? (draftStore.getDraftThread(currentRouteTarget.threadRef) ?? null)
@@ -1933,9 +1936,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const seedContext = resolveSidebarNewThreadSeedContext({
         projectId: member.id,
         defaultEnvMode: resolveSidebarNewThreadEnvMode({
-          defaultEnvMode:
-            serverConfigs.get(member.environmentId)?.settings.defaultThreadEnvMode ??
-            DEFAULT_SERVER_SETTINGS.defaultThreadEnvMode,
+          defaultEnvMode: environmentSettings.defaultThreadEnvMode,
+        }),
+        defaultStartFromOrigin: resolveNewDraftStartFromOrigin({
+          envMode: environmentSettings.defaultThreadEnvMode,
+          newWorktreesStartFromOrigin: environmentSettings.newWorktreesStartFromOrigin,
         }),
         activeThread:
           currentActiveThread && currentActiveThread.projectId === member.id

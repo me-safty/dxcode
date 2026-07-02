@@ -115,6 +115,11 @@ export default defineConfig(() => {
                 target: devProxyTarget,
                 changeOrigin: true,
               },
+              "/ws": {
+                target: devProxyTarget,
+                changeOrigin: true,
+                ws: true,
+              },
             },
           }
         : {}),

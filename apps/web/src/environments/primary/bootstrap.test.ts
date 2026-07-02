@@ -192,6 +192,20 @@ describe("environmentBootstrap", () => {
     );
   });
 
+  it("uses the vite proxy for configured loopback websocket targets during local dev", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "http://127.0.0.1:5733");
+    vi.stubEnv("VITE_WS_URL", "ws://127.0.0.1:13774");
+    installTestBrowser("http://127.0.0.1:5733/");
+
+    expect(readPrimaryEnvironmentTarget()).toEqual({
+      source: "configured",
+      target: {
+        httpBaseUrl: "http://127.0.0.1:5733/",
+        wsBaseUrl: "ws://127.0.0.1:5733/",
+      },
+    });
+  });
+
   it("retains the URL parser cause without exposing the configured URL in its message", () => {
     vi.stubEnv("VITE_HTTP_URL", "http://[");
 

@@ -9,6 +9,7 @@ import {
   STANDALONE_CHAT_PROJECT_ID,
   type EnvironmentId,
   type ScopedProjectRef,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
@@ -30,6 +31,19 @@ import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
+
+export function resolveNewThreadDefaults(
+  settings: Pick<ServerSettings, "defaultThreadEnvMode" | "newWorktreesStartFromOrigin">,
+) {
+  const envMode = settings.defaultThreadEnvMode;
+  return {
+    envMode,
+    startFromOrigin: resolveNewDraftStartFromOrigin({
+      envMode,
+      newWorktreesStartFromOrigin: settings.newWorktreesStartFromOrigin,
+    }),
+  };
+}
 
 export function useNewThreadHandler() {
   const projects = useProjects();
@@ -202,10 +216,13 @@ export function useNewChatHandler() {
         return false;
       }
 
+      const settings = serverConfigs.get(targetEnvironmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
+      const defaults = resolveNewThreadDefaults(settings);
+
       await handleNewThread(scopeProjectRef(targetEnvironmentId, STANDALONE_CHAT_PROJECT_ID), {
         branch: null,
-        envMode: "local",
-        startFromOrigin: false,
+        envMode: defaults.envMode,
+        startFromOrigin: defaults.startFromOrigin,
         worktreePath: null,
       });
       return true;
@@ -231,6 +248,7 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useProjects();
+  const serverConfigs = useServerConfigs();
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -244,15 +262,24 @@ export function useHandleNewThread() {
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
   const handleNewChat = useNewChatHandler();
+  const defaultProjectRef = orderedProjects[0]
+    ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
+    : null;
+  const getNewThreadDefaults = useCallback(
+    (environmentId: EnvironmentId) =>
+      resolveNewThreadDefaults(
+        serverConfigs.get(environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS,
+      ),
+    [serverConfigs],
+  );
 
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
-      : null,
+    defaultProjectRef,
     handleNewChat,
     handleNewThread,
+    getNewThreadDefaults,
     routeThreadRef,
   };
 }
