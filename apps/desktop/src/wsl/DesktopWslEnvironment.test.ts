@@ -18,7 +18,6 @@ import {
   formatNodePtyProbeFailureReason,
   formatWslShellTransportFailureReason,
   parseNodePath,
-  parseNodeVersion,
   parseResolvedPath,
   parseToolchainReport,
   probeWslDistros,
@@ -196,25 +195,6 @@ describe("parseResolvedPath", () => {
   });
 });
 
-describe("parseNodeVersion", () => {
-  it("extracts the version from a nodeVersion: line", () => {
-    const stdout = "nodePath:/usr/bin/node\nresolvedPath:/usr/bin\nnodeVersion:18.20.8\n";
-    expect(parseNodeVersion(stdout)).toBe("18.20.8");
-  });
-
-  it("returns null when there is no nodeVersion line at all", () => {
-    expect(parseNodeVersion("nodePath:/usr/bin/node\nresolvedPath:/usr/bin\n")).toBeNull();
-  });
-
-  it("returns null when the value after the prefix is empty", () => {
-    expect(parseNodeVersion("nodeVersion:\n")).toBeNull();
-  });
-
-  it("trims surrounding whitespace and a trailing carriage return", () => {
-    expect(parseNodeVersion("  nodeVersion:22.22.1\r\n")).toBe("22.22.1");
-  });
-});
-
 describe("formatMissingToolsReason", () => {
   it("returns null when everything is present and node is in range", () => {
     expect(
@@ -284,18 +264,18 @@ describe("ensureNodePtyImpl: WSL Node engine-range preflight (#3611)", () => {
 
   it("rejects a resolved Node that does not satisfy nodeEngineRange (the reporter's exact case)", () =>
     Effect.gen(function* () {
-      const result = yield* ensureNodePtyImpl(
-        "Ubuntu",
-        "C:\\repo",
-        windowsToWslPath,
-        { nodeEngineRange: "^22.16 || ^23.11 || >=24.10" },
-      );
+      const result = yield* ensureNodePtyImpl("Ubuntu", "C:\\repo", windowsToWslPath, {
+        nodeEngineRange: "^22.16 || ^23.11 || >=24.10",
+      });
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.fatal).toBe(true);
         expect(result.reason).toContain("18.20.8");
         expect(result.reason).toContain("^22.16 || ^23.11 || >=24.10");
         expect(result.reason).toContain("/home/josh/.nvm/versions/node/v18.20.8/bin/node");
+        // Deterministic mismatch: surfaced on the first attempt instead of
+        // burning the default preflight retry allowance.
+        expect(result.retryLimit).toBe(1);
       }
     }).pipe(
       Effect.provideService(
@@ -312,16 +292,16 @@ describe("ensureNodePtyImpl: WSL Node engine-range preflight (#3611)", () => {
 
   it("rejects (fail closed) when a range is required but the probe didn't report a version (bot-flagged fix)", () =>
     Effect.gen(function* () {
-      const result = yield* ensureNodePtyImpl(
-        "Ubuntu",
-        "C:\\repo",
-        windowsToWslPath,
-        { nodeEngineRange: "^22.16 || ^23.11 || >=24.10" },
-      );
+      const result = yield* ensureNodePtyImpl("Ubuntu", "C:\\repo", windowsToWslPath, {
+        nodeEngineRange: "^22.16 || ^23.11 || >=24.10",
+      });
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.fatal).toBe(true);
         expect(result.reason).toContain("^22.16 || ^23.11 || >=24.10");
+        // Possibly a one-off probe hiccup: keeps the default retry allowance,
+        // unlike the deterministic version-mismatch case.
+        expect(result.retryLimit).toBeUndefined();
       }
     }).pipe(
       Effect.provideService(
@@ -339,12 +319,9 @@ describe("ensureNodePtyImpl: WSL Node engine-range preflight (#3611)", () => {
 
   it("does not false-positive when the resolved Node satisfies nodeEngineRange (happy path unchanged)", () =>
     Effect.gen(function* () {
-      const result = yield* ensureNodePtyImpl(
-        "Ubuntu",
-        "C:\\repo",
-        windowsToWslPath,
-        { nodeEngineRange: "^22.16 || ^23.11 || >=24.10" },
-      );
+      const result = yield* ensureNodePtyImpl("Ubuntu", "C:\\repo", windowsToWslPath, {
+        nodeEngineRange: "^22.16 || ^23.11 || >=24.10",
+      });
       expect(result).toEqual({
         ok: true,
         nodePath: "/home/josh/.nvm/versions/node/v22.22.1/bin/node",

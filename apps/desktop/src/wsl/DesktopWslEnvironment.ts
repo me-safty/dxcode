@@ -223,8 +223,13 @@ const NODE_PTY_PROBE_SCRIPT = (
   linuxServerDir: string,
 ) => `printf 'nodePath:%s\\n' "$(command -v node 2>/dev/null)"
 printf 'resolvedPath:%s\\n' "$PATH"
-printf 'nodeVersion:%s\\n' "$(node -p 'process.versions.node' 2>/dev/null)"
-cd ${shellQuote(linuxServerDir)} && node <<'NODE' >/dev/null 2>&1
+cd ${shellQuote(linuxServerDir)} && node <<'NODE' 3>&1 >/dev/null 2>&1
+// Emit the version over fd 3 -- duplicated onto the probe's real stdout by
+// the 3>&1 above, before stdout/stderr are silenced -- so the engine-range
+// check reuses this node invocation instead of paying a second Node cold
+// start on every preflight. First statement on purpose: the version must be
+// reported even when the dependency checks below exit early.
+require("node:fs").writeSync(3, "nodeVersion:" + process.versions.node + "\\n");
 // The server bundle externalizes its deps to node_modules, and the WSL Node
 // can't read inside app.asar, so confirm those deps are unpacked on the real
 // filesystem before reporting the backend healthy. "effect" is the framework
@@ -328,23 +333,6 @@ export const parseResolvedPath = (stdout: string): string | null => {
   if (line === undefined) return null;
   const resolvedPath = line.slice(prefix.length).replace(/\r$/, "");
   return resolvedPath.length > 0 ? resolvedPath : null;
-};
-
-// Captures the resolved node's own reported version (`process.versions.node`)
-// from NODE_PTY_PROBE_SCRIPT, so a node that resolves but doesn't satisfy
-// `engines.node` can be caught at preflight instead of silently no-op'ing
-// (Node < the version where `import.meta.main` exists makes the server's
-// `if (import.meta.main)` launch gate never run, producing a clean exit
-// code=0 with no stdout/stderr and nothing ever listening on the port).
-export const parseNodeVersion = (stdout: string): string | null => {
-  const prefix = "nodeVersion:";
-  const line = stdout
-    .split("\n")
-    .map((candidate) => candidate.trim())
-    .find((candidate) => candidate.startsWith(prefix));
-  if (line === undefined) return null;
-  const version = line.slice(prefix.length).trim();
-  return version.length > 0 ? version : null;
 };
 
 export const formatMissingToolsReason = (
@@ -491,15 +479,15 @@ export const ensureNodePtyImpl = (
       // unconditionally as soon as nodePath resolves) so this doesn't mask a
       // more specific, unrelated probe failure (e.g. the exitCode === 3 case
       // above) behind a Node-version error in the rare case both are true.
-      const nodeVersion = parseNodeVersion(probe.stdout);
+      const nodeVersion = parseToolchainReport(probe.stdout).nodeVersion;
       const requiredRange = options.nodeEngineRange?.trim() || null;
       if (requiredRange !== null) {
         if (nodeVersion === null) {
           // A range is required but the probe didn't report a version --
           // fail closed rather than silently letting an unchecked Node
           // through (the exact failure class this check exists to catch).
-          // Fatal/bounded like the mismatch case below, so a one-off probe
-          // hiccup still gets a few retries before falling back.
+          // Fatal/bounded with the default retry allowance, so a one-off
+          // probe hiccup still gets a few retries before falling back.
           return {
             ok: false,
             reason: `Could not determine the WSL Node.js version, which is required to satisfy ${requiredRange}. The version probe did not report a version; please report this if it persists.`,
@@ -507,10 +495,24 @@ export const ensureNodePtyImpl = (
           } as const;
         }
         if (!satisfiesSemverRange(nodeVersion, requiredRange)) {
+          // Single source for the out-of-range wording and remediation --
+          // formatMissingToolsReason's nodeOutOfRange branch -- so this
+          // message can't drift from the toolchain-report path's. The
+          // resolved path is appended because it pins down WHICH node needs
+          // switching (e.g. an nvm default alias).
+          const mismatch =
+            formatMissingToolsReason({ missingTools: [], nodeVersion }, requiredRange) ??
+            `WSL Node.js v${nodeVersion} does not satisfy the required range ${requiredRange}.`;
           return {
             ok: false,
-            reason: `Found Node.js v${nodeVersion} at ${nodePath}, which does not satisfy the required range ${requiredRange}. Activate a supported version (e.g. nvm alias default 22 && nvm use 22) and restart T3 Code.`,
+            reason: `${mismatch} (Resolved node: ${nodePath}.)`,
             fatal: true,
+            // Unlike the missing-version case above, the resolved version
+            // cannot change between the manager's back-to-back preflight
+            // retries, so surface the actionable error immediately instead
+            // of burning the default retry allowance on a deterministic
+            // failure.
+            retryLimit: 1,
           } as const;
         }
       }
