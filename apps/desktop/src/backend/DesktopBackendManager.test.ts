@@ -10,6 +10,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -228,7 +229,7 @@ describe("DesktopBackendManager", () => {
         // --- stdin-delivered (WSL) path: the bootstrap stream must never
         // complete in normal operation, eliminating the readline 'line' vs
         // 'close' race in apps/server/src/bootstrap.ts. ---
-        let stdinStream: ChildProcess.CommandInput | undefined;
+        let stdinStream: ChildProcess.CommandInput | ChildProcess.StdinConfig | undefined;
         const stdinSpawned = yield* Deferred.make<void>();
         const stdinSpawnerLayer = Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
@@ -258,8 +259,8 @@ describe("DesktopBackendManager", () => {
             yield* instance.start;
             yield* Deferred.await(stdinSpawned);
             assert.isDefined(stdinStream);
-            if (typeof stdinStream === "string") {
-              throw new Error("Expected stdin to be a Stream, not a CommandInput string.");
+            if (!Stream.isStream(stdinStream)) {
+              throw new Error("Expected stdin to be a raw Stream, not a string stdio config.");
             }
 
             const drained = yield* Stream.runDrain(stdinStream).pipe(
@@ -274,7 +275,7 @@ describe("DesktopBackendManager", () => {
 
         // --- fd3-delivered (Windows-native) path: unaffected regression
         // check -- the bootstrap stream must still terminate normally. ---
-        let fd3Stream: Stream.Stream<Uint8Array> | undefined;
+        let fd3Stream: Stream.Stream<Uint8Array, PlatformError.PlatformError> | undefined;
         const fd3Spawned = yield* Deferred.make<void>();
         const fd3SpawnerLayer = Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
@@ -946,6 +947,63 @@ describe("DesktopBackendManager", () => {
           assert.equal(failures.length, 2);
           const spawnsSinceRestart = startCount - startCountAtTrip;
           assert.isTrue(spawnsSinceRestart >= 5 && spawnsSinceRestart <= 7);
+        }).pipe(Effect.provide(TestClock.layer())),
+      ),
+  );
+
+  it.effect(
+    "stops without re-surfacing when the never-ready fallback didn't take (config still resolves stdin)",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const starts = yield* Queue.unbounded<number>();
+          let startCount = 0;
+          const failures: Array<{ reason: string; fatal: boolean }> = [];
+
+          const spawnerLayer = Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.sync(() => {
+                startCount += 1;
+                return makeProcess({
+                  exitCode: Queue.offer(starts, startCount).pipe(
+                    Effect.as(ChildProcessSpawner.ExitCode(0)),
+                  ),
+                });
+              }),
+            ),
+          );
+
+          const instance = yield* makeTestInstance({
+            spawnerLayer,
+            config: { ...baseConfig, bootstrapDelivery: "stdin" },
+            httpClientLayer: httpClientLayer(() => Effect.never),
+            // Asks for the post-fallback restart (like the wsl-only primary
+            // does after persisting the Windows fallback), but the config
+            // above keeps resolving the same stdin backend -- the fallback
+            // "didn't take".
+            onPreflightFailed: (failure) =>
+              Effect.sync(() => {
+                failures.push(failure);
+              }).pipe(Effect.as(true)),
+          });
+
+          yield* instance.start;
+          for (let i = 0; i < 12; i++) {
+            yield* TestClock.adjust(Duration.seconds(10));
+          }
+
+          // Surfaced exactly once; the guard parks the instance on the next
+          // never-ready exit instead of re-showing the dialog on every exit.
+          assert.equal(failures.length, 1);
+          assert.equal(failures[0]?.fatal, true);
+          assert.isTrue(
+            startCount >= 6 && startCount <= 8,
+            "one extra spawn after the cap fired, then stop",
+          );
+
+          const snapshot = yield* instance.snapshot;
+          assert.equal(snapshot.desiredRunning, false);
         }).pipe(Effect.provide(TestClock.layer())),
       ),
   );

@@ -464,6 +464,29 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
     });
   });
 
+  // Shared tail of both bounded-failure escalations (fatal preflight
+  // failures and the post-spawn never-ready cap): surface the failure via
+  // spec.onPreflightFailed, then either schedule the restart the handler
+  // asked for (it changed something -- e.g. persisted the Windows fallback
+  // -- and wants the next config resolve to pick it up) or park the
+  // instance. Referenced before scheduleRestart is declared, which is safe
+  // because the generator body only runs once the instance is started.
+  const surfaceFatalFailure = Effect.fn("desktop.backendInstance.surfaceFatalFailure")(function* (
+    failure: PreflightFailure,
+    restartReason: string,
+  ) {
+    const shouldRestart = yield* spec.onPreflightFailed?.(failure) ?? Effect.succeed(false);
+    if (shouldRestart) {
+      yield* scheduleRestart(restartReason);
+    } else {
+      yield* Ref.update(state, (latest) => ({
+        ...latest,
+        desiredRunning: false,
+        ready: false,
+      }));
+    }
+  });
+
   const start: Effect.Effect<void> = Effect.suspend(() =>
     mutex.withPermits(1)(
       Effect.gen(function* () {
@@ -550,18 +573,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               "backend preflight failed repeatedly; surfacing and falling back",
               { reason, attempt },
             );
-            const shouldRestart = yield* (
-              spec.onPreflightFailed?.(preflightFailure.value) ?? Effect.succeed(false)
-            );
-            if (shouldRestart) {
-              yield* scheduleRestart(reason);
-            } else {
-              yield* Ref.update(state, (latest) => ({
-                ...latest,
-                desiredRunning: false,
-                ready: false,
-              }));
-            }
+            yield* surfaceFatalFailure(preflightFailure.value, reason);
             return;
           }
           yield* scheduleRestart(reason);
@@ -666,24 +678,35 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
                   config.value.bootstrapDelivery === "stdin" &&
                   nextState.neverReadyAttempt >= MAX_PREFLIGHT_FAILURE_ATTEMPTS
                 ) {
-                  yield* logInstanceError(
-                    "backend exited repeatedly before becoming ready; surfacing and falling back",
-                    { reason, attempt: nextState.neverReadyAttempt },
-                  );
-                  const shouldRestart = yield* (
-                    spec.onPreflightFailed?.({
-                      reason: `backend process exited ${nextState.neverReadyAttempt} times in a row without becoming ready (last: ${reason})`,
-                      fatal: true,
-                    }) ?? Effect.succeed(false)
-                  );
-                  if (shouldRestart) {
-                    yield* scheduleRestart(reason);
-                  } else {
+                  if (nextState.neverReadyAttempt > MAX_PREFLIGHT_FAILURE_ATTEMPTS) {
+                    // Mirrors the preflight path's attempt > attemptLimit
+                    // guard above: we already surfaced and asked for the
+                    // fallback, yet the config still resolves a
+                    // stdin-delivered backend that exits before ready -- the
+                    // fallback didn't take (e.g. the settings write failed).
+                    // Stop rather than re-surface the dialog on every
+                    // subsequent exit.
+                    yield* logInstanceError("backend still never-ready after fallback; stopping", {
+                      reason,
+                      attempt: nextState.neverReadyAttempt,
+                    });
                     yield* Ref.update(state, (latest) => ({
                       ...latest,
                       desiredRunning: false,
                       ready: false,
                     }));
+                  } else {
+                    yield* logInstanceError(
+                      "backend exited repeatedly before becoming ready; surfacing and falling back",
+                      { reason, attempt: nextState.neverReadyAttempt },
+                    );
+                    yield* surfaceFatalFailure(
+                      {
+                        reason: `backend process exited ${nextState.neverReadyAttempt} times in a row without becoming ready (last: ${reason})`,
+                        fatal: true,
+                      },
+                      reason,
+                    );
                   }
                 } else {
                   yield* scheduleRestart(reason);
