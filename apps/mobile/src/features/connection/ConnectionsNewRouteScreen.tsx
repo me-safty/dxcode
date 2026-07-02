@@ -183,7 +183,7 @@ export function ConnectionsNewRouteScreen({
                 className="items-center gap-3 rounded-[24px] bg-card px-5 py-8"
                 style={{ borderCurve: "continuous" }}
               >
-                <Text className="text-center text-sm leading-[20px] text-foreground-muted">
+                <Text className="text-center text-sm leading-normal text-foreground-muted">
                   Camera permission is required to scan a QR code.
                 </Text>
                 <ConnectionSheetButton

@@ -5,6 +5,8 @@ import type {
 } from "../diffs/nativeReviewDiffTypes";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
+import type { ResolvedMobileCodeSurface } from "../../lib/appearancePreferences";
+import { resolveMobileCodeSurface } from "../../lib/appearancePreferences";
 import { MOBILE_CODE_SURFACE } from "../../lib/typography";
 import { getPierreTerminalTheme, type TerminalAppearanceScheme } from "../terminal/terminalTheme";
 import { computeWordAltDiffRanges } from "./reviewWordDiffs";
@@ -22,38 +24,44 @@ const NATIVE_REVIEW_MAX_WORD_DIFF_COVERAGE = 0.45;
 export const NATIVE_REVIEW_DIFF_ROW_HEIGHT = MOBILE_CODE_SURFACE.rowHeight;
 export const NATIVE_REVIEW_DIFF_CONTENT_WIDTH = 2_800;
 
-export const NATIVE_REVIEW_DIFF_STYLE = {
-  rowHeight: NATIVE_REVIEW_DIFF_ROW_HEIGHT,
-  contentWidth: NATIVE_REVIEW_DIFF_CONTENT_WIDTH,
-  changeBarWidth: 4,
-  gutterWidth: MOBILE_CODE_SURFACE.gutterWidth,
-  codePadding: MOBILE_CODE_SURFACE.codePadding,
-  textVerticalInset: MOBILE_CODE_SURFACE.textVerticalInset,
-  fileHeaderHeight: 56,
-  fileHeaderHorizontalMargin: 8,
-  fileHeaderVerticalMargin: 6,
-  fileHeaderCornerRadius: 10,
-  fileHeaderHorizontalPadding: 10,
-  fileHeaderPathRightPadding: 118,
-  fileHeaderCountColumnWidth: 38,
-  fileHeaderCountGap: 5,
-  codeFontSize: MOBILE_CODE_SURFACE.fontSize,
-  codeFontWeight: "regular",
-  lineNumberFontSize: MOBILE_CODE_SURFACE.lineNumberFontSize,
-  lineNumberFontWeight: "regular",
-  hunkFontSize: 11,
-  hunkFontWeight: "medium",
-  fileHeaderFontSize: 11,
-  fileHeaderFontWeight: "semibold",
-  fileHeaderMetaFontSize: 10,
-  fileHeaderMetaFontWeight: "semibold",
-  fileHeaderSubtextFontSize: 11,
-  fileHeaderSubtextFontWeight: "medium",
-  fileHeaderStatusFontSize: 9,
-  fileHeaderStatusFontWeight: "bold",
-  emptyStateFontSize: 12,
-  emptyStateFontWeight: "medium",
-} as const;
+export const NATIVE_REVIEW_DIFF_STYLE = createNativeReviewDiffStyle(
+  resolveMobileCodeSurface(MOBILE_CODE_SURFACE.fontSize),
+);
+
+export function createNativeReviewDiffStyle(codeSurface: ResolvedMobileCodeSurface) {
+  return {
+    rowHeight: codeSurface.rowHeight,
+    contentWidth: NATIVE_REVIEW_DIFF_CONTENT_WIDTH,
+    changeBarWidth: 4,
+    gutterWidth: codeSurface.gutterWidth,
+    codePadding: codeSurface.codePadding,
+    textVerticalInset: codeSurface.textVerticalInset,
+    fileHeaderHeight: 56,
+    fileHeaderHorizontalMargin: 8,
+    fileHeaderVerticalMargin: 6,
+    fileHeaderCornerRadius: 10,
+    fileHeaderHorizontalPadding: 10,
+    fileHeaderPathRightPadding: 118,
+    fileHeaderCountColumnWidth: 38,
+    fileHeaderCountGap: 5,
+    codeFontSize: codeSurface.fontSize,
+    codeFontWeight: "regular",
+    lineNumberFontSize: codeSurface.lineNumberFontSize,
+    lineNumberFontWeight: "regular",
+    hunkFontSize: 11,
+    hunkFontWeight: "medium",
+    fileHeaderFontSize: 11,
+    fileHeaderFontWeight: "semibold",
+    fileHeaderMetaFontSize: 10,
+    fileHeaderMetaFontWeight: "semibold",
+    fileHeaderSubtextFontSize: 11,
+    fileHeaderSubtextFontWeight: "medium",
+    fileHeaderStatusFontSize: 9,
+    fileHeaderStatusFontWeight: "bold",
+    emptyStateFontSize: 12,
+    emptyStateFontWeight: "medium",
+  } as const;
+}
 
 export interface NativeReviewDiffData {
   readonly rows: ReadonlyArray<NativeReviewDiffRow>;

@@ -1,10 +1,10 @@
 import { SymbolView } from "expo-symbols";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { useThemeColor } from "../../lib/useThemeColor";
 
-export function WorkspaceEmptyDetail() {
+export function WorkspaceEmptyDetail(props: { readonly onStartNewTask?: () => void }) {
   const iconColor = useThemeColor("--color-icon-subtle");
 
   return (
@@ -15,6 +15,15 @@ export function WorkspaceEmptyDetail() {
         <Text className="text-center text-base text-foreground-muted">
           Choose a thread from the sidebar or start a new task.
         </Text>
+        {props.onStartNewTask ? (
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 flex-row items-center gap-2 rounded-full bg-primary px-5 py-3 active:opacity-70"
+            onPress={props.onStartNewTask}
+          >
+            <Text className="text-base font-t3-bold text-primary-foreground">New Task</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );

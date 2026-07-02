@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildNativeReviewTokensResetKey, hashReviewDiffKey } from "./useNativeReviewDiffBridge";
+import { buildNativeReviewTokensResetKey, hashReviewDiffKey } from "./reviewDiffBridgeKeys";
 
 describe("native review diff bridge", () => {
   it("builds stable reset keys from the rendered diff identity", () => {

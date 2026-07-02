@@ -92,9 +92,9 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
     >
       <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
         <Text
+          className="text-2xs"
           style={{
             color: theme.mutedForeground,
-            fontSize: MOBILE_TYPOGRAPHY.caption.fontSize,
             paddingBottom: 8,
           }}
         >
@@ -137,11 +137,11 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
           placeholder="type and press return"
           placeholderTextColor={theme.mutedForeground}
           returnKeyType="send"
+          className="text-sm"
           style={{
             color: theme.foreground,
             flex: 1,
             fontFamily: "Menlo",
-            fontSize: MOBILE_TYPOGRAPHY.footnote.fontSize,
             padding: 0,
           }}
           onSubmitEditing={(event) => {
@@ -163,10 +163,10 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
           onPress={() => props.onInput("\u0003")}
         >
           <Text
+            className="text-2xs"
             style={{
               color: theme.foreground,
               fontFamily: "DMSans_700Bold",
-              fontSize: MOBILE_TYPOGRAPHY.caption.fontSize,
             }}
           >
             Ctrl-C

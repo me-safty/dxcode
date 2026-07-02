@@ -34,6 +34,15 @@ describe("resolveThreadSelectionNavigationAction", () => {
     ).toBe("replace");
   });
 
+  it("pushes from Home so the back stack survives collapsing to compact", () => {
+    expect(
+      resolveThreadSelectionNavigationAction({
+        usesSplitView: true,
+        pathname: "/",
+      }),
+    ).toBe("push");
+  });
+
   it("pushes compact list selections onto the native stack", () => {
     expect(
       resolveThreadSelectionNavigationAction({

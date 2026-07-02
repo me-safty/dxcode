@@ -31,7 +31,7 @@ import {
   resolveProviderOptionDescriptors,
 } from "../../lib/providerOptions";
 import { scopedProjectKey } from "../../lib/scopedEntities";
-import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
+import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { getComposerDraftSnapshot } from "../../state/use-composer-drafts";
 import { useProjects } from "../../state/entities";
 import { branchBadgeLabel, useNewTaskFlow } from "./new-task-flow-provider";
@@ -68,6 +68,7 @@ export function NewTaskDraftScreen(props: {
   const loadedBranchesProjectKeyRef = useRef<string | null>(null);
 
   const borderColor = useThemeColor("--color-border");
+  const bodyText = useScaledTextRole("body");
   const sheetFadeOpaque = colorScheme === "dark" ? "rgba(14,14,14,0.98)" : "rgba(242,242,247,0.98)";
   const sheetFadeTransparent = colorScheme === "dark" ? "rgba(14,14,14,0)" : "rgba(242,242,247,0)";
 
@@ -462,7 +463,7 @@ export function NewTaskDraftScreen(props: {
             onPasteImages={(uris) => void handleNativePasteImages(uris)}
             placeholder={`Describe a coding task in ${selectedProject.title}`}
             style={{ flex: 1, minHeight: 0 }}
-            textStyle={MOBILE_TYPOGRAPHY.composer}
+            textStyle={bodyText}
           />
         </View>
 

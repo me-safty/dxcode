@@ -93,7 +93,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
       <PierreEntryIcon path={node.path} kind={node.kind} size={17} />
       <Text
         className={cn(
-          "min-w-0 flex-1 text-sm leading-[19px]",
+          "min-w-0 flex-1 text-sm leading-normal",
           props.selected
             ? "font-t3-bold text-foreground"
             : "font-t3-medium text-foreground-secondary",
@@ -234,7 +234,7 @@ export function FileTreeBrowser(props: {
     return (
       <View className="flex-1 bg-sheet px-4 py-5">
         <Text className="text-sm font-t3-bold text-foreground">Files unavailable</Text>
-        <Text className="mt-1 text-xs leading-[18px] text-foreground-muted">{props.error}</Text>
+        <Text className="mt-1 text-xs leading-normal text-foreground-muted">{props.error}</Text>
       </View>
     );
   }
@@ -269,7 +269,7 @@ export function FileTreeBrowser(props: {
           ) : (
             <>
               <Text className="text-sm font-t3-bold text-foreground">No files found</Text>
-              <Text className="mt-1 text-xs leading-[18px] text-foreground-muted">
+              <Text className="mt-1 text-xs leading-normal text-foreground-muted">
                 {props.searchQuery.trim().length > 0
                   ? "Try a different search."
                   : "The workspace file index is empty."}

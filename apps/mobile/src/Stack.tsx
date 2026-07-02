@@ -38,6 +38,7 @@ import { AddProjectSourceRoute } from "./features/projects/AddProjectSourceRoute
 import { NewTaskDraftRouteScreen } from "./features/threads/NewTaskDraftRouteScreen";
 import { NewTaskFlowProvider } from "./features/threads/new-task-flow-provider";
 import { NewTaskRouteScreen } from "./features/threads/NewTaskRouteScreen";
+import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
@@ -137,6 +138,13 @@ const SettingsSheetStack = createNativeStackNavigator({
         title: "Archived Threads",
       },
     }),
+    SettingsAppearance: createNativeStackScreen({
+      screen: SettingsAppearanceRouteScreen,
+      linking: "appearance",
+      options: {
+        title: "Appearance",
+      },
+    }),
     SettingsAuth: createNativeStackScreen({
       screen: SettingsAuthRouteScreen,
       linking: "auth",
@@ -208,19 +216,53 @@ const NewTaskSheetStack = createNativeStackNavigator({
   },
 });
 
+// Routes presented as sheets/overlays ON TOP of the workspace. They must not
+// influence the adaptive workspace layout: opening Settings over Home should
+// not flip the sidebar in or change the active thread.
+const WORKSPACE_OVERLAY_ROUTES = new Set([
+  "Connections",
+  "ConnectionsNew",
+  "GitBranches",
+  "GitCommit",
+  "GitConfirm",
+  "GitOverview",
+  "NewTaskSheet",
+  "SettingsSheet",
+  "ThreadReviewComment",
+]);
+
+/**
+ * Pathname of the topmost NON-overlay route — the screen the workspace is
+ * actually "on", regardless of any sheets floating above it.
+ */
+function workspacePathFromState(state: NavigationState): string {
+  const routes = state.routes.filter((route) => !WORKSPACE_OVERLAY_ROUTES.has(route.name));
+  const effectiveState =
+    routes.length > 0 && routes.length !== state.routes.length
+      ? ({ ...state, routes, index: routes.length - 1 } as NavigationState)
+      : state;
+  const path = getPathFromState(effectiveState, navigationPathConfig);
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
 function RootStackLayout(props: {
   readonly children: React.ReactNode;
   readonly state: NavigationState;
 }) {
   useAgentNotificationNavigation();
   useThreadOutboxDrain();
+  // Full pathname (sheets included) for keyboard-command scoping; the
+  // workspace layout only reacts to the underlying non-overlay route.
   const path = getPathFromState(props.state, navigationPathConfig);
   const pathname = path.startsWith("/") ? path : `/${path}`;
+  const workspacePathname = workspacePathFromState(props.state);
 
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
       <ClerkSettingsSheetDetentProvider initiallyExpanded={false}>
-        <AdaptiveWorkspaceLayout pathname={pathname}>{props.children}</AdaptiveWorkspaceLayout>
+        <AdaptiveWorkspaceLayout pathname={workspacePathname}>
+          {props.children}
+        </AdaptiveWorkspaceLayout>
       </ClerkSettingsSheetDetentProvider>
     </HardwareKeyboardCommandProvider>
   );

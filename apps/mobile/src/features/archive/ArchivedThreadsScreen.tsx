@@ -305,7 +305,7 @@ function ArchivedThreadRow(props: {
           <View className="min-w-0 flex-1 gap-1">
             <View className="flex-row items-center gap-2">
               <Text
-                className="min-w-0 flex-1 text-base font-t3-bold leading-[20px] text-foreground"
+                className="min-w-0 flex-1 text-base font-t3-bold leading-snug text-foreground"
                 numberOfLines={1}
               >
                 {props.thread.title}
@@ -358,7 +358,7 @@ function ArchiveError(props: { readonly message: string; readonly onRetry: () =>
       <Text className="text-base font-t3-bold text-danger-foreground">
         Could not load every archive
       </Text>
-      <Text className="mt-1 text-sm leading-[18px] text-foreground-muted">{props.message}</Text>
+      <Text className="mt-1 text-sm text-foreground-muted">{props.message}</Text>
       <Pressable className="mt-3 self-start active:opacity-60" onPress={props.onRetry}>
         <Text className="text-sm font-t3-bold text-danger-foreground">Try again</Text>
       </Pressable>

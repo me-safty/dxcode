@@ -27,6 +27,13 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useWorkspaceState } from "../../state/workspace";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import {
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_SIZE_STEP,
+  stepTerminalFontSize,
+} from "../../lib/appearancePreferences";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import {
   useAttachedTerminalSession,
   useKnownTerminalSessions,
 } from "../../state/use-terminal-session";
@@ -36,7 +43,6 @@ import { EnvironmentConnectionNotice } from "../connection/EnvironmentConnection
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { TerminalSurface } from "./NativeTerminalSurface";
 import { getPierreTerminalTheme } from "./terminalTheme";
-import { loadPreferences, savePreferencesPatch } from "../../lib/storage";
 import { terminalDebugLog } from "./terminalDebugLog";
 import {
   getTerminalBufferReplayKey,
@@ -56,19 +62,7 @@ import {
   resolveTerminalSessionLabel,
   type TerminalMenuSession,
 } from "./terminalMenu";
-import {
-  DEFAULT_TERMINAL_FONT_SIZE,
-  MAX_TERMINAL_FONT_SIZE,
-  MIN_TERMINAL_FONT_SIZE,
-  TERMINAL_FONT_SIZE_STEP,
-  normalizeTerminalFontSize,
-} from "./terminalPreferences";
-import {
-  cacheTerminalFontSize,
-  cacheTerminalGridSize,
-  getCachedTerminalFontSize,
-  getCachedTerminalGridSize,
-} from "./terminalUiState";
+import { cacheTerminalGridSize, getCachedTerminalGridSize } from "./terminalUiState";
 
 const DEFAULT_TERMINAL_COLS = 80;
 const DEFAULT_TERMINAL_ROWS = 24;
@@ -224,7 +218,12 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   const isEnvironmentReady = environment.presentation?.connection.phase === "connected";
   const requestedTerminalId = firstRouteParam(params.terminalId);
   const terminalId = requestedTerminalId ?? DEFAULT_TERMINAL_ID;
-  const cachedFontSize = getCachedTerminalFontSize();
+  const {
+    isReady: hasResolvedFontPreference,
+    appearance,
+    setTerminalFontSize,
+  } = useAppearancePreferences();
+  const fontSize = appearance.terminalFontSize;
   const cachedRouteGridSize =
     routeEnvironmentId && routeThreadId
       ? getCachedTerminalGridSize({
@@ -284,7 +283,6 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       rows: DEFAULT_TERMINAL_ROWS,
     },
   );
-  const [fontSize, setFontSize] = useState(cachedFontSize ?? DEFAULT_TERMINAL_FONT_SIZE);
   const [keyboardFocusRequest, setKeyboardFocusRequest] = useState(0);
   const [isAccessoryDismissed, setIsAccessoryDismissed] = useState(false);
   const bufferReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -292,9 +290,6 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   const lastBufferReplayKeyRef = useRef<string | null>(null);
   const sentInitialInputKeyRef = useRef<string | null>(null);
   const [readyBufferReplayKey, setReadyBufferReplayKey] = useState<string | null>(null);
-  const [hasResolvedFontPreference, setHasResolvedFontPreference] = useState(
-    cachedFontSize !== null,
-  );
   /** Default grid is always valid for attach; onResize refines cols/rows. Requiring a cached size blocked bootstrap for new terminal routes. */
   const [hasMeasuredSurface, setHasMeasuredSurface] = useState(true);
   const [pendingModifierState, setPendingModifierState] = useState<{
@@ -705,42 +700,6 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     setHasMeasuredSurface(true);
   }, [routeEnvironmentId, routeThreadId, terminalId]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void loadPreferences()
-      .then((preferences) => {
-        if (cancelled) {
-          return;
-        }
-
-        setFontSize(cacheTerminalFontSize(preferences.terminalFontSize));
-        setHasResolvedFontPreference(true);
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-
-        setHasResolvedFontPreference(true);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!hasResolvedFontPreference) {
-      return;
-    }
-
-    cacheTerminalFontSize(fontSize);
-    void savePreferencesPatch({
-      terminalFontSize: normalizeTerminalFontSize(fontSize),
-    });
-  }, [fontSize, hasResolvedFontPreference]);
-
   const writeInput = useCallback(
     (data: string) => {
       if (!selectedThread || !isRunning) {
@@ -868,19 +827,13 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     );
   }, [navigation, selectedThread, terminalId, terminalMenuSessions]);
 
-  const adjustFontSize = useCallback((delta: number) => {
-    setTimeout(() => {
-      setFontSize((current) => cacheTerminalFontSize(current + delta));
-    }, 0);
-  }, []);
-
   const handleDecreaseFontSize = useCallback(() => {
-    adjustFontSize(-TERMINAL_FONT_SIZE_STEP);
-  }, [adjustFontSize]);
+    setTerminalFontSize(stepTerminalFontSize(fontSize, -1));
+  }, [fontSize, setTerminalFontSize]);
 
   const handleIncreaseFontSize = useCallback(() => {
-    adjustFontSize(TERMINAL_FONT_SIZE_STEP);
-  }, [adjustFontSize]);
+    setTerminalFontSize(stepTerminalFontSize(fontSize, 1));
+  }, [fontSize, setTerminalFontSize]);
 
   const handleClearTerminal = useCallback(() => {
     if (!selectedThread) {

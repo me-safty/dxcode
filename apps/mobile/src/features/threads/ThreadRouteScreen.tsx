@@ -10,7 +10,6 @@ import * as Option from "effect/Option";
 import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Platform, Pressable, ScrollView, Text as RNText, View } from "react-native";
-import { type SearchBarCommands } from "react-native-screens";
 import { useWorkspaceState } from "../../state/workspace";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useEnvironmentQuery } from "../../state/query";
@@ -179,7 +178,6 @@ function ThreadRouteContent(
     fileInspector,
     layout,
     panes,
-    setPrimarySidebarSearchQuery,
     showAuxiliaryPane,
     toggleAuxiliaryPane,
     togglePrimarySidebar,
@@ -189,7 +187,6 @@ function ThreadRouteContent(
   const { selectedThread, selectedThreadProject, selectedEnvironmentConnection } =
     useThreadSelection();
   const selectedThreadDetailState = props.selectedThreadDetailState;
-  const threadSearchBarRef = useRef<SearchBarCommands>(null);
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const composer = useThreadComposerState();
@@ -283,16 +280,6 @@ function ThreadRouteContent(
   /* ─── Native header theming ──────────────────────────────────────── */
   const foregroundColor = String(useThemeColor("--color-foreground"));
   const usesNativeHeaderGlass = Platform.OS === "ios";
-  const usesThreadSearchToolbar =
-    Platform.OS === "ios" && layout.usesSplitView && inspectorMode === null;
-  const focusThreadSearch = useCallback(() => {
-    if (!usesThreadSearchToolbar) {
-      return false;
-    }
-    threadSearchBarRef.current?.focus();
-    return true;
-  }, [usesThreadSearchToolbar]);
-  useHardwareKeyboardCommand("focusSearch", focusThreadSearch);
   const headerSubtitle = [
     selectedThreadProject?.title ?? null,
     selectedEnvironmentConnection?.environmentLabel ?? null,
@@ -744,44 +731,26 @@ function ThreadRouteContent(
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
       <NativeStackScreenOptions
         options={{
-          headerTitle: layout.usesSplitView ? () => null : selectedThread.title,
+          headerTitle: selectedThread.title,
           headerTitleStyle: usesNativeHeaderGlass
             ? {
                 fontSize: 17,
                 fontWeight: "800",
               }
             : undefined,
-          title: layout.usesSplitView ? "" : selectedThread.title,
+          title: selectedThread.title,
           headerBackVisible: !layout.usesSplitView,
-          headerSearchBarOptions: usesThreadSearchToolbar
-            ? {
-                ref: threadSearchBarRef,
-                allowToolbarIntegration: true,
-                autoCapitalize: "none",
-                hideNavigationBar: false,
-                obscureBackground: false,
-                onCancelButtonPress: () => {
-                  setPrimarySidebarSearchQuery("");
-                },
-                onChangeText: (event) => {
-                  setPrimarySidebarSearchQuery(event.nativeEvent.text);
-                },
-                placeholder: "Search",
-                placement: "integratedButton",
-              }
-            : undefined,
           // Compact uses the NATIVE back button (Thread lives flat in the root
           // stack now, so a real previous route exists); only split view needs
           // custom left items.
           unstable_headerLeftItems:
             Platform.OS === "ios" && layout.usesSplitView ? () => splitLeftHeaderItems : undefined,
-          unstable_headerCenterItems:
-            layout.usesSplitView && Platform.OS === "ios"
-              ? () => threadCenterHeaderItems
-              : undefined,
+          // Search lives in the persistent sidebar, so the split header keeps
+          // the git controls on the RIGHT (no center items — center space is
+          // reserved for future breadcrumbs/status).
           unstable_headerRightItems:
-            !layout.usesSplitView && Platform.OS === "ios"
-              ? () => compactRightHeaderItems
+            Platform.OS === "ios"
+              ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
               : undefined,
           unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
         }}

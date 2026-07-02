@@ -110,7 +110,10 @@ export function AdaptiveWorkspaceLayout(props: {
     useState<WorkspaceAuxiliaryPaneRole | null>(null);
   const baseLayout = useMemo(() => deriveLayout({ width, height }), [height, width]);
   const layout = baseLayout;
-  const shouldRenderPrimarySidebar = layout.usesSplitView && pathname !== "/";
+  // In split layouts the sidebar IS the thread list — it renders on every
+  // route, including Home (which shows an empty-detail pane instead of the
+  // compact list).
+  const shouldRenderPrimarySidebar = layout.usesSplitView;
   const fileInspector = useMemo(
     () =>
       deriveFileInspectorPaneLayout({
@@ -273,9 +276,6 @@ export function AdaptiveWorkspaceLayout(props: {
   const handleOpenSettings = useCallback(() => {
     navigation.navigate("SettingsSheet", { screen: "Settings" });
   }, [navigation]);
-  const handleStartNewTask = useCallback(() => {
-    navigation.navigate("NewTaskSheet", { screen: "NewTask" });
-  }, [navigation]);
 
   const renderedSidebarWidth = useSharedValue(
     panes.primarySidebarVisible ? (layout.listPaneWidth ?? 0) : 0,
@@ -344,7 +344,6 @@ export function AdaptiveWorkspaceLayout(props: {
                 onOpenSettings={handleOpenSettings}
                 onSelectThread={handleSelectThread}
                 onSearchQueryChange={setPrimarySidebarSearchQuery}
-                onStartNewTask={handleStartNewTask}
                 searchQuery={primarySidebarSearchQuery}
               />
             </Animated.View>

@@ -45,7 +45,7 @@ import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
-import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
+import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import type { RemoteClientConnectionState } from "../../lib/connection";
 import {
   insertRankedSearchResult,
@@ -217,7 +217,7 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
           <View className="h-2 w-2 rounded-full bg-red-500" />
         )}
         <Text
-          className="max-w-[260px] text-sm font-t3-bold leading-[17px] text-foreground"
+          className="max-w-[260px] text-sm font-t3-bold leading-snug text-foreground"
           numberOfLines={1}
         >
           {props.status.label}
@@ -230,6 +230,7 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
 export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposerProps) {
   const isDarkMode = useColorScheme() === "dark";
   const foregroundColor = useThemeColor("--color-foreground");
+  const bodyText = useScaledTextRole("body");
   const fallbackInputRef = useRef<ComposerEditorHandle>(null);
   const inputRef = props.editorRef ?? fallbackInputRef;
   const [isFocused, setIsFocused] = useState(false);
@@ -756,7 +757,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     }
               }
               textStyle={{
-                ...MOBILE_TYPOGRAPHY.composer,
+                ...bodyText,
                 color: foregroundColor,
                 fontFamily: "DMSans_400Regular",
               }}
@@ -866,13 +867,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
         {/* Queue count */}
         {props.queueCount > 0 ? (
-          <Text
-            className="text-foreground-muted"
-            style={{
-              ...MOBILE_TYPOGRAPHY.label,
-              paddingTop: 8,
-            }}
-          >
+          <Text className="text-xs text-foreground-muted" style={{ paddingTop: 8 }}>
             {props.queueCount} queued message{props.queueCount === 1 ? "" : "s"} will send
             automatically.
           </Text>

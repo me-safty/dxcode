@@ -25,10 +25,10 @@ import {
   getSelectedReviewCommentLines,
   useReviewCommentTarget,
 } from "./reviewCommentSelection";
+import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
 import {
   changeTone,
   DiffTokenText,
-  REVIEW_DIFF_LINE_HEIGHT,
   REVIEW_MONO_FONT_FAMILY,
   ReviewChangeBar,
 } from "./reviewDiffRendering";
@@ -52,6 +52,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
   const colorScheme = useColorScheme();
   const iconTint = String(useThemeColor("--color-icon"));
   const target = useReviewCommentTarget();
+  const { codeSurface } = useAppearanceCodeSurface();
   const { environmentId, threadId } = props.route.params;
   const [commentText, setCommentText] = useState("");
   const [highlightedLinesById, setHighlightedLinesById] = useState<
@@ -80,8 +81,8 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
         ? `Lines ${firstNumber}-${lastNumber}`
         : `${selectedLines.length} lines selected`;
   const previewHeight = Math.max(
-    Math.min(selectedLines.length, REVIEW_COMMENT_PREVIEW_MAX_LINES) * REVIEW_DIFF_LINE_HEIGHT,
-    REVIEW_DIFF_LINE_HEIGHT,
+    Math.min(selectedLines.length, REVIEW_COMMENT_PREVIEW_MAX_LINES) * codeSurface.rowHeight,
+    codeSurface.rowHeight,
   );
   const previewViewportWidth = Math.max(width - 40, 280);
   const dismissComposer = useCallback(() => {
@@ -169,7 +170,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
           {!target ? (
             <View className="rounded-[22px] border border-border bg-card px-4 py-5">
               <Text className="text-base font-t3-bold text-foreground">No selection</Text>
-              <Text className="mt-1 text-sm leading-[19px] text-foreground-muted">
+              <Text className="mt-1 text-sm leading-normal text-foreground-muted">
                 Select a diff line or range first.
               </Text>
             </View>
@@ -180,7 +181,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                   {selectionLabel}
                 </Text>
                 <Text
-                  className="font-mono text-xs leading-[17px] text-foreground-muted"
+                  className="font-mono text-xs leading-snug text-foreground-muted"
                   ellipsizeMode="middle"
                   numberOfLines={2}
                 >
@@ -213,9 +214,9 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                           <View
                             key={line.id}
                             className={cn("flex-row items-start", changeTone(line.change))}
-                            style={{ height: REVIEW_DIFF_LINE_HEIGHT }}
+                            style={{ height: codeSurface.rowHeight }}
                           >
-                            <ReviewChangeBar change={line.change} />
+                            <ReviewChangeBar change={line.change} height={codeSurface.rowHeight} />
                             <Text
                               className="w-9 py-1 pr-1 text-right text-2xs font-t3-medium text-foreground-muted"
                               style={{ fontFamily: REVIEW_MONO_FONT_FAMILY }}
@@ -227,6 +228,8 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                                 fallback={line.content}
                                 tokens={highlightedLinesById[line.id] ?? null}
                                 change={line.change}
+                                fontSize={codeSurface.fontSize}
+                                lineHeight={codeSurface.rowHeight}
                               />
                             </View>
                           </View>

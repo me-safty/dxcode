@@ -5,8 +5,7 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SymbolView } from "expo-symbols";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
-import { Alert, Linking, Platform, Pressable, ScrollView, Switch, View } from "react-native";
+import { Alert, Linking, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -29,6 +28,9 @@ import { runtime } from "../../lib/runtime";
 import { loadPreferences } from "../../lib/storage";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import { SettingsRow } from "./components/SettingsRow";
+import { SettingsSection } from "./components/SettingsSection";
+import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -86,6 +88,10 @@ function LocalSettingsRouteScreen() {
             value={`${environmentCount}`}
             target="SettingsEnvironments"
           />
+        </SettingsSection>
+
+        <SettingsSection title="Appearance">
+          <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
         </SettingsSection>
 
         <ArchivedThreadsSettingsSection />
@@ -371,7 +377,7 @@ function ConfiguredSettingsRouteScreen() {
               onPress={openAccount}
             />
           </SettingsSection>
-          <Text className="px-2 text-sm leading-[18px] text-foreground-muted">
+          <Text className="px-2 text-sm text-foreground-muted">
             T3 Code works locally without signing in. Cloud features are optional.
           </Text>
         </View>
@@ -401,26 +407,14 @@ function ConfiguredSettingsRouteScreen() {
           />
         </SettingsSection>
 
+        <SettingsSection title="Appearance">
+          <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
+        </SettingsSection>
+
         <ArchivedThreadsSettingsSection />
 
         <AppSettingsSection />
       </ScrollView>
-    </View>
-  );
-}
-
-type SymbolName = ComponentProps<typeof SymbolView>["name"];
-
-function SettingsSection(props: { readonly title: string; readonly children: ReactNode }) {
-  return (
-    <View className="gap-2">
-      <Text className="px-2 text-sm font-t3-medium text-foreground-muted">{props.title}</Text>
-      <View
-        className="overflow-hidden rounded-[28px] bg-card"
-        style={{ borderCurve: "continuous" }}
-      >
-        {props.children}
-      </View>
     </View>
   );
 }
@@ -450,100 +444,5 @@ function ArchivedThreadsSettingsSection() {
     <SettingsSection title="Threads">
       <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
     </SettingsSection>
-  );
-}
-
-function SettingsRow(props: {
-  readonly disabled?: boolean;
-  readonly icon: SymbolName;
-  readonly label: string;
-  readonly value?: string;
-  readonly target?: "SettingsEnvironments" | "SettingsArchive";
-  readonly onPress?: () => void;
-}) {
-  const navigation = useNavigation();
-  const icon = useThemeColor("--color-icon");
-  const chevron = useThemeColor("--color-chevron");
-  const content = (
-    <View
-      className="flex-row items-center gap-4 p-4"
-      style={{ opacity: props.disabled ? 0.45 : 1 }}
-    >
-      <SymbolView name={props.icon} size={22} tintColor={icon} type="monochrome" weight="regular" />
-      <Text className="shrink-0 text-lg text-foreground" numberOfLines={1}>
-        {props.label}
-      </Text>
-      <View className="min-w-0 flex-1 items-end">
-        {props.value ? (
-          <Text
-            className="max-w-[180px] text-right text-base text-foreground-muted"
-            ellipsizeMode="middle"
-            numberOfLines={1}
-          >
-            {props.value}
-          </Text>
-        ) : null}
-      </View>
-      <SymbolView
-        name="chevron.right"
-        size={16}
-        tintColor={chevron}
-        type="monochrome"
-        weight="semibold"
-      />
-    </View>
-  );
-
-  const target = props.target;
-  if (target) {
-    return (
-      <Pressable
-        accessibilityLabel={props.label}
-        accessibilityRole="button"
-        disabled={props.disabled}
-        onPress={() =>
-          navigation.navigate("SettingsSheet", {
-            screen: target,
-          })
-        }
-      >
-        {content}
-      </Pressable>
-    );
-  }
-
-  return (
-    <Pressable accessibilityRole="button" disabled={props.disabled} onPress={props.onPress}>
-      {content}
-    </Pressable>
-  );
-}
-
-function SettingsSwitchRow(props: {
-  readonly disabled?: boolean;
-  readonly icon: SymbolName;
-  readonly label: string;
-  readonly value: boolean;
-  readonly onValueChange: (value: boolean) => void;
-}) {
-  const icon = useThemeColor("--color-icon");
-  const activeTrack = String(useThemeColor("--color-switch-active"));
-  const track = String(useThemeColor("--color-secondary-border"));
-
-  return (
-    <View
-      className="flex-row items-center gap-4 p-4"
-      style={{ opacity: props.disabled ? 0.45 : 1 }}
-    >
-      <SymbolView name={props.icon} size={22} tintColor={icon} type="monochrome" weight="regular" />
-      <Text className="flex-1 text-lg text-foreground">{props.label}</Text>
-      <Switch
-        disabled={props.disabled}
-        ios_backgroundColor={track}
-        onValueChange={props.onValueChange}
-        trackColor={{ false: track, true: activeTrack }}
-        value={props.value}
-      />
-    </View>
   );
 }

@@ -387,7 +387,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         <Text className={isInspector ? "pr-10 text-xl font-t3-bold" : "text-3xl font-t3-bold"}>
           {currentBranchLabel}
         </Text>
-        <Text className="text-foreground-secondary text-sm font-medium leading-[19px]">
+        <Text className="text-foreground-secondary text-sm font-medium leading-normal">
           {currentStatusSummary}
         </Text>
       </View>

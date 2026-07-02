@@ -1,10 +1,24 @@
+import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
 import { SymbolView } from "expo-symbols";
 import { useNavigation } from "@react-navigation/native";
-import { memo, useCallback, useMemo, useRef, useState, type ComponentProps } from "react";
-import type { ColorValue, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
+import type {
+  ColorValue,
+  LayoutChangeEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+} from "react-native";
 import { Platform, Pressable, StyleSheet, TextInput, View, useColorScheme } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
@@ -14,7 +28,6 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { AppText as Text } from "../../components/AppText";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { StatusPill } from "../../components/StatusPill";
-import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { relativeTime } from "../../lib/time";
 import { useThemeColor } from "../../lib/useThemeColor";
@@ -35,30 +48,54 @@ import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { useThreadListActions } from "../home/useThreadListActions";
 import { WorkspaceConnectionStatus } from "../home/WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "../home/workspace-connection-status";
-import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { SidebarHeaderActions } from "./sidebar-header-actions";
 import { SidebarFilterButton } from "./sidebar-filter-button";
 import { threadStatusTone } from "./threadPresentation";
 
+/**
+ * Shared capsule behind the sidebar header buttons — a native liquid-glass
+ * surface on iOS 26+, a tinted pill everywhere else.
+ */
+function SidebarHeaderButtonGroup(props: {
+  readonly children: ReactNode;
+  readonly colorScheme: "light" | "dark";
+}) {
+  if (isLiquidGlassSupported) {
+    return (
+      <LiquidGlassView
+        colorScheme={props.colorScheme}
+        effect="regular"
+        interactive
+        style={styles.headerButtonGroup}
+      >
+        {props.children}
+      </LiquidGlassView>
+    );
+  }
+
+  return (
+    <View
+      style={[
+        styles.headerButtonGroup,
+        props.colorScheme === "dark"
+          ? { backgroundColor: "rgba(118,118,128,0.24)", borderColor: "rgba(255,255,255,0.08)" }
+          : { backgroundColor: "rgba(255,255,255,0.72)", borderColor: "rgba(0,0,0,0.08)" },
+        { borderWidth: StyleSheet.hairlineWidth },
+      ]}
+    >
+      {props.children}
+    </View>
+  );
+}
+
 const SIDEBAR_STICKY_HEADER_HEIGHT = 106;
 const SIDEBAR_STICKY_HEADER_FADE_HEIGHT = 44;
-const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 const IOS_SEARCH_FILL_DARK = "rgba(118, 118, 128, 0.24)";
 const IOS_SEARCH_FILL_LIGHT = "rgba(118, 118, 128, 0.12)";
 const SIDEBAR_HEADER_WASH_OPACITY = {
   dark: [0.22, 0.14, 0.04],
   light: [0.46, 0.3, 0.08],
 } as const;
-
-function sidebarConnectionStatusLabel(state: WorkspaceState): string {
-  if (state.networkStatus === "offline") return "Offline";
-  if (state.connectionState === "connected") return "Ready";
-  if (state.connectionState === "connecting") return "Connecting";
-  if (state.connectionState === "reconnecting") return "Reconnecting";
-  if (state.connectionState === "error") return "Error";
-  if (!state.hasConnections) return "No environments";
-  return "Not connected";
-}
 
 const ThreadNavigationRow = memo(function ThreadNavigationRow(props: {
   readonly backgroundColor: ColorValue;
@@ -251,7 +288,6 @@ export function ThreadNavigationSidebar(props: {
   readonly onOpenSettings: () => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
-  readonly onStartNewTask: () => void;
   readonly onRequestVisibility: () => void;
   readonly searchQuery: string;
 }) {
@@ -315,35 +351,6 @@ export function ThreadNavigationSidebar(props: {
     [groups],
   );
   const showsConnectionStatus = shouldShowWorkspaceConnectionStatus(catalogState);
-  const selectedThread = useMemo(() => {
-    if (props.selectedThreadKey === null) return null;
-    return (
-      threads.find(
-        (thread) => scopedThreadKey(thread.environmentId, thread.id) === props.selectedThreadKey,
-      ) ?? null
-    );
-  }, [props.selectedThreadKey, threads]);
-  const selectedProject = useMemo(() => {
-    if (selectedThread === null) return null;
-    return (
-      projects.find(
-        (project) =>
-          project.environmentId === selectedThread.environmentId &&
-          project.id === selectedThread.projectId,
-      ) ?? null
-    );
-  }, [projects, selectedThread]);
-  const selectedEnvironmentLabel =
-    options.selectedEnvironmentId === null
-      ? null
-      : (environments.find(
-          (environment) => environment.environmentId === options.selectedEnvironmentId,
-        )?.label ?? null);
-  const sidebarScopeLabel =
-    selectedProject?.title ??
-    selectedEnvironmentLabel ??
-    (projects.length === 1 ? projects[0]!.title : "All projects");
-  const nativeSidebarSubtitle = `${sidebarScopeLabel} · ${sidebarConnectionStatusLabel(catalogState)}`;
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -455,9 +462,16 @@ export function ThreadNavigationSidebar(props: {
   const listExtraData = `${listThemeKey}:${props.selectedThreadKey ?? ""}:${props.searchQuery}`;
   const headerFadeColor = String(backgroundColor);
   const headerWashOpacity = SIDEBAR_HEADER_WASH_OPACITY[colorScheme];
-  const usesNativeSidebarChrome = Platform.OS === "ios";
-  const topListInset = insets.top + SIDEBAR_STICKY_HEADER_HEIGHT - 6;
-  const nativeTopListInset = insets.top + 76;
+  const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState<number | null>(null);
+  // The sticky header (title row, search field, optional connection status)
+  // is measured so the list inset always matches its real height — no
+  // hardcoded per-variant constants.
+  const stickyHeaderHeight = measuredHeaderHeight ?? insets.top + SIDEBAR_STICKY_HEADER_HEIGHT;
+  const topListInset = stickyHeaderHeight + 6;
+  const handleStickyHeaderLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    setMeasuredHeaderHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
     if (openSwipeableRef.current !== methods) {
       openSwipeableRef.current?.close();
@@ -485,9 +499,6 @@ export function ThreadNavigationSidebar(props: {
     setHeaderIsOverContent(next);
   }, []);
   const focusSearch = useCallback(() => {
-    if (usesNativeSidebarChrome) {
-      return false;
-    }
     if (!props.visible) {
       props.onRequestVisibility();
       setTimeout(() => {
@@ -497,7 +508,7 @@ export function ThreadNavigationSidebar(props: {
       searchInputRef.current?.focus();
     }
     return true;
-  }, [props.onRequestVisibility, props.visible, usesNativeSidebarChrome]);
+  }, [props.onRequestVisibility, props.visible]);
   useHardwareKeyboardCommand("focusSearch", focusSearch);
   const renderListItem = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
@@ -562,181 +573,6 @@ export function ThreadNavigationSidebar(props: {
   const filterIcon = hasCustomHomeListOptions(options)
     ? "line.3.horizontal.decrease.circle.fill"
     : "line.3.horizontal.decrease.circle";
-  if (usesNativeSidebarChrome) {
-    const { Screen, ScreenStack, ScreenStackHeaderConfig } =
-      require("react-native-screens") as typeof import("react-native-screens");
-    const nativeHeaderRightBarButtonItems = [
-      withNativeGlassHeaderItem({
-        accessibilityLabel: "Open settings",
-        icon: { name: "ellipsis", type: "sfSymbol" } as const,
-        identifier: "thread-sidebar-settings",
-        onPress: props.onOpenSettings,
-        tintColor: foregroundColor,
-        type: "button",
-      }),
-      withNativeGlassHeaderItem({
-        accessibilityLabel: "Filter and sort threads",
-        icon: { name: filterIcon, type: "sfSymbol" } as const,
-        identifier: "thread-sidebar-filter",
-        menu: {
-          title: "Thread list options",
-          items: [
-            {
-              type: "submenu",
-              title: "Environment",
-              items: [
-                {
-                  onPress: () => setSelectedEnvironmentId(null),
-                  state: options.selectedEnvironmentId === null ? "on" : "off",
-                  subtitle: "Show threads from every environment",
-                  title: "All environments",
-                  type: "action",
-                },
-                ...environments.map((environment) => ({
-                  onPress: () => setSelectedEnvironmentId(environment.environmentId),
-                  state:
-                    options.selectedEnvironmentId === environment.environmentId
-                      ? ("on" as const)
-                      : ("off" as const),
-                  title: environment.label,
-                  type: "action" as const,
-                })),
-              ],
-            },
-            {
-              type: "submenu",
-              title: "Sort projects",
-              items: PROJECT_SORT_OPTIONS.map((option) => ({
-                onPress: () => setProjectSortOrder(option.value),
-                state:
-                  options.projectSortOrder === option.value ? ("on" as const) : ("off" as const),
-                title: option.label,
-                type: "action" as const,
-              })),
-            },
-            {
-              type: "submenu",
-              title: "Sort threads",
-              items: THREAD_SORT_OPTIONS.map((option) => ({
-                onPress: () => setThreadSortOrder(option.value),
-                state:
-                  options.threadSortOrder === option.value ? ("on" as const) : ("off" as const),
-                title: option.label,
-                type: "action" as const,
-              })),
-            },
-            {
-              type: "submenu",
-              title: "Group projects",
-              items: PROJECT_GROUPING_OPTIONS.map((option) => ({
-                onPress: () => setProjectGroupingMode(option.value),
-                state:
-                  options.projectGroupingMode === option.value ? ("on" as const) : ("off" as const),
-                subtitle: option.subtitle,
-                title: option.label,
-                type: "action" as const,
-              })),
-            },
-          ],
-        },
-        tintColor: foregroundColor,
-        type: "menu",
-      }),
-    ] as ComponentProps<typeof ScreenStackHeaderConfig>["headerRightBarButtonItems"];
-
-    return (
-      <View
-        testID="thread-navigation-sidebar"
-        style={[
-          styles.container,
-          {
-            width: props.width,
-            backgroundColor,
-            borderRightColor: borderColor,
-            borderRightWidth: StyleSheet.hairlineWidth,
-          },
-        ]}
-      >
-        <ScreenStack style={styles.container}>
-          <Screen
-            activityState={2}
-            enabled
-            isNativeStack
-            screenId="thread-navigation-sidebar-native"
-            scrollEdgeEffects={HEADER_SCROLL_EDGE_EFFECTS}
-            style={[styles.container, { backgroundColor }]}
-          >
-            <View style={{ flex: 1, paddingBottom: insets.bottom }}>
-              <GestureDetector gesture={sidebarScrollGesture}>
-                <LegendList
-                  data={listItems}
-                  estimatedItemSize={58}
-                  extraData={listExtraData}
-                  getItemType={(item) => item.kind}
-                  keyExtractor={(item) => item.key}
-                  renderItem={renderListItem}
-                  contentContainerStyle={[
-                    styles.threadListContent,
-                    {
-                      paddingBottom: 16 + insets.bottom,
-                      paddingTop: nativeTopListInset,
-                    },
-                  ]}
-                  keyboardDismissMode="on-drag"
-                  keyboardShouldPersistTaps="handled"
-                  onScroll={handleScroll}
-                  onScrollBeginDrag={() => openSwipeableRef.current?.close()}
-                  scrollEventThrottle={16}
-                  showsVerticalScrollIndicator={false}
-                  style={styles.threadList}
-                  ListHeaderComponent={
-                    showsConnectionStatus ? (
-                      <View style={styles.nativeConnectionStatus}>
-                        <WorkspaceConnectionStatus
-                          onPress={() =>
-                            navigation.navigate("SettingsSheet", {
-                              screen: "SettingsEnvironments",
-                            })
-                          }
-                          state={catalogState}
-                          variant="sidebar"
-                        />
-                      </View>
-                    ) : null
-                  }
-                  ListEmptyComponent={
-                    <Text className="px-2 py-4 text-sm" style={{ color: mutedColor }}>
-                      {catalogState.isLoadingConnections
-                        ? "Loading threads…"
-                        : props.searchQuery.trim().length > 0
-                          ? "No matching threads"
-                          : "No threads yet"}
-                    </Text>
-                  }
-                />
-              </GestureDetector>
-            </View>
-
-            <ScreenStackHeaderConfig
-              backgroundColor="rgba(0,0,0,0)"
-              color={foregroundColor}
-              hideBackButton
-              hideShadow={false}
-              headerRightBarButtonItems={nativeHeaderRightBarButtonItems}
-              navigationItemStyle="editor"
-              subtitle={nativeSidebarSubtitle}
-              title="Threads"
-              titleColor={foregroundColor}
-              titleFontSize={17}
-              titleFontWeight="700"
-              translucent
-            />
-          </Screen>
-        </ScreenStack>
-      </View>
-    );
-  }
-
   return (
     <View
       testID="thread-navigation-sidebar"
@@ -763,7 +599,7 @@ export function ThreadNavigationSidebar(props: {
               styles.threadListContent,
               {
                 paddingBottom: 16 + insets.bottom,
-                paddingTop: showsConnectionStatus ? topListInset + 138 : topListInset,
+                paddingTop: topListInset,
               },
             ]}
             keyboardDismissMode="on-drag"
@@ -787,6 +623,7 @@ export function ThreadNavigationSidebar(props: {
       </View>
 
       <View
+        onLayout={handleStickyHeaderLayout}
         pointerEvents="box-none"
         style={[
           styles.stickyHeader,
@@ -802,7 +639,7 @@ export function ThreadNavigationSidebar(props: {
           style={[
             styles.stickyHeaderWash,
             {
-              height: insets.top + SIDEBAR_STICKY_HEADER_HEIGHT + SIDEBAR_STICKY_HEADER_FADE_HEIGHT,
+              height: stickyHeaderHeight + SIDEBAR_STICKY_HEADER_FADE_HEIGHT,
             },
           ]}
         >
@@ -838,13 +675,16 @@ export function ThreadNavigationSidebar(props: {
           >
             Threads
           </Text>
-          <ControlPillMenu actions={listMenuActions} onPressAction={handleListMenuAction}>
-            <SidebarFilterButton accessibilityLabel="Filter and sort threads" icon={filterIcon} />
-          </ControlPillMenu>
-          <SidebarHeaderActions
-            onOpenSettings={props.onOpenSettings}
-            onStartNewTask={props.onStartNewTask}
-          />
+          <SidebarHeaderButtonGroup colorScheme={colorScheme}>
+            <ControlPillMenu actions={listMenuActions} onPressAction={handleListMenuAction}>
+              <SidebarFilterButton
+                grouped
+                accessibilityLabel="Filter and sort threads"
+                icon={filterIcon}
+              />
+            </ControlPillMenu>
+            <SidebarHeaderActions grouped onOpenSettings={props.onOpenSettings} />
+          </SidebarHeaderButtonGroup>
         </View>
 
         <View
@@ -866,6 +706,7 @@ export function ThreadNavigationSidebar(props: {
             placeholder="Search"
             placeholderTextColor={placeholderColor}
             returnKeyType="search"
+            className="text-base"
             style={[styles.searchInput, { color: foregroundColor }]}
             value={props.searchQuery}
           />
@@ -914,18 +755,15 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 2,
   },
+  headerButtonGroup: {
+    alignItems: "center",
+    borderRadius: 22,
+    flexDirection: "row",
+    overflow: "hidden",
+  },
   connectionStatus: {
     paddingTop: 10,
     paddingHorizontal: 14,
-  },
-  nativeConnectionStatus: {
-    paddingBottom: 10,
-    paddingHorizontal: 14,
-  },
-  nativeHeaderActions: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 2,
   },
   searchField: {
     height: 38,
@@ -944,7 +782,6 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     paddingHorizontal: 0,
     fontFamily: "DMSans_400Regular",
-    fontSize: 15,
   },
   threadList: {
     flex: 1,

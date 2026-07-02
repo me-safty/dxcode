@@ -143,7 +143,7 @@ export function NewTaskRouteScreen() {
             <Text className="text-center text-lg font-t3-bold text-foreground">
               {projectEmptyState.title}
             </Text>
-            <Text className="text-center text-sm leading-[20px] text-foreground-muted">
+            <Text className="text-center text-sm leading-normal text-foreground-muted">
               {projectEmptyState.detail}
             </Text>
             {!catalogState.hasReadyEnvironment ? (
@@ -207,7 +207,7 @@ export function NewTaskRouteScreen() {
                       />
                     </View>
                     <View className="flex-1">
-                      <Text className="text-base leading-[21px] font-t3-bold">{item.title}</Text>
+                      <Text className="text-base leading-snug font-t3-bold">{item.title}</Text>
                     </View>
                     <SymbolView
                       name="chevron.right"

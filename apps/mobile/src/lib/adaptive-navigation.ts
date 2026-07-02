@@ -9,12 +9,14 @@ export function isBaseThreadRoute(pathname: string): boolean {
 /**
  * A persistent sidebar selects a peer destination in place. A compact list
  * drills into a new destination so the native back stack remains available.
+ * From Home the selection pushes (never replaces) so Home stays beneath the
+ * thread — collapsing back to a compact width keeps a sane back stack.
  */
 export function resolveThreadSelectionNavigationAction(input: {
   readonly usesSplitView: boolean;
   readonly pathname: string;
 }): AdaptiveNavigationAction {
-  if (!input.usesSplitView) {
+  if (!input.usesSplitView || input.pathname === "/") {
     return "push";
   }
 

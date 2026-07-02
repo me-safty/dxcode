@@ -109,7 +109,7 @@ export function SettingsEnvironmentsRouteScreen() {
                 type="monochrome"
               />
             </View>
-            <Text className="text-center text-sm leading-[20px] text-foreground-muted">
+            <Text className="text-center text-sm leading-normal text-foreground-muted">
               No environments connected yet.{"\n"}Tap{" "}
               <Text className="font-t3-bold text-foreground">+</Text> to add one.
             </Text>
@@ -202,7 +202,7 @@ function ConfiguredCloudEnvironmentRows(props: {
       ) : controller.relayDiscovery.isRefreshing ? (
         <View collapsable={false} className="items-center gap-3 rounded-[24px] bg-card p-6">
           <ActivityIndicator color={iconColor} />
-          <Text className="text-center text-sm leading-[20px] text-foreground-muted">
+          <Text className="text-center text-sm leading-normal text-foreground-muted">
             Loading linked cloud environments.
           </Text>
         </View>
@@ -211,7 +211,7 @@ function ConfiguredCloudEnvironmentRows(props: {
           <Text className="text-base font-t3-bold text-foreground">
             Could not load T3 Cloud environments
           </Text>
-          <Text className="text-sm leading-[18px] text-foreground-muted">
+          <Text className="text-sm text-foreground-muted">
             {controller.relayDiscovery.error}
           </Text>
           {controller.relayDiscovery.errorTraceId ? (
@@ -220,7 +220,7 @@ function ConfiguredCloudEnvironmentRows(props: {
         </View>
       ) : (
         <View collapsable={false} className="rounded-[24px] bg-card p-5">
-          <Text className="text-sm leading-[20px] text-foreground-muted">
+          <Text className="text-sm leading-normal text-foreground-muted">
             No additional linked cloud environments.
           </Text>
         </View>
@@ -359,7 +359,7 @@ function CloudEnvironmentRowShell(props: {
         <View className="min-w-0 flex-row items-center gap-2">
           <ConnectionStatusDot state={props.connectionState} pulse={shouldPulse} size={7} />
           <Text
-            className="min-w-0 flex-shrink text-base font-t3-bold leading-[21px] text-foreground"
+            className="min-w-0 flex-shrink text-base font-t3-bold leading-snug text-foreground"
             numberOfLines={1}
           >
             {props.label}
@@ -368,7 +368,7 @@ function CloudEnvironmentRowShell(props: {
         {props.connectionError ? (
           <Text
             aria-hidden
-            className={cn("absolute left-0 right-0 text-xs leading-[16px]", statusClassName)}
+            className={cn("absolute left-0 right-0 text-xs", statusClassName)}
             onTextLayout={onMeasuredErrorTextLayout}
             style={{ opacity: 0, zIndex: -1 }}
           >
@@ -382,7 +382,7 @@ function CloudEnvironmentRowShell(props: {
           className="min-w-0 flex-row items-start gap-1"
         >
           <Text
-            className={cn("min-w-0 flex-1 text-xs leading-[16px]", statusClassName)}
+            className={cn("min-w-0 flex-1 text-xs", statusClassName)}
             numberOfLines={isErrorExpanded ? undefined : 1}
           >
             {statusText}
@@ -392,7 +392,7 @@ function CloudEnvironmentRowShell(props: {
                 <Text
                   accessibilityHint="Copies the trace ID"
                   accessibilityRole="button"
-                  className={cn("text-xs leading-[16px] underline", statusClassName)}
+                  className={cn("text-xs underline", statusClassName)}
                   onLongPress={(event) => {
                     event.stopPropagation();
                     copyTextWithHaptic(errorTraceId, { target: "connection-trace-id" });

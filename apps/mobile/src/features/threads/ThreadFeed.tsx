@@ -62,13 +62,16 @@ import {
   buildNativeReviewDiffData,
   createNativeReviewDiffTheme,
   NATIVE_REVIEW_DIFF_CONTENT_WIDTH,
-  NATIVE_REVIEW_DIFF_ROW_HEIGHT,
-  NATIVE_REVIEW_DIFF_STYLE,
 } from "../review/nativeReviewDiffAdapter";
 import { buildReviewParsedDiff } from "../review/reviewModel";
 import { cn } from "../../lib/cn";
 import { deriveCenteredContentHorizontalPadding, type LayoutVariant } from "../../lib/layout";
-import { MOBILE_CODE_SURFACE, MOBILE_TYPOGRAPHY } from "../../lib/typography";
+import {
+  resolveMarkdownFontSizes,
+  resolveNativeMarkdownTypography,
+} from "../../lib/appearancePreferences";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
 import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons";
 import { resolveMarkdownLinkPresentation } from "@t3tools/mobile-markdown-text/links";
 import {
@@ -278,6 +281,15 @@ function useReviewCommentColors(): ReviewCommentColors {
 
 function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSets {
   const colorScheme = useColorScheme();
+  const { appearance } = useAppearancePreferences();
+  const markdownFontSizes = useMemo(
+    () => resolveMarkdownFontSizes(appearance.baseFontSize),
+    [appearance.baseFontSize],
+  );
+  const nativeMarkdownTypography = useMemo(
+    () => resolveNativeMarkdownTypography(appearance.baseFontSize),
+    [appearance.baseFontSize],
+  );
   const colors = MARKDOWN_COLORS[colorScheme === "dark" ? "dark" : "light"];
   const inlineSkillForeground = String(useThemeColor("--color-inline-skill-foreground"));
 
@@ -321,14 +333,14 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         xl: 16,
       },
       fontSizes: {
-        s: 13,
-        m: 15,
-        h1: 20,
-        h2: 18,
-        h3: 16,
-        h4: 14,
-        h5: 14,
-        h6: 14,
+        s: markdownFontSizes.s,
+        m: markdownFontSizes.m,
+        h1: markdownFontSizes.h1,
+        h2: markdownFontSizes.h2,
+        h3: markdownFontSizes.h3,
+        h4: markdownFontSizes.h4,
+        h5: markdownFontSizes.h5,
+        h6: markdownFontSizes.h6,
       },
       fontFamilies: {
         regular: "DMSans_400Regular",
@@ -350,7 +362,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       list: { marginTop: 4, marginBottom: 8 },
       list_item: { marginTop: 0, marginBottom: 4 },
       task_list_item: { marginTop: 0, marginBottom: 4 },
-      text: { lineHeight: 22 },
+      text: { lineHeight: markdownFontSizes.bodyLineHeight },
       bold: {
         fontWeight: "700",
         color: markdownStrongColor,
@@ -459,7 +471,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                     marginRight: 5,
                     color: inlineTextColor,
                     fontFamily: "DMSans_400Regular",
-                    ...MOBILE_TYPOGRAPHY.body,
+                    fontSize: markdownFontSizes.m,
+                    lineHeight: markdownFontSizes.bodyLineHeight,
                     textAlign: ordered ? "right" : "center",
                   }}
                 >
@@ -480,8 +493,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
             style={{
               color: inlineCodeTextColor,
               fontFamily: "ui-monospace",
-              fontSize: MOBILE_TYPOGRAPHY.label.fontSize,
-              lineHeight: 22,
+              fontSize: markdownFontSizes.codeBlockFontSize,
+              lineHeight: markdownFontSizes.bodyLineHeight,
             }}
           >
             {value}
@@ -517,7 +530,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                 style={{
                   color: markdownBodyColor,
                   fontFamily: "ui-monospace",
-                  fontSize: MOBILE_TYPOGRAPHY.label.fontSize,
+                  fontSize: markdownFontSizes.codeBlockFontSize,
                   opacity: 0.7,
                   textTransform: "uppercase",
                 }}
@@ -537,8 +550,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
               style={{
                 color: blockTextColor,
                 fontFamily: "ui-monospace",
-                fontSize: MOBILE_TYPOGRAPHY.label.fontSize,
-                lineHeight: 18,
+                fontSize: markdownFontSizes.codeBlockFontSize,
+                lineHeight: markdownFontSizes.codeBlockLineHeight,
               }}
             >
               {content}
@@ -617,7 +630,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           skillTextColor: "#f0abfc",
           quoteMarkerColor: markdownUserBodyColor,
           dividerColor: markdownUserBodyColor,
-          ...MOBILE_TYPOGRAPHY.body,
+          fontSize: nativeMarkdownTypography.fontSize,
+          lineHeight: nativeMarkdownTypography.lineHeight,
+          headingFontSizes: nativeMarkdownTypography.headingFontSizes,
           fontFamily: "DMSans_400Regular",
           headingFontFamily: "DMSans_700Bold",
           boldFontFamily: "DMSans_700Bold",
@@ -646,14 +661,16 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           skillTextColor: inlineSkillForeground,
           quoteMarkerColor: markdownBlockquoteBorder,
           dividerColor: markdownHrColor,
-          ...MOBILE_TYPOGRAPHY.body,
+          fontSize: nativeMarkdownTypography.fontSize,
+          lineHeight: nativeMarkdownTypography.lineHeight,
+          headingFontSizes: nativeMarkdownTypography.headingFontSizes,
           fontFamily: "DMSans_400Regular",
           headingFontFamily: "DMSans_700Bold",
           boldFontFamily: "DMSans_700Bold",
         },
       },
     };
-  }, [colors, inlineSkillForeground, onLinkPress]);
+  }, [colors, inlineSkillForeground, markdownFontSizes, nativeMarkdownTypography, onLinkPress]);
 }
 
 function renderFeedEntry(
@@ -929,6 +946,7 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
   readonly comment: ReviewInlineComment;
   readonly colors: ReviewCommentColors;
 }) {
+  const { codeSurface, nativeReviewDiffStyle } = useAppearanceCodeSurface();
   const colorScheme = useColorScheme();
   const appearanceScheme = colorScheme === "light" ? "light" : "dark";
   const NativeReviewDiffView = resolveNativeReviewDiffView();
@@ -951,18 +969,21 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
     () => JSON.stringify(nativeReviewDiffTheme),
     [nativeReviewDiffTheme],
   );
-  const nativeStyleJson = useMemo(() => JSON.stringify(NATIVE_REVIEW_DIFF_STYLE), []);
+  const nativeStyleJson = useMemo(
+    () => JSON.stringify(nativeReviewDiffStyle),
+    [nativeReviewDiffStyle],
+  );
   const nativeDiffHeight = useMemo(
     () =>
       Math.min(
         360,
         Math.max(
           112,
-          compactNativeRows.length * NATIVE_REVIEW_DIFF_ROW_HEIGHT +
-            NATIVE_REVIEW_DIFF_STYLE.fileHeaderVerticalMargin,
+          compactNativeRows.length * nativeReviewDiffStyle.rowHeight +
+            nativeReviewDiffStyle.fileHeaderVerticalMargin,
         ),
       ),
-    [compactNativeRows.length],
+    [compactNativeRows.length, nativeReviewDiffStyle],
   );
   const shouldRenderNativeDiff = NativeReviewDiffView != null && compactNativeRows.length > 0;
 
@@ -992,7 +1013,7 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         </View>
         <View className="min-w-0 flex-1">
           <Text
-            className="font-mono text-xs leading-[16px]"
+            className="font-mono text-xs"
             numberOfLines={1}
             style={{ color: props.colors.text }}
           >
@@ -1015,7 +1036,7 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
             style={StyleSheet.absoluteFill}
             appearanceScheme={appearanceScheme}
             contentWidth={NATIVE_REVIEW_DIFF_CONTENT_WIDTH}
-            rowHeight={NATIVE_REVIEW_DIFF_ROW_HEIGHT}
+            rowHeight={nativeReviewDiffStyle.rowHeight}
             rowsJson={nativeRowsJson}
             styleJson={nativeStyleJson}
             themeJson={nativeThemeJson}
@@ -1037,8 +1058,8 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
             style={{
               color: props.colors.text,
               fontFamily: "ui-monospace",
-              fontSize: MOBILE_CODE_SURFACE.fontSize,
-              lineHeight: MOBILE_CODE_SURFACE.rowHeight,
+              fontSize: codeSurface.fontSize,
+              lineHeight: codeSurface.rowHeight,
             }}
           >
             {props.comment.diff.trim()}
@@ -1049,7 +1070,7 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         <View className="border-t px-3 py-3" style={{ borderColor: props.colors.border }}>
           <Text
             selectable
-            className="text-base leading-[21px]"
+            className="text-base leading-snug"
             style={{ color: props.colors.text }}
           >
             {props.comment.text}
@@ -1109,7 +1130,7 @@ function ThreadFeedPlaceholder(props: {
     >
       <View className="max-w-[320px] items-center gap-2">
         <Text className="text-center font-t3-bold text-lg text-foreground">{props.title}</Text>
-        <Text className="text-center text-sm leading-5 text-foreground-secondary">
+        <Text className="text-center text-sm leading-normal text-foreground-secondary">
           {props.detail}
         </Text>
       </View>

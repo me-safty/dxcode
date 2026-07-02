@@ -141,7 +141,7 @@ function FileContent(props: {
           <Text className="text-2xs font-t3-bold uppercase text-amber-700 dark:text-amber-300">
             Partial file
           </Text>
-          <Text className="text-xs leading-[17px] text-amber-800 dark:text-amber-200">
+          <Text className="text-xs leading-snug text-amber-800 dark:text-amber-200">
             Preview limited to the first 1 MB of a truncated file.
           </Text>
         </View>

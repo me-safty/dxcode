@@ -13,7 +13,7 @@ export function EmptyState(props: {
     return (
       <View className="items-center px-8 py-8">
         <Text className="text-center text-xl font-t3-bold text-foreground">{props.title}</Text>
-        <Text className="mt-2 text-center font-sans text-base leading-[23px] text-foreground-muted">
+        <Text className="mt-2 text-center font-sans text-base leading-normal text-foreground-muted">
           {props.detail}
         </Text>
         {props.actionLabel && props.onAction ? (
@@ -33,7 +33,7 @@ export function EmptyState(props: {
   return (
     <View className="rounded-[22px] border border-border bg-card p-5">
       <Text className="font-t3-bold text-lg text-foreground">{props.title}</Text>
-      <Text className="mt-2 font-sans text-sm leading-[21px] text-foreground-muted">
+      <Text className="mt-2 font-sans text-sm leading-relaxed text-foreground-muted">
         {props.detail}
       </Text>
       {props.actionLabel && props.onAction ? (

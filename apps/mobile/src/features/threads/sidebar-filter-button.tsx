@@ -10,8 +10,10 @@ export type SidebarFilterButtonIcon =
 export function SidebarFilterButton(props: {
   readonly accessibilityLabel: string;
   readonly icon: SidebarFilterButtonIcon;
+  /** Rendered inside a shared capsule group — no own background/border. */
+  readonly grouped?: boolean;
 }) {
-  const iconColor = useThemeColor("--color-icon-muted");
+  const iconColor = useThemeColor("--color-foreground");
   const pressedBackgroundColor = useThemeColor("--color-subtle");
   const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
   const idleBackgroundColor =
@@ -25,20 +27,24 @@ export function SidebarFilterButton(props: {
       hitSlop={4}
       style={({ pressed }) => [
         styles.button,
-        {
-          backgroundColor: pressed ? pressedBackgroundColor : idleBackgroundColor,
-          borderColor,
-        },
+        props.grouped
+          ? { backgroundColor: pressed ? pressedBackgroundColor : "transparent", borderWidth: 0 }
+          : {
+              backgroundColor: pressed ? pressedBackgroundColor : idleBackgroundColor,
+              borderColor,
+            },
       ]}
     >
-      <SymbolView name={props.icon} size={18} tintColor={iconColor} type="monochrome" />
+      <SymbolView name={props.icon} size={20} tintColor={iconColor} type="monochrome" />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    width: 44,
+    // Match the native glass UIBarButtonItem group metrics (~50pt slots,
+    // 44pt bar height, label-colored ~20pt glyphs).
+    width: 50,
     height: 44,
     borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,

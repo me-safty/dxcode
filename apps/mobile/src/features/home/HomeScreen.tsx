@@ -315,7 +315,7 @@ function ThreadRow(props: {
             >
               <View className="flex-row items-center justify-between gap-2">
                 <Text
-                  className="flex-1 text-lg font-t3-bold leading-[22px] text-foreground"
+                  className="flex-1 text-lg font-t3-bold text-foreground"
                   numberOfLines={1}
                 >
                   {props.thread.title}

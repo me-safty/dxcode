@@ -3,9 +3,13 @@ import * as Order from "effect/Order";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 
+import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { WorkspaceEmptyDetail } from "../layout/WorkspaceEmptyDetail";
+import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
@@ -14,6 +18,7 @@ import { useThreadListActions } from "./useThreadListActions";
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
 export function HomeRouteScreen() {
+  const { layout } = useAdaptiveWorkspaceLayout();
   const projects = useProjects();
   const threads = useThreadShells();
   const { state: catalogState } = useWorkspaceState();
@@ -48,8 +53,32 @@ export function HomeRouteScreen() {
   } = useHomeListOptions(availableEnvironmentIds);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
 
+  // In split layouts the persistent sidebar IS the thread list — Home becomes
+  // an empty detail pane so selecting a thread never transitions layouts.
+  if (layout.usesSplitView) {
+    return (
+      <>
+        <NativeStackScreenOptions options={{ title: "", headerTitle: "" }} />
+        <WorkspaceSidebarToolbar
+          afterSidebarButton={
+            <NativeHeaderToolbar.Button
+              accessibilityLabel="New task"
+              icon="square.and.pencil"
+              onPress={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
+            />
+          }
+        />
+        <WorkspaceEmptyDetail
+          onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
+        />
+      </>
+    );
+  }
+
   return (
     <>
+      {/* Restore the compact title in case the split branch blanked it. */}
+      <NativeStackScreenOptions options={{ title: "Threads", headerTitle: "Threads" }} />
       <HomeHeader
         environments={environments}
         selectedEnvironmentId={selectedEnvironmentId}

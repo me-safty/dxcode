@@ -168,9 +168,9 @@ function ListRow(props: {
           {props.icon}
         </View>
         <View className="flex-1 gap-0.5">
-          <Text className="text-base leading-[21px] font-t3-bold">{props.title}</Text>
+          <Text className="text-base leading-snug font-t3-bold">{props.title}</Text>
           {props.subtitle ? (
-            <Text className="text-sm leading-[17px] text-foreground-muted" numberOfLines={2}>
+            <Text className="text-sm leading-snug text-foreground-muted" numberOfLines={2}>
               {props.subtitle}
             </Text>
           ) : null}
@@ -215,7 +215,7 @@ function ProjectPathInput(props: {
 }) {
   return (
     <TextInput
-      className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-[20px]"
+      className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-snug"
       value={props.value}
       onChangeText={props.onChangeText}
       autoCapitalize="none"
@@ -270,7 +270,7 @@ function EmptyEnvironmentState() {
   return (
     <View className="items-center gap-3 rounded-2xl bg-card px-5 py-8">
       <Text className="text-center text-lg font-t3-bold">No environments connected</Text>
-      <Text className="text-center text-sm leading-[20px] text-foreground-muted">
+      <Text className="text-center text-sm leading-normal text-foreground-muted">
         Add an environment before adding a project.
       </Text>
       <Pressable
@@ -564,7 +564,7 @@ export function AddProjectRepositoryScreen(props: {
     <AddProjectShell>
       {error ? <ErrorBanner message={error} /> : null}
       <TextInput
-        className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-[20px]"
+        className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-snug"
         value={repositoryInput}
         onChangeText={setRepositoryInput}
         autoCapitalize="none"

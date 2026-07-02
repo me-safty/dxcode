@@ -43,10 +43,8 @@ import {
   type NativeReviewDiffViewHandle,
   resolveNativeReviewDiffView,
 } from "../diffs/nativeReviewDiffSurface";
-import {
-  NATIVE_REVIEW_DIFF_CONTENT_WIDTH,
-  NATIVE_REVIEW_DIFF_ROW_HEIGHT,
-} from "./nativeReviewDiffAdapter";
+import { NATIVE_REVIEW_DIFF_CONTENT_WIDTH } from "./nativeReviewDiffAdapter";
+import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
 import { useReviewDiffData } from "./useReviewDiffData";
 import { useReviewDiffPrewarming } from "./useReviewDiffPrewarming";
 import { useReviewFileVisibility } from "./reviewFileVisibility";
@@ -65,7 +63,7 @@ const ReviewNotice = memo(function ReviewNotice(props: { readonly notice: string
       <Text className="text-xs font-t3-bold uppercase text-amber-700 dark:text-amber-300">
         Partial diff
       </Text>
-      <Text className="text-xs leading-[18px] text-amber-800 dark:text-amber-200">
+      <Text className="text-xs leading-normal text-amber-800 dark:text-amber-200">
         {props.notice}
       </Text>
     </View>
@@ -287,6 +285,7 @@ type ReviewSheetProps = StaticScreenProps<{
 }>;
 
 export function ReviewSheet(props: ReviewSheetProps) {
+  const { nativeReviewDiffStyle } = useAppearanceCodeSurface();
   useAdaptiveWorkspacePaneRole("inspector");
   const { layout, panes, showAuxiliaryPane, toggleAuxiliaryPane, togglePrimarySidebar } =
     useAdaptiveWorkspaceLayout();
@@ -447,7 +446,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
       children.push(
         <View key="review-error" className="border-b border-border bg-card px-4 py-3">
           <Text className="text-sm font-t3-bold text-foreground">Review unavailable</Text>
-          <Text className="text-xs leading-[18px] text-foreground-muted">{error}</Text>
+          <Text className="text-xs leading-normal text-foreground-muted">{error}</Text>
         </View>,
       );
     }
@@ -611,7 +610,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
                     contentResetKey={`${reviewCache.threadKey}:${selectedSection.id}`}
                     contentWidth={NATIVE_REVIEW_DIFF_CONTENT_WIDTH}
                     nativeViewRef={nativeReviewDiffViewRef}
-                    rowHeight={NATIVE_REVIEW_DIFF_ROW_HEIGHT}
+                    rowHeight={nativeReviewDiffStyle.rowHeight}
                     rowsJson={nativeBridge.rowsJson}
                     selectedRowIdsJson={nativeBridge.selectedRowIdsJson}
                     styleJson={nativeBridge.styleJson}
@@ -646,7 +645,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
             {!selectedSection ? (
               <View className="border-b border-border bg-card px-4 py-5">
                 <Text className="text-sm font-t3-bold text-foreground">No review diffs</Text>
-                <Text className="text-xs leading-[18px] text-foreground-muted">
+                <Text className="text-xs leading-normal text-foreground-muted">
                   This thread has no ready turn diffs and the worktree diff is empty.
                 </Text>
               </View>
@@ -658,17 +657,17 @@ export function ReviewSheet(props: ReviewSheetProps) {
             ) : parsedDiff.kind === "empty" ? (
               <View className="border-b border-border bg-card px-4 py-5">
                 <Text className="text-sm font-t3-bold text-foreground">No changes</Text>
-                <Text className="text-xs leading-[18px] text-foreground-muted">
+                <Text className="text-xs leading-normal text-foreground-muted">
                   {selectedSection.subtitle ?? "This diff is empty."}
                 </Text>
               </View>
             ) : parsedDiff.kind === "raw" ? (
               <View className="gap-3 border-b border-border bg-card px-4 py-4">
-                <Text className="text-xs leading-[18px] text-foreground-muted">
+                <Text className="text-xs leading-normal text-foreground-muted">
                   {parsedDiff.reason}
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
-                  <Text selectable className="font-mono text-xs leading-[19px] text-foreground">
+                  <Text selectable className="font-mono text-xs leading-relaxed text-foreground">
                     {parsedDiff.text}
                   </Text>
                 </ScrollView>

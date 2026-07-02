@@ -91,7 +91,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
         </View>
         {isDefaultRef ? (
           <Text
-            className="text-xs leading-[18px]"
+            className="text-xs leading-normal"
             style={{ color: isDarkMode ? "#fbbf24" : "#b45309" }}
           >
             Warning: this is the default branch.
@@ -103,7 +103,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
         <View className="flex-row items-center justify-between gap-3">
           <View className="gap-1">
             <Text className="text-foreground text-base font-t3-bold">Files</Text>
-            <Text className="text-foreground-muted text-xs leading-[18px]">
+            <Text className="text-foreground-muted text-xs leading-normal">
               {selectedFiles.length} selected · +{selectedInsertions} / -{selectedDeletions}
             </Text>
           </View>
@@ -128,7 +128,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
         </View>
 
         {allFiles.length === 0 ? (
-          <Text className="text-foreground-secondary text-sm leading-[19px]">
+          <Text className="text-foreground-secondary text-sm leading-normal">
             No changed files are available to commit.
           </Text>
         ) : !isEditingFiles ? (
@@ -147,7 +147,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
               </View>
             ))}
             {selectedFiles.length > selectedFilePreview.length ? (
-              <Text className="text-foreground-muted text-xs leading-[17px]">
+              <Text className="text-foreground-muted text-xs leading-snug">
                 +{selectedFiles.length - selectedFilePreview.length} more files
               </Text>
             ) : null}
@@ -187,7 +187,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
                         {file.path}
                       </Text>
                       {!included ? (
-                        <Text className="text-foreground-muted text-2xs leading-[16px]">
+                        <Text className="text-foreground-muted text-2xs leading-normal">
                           Excluded from this commit
                         </Text>
                       ) : null}

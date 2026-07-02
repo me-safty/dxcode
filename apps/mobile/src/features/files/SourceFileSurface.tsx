@@ -2,7 +2,14 @@ import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, ScrollView, Text as NativeText, useColorScheme, View } from "react-native";
+import {
+  FlatList,
+  ScrollView,
+  Text as NativeText,
+  useColorScheme,
+  useWindowDimensions,
+  View,
+} from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { LoadingStrip } from "../../components/LoadingStrip";
@@ -11,27 +18,18 @@ import {
   resolveNativeReviewDiffView,
 } from "../diffs/nativeReviewDiffSurface";
 import { createNativeReviewDiffTheme } from "../review/nativeReviewDiffAdapter";
-import {
-  REVIEW_DIFF_LINE_HEIGHT,
-  REVIEW_MONO_FONT_FAMILY,
-  renderVisibleWhitespace,
-} from "../review/reviewDiffRendering";
+import { REVIEW_MONO_FONT_FAMILY, renderVisibleWhitespace } from "../review/reviewDiffRendering";
 import type { ReviewHighlightedToken } from "../review/shikiReviewHighlighter";
 import { cn } from "../../lib/cn";
-import { MOBILE_CODE_SURFACE } from "../../lib/typography";
+import type { ResolvedMobileCodeSurface } from "../../lib/appearancePreferences";
+import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
 import {
   buildNativeSourceTokens,
   NATIVE_SOURCE_CONTENT_WIDTH,
-  NATIVE_SOURCE_ROW_HEIGHT,
-  NATIVE_SOURCE_STYLE,
   nativeSourceRowId,
 } from "./nativeSourceFileAdapter";
 import { prepareSourceFileDocument } from "./source-file-document";
 import { sourceHighlightAtom } from "./sourceHighlightingState";
-
-const SOURCE_LINE_HEIGHT = MOBILE_CODE_SURFACE.rowHeight;
-const SOURCE_LINE_NUMBER_WIDTH = MOBILE_CODE_SURFACE.gutterWidth;
-const NATIVE_SOURCE_STYLE_JSON = JSON.stringify(NATIVE_SOURCE_STYLE);
 
 interface SourceFileSurfaceProps {
   readonly contents: string;
@@ -44,36 +42,38 @@ interface SourceFileSurfaceProps {
 type SourceHighlightStatus = "highlighting" | "ready" | "error";
 
 const HighlightedSourceLine = memo(function HighlightedSourceLine(props: {
+  readonly codeSurface: ResolvedMobileCodeSurface;
   readonly index: number;
   readonly line: string;
   readonly tokens: ReadonlyArray<ReviewHighlightedToken> | null;
   readonly highlighted: boolean;
+  readonly wordBreak: boolean;
 }) {
   return (
     <View
       className={cn("flex-row", props.highlighted && "bg-primary/10")}
-      style={{ minHeight: SOURCE_LINE_HEIGHT }}
+      style={{ minHeight: props.codeSurface.rowHeight }}
     >
       <NativeText
         className="select-none pr-3 text-right text-foreground-tertiary"
         style={{
-          width: SOURCE_LINE_NUMBER_WIDTH,
+          width: props.codeSurface.gutterWidth,
           fontFamily: REVIEW_MONO_FONT_FAMILY,
-          fontSize: MOBILE_CODE_SURFACE.lineNumberFontSize,
-          lineHeight: MOBILE_CODE_SURFACE.rowHeight,
+          fontSize: props.codeSurface.lineNumberFontSize,
+          lineHeight: props.codeSurface.rowHeight,
         }}
       >
         {props.index + 1}
       </NativeText>
       <NativeText
         selectable
-        numberOfLines={1}
-        className="font-normal text-foreground"
+        numberOfLines={props.wordBreak ? undefined : 1}
+        className="flex-1 font-normal text-foreground"
         style={{
           fontFamily: REVIEW_MONO_FONT_FAMILY,
-          fontSize: MOBILE_CODE_SURFACE.fontSize,
-          lineHeight: MOBILE_CODE_SURFACE.rowHeight,
-          minWidth: 320,
+          fontSize: props.codeSurface.fontSize,
+          lineHeight: props.codeSurface.rowHeight,
+          minWidth: props.wordBreak ? undefined : 320,
         }}
       >
         {props.tokens && props.tokens.length > 0
@@ -158,6 +158,8 @@ function NativeSourceFileSurface(
   },
 ) {
   const { NativeView, onRefresh } = props;
+  const { codeSurface, codeWordBreak, nativeSourceStyle } = useAppearanceCodeSurface();
+  const { width: viewportWidth } = useWindowDimensions();
   const { rowsJson, status, targetIndex, theme, tokens } = useSourceFileModel(props);
   const [isPullRefreshing, setIsPullRefreshing] = useState(false);
   const handlePullToRefresh = useCallback(async () => {
@@ -177,6 +179,10 @@ function NativeSourceFileSurface(
     [targetIndex],
   );
   const themeJson = useMemo(() => JSON.stringify(createNativeReviewDiffTheme(theme)), [theme]);
+  const styleJson = useMemo(() => JSON.stringify(nativeSourceStyle), [nativeSourceStyle]);
+  const contentWidth = codeWordBreak
+    ? Math.max(240, viewportWidth - codeSurface.gutterWidth - 24)
+    : NATIVE_SOURCE_CONTENT_WIDTH;
 
   return (
     <View className="relative flex-1 bg-sheet">
@@ -187,12 +193,12 @@ function NativeSourceFileSurface(
         style={{ flex: 1 }}
         appearanceScheme={theme}
         contentResetKey={props.path}
-        contentWidth={NATIVE_SOURCE_CONTENT_WIDTH}
+        contentWidth={contentWidth}
         initialRowIndex={targetIndex ?? -1}
-        rowHeight={NATIVE_SOURCE_ROW_HEIGHT}
+        rowHeight={nativeSourceStyle.rowHeight ?? codeSurface.rowHeight}
         rowsJson={rowsJson}
         selectedRowIdsJson={selectedRowIdsJson}
-        styleJson={NATIVE_SOURCE_STYLE_JSON}
+        styleJson={styleJson}
         themeJson={themeJson}
         tokensJson={tokensJson}
         {...(onRefresh
@@ -207,6 +213,7 @@ function NativeSourceFileSurface(
 }
 
 function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
+  const { codeSurface, codeWordBreak } = useAppearanceCodeSurface();
   const { lines, status, targetIndex, tokens } = useSourceFileModel(props);
   const listRef = useRef<FlatList<string>>(null);
 
@@ -223,39 +230,53 @@ function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
   const renderLine = useCallback(
     ({ item, index }: { item: string; index: number }) => (
       <HighlightedSourceLine
+        codeSurface={codeSurface}
         index={index}
         line={item}
         tokens={tokens?.[index] ?? null}
         highlighted={index === targetIndex}
+        wordBreak={codeWordBreak}
       />
     ),
-    [targetIndex, tokens],
+    [codeSurface, codeWordBreak, targetIndex, tokens],
+  );
+
+  const list = (
+    <FlatList
+      ref={listRef}
+      data={lines}
+      keyExtractor={(_line, index) => String(index)}
+      initialNumToRender={80}
+      maxToRenderPerBatch={80}
+      windowSize={12}
+      {...(codeWordBreak
+        ? {}
+        : {
+            getItemLayout: (_data, index) => ({
+              length: codeSurface.rowHeight,
+              offset: codeSurface.rowHeight * index,
+              index,
+            }),
+          })}
+      contentContainerStyle={{
+        minWidth: codeWordBreak ? undefined : "100%",
+        paddingBottom: codeSurface.rowHeight,
+        paddingTop: 8,
+      }}
+      renderItem={renderLine}
+    />
   );
 
   return (
     <View className="relative flex-1 bg-sheet">
       <SourceHighlightStatusView status={status} />
-      <ScrollView horizontal bounces={false} className="flex-1">
-        <FlatList
-          ref={listRef}
-          data={lines}
-          keyExtractor={(_line, index) => String(index)}
-          initialNumToRender={80}
-          maxToRenderPerBatch={80}
-          windowSize={12}
-          getItemLayout={(_data, index) => ({
-            length: SOURCE_LINE_HEIGHT,
-            offset: SOURCE_LINE_HEIGHT * index,
-            index,
-          })}
-          contentContainerStyle={{
-            minWidth: "100%",
-            paddingBottom: REVIEW_DIFF_LINE_HEIGHT,
-            paddingTop: 8,
-          }}
-          renderItem={renderLine}
-        />
-      </ScrollView>
+      {codeWordBreak ? (
+        list
+      ) : (
+        <ScrollView horizontal bounces={false} className="flex-1">
+          {list}
+        </ScrollView>
+      )}
     </View>
   );
 }
