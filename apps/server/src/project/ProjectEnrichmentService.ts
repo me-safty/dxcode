@@ -51,6 +51,12 @@ export class ProjectEnrichmentService extends Context.Service<
     readonly request: (workspaceRoot: string) => Effect.Effect<void>;
     /** Read immediately available metadata and schedule anything missing. */
     readonly getAvailable: (workspaceRoot: string) => Effect.Effect<ProjectEnrichment>;
+    /**
+     * Await repository-identity resolution (and favicon if already cached).
+     * Used for shell snapshots so multi-env project grouping keys are present
+     * before the client paints, instead of racing background workers.
+     */
+    readonly get: (workspaceRoot: string) => Effect.Effect<ProjectEnrichment>;
     /** Invalidate workspace-derived metadata. */
     readonly invalidate: (workspaceRoots: Iterable<string>) => Effect.Effect<void>;
     /** Subscribe to ephemeral completion notifications. */
@@ -256,6 +262,23 @@ export const make = Effect.fn("ProjectEnrichmentService.make")(function* (
     return available;
   });
 
+  const get: ProjectEnrichmentService["Service"]["get"] = Effect.fn("ProjectEnrichmentService.get")(
+    function* (workspaceRoot) {
+      // Await identity so shell snapshots used for grouping do not race the
+      // background lane. Favicon stays non-blocking (optional UI chrome).
+      const repositoryIdentity = yield* Cache.get(repositoryIdentityCache, workspaceRoot);
+      yield* logFailure(workspaceRoot, "repositoryIdentity", repositoryIdentity);
+      const faviconPath = yield* Cache.getSuccess(faviconCache, workspaceRoot);
+      if (Option.isNone(faviconPath)) {
+        yield* requestLane(faviconLane, workspaceRoot, "faviconPath");
+      }
+      return {
+        repositoryIdentity: availableValue(Option.some(repositoryIdentity)),
+        faviconPath: availableValue(faviconPath),
+      };
+    },
+  );
+
   const invalidate: ProjectEnrichmentService["Service"]["invalidate"] = Effect.fn(
     "ProjectEnrichmentService.invalidate",
   )(function* (workspaceRoots) {
@@ -277,6 +300,7 @@ export const make = Effect.fn("ProjectEnrichmentService.make")(function* (
     peek,
     request,
     getAvailable,
+    get,
     invalidate,
     subscribeChanges: PubSub.subscribe(changes),
   });

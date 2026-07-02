@@ -107,6 +107,7 @@ const SharedApplicationDataPlaneTestLayer = Layer.merge(
       peek: () => Effect.succeed({ repositoryIdentity: null, faviconPath: null }),
       request: () => Effect.void,
       getAvailable: () => Effect.succeed({ repositoryIdentity: null, faviconPath: null }),
+      get: () => Effect.succeed({ repositoryIdentity: null, faviconPath: null }),
       invalidate: () => Effect.void,
       subscribeChanges: Effect.never,
     }),
