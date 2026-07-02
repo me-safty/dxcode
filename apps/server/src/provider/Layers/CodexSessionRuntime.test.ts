@@ -195,7 +195,7 @@ describe("buildTurnStartParams", () => {
 });
 
 describe("Mognet browser developer instructions", () => {
-  it("prefers the product-native preview tools in both collaboration modes", () => {
+  it("prefers the product-native Mognet tools in both collaboration modes", () => {
     for (const instructions of [
       CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
       CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
@@ -204,6 +204,19 @@ describe("Mognet browser developer instructions", () => {
       NodeAssert.match(instructions, /preview_status/);
       NodeAssert.match(instructions, /preview_open/);
       NodeAssert.match(instructions, /Do not switch to global browser skills/);
+      NodeAssert.match(instructions, /call that exact tool/);
+      NodeAssert.match(instructions, /mognet_thread_start/);
+      NodeAssert.match(instructions, /mognet_delegate_task/);
+      NodeAssert.match(instructions, /mognet_thread_handoff/);
+      NodeAssert.match(instructions, /mognet_thread_open/);
+      NodeAssert.match(instructions, /do not call it for general context\/status answers/);
+      NodeAssert.match(instructions, /standalone chat scopes/);
+      NodeAssert.match(instructions, /scope.kind: "standalone-chat"/);
+      NodeAssert.match(instructions, /currentThreadSummary/);
+      NodeAssert.match(instructions, /hasOtherScopeThreads/);
+      NodeAssert.match(instructions, /internal project IDs/);
+      NodeAssert.match(instructions, /exact active-thread counts/);
+      NodeAssert.match(instructions, /no workspace project or Git branch is attached/);
     }
   });
 });

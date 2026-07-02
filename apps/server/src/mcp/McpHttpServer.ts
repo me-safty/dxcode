@@ -17,11 +17,13 @@ import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
 } from "./toolkits/preview/handlers.ts";
+import { MognetToolkitHandlersLive } from "./toolkits/mognet/handlers.ts";
 import {
   PreviewSnapshotTool,
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
+import { MognetToolkit } from "./toolkits/mognet/tools.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -203,9 +205,18 @@ const PreviewSnapshotRegistrationLive = Layer.effectDiscard(registerPreviewSnaps
   Layer.provide(PreviewSnapshotToolkitHandlersLive),
 );
 
+const MognetWorkflowToolkitRegistrationLive = McpServer.toolkit(MognetToolkit).pipe(
+  Layer.provide(MognetToolkitHandlersLive),
+);
+
 export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewStandardToolkitRegistrationLive,
   PreviewSnapshotRegistrationLive,
+);
+
+export const MognetToolkitRegistrationLive = Layer.mergeAll(
+  PreviewToolkitRegistrationLive,
+  MognetWorkflowToolkitRegistrationLive,
 );
 
 const McpTransportLive = McpServer.layerHttp({
@@ -214,4 +225,4 @@ const McpTransportLive = McpServer.layerHttp({
   path: "/mcp",
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = PreviewToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));
+export const layer = MognetToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));
