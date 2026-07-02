@@ -38,6 +38,7 @@ import {
   type HomeListItem,
 } from "./homeListItems";
 import { buildHomeThreadGroups, type HomeProjectSortOrder } from "./homeThreadList";
+import { useSwipeableScrollGate } from "./thread-swipe-actions";
 import { WorkspaceConnectionStatus } from "./WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "./workspace-connection-status";
 
@@ -179,6 +180,13 @@ export function HomeScreen(props: HomeScreenProps) {
     }
   }, []);
 
+  const handleScrollBeginDrag = useCallback(() => {
+    openSwipeableRef.current?.close();
+  }, []);
+  const { swipeEnabled, scrollGateHandlers } = useSwipeableScrollGate({
+    onScrollBeginDrag: handleScrollBeginDrag,
+  });
+
   const projectGroups = useMemo(
     () =>
       buildHomeThreadGroups({
@@ -221,8 +229,8 @@ export function HomeScreen(props: HomeScreenProps) {
   }, [props.projects]);
 
   const extraData = useMemo(
-    () => ({ savedConnectionsById: props.savedConnectionsById, projectCwdByKey }),
-    [props.savedConnectionsById, projectCwdByKey],
+    () => ({ savedConnectionsById: props.savedConnectionsById, projectCwdByKey, swipeEnabled }),
+    [props.savedConnectionsById, projectCwdByKey, swipeEnabled],
   );
 
   const renderItem = useCallback(
@@ -260,6 +268,7 @@ export function HomeScreen(props: HomeScreenProps) {
               onSelectThread={props.onSelectThread}
               onSwipeableClose={handleSwipeableClose}
               onSwipeableWillOpen={handleSwipeableWillOpen}
+              swipeEnabled={swipeEnabled}
             />
           );
         }
@@ -283,6 +292,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onDeleteThread,
       props.onSelectThread,
       props.savedConnectionsById,
+      swipeEnabled,
       updateGroupDisplay,
     ],
   );
@@ -393,7 +403,8 @@ export function HomeScreen(props: HomeScreenProps) {
         showsVerticalScrollIndicator={false}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        onScrollBeginDrag={() => openSwipeableRef.current?.close()}
+        {...scrollGateHandlers}
+        recycleItems={false}
         scrollEventThrottle={16}
         contentContainerStyle={{
           paddingBottom: Platform.OS === "ios" ? Math.max(insets.bottom, 24) + 24 : 24,

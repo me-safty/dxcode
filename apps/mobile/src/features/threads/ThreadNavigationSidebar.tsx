@@ -43,6 +43,7 @@ import {
   type HomeListItem,
 } from "../home/homeListItems";
 import { buildHomeThreadGroups } from "../home/homeThreadList";
+import { useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { useThreadListActions } from "../home/useThreadListActions";
 import { WorkspaceConnectionStatus } from "../home/WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "../home/workspace-connection-status";
@@ -336,7 +337,6 @@ function ThreadNavigationSidebarPane(
   const placeholderColor = useThemeColor("--color-placeholder");
   const searchBackgroundColor =
     colorScheme === "dark" ? IOS_SEARCH_FILL_DARK : IOS_SEARCH_FILL_LIGHT;
-  const listExtraData = `${props.selectedThreadKey ?? ""}:${props.searchQuery}`;
   const headerFadeColor = String(backgroundColor);
   const headerWashOpacity = SIDEBAR_HEADER_WASH_OPACITY[colorScheme];
   const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState<number | null>(null);
@@ -375,6 +375,14 @@ function ThreadNavigationSidebarPane(
     headerIsOverContentRef.current = next;
     setHeaderIsOverContent(next);
   }, []);
+  const handleScrollBeginDrag = useCallback(() => {
+    openSwipeableRef.current?.close();
+  }, []);
+  const { swipeEnabled, scrollGateHandlers } = useSwipeableScrollGate({
+    onScroll: handleScroll,
+    onScrollBeginDrag: handleScrollBeginDrag,
+  });
+  const listExtraData = `${props.selectedThreadKey ?? ""}:${props.searchQuery}:${swipeEnabled}`;
   const focusSearch = useCallback(() => {
     const focus = () => {
       if (props.nativeChrome) {
@@ -432,6 +440,7 @@ function ThreadNavigationSidebarPane(
               onSwipeableClose={handleSwipeableClose}
               onSwipeableWillOpen={handleSwipeableWillOpen}
               simultaneousSwipeGesture={sidebarScrollGesture}
+              swipeEnabled={swipeEnabled}
             />
           );
         }
@@ -458,6 +467,7 @@ function ThreadNavigationSidebarPane(
       props.width,
       savedConnectionsById,
       sidebarScrollGesture,
+      swipeEnabled,
       updateGroupDisplay,
     ],
   );
@@ -551,7 +561,8 @@ function ThreadNavigationSidebarPane(
               ]}
               keyboardDismissMode="on-drag"
               keyboardShouldPersistTaps="handled"
-              onScrollBeginDrag={() => openSwipeableRef.current?.close()}
+              {...scrollGateHandlers}
+              recycleItems={false}
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}
               style={styles.threadList}
@@ -606,8 +617,8 @@ function ThreadNavigationSidebarPane(
             ]}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
-            onScroll={handleScroll}
-            onScrollBeginDrag={() => openSwipeableRef.current?.close()}
+            {...scrollGateHandlers}
+            recycleItems={false}
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
             style={styles.threadList}

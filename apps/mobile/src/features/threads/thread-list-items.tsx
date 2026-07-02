@@ -192,6 +192,8 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly isLast: boolean;
   /** Sidebar only: the thread currently open in the detail pane. */
   readonly selected?: boolean;
+  /** Gate from useSwipeableScrollGate — false while the list is scrolling. */
+  readonly swipeEnabled?: boolean;
   /** Defaults to window width minus compact margins. */
   readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
@@ -409,6 +411,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       containerStyle={
         compact ? undefined : { borderRadius: SIDEBAR_ROW_RADIUS, overflow: "hidden" }
       }
+      enabled={props.swipeEnabled}
       enableTrackpadSwipe
       fullSwipeWidth={props.fullSwipeWidth ?? windowWidth - 32}
       onDelete={handleDelete}
@@ -419,8 +422,12 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       threadTitle={thread.title}
     >
       {(close) => (
-        // Messages-style row actions: native context menu on long-press /
-        // pointer right-click, shared across compact and sidebar variants.
+        // Messages-style row actions: a real UIContextMenuInteraction on
+        // long-press / pointer right-click, with the row as the zoom preview.
+        // Requires the patched @react-native-menu (see
+        // patches/@react-native-menu__menu@2.0.0.patch): in long-press mode
+        // the interaction is hosted by the component view and the underlying
+        // UIButton passes touches through, so row taps keep working.
         <ControlPillMenu
           actions={THREAD_ROW_MENU_ACTIONS}
           onPressAction={handleMenuAction}

@@ -1,7 +1,7 @@
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
-import { useCallback, useRef, type ComponentProps, type ReactNode } from "react";
-import type { ColorValue, StyleProp, ViewStyle } from "react-native";
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import type { ColorValue, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from "react-native";
 import { Pressable, View } from "react-native";
 import ReanimatedSwipeable, {
   type SwipeableMethods,
@@ -36,10 +36,100 @@ interface ThreadSwipePrimaryAction {
   readonly onPress: () => void;
 }
 
+/**
+ * Gates row swipes on list scroll activity, mirroring UIKit's own swipe
+ * actions (`!isDragging && !isDecelerating`). failOffsetY on the swipe pan
+ * covers the first pan of a scroll, but trackpad scroll sessions spawn fresh
+ * gesture sessions (momentum catch, direction changes) whose reset
+ * translation can re-activate a swipe mid-scroll — so while the list has
+ * moved vertically during an active drag/momentum phase, row swipes are
+ * disabled entirely.
+ *
+ * Spread the returned handlers onto the list and pass `swipeEnabled` to rows.
+ */
+export function useSwipeableScrollGate(options?: {
+  readonly onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  readonly onScrollBeginDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+}) {
+  const [gateActive, setGateActive] = useState(false);
+  const gateActiveRef = useRef(false);
+  const draggingRef = useRef(false);
+  const dragStartYRef = useRef(0);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const externalOnScroll = options?.onScroll;
+  const externalOnScrollBeginDrag = options?.onScrollBeginDrag;
+
+  const update = useCallback((next: boolean) => {
+    if (gateActiveRef.current !== next) {
+      gateActiveRef.current = next;
+      setGateActive(next);
+    }
+  }, []);
+  const clearSettle = useCallback(() => {
+    if (settleTimerRef.current !== null) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearSettle, [clearSettle]);
+
+  const onScrollBeginDrag = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      draggingRef.current = true;
+      dragStartYRef.current = event.nativeEvent.contentOffset.y;
+      clearSettle();
+      externalOnScrollBeginDrag?.(event);
+    },
+    [clearSettle, externalOnScrollBeginDrag],
+  );
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // Only vertical movement during a user drag arms the gate — a purely
+      // horizontal row swipe never moves contentOffset.y, and inset-driven
+      // offset changes at mount happen outside a drag.
+      if (
+        draggingRef.current &&
+        !gateActiveRef.current &&
+        Math.abs(event.nativeEvent.contentOffset.y - dragStartYRef.current) > 4
+      ) {
+        update(true);
+      }
+      externalOnScroll?.(event);
+    },
+    [externalOnScroll, update],
+  );
+  const onScrollEndDrag = useCallback(() => {
+    draggingRef.current = false;
+    clearSettle();
+    // If momentum follows, onMomentumScrollBegin cancels this and the gate
+    // stays armed until the deceleration finishes.
+    settleTimerRef.current = setTimeout(() => update(false), 160);
+  }, [clearSettle, update]);
+  const onMomentumScrollBegin = useCallback(() => {
+    clearSettle();
+  }, [clearSettle]);
+  const onMomentumScrollEnd = useCallback(() => {
+    update(false);
+  }, [update]);
+
+  return {
+    swipeEnabled: !gateActive,
+    scrollGateHandlers: {
+      onScroll,
+      onScrollBeginDrag,
+      onScrollEndDrag,
+      onMomentumScrollBegin,
+      onMomentumScrollEnd,
+    },
+  };
+}
+
 export function ThreadSwipeable(props: {
   readonly backgroundColor: ColorValue;
   readonly children: (close: () => void) => ReactNode;
   readonly containerStyle?: StyleProp<ViewStyle>;
+  /** Disables NEW swipe activations (e.g. while the list scrolls). */
+  readonly enabled?: boolean;
   readonly enableTrackpadSwipe?: boolean;
   readonly fullSwipeWidth: number;
   readonly onDelete: () => void;
@@ -69,6 +159,7 @@ export function ThreadSwipeable(props: {
       childrenContainerStyle={{ backgroundColor: props.backgroundColor }}
       containerStyle={[{ backgroundColor: props.backgroundColor }, props.containerStyle]}
       dragOffsetFromRightEdge={8}
+      enabled={props.enabled}
       enableTrackpadTwoFingerGesture={props.enableTrackpadSwipe ?? true}
       // Fail the swipe once the pan is vertically dominant (patched-in RNGH
       // prop) — otherwise trackpad scrolls with ~8px of horizontal drift
