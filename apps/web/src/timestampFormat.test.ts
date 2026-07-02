@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  formatCompactRelativeTimeLabel,
   formatElapsedDurationLabel,
   formatExpiresInLabel,
   formatRelativeTimeUntilLabel,
@@ -110,5 +111,24 @@ describe("formatElapsedDurationLabel", () => {
     expect(formatElapsedDurationLabel("2026-04-07T11:45:00.000Z")).toBe("15m");
     expect(formatElapsedDurationLabel("2026-04-07T06:00:00.000Z")).toBe("6h");
     expect(formatElapsedDurationLabel("2026-04-03T12:00:00.000Z")).toBe("4d");
+  });
+});
+
+describe("formatCompactRelativeTimeLabel", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns compact labels without ago suffixes", () => {
+    expect(formatCompactRelativeTimeLabel("2026-04-07T12:01:00.000Z")).toBe("now");
+    expect(formatCompactRelativeTimeLabel("2026-04-07T11:59:00.000Z")).toBe("1m");
+    expect(formatCompactRelativeTimeLabel("2026-04-07T09:00:00.000Z")).toBe("3h");
+    expect(formatCompactRelativeTimeLabel("2026-04-04T12:00:00.000Z")).toBe("3d");
+    expect(formatCompactRelativeTimeLabel("2026-03-10T12:00:00.000Z")).toBe("4w");
   });
 });

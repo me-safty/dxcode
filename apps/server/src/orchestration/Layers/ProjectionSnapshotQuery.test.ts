@@ -77,6 +77,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           interaction_mode,
           branch,
           worktree_path,
+          origin_json,
           latest_turn_id,
           latest_user_message_at,
           pending_approval_count,
@@ -95,6 +96,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'default',
           NULL,
           NULL,
+          '{"type":"scheduled-task","scheduledTaskId":"task-1","scheduledTaskTitle":"Nightly check"}',
           'turn-1',
           '2026-02-24T00:00:04.000Z',
           1,
@@ -294,6 +296,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
+          origin: {
+            type: "scheduled-task",
+            scheduledTaskId: "task-1",
+            scheduledTaskTitle: "Nightly check",
+          },
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -405,6 +412,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
+          origin: {
+            type: "scheduled-task",
+            scheduledTaskId: "task-1",
+            scheduledTaskTitle: "Nightly check",
+          },
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
