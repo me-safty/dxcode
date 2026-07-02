@@ -277,6 +277,12 @@ export function AdaptiveWorkspaceLayout(props: {
     navigation.navigate("SettingsSheet", { screen: "Settings" });
   }, [navigation]);
 
+  // Minted here (root stack navigation) so the sidebar pane stays free of
+  // navigation hooks — on iOS it renders inside an independent nav tree.
+  const handleOpenEnvironmentSettings = useCallback(() => {
+    navigation.navigate("SettingsSheet", { screen: "SettingsEnvironments" });
+  }, [navigation]);
+
   const renderedSidebarWidth = useSharedValue(
     panes.primarySidebarVisible ? (layout.listPaneWidth ?? 0) : 0,
   );
@@ -342,6 +348,7 @@ export function AdaptiveWorkspaceLayout(props: {
                 onRequestVisibility={revealPrimarySidebar}
                 selectedThreadKey={selectedThreadKey}
                 onOpenSettings={handleOpenSettings}
+                onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
                 onSelectThread={handleSelectThread}
                 onSearchQueryChange={setPrimarySidebarSearchQuery}
                 searchQuery={primarySidebarSearchQuery}

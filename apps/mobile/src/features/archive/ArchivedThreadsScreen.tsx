@@ -2,6 +2,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import { LegendList } from "@legendapp/list/react-native";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
@@ -12,7 +13,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -47,6 +47,22 @@ const THREAD_ACTIONS: MenuAction[] = [
     attributes: { destructive: true },
   },
 ];
+
+type ArchivedThreadListItem =
+  | {
+      readonly kind: "project";
+      readonly key: string;
+      readonly environmentLabel: string | null;
+      readonly project: EnvironmentProject;
+    }
+  | {
+      readonly kind: "thread";
+      readonly key: string;
+      readonly environmentLabel: string | null;
+      readonly isFirst: boolean;
+      readonly isLast: boolean;
+      readonly thread: EnvironmentThreadShell;
+    };
 
 function ArchivedThreadsHeader(props: {
   readonly environments: ReadonlyArray<ArchivedThreadsHeaderEnvironment>;
@@ -245,6 +261,7 @@ function ProjectGroupLabel(props: {
 
 function ArchivedThreadRow(props: {
   readonly environmentLabel: string | null;
+  readonly isFirst: boolean;
   readonly isLast: boolean;
   readonly onDelete: () => void;
   readonly onSwipeableClose: (methods: SwipeableMethods) => void;
@@ -296,6 +313,10 @@ function ArchivedThreadRow(props: {
           style={{
             borderBottomColor: separatorColor,
             borderBottomWidth: props.isLast ? 0 : 1,
+            borderTopLeftRadius: props.isFirst ? 20 : 0,
+            borderTopRightRadius: props.isFirst ? 20 : 0,
+            borderBottomLeftRadius: props.isLast ? 20 : 0,
+            borderBottomRightRadius: props.isLast ? 20 : 0,
           }}
         >
           <View className="h-[34px] w-[34px] items-center justify-center rounded-[11px] bg-subtle">
@@ -381,9 +402,41 @@ export function ArchivedThreadsScreen(props: {
   readonly onSortOrderChange: (sortOrder: ArchivedThreadSortOrder) => void;
   readonly onUnarchiveThread: (thread: EnvironmentThreadShell) => void;
 }) {
+  const { onDeleteThread, onUnarchiveThread } = props;
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const archiveScrollGesture = useMemo(() => Gesture.Native(), []);
   const refreshTint = useThemeColor("--color-icon");
+  const environmentLabelsById = useMemo(
+    () =>
+      new Map(
+        props.environments.map((environment) => [environment.environmentId, environment.label]),
+      ),
+    [props.environments],
+  );
+  const listItems = useMemo<ReadonlyArray<ArchivedThreadListItem>>(() => {
+    const items: ArchivedThreadListItem[] = [];
+    for (const group of props.groups) {
+      const environmentLabel = environmentLabelsById.get(group.project.environmentId) ?? null;
+      items.push({
+        kind: "project",
+        key: `${group.key}:project`,
+        environmentLabel,
+        project: group.project,
+      });
+
+      group.threads.forEach((thread, index) => {
+        items.push({
+          kind: "thread",
+          key: `${thread.environmentId}:${thread.id}`,
+          environmentLabel,
+          isFirst: index === 0,
+          isLast: index === group.threads.length - 1,
+          thread,
+        });
+      });
+    }
+    return items;
+  }, [environmentLabelsById, props.groups]);
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
     if (openSwipeableRef.current && openSwipeableRef.current !== methods) {
       openSwipeableRef.current.close();
@@ -397,6 +450,59 @@ export function ArchivedThreadsScreen(props: {
   }, []);
   const isInitialLoad = props.isLoading && props.groups.length === 0 && props.error === null;
   const isFiltered = props.searchQuery.trim().length > 0 || props.selectedEnvironmentId !== null;
+  const renderListItem = useCallback(
+    ({ item }: { item: ArchivedThreadListItem }) => {
+      if (item.kind === "project") {
+        return (
+          <View className="pt-4">
+            <ProjectGroupLabel environmentLabel={item.environmentLabel} project={item.project} />
+          </View>
+        );
+      }
+
+      return (
+        <ArchivedThreadRow
+          environmentLabel={item.environmentLabel}
+          isFirst={item.isFirst}
+          isLast={item.isLast}
+          onDelete={() => onDeleteThread(item.thread)}
+          onSwipeableClose={handleSwipeableClose}
+          onSwipeableWillOpen={handleSwipeableWillOpen}
+          onUnarchive={() => onUnarchiveThread(item.thread)}
+          simultaneousSwipeGesture={archiveScrollGesture}
+          thread={item.thread}
+        />
+      );
+    },
+    [
+      archiveScrollGesture,
+      handleSwipeableClose,
+      handleSwipeableWillOpen,
+      onDeleteThread,
+      onUnarchiveThread,
+    ],
+  );
+  const listEmptyComponent = useMemo(() => {
+    if (isInitialLoad) {
+      return (
+        <View className="items-center py-16">
+          <ActivityIndicator color={refreshTint} />
+          <Text className="mt-3 text-sm text-foreground-muted">Loading archive...</Text>
+        </View>
+      );
+    }
+
+    return (
+      <EmptyState
+        detail={
+          isFiltered
+            ? "Try another search or environment."
+            : "Threads you archive will appear here."
+        }
+        title={isFiltered ? "No matching threads" : "No archived threads"}
+      />
+    );
+  }, [isFiltered, isInitialLoad, refreshTint]);
 
   return (
     <View className="flex-1 bg-sheet">
@@ -411,17 +517,24 @@ export function ArchivedThreadsScreen(props: {
       />
 
       <GestureDetector gesture={archiveScrollGesture}>
-        <ScrollView
+        <LegendList
           className="flex-1"
           contentContainerStyle={{
-            gap: 20,
             paddingBottom: 32,
             paddingHorizontal: 16,
-            paddingTop: 8,
+            paddingTop: 4,
           }}
           contentInsetAdjustmentBehavior="automatic"
+          data={listItems}
+          estimatedItemSize={62}
+          getItemType={(item) => item.kind}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
+          keyExtractor={(item) => item.key}
+          ListEmptyComponent={listEmptyComponent}
+          ListHeaderComponent={
+            props.error ? <ArchiveError message={props.error} onRetry={props.onRefresh} /> : null
+          }
           onScrollBeginDrag={() => openSwipeableRef.current?.close()}
           refreshControl={
             <RefreshControl
@@ -430,57 +543,9 @@ export function ArchivedThreadsScreen(props: {
               tintColor={String(refreshTint)}
             />
           }
+          renderItem={renderListItem}
           showsVerticalScrollIndicator={false}
-        >
-          {props.error ? <ArchiveError message={props.error} onRetry={props.onRefresh} /> : null}
-
-          {isInitialLoad ? (
-            <View className="items-center py-16">
-              <ActivityIndicator color={refreshTint} />
-              <Text className="mt-3 text-sm text-foreground-muted">Loading archive…</Text>
-            </View>
-          ) : props.groups.length === 0 ? (
-            <EmptyState
-              detail={
-                isFiltered
-                  ? "Try another search or environment."
-                  : "Threads you archive will appear here."
-              }
-              title={isFiltered ? "No matching threads" : "No archived threads"}
-            />
-          ) : (
-            props.groups.map((group) => {
-              const environmentLabel =
-                props.environments.find(
-                  (environment) => environment.environmentId === group.project.environmentId,
-                )?.label ?? null;
-
-              return (
-                <View key={group.key} collapsable={false}>
-                  <ProjectGroupLabel environmentLabel={environmentLabel} project={group.project} />
-                  <View
-                    className="overflow-hidden rounded-[20px] bg-card"
-                    style={{ borderCurve: "continuous" }}
-                  >
-                    {group.threads.map((thread, index) => (
-                      <ArchivedThreadRow
-                        key={`${thread.environmentId}:${thread.id}`}
-                        environmentLabel={environmentLabel}
-                        isLast={index === group.threads.length - 1}
-                        onDelete={() => props.onDeleteThread(thread)}
-                        onSwipeableClose={handleSwipeableClose}
-                        onSwipeableWillOpen={handleSwipeableWillOpen}
-                        onUnarchive={() => props.onUnarchiveThread(thread)}
-                        simultaneousSwipeGesture={archiveScrollGesture}
-                        thread={thread}
-                      />
-                    ))}
-                  </View>
-                </View>
-              );
-            })
-          )}
-        </ScrollView>
+        />
       </GestureDetector>
     </View>
   );

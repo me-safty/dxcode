@@ -70,6 +70,11 @@ export function ThreadSwipeable(props: {
       containerStyle={[{ backgroundColor: props.backgroundColor }, props.containerStyle]}
       dragOffsetFromRightEdge={8}
       enableTrackpadTwoFingerGesture={props.enableTrackpadSwipe ?? true}
+      // Fail the swipe once the pan is vertically dominant (patched-in RNGH
+      // prop) — otherwise trackpad scrolls with ~8px of horizontal drift
+      // start opening rows because the swipe pan runs simultaneously with
+      // the list scroll gesture and never gets disqualified by Y movement.
+      failOffsetY={[-10, 10]}
       friction={1}
       onSwipeableClose={() => {
         fullSwipeArmedRef.current = false;

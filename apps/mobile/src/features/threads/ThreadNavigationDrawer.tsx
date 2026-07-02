@@ -23,7 +23,7 @@ import { StatusPill } from "../../components/StatusPill";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { relativeTime } from "../../lib/time";
-import { threadStatusTone } from "./threadPresentation";
+import { resolveThreadStatus } from "./threadPresentation";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { buildThreadNavigationGroups } from "./thread-navigation-groups";
 
@@ -211,6 +211,7 @@ function ThreadNavigationDrawerContent(props: {
               group.threads.map((thread, index) => {
                 const threadKey = scopedThreadKey(thread.environmentId, thread.id);
                 const selected = props.selectedThreadKey === threadKey;
+                const status = resolveThreadStatus(thread);
 
                 return (
                   <Pressable
@@ -240,7 +241,7 @@ function ThreadNavigationDrawerContent(props: {
                           {relativeTime(thread.updatedAt ?? thread.createdAt)}
                         </Text>
                       </View>
-                      <StatusPill {...threadStatusTone(thread)} />
+                      {status ? <StatusPill {...status} /> : null}
                     </View>
                   </Pressable>
                 );
