@@ -408,6 +408,7 @@ export function hasFileChangeWorkEntryDetails(workEntry: WorkLogEntry): boolean 
 export function filterChangedFilesWithoutInlineDiff(
   changedFiles: ReadonlyArray<string> | undefined,
   inlineDiffPaths: ReadonlyArray<string>,
+  workspaceRoot?: string,
 ): string[] {
   if (!changedFiles || changedFiles.length === 0) {
     return [];
@@ -419,11 +420,51 @@ export function filterChangedFilesWithoutInlineDiff(
   const inlineDiffMatchers = inlineDiffPaths
     .filter((inlineDiffPath) => inlineDiffPath.includes("/") || inlineDiffPath.includes("\\"))
     .map(createChangedFileDiffPathMatcher);
-  return changedFiles.filter(
-    (changedFile) =>
+  const normalizedWorkspaceRoot = workspaceRoot
+    ? normalizeWorkLogDiffComparisonPath(workspaceRoot).replace(/\/+$/u, "")
+    : null;
+  const workspaceRelativeInlineDiffPaths = normalizedWorkspaceRoot
+    ? new Set(
+        inlineDiffPaths.map((inlineDiffPath) =>
+          normalizeWorkLogDiffComparisonPath(inlineDiffPath).toLowerCase(),
+        ),
+      )
+    : null;
+  return changedFiles.filter((changedFile) => {
+    const workspaceRelativeChangedFile =
+      normalizedWorkspaceRoot && workspaceRelativeInlineDiffPaths
+        ? getWorkspaceRelativeChangedFile(changedFile, normalizedWorkspaceRoot)
+        : null;
+    const matchesWorkspaceRelativeInlineDiffPath =
+      workspaceRelativeChangedFile !== null &&
+      workspaceRelativeInlineDiffPaths?.has(workspaceRelativeChangedFile.toLowerCase()) === true;
+    return (
       !exactInlineDiffPaths.has(changedFile) &&
-      !inlineDiffMatchers.some((matchesDiffPath) => matchesDiffPath(changedFile)),
-  );
+      !matchesWorkspaceRelativeInlineDiffPath &&
+      !inlineDiffMatchers.some((matchesDiffPath) => matchesDiffPath(changedFile))
+    );
+  });
+}
+
+function getWorkspaceRelativeChangedFile(
+  changedFile: string,
+  normalizedWorkspaceRoot: string,
+): string | null {
+  const normalizedChangedFile = normalizeWorkLogDiffComparisonPath(changedFile);
+  const changedFileForCompare = normalizedChangedFile.toLowerCase();
+  const workspaceRootForCompare = normalizedWorkspaceRoot.toLowerCase();
+  if (changedFileForCompare === workspaceRootForCompare) {
+    return "";
+  }
+  const workspaceRootPrefix = `${workspaceRootForCompare}/`;
+  if (!changedFileForCompare.startsWith(workspaceRootPrefix)) {
+    return null;
+  }
+  return normalizedChangedFile.slice(normalizedWorkspaceRoot.length + 1);
+}
+
+function normalizeWorkLogDiffComparisonPath(value: string): string {
+  return value.replace(/\\/gu, "/").replace(/^\/([A-Za-z]:\/)/u, "$1");
 }
 
 export interface DerivedFileChangeDisplayFile {
@@ -436,12 +477,14 @@ export function deriveFileChangeDisplayFiles(input: {
   inlineDiffPaths: ReadonlyArray<string>;
   workspaceRoot: string | undefined;
 }): DerivedFileChangeDisplayFile[] {
-  return filterChangedFilesWithoutInlineDiff(input.changedFiles, input.inlineDiffPaths).map(
-    (filePath) => ({
-      path: filePath,
-      displayPath: formatWorkspaceRelativePath(filePath, input.workspaceRoot),
-    }),
-  );
+  return filterChangedFilesWithoutInlineDiff(
+    input.changedFiles,
+    input.inlineDiffPaths,
+    input.workspaceRoot,
+  ).map((filePath) => ({
+    path: filePath,
+    displayPath: formatWorkspaceRelativePath(filePath, input.workspaceRoot),
+  }));
 }
 
 export interface DerivedCommandOutputDisplay {

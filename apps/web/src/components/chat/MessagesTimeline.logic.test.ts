@@ -673,6 +673,16 @@ describe("activity detail expansion", () => {
     ).toEqual([]);
   });
 
+  it("removes absolute root changed files represented by basename inline diffs", () => {
+    expect(
+      filterChangedFilesWithoutInlineDiff(
+        ["/Users/example/t3code/README.md", "/Users/example/t3code/docs/README.md"],
+        ["README.md"],
+        "/Users/example/t3code",
+      ),
+    ).toEqual(["/Users/example/t3code/docs/README.md"]);
+  });
+
   it("derives changed-file display chips after inline diff paths are removed", () => {
     expect(
       deriveFileChangeDisplayFiles({
