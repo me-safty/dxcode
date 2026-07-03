@@ -363,7 +363,10 @@ export function makeAgentsCapability(input: {
                       commandId: nextCommandId("thread-create-rollback"),
                       threadId: request.threadId,
                     })
-                    .pipe(Effect.ignore, Effect.andThen(Effect.sync(() => turnAliases.delete(String(turnId)))))
+                    .pipe(
+                      Effect.ignore,
+                      Effect.andThen(Effect.sync(() => turnAliases.delete(String(turnId)))),
+                    )
                 : Effect.void,
             ),
           );
