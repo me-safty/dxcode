@@ -1,0 +1,17 @@
+{
+  "name": "@t3tools/fixture-workflow-boards",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsgo --noEmit",
+    "test": "pnpm run build -- --out-dir .tmp-test-build"
+  },
+  "dependencies": {
+    "@t3tools/plugin-sdk": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}

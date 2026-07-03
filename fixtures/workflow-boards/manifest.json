@@ -1,0 +1,14 @@
+{
+  "id": "workflow-boards",
+  "name": "Workflow Boards",
+  "version": "0.1.0",
+  "description": "Board-as-state-machine workflow engine (server schema - slice A1a).",
+  "author": {
+    "name": "T3 Tools"
+  },
+  "hostApi": "^1.0.0",
+  "capabilities": ["database"],
+  "entries": {
+    "server": "server/index.js"
+  }
+}
