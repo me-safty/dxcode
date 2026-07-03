@@ -680,7 +680,6 @@ const buildAppUnderTest = (options?: {
         Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.fromPubSub(orchestrationEventPubSub),
           subscribeDomainEvents: PubSub.subscribe(orchestrationEventPubSub),
           ...options?.layers?.orchestrationEngine,
         }),
@@ -5645,7 +5644,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 1 }),
           },
           orchestrationEngine: {
-            streamDomainEvents: Stream.fromPubSub(eventPubSub),
             subscribeDomainEvents: PubSub.subscribe(eventPubSub),
           },
         },
@@ -5759,7 +5757,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.succeed(id === projectId ? Option.some(project) : Option.none()),
           },
           orchestrationEngine: {
-            streamDomainEvents: Stream.fromPubSub(eventPubSub),
             subscribeDomainEvents: PubSub.subscribe(eventPubSub),
           },
         },

@@ -439,8 +439,9 @@ describe("OrchestrationEngine", () => {
     await system.run(
       Effect.gen(function* () {
         const eventQueue = yield* Queue.unbounded<OrchestrationEvent>();
+        const domainEventSubscription = yield* engine.subscribeDomainEvents;
         yield* Effect.forkScoped(
-          Stream.take(engine.streamDomainEvents, 2).pipe(
+          Stream.take(Stream.fromSubscription(domainEventSubscription), 2).pipe(
             Stream.runForEach((event) => Queue.offer(eventQueue, event).pipe(Effect.asVoid)),
           ),
         );

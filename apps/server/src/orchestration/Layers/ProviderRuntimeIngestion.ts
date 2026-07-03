@@ -1694,13 +1694,14 @@ const make = Effect.gen(function* () {
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
+      const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
       yield* Effect.forkScoped(
         Stream.runForEach(providerService.streamEvents, (event) =>
           worker.enqueue({ source: "runtime", event }),
         ),
       );
       yield* Effect.forkScoped(
-        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        Stream.runForEach(Stream.fromSubscription(domainEventSubscription), (event) => {
           if (event.type !== "thread.turn-start-requested") {
             return Effect.void;
           }

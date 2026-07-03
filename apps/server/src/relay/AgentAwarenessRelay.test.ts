@@ -24,7 +24,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
+import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
 
@@ -403,7 +403,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
   it.effect("keeps the orchestration listener armed until relay config is installed", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const events = yield* Queue.unbounded<OrchestrationEvent>();
+        const events = yield* PubSub.unbounded<OrchestrationEvent>();
         const threadShellRequested = yield* Deferred.make<void>();
         const secrets = makeMemorySecretStore();
         const now = "2026-05-25T00:00:00.000Z";
@@ -460,8 +460,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
         const orchestrationEngine = {
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 1 }),
-          streamDomainEvents: Stream.fromQueue(events),
-          subscribeDomainEvents: Effect.die("unused"),
+          subscribeDomainEvents: PubSub.subscribe(events),
         } satisfies OrchestrationEngineShape;
 
         const snapshotQuery = {
@@ -509,7 +508,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           yield* secrets.setString(RELAY_URL_SECRET, "http://127.0.0.1:1");
           yield* secrets.setString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "relay-credential");
           yield* secrets.setString(PUBLISH_AGENT_ACTIVITY_SECRET, "true");
-          yield* Queue.offer(events, {
+          yield* PubSub.publish(events, {
             type: "thread.activity-appended",
             sequence: 1,
             eventId: "evt-1",
@@ -545,7 +544,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
         const originalFetch = globalThis.fetch;
         const context = yield* Effect.context<never>();
         const runFork = Effect.runForkWith(context);
-        const events = yield* Queue.unbounded<OrchestrationEvent>();
+        const events = yield* PubSub.unbounded<OrchestrationEvent>();
         const fetchSeen = yield* Deferred.make<URL>();
         const userSpans: Array<string> = [];
         const productSpans: Array<string> = [];
@@ -650,8 +649,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           Layer.succeed(OrchestrationEngineService, {
             readEvents: () => Stream.empty,
             dispatch: () => Effect.succeed({ sequence: 1 }),
-            streamDomainEvents: Stream.fromQueue(events),
-            subscribeDomainEvents: Effect.die("unused"),
+            subscribeDomainEvents: PubSub.subscribe(events),
           } satisfies OrchestrationEngineShape),
           Layer.succeed(ProjectionSnapshotQuery, {
             getShellSnapshot: () =>
@@ -673,7 +671,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           yield* secrets.setString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "relay-credential");
           yield* secrets.setString(PUBLISH_AGENT_ACTIVITY_SECRET, "true");
           yield* relay.start();
-          yield* Queue.offer(events, {
+          yield* PubSub.publish(events, {
             type: "thread.activity-appended",
             sequence: 1,
             eventId: "evt-1",

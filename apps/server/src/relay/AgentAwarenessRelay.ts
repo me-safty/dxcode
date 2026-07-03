@@ -508,8 +508,9 @@ export const make = Effect.gen(function* () {
           Effect.andThen(publishActiveThreadsOnceWhenConfigured(startupState !== "enabled")),
         ),
       );
+      const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
       yield* Effect.forkScoped(
-        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        Stream.runForEach(Stream.fromSubscription(domainEventSubscription), (event) => {
           const threadId = eventThreadId(event);
           if (threadId === null) {
             return Effect.logDebug("agent activity publishing ignored event without thread id", {
