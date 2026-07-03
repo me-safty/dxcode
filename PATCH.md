@@ -13,10 +13,12 @@ explains what must survive an upstream update.
 
 Commands that must pass after a customization or upstream update:
 
-- Install: `pnpm install`
 - Check: `vp check`
 - Typecheck: `vp run typecheck`
 - Native mobile changes: `vp run lint:mobile`
+
+Bootstrap dependencies with `pnpm install --frozen-lockfile` when the checkout
+is not already installed. This setup step is not a verification result.
 
 ## Active customizations
 
