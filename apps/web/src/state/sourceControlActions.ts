@@ -336,6 +336,7 @@ export function usePreparePullRequestThreadAction(scope: SourceControlActionScop
         environmentId: target.environmentId,
         input: {
           cwd: target.cwd,
+          ...(target.projectId ? { projectId: target.projectId } : {}),
           reference: input.reference,
           mode: input.mode,
           ...(input.threadId ? { threadId: input.threadId } : {}),
@@ -355,7 +356,20 @@ export function usePreparePullRequestThreadAction(scope: SourceControlActionScop
 export interface PullRequestResolutionTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
+  readonly projectId?: ProjectId | null;
   readonly reference: string | null;
+}
+
+function pullRequestResolutionInput(target: {
+  readonly cwd: string;
+  readonly projectId?: ProjectId | null;
+  readonly reference: string;
+}) {
+  return {
+    cwd: target.cwd,
+    ...(target.projectId ? { projectId: target.projectId } : {}),
+    reference: target.reference,
+  };
 }
 
 export function readCachedPullRequestResolution(
@@ -369,7 +383,11 @@ export function readCachedPullRequestResolution(
       appAtomRegistry.get(
         gitEnvironment.pullRequestResolution({
           environmentId: target.environmentId,
-          input: { cwd: target.cwd, reference: target.reference },
+          input: pullRequestResolutionInput({
+            cwd: target.cwd,
+            projectId: target.projectId,
+            reference: target.reference,
+          }),
         }),
       ),
     ),
@@ -381,10 +399,11 @@ export function usePullRequestResolutionState(target: PullRequestResolutionTarge
     target.environmentId !== null && target.cwd !== null && target.reference !== null
       ? gitEnvironment.pullRequestResolution({
           environmentId: target.environmentId,
-          input: {
+          input: pullRequestResolutionInput({
             cwd: target.cwd,
+            projectId: target.projectId,
             reference: target.reference,
-          },
+          }),
         })
       : null,
   );

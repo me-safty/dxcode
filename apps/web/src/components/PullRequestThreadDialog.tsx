@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +31,7 @@ interface PullRequestThreadDialogProps {
   environmentId: EnvironmentId;
   threadId: ThreadId;
   cwd: string | null;
+  projectId: ProjectId | null;
   initialReference: string | null;
   onOpenChange: (open: boolean) => void;
   onPrepared: (input: { branch: string; worktreePath: string | null }) => Promise<void> | void;
@@ -41,6 +42,7 @@ export function PullRequestThreadDialog({
   environmentId,
   threadId,
   cwd,
+  projectId,
   initialReference,
   onOpenChange,
   onPrepared,
@@ -59,7 +61,7 @@ export function PullRequestThreadDialog({
       ? null
       : vcsEnvironment.status({
           environmentId,
-          input: { cwd },
+          input: { cwd, ...(projectId ? { projectId } : {}) },
         }),
   );
   const sourceControlPresentation = useMemo(
@@ -86,8 +88,9 @@ export function PullRequestThreadDialog({
     () => ({
       environmentId,
       cwd,
+      projectId,
     }),
-    [cwd, environmentId],
+    [cwd, environmentId, projectId],
   );
   const pullRequestResolution = usePullRequestResolution({
     ...sourceControlScope,

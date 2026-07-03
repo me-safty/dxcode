@@ -571,10 +571,11 @@ export const make = Effect.gen(function* () {
 
   const configurePullRequestHeadUpstreamBase = Effect.fn("configurePullRequestHeadUpstream")(
     function* (
-      cwd: string,
+      target: VcsStatusInput,
       pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
       localBranch = pullRequest.headBranch,
     ) {
+      const { cwd } = target;
       const repositoryNameWithOwner = resolveHeadRepositoryNameWithOwner(pullRequest) ?? "";
       if (repositoryNameWithOwner.length === 0 && pullRequest.isCrossRepository !== true) {
         const remoteName = yield* gitCore.resolvePrimaryRemoteName(cwd);
@@ -596,7 +597,7 @@ export const make = Effect.gen(function* () {
         return;
       }
 
-      const cloneUrls = yield* (yield* sourceControlProvider(cwd)).getRepositoryCloneUrls({
+      const cloneUrls = yield* (yield* sourceControlProvider(target)).getRepositoryCloneUrls({
         cwd,
         repository: repositoryNameWithOwner,
       });
@@ -627,14 +628,14 @@ export const make = Effect.gen(function* () {
   );
 
   const configurePullRequestHeadUpstream = (
-    cwd: string,
+    target: VcsStatusInput,
     pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
     localBranch = pullRequest.headBranch,
   ) =>
-    configurePullRequestHeadUpstreamBase(cwd, pullRequest, localBranch).pipe(
+    configurePullRequestHeadUpstreamBase(target, pullRequest, localBranch).pipe(
       Effect.catch((error) =>
         Effect.logWarning("GitManager.configurePullRequestHeadUpstream failed", {
-          cwd,
+          cwd: target.cwd,
           localBranch,
           headBranch: pullRequest.headBranch,
           cause: error,
@@ -644,10 +645,11 @@ export const make = Effect.gen(function* () {
 
   const materializePullRequestHeadBranchBase = Effect.fn("materializePullRequestHeadBranch")(
     function* (
-      cwd: string,
+      target: VcsStatusInput,
       pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
       localBranch = pullRequest.headBranch,
     ) {
+      const { cwd } = target;
       const repositoryNameWithOwner = resolveHeadRepositoryNameWithOwner(pullRequest) ?? "";
 
       if (repositoryNameWithOwner.length === 0) {
@@ -659,7 +661,7 @@ export const make = Effect.gen(function* () {
         return;
       }
 
-      const cloneUrls = yield* (yield* sourceControlProvider(cwd)).getRepositoryCloneUrls({
+      const cloneUrls = yield* (yield* sourceControlProvider(target)).getRepositoryCloneUrls({
         cwd,
         repository: repositoryNameWithOwner,
       });
@@ -691,15 +693,15 @@ export const make = Effect.gen(function* () {
   );
 
   const materializePullRequestHeadBranch = (
-    cwd: string,
+    target: VcsStatusInput,
     pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
     localBranch = pullRequest.headBranch,
   ) =>
-    materializePullRequestHeadBranchBase(cwd, pullRequest, localBranch).pipe(
+    materializePullRequestHeadBranchBase(target, pullRequest, localBranch).pipe(
       Effect.catch((primaryCause) =>
         gitCore
           .fetchPullRequestBranch({
-            cwd,
+            cwd: target.cwd,
             prNumber: pullRequest.number,
             branch: localBranch,
           })
@@ -707,7 +709,7 @@ export const make = Effect.gen(function* () {
             Effect.mapError(
               (fallbackCause) =>
                 new GitPullRequestMaterializationError({
-                  cwd,
+                  cwd: target.cwd,
                   pullRequestNumber: pullRequest.number,
                   headRepository: resolveHeadRepositoryNameWithOwner(pullRequest),
                   headBranch: pullRequest.headBranch,
@@ -974,7 +976,7 @@ export const make = Effect.gen(function* () {
   });
 
   const findOpenPr = Effect.fn("findOpenPr")(function* (
-    cwd: string,
+    target: VcsStatusInput,
     headContext: Pick<
       BranchHeadContext,
       | "headBranch"
@@ -984,8 +986,9 @@ export const make = Effect.gen(function* () {
       | "isCrossRepository"
     >,
   ) {
+    const { cwd } = target;
     for (const headSelector of headContext.headSelectors) {
-      const pullRequests = yield* (yield* sourceControlProvider(cwd)).listChangeRequests({
+      const pullRequests = yield* (yield* sourceControlProvider(target)).listChangeRequests({
         cwd,
         headSelector,
         state: "open",
@@ -1046,10 +1049,11 @@ export const make = Effect.gen(function* () {
   });
 
   const buildCompletionToast = Effect.fn("buildCompletionToast")(function* (
-    cwd: string,
+    target: VcsStatusInput,
     result: Pick<GitRunStackedActionResult, "action" | "branch" | "commit" | "push" | "pr">,
   ) {
-    const terms = yield* sourceControlProvider(cwd).pipe(
+    const { cwd } = target;
+    const terms = yield* sourceControlProvider(target).pipe(
       Effect.map((provider) => getChangeRequestTerminologyForKind(provider.kind)),
       Effect.orElseSucceed(() => getChangeRequestTerminologyForKind("unknown")),
     );
@@ -1094,7 +1098,7 @@ export const make = Effect.gen(function* () {
         branch: finalBranchContext.branch,
         upstreamRef: finalBranchContext.upstreamRef,
       }).pipe(
-        Effect.flatMap((headContext) => findOpenPr(cwd, headContext)),
+        Effect.flatMap((headContext) => findOpenPr(target, headContext)),
         Effect.orElseSucceed(() => null),
       );
     }
@@ -1140,11 +1144,12 @@ export const make = Effect.gen(function* () {
   });
 
   const resolveBaseBranch = Effect.fn("resolveBaseBranch")(function* (
-    cwd: string,
+    target: VcsStatusInput,
     branch: string,
     upstreamRef: string | null,
     headContext: Pick<BranchHeadContext, "isCrossRepository" | "remoteName">,
   ) {
+    const { cwd } = target;
     const configured = yield* gitCore.readConfigValue(cwd, `branch.${branch}.gh-merge-base`);
     if (configured) return configured;
 
@@ -1157,7 +1162,7 @@ export const make = Effect.gen(function* () {
       }
     }
 
-    const defaultFromProvider = yield* sourceControlProvider(cwd).pipe(
+    const defaultFromProvider = yield* sourceControlProvider(target).pipe(
       Effect.flatMap((provider) => provider.getDefaultBranch({ cwd })),
       Effect.orElseSucceed(() => null),
     );
@@ -1351,11 +1356,12 @@ export const make = Effect.gen(function* () {
 
   const runPrStep = Effect.fn("runPrStep")(function* (
     modelSelection: ModelSelection,
-    cwd: string,
+    target: VcsStatusInput,
     fallbackBranch: string | null,
     emit: GitActionProgressEmitter,
   ) {
-    const provider = yield* sourceControlProvider(cwd);
+    const { cwd } = target;
+    const provider = yield* sourceControlProvider(target);
     const terms = getChangeRequestTerminologyForKind(provider.kind);
     const details = yield* gitCore.statusDetails(cwd);
     const branch = details.branch ?? fallbackBranch;
@@ -1379,7 +1385,7 @@ export const make = Effect.gen(function* () {
       upstreamRef: details.upstreamRef,
     });
 
-    const existing = yield* findOpenPr(cwd, headContext);
+    const existing = yield* findOpenPr(target, headContext);
     if (existing) {
       return {
         status: "opened_existing" as const,
@@ -1391,7 +1397,7 @@ export const make = Effect.gen(function* () {
       };
     }
 
-    const baseBranch = yield* resolveBaseBranch(cwd, branch, details.upstreamRef, headContext);
+    const baseBranch = yield* resolveBaseBranch(target, branch, details.upstreamRef, headContext);
     yield* emit({
       kind: "phase_started",
       phase: "pr",
@@ -1440,7 +1446,7 @@ export const make = Effect.gen(function* () {
       })
       .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))));
 
-    const created = yield* findOpenPr(cwd, headContext);
+    const created = yield* findOpenPr(target, headContext);
     if (!created) {
       return {
         status: "created" as const,
@@ -1501,7 +1507,7 @@ export const make = Effect.gen(function* () {
   const resolvePullRequest: GitManager["Service"]["resolvePullRequest"] = Effect.fn(
     "resolvePullRequest",
   )(function* (input) {
-    const pullRequest = yield* (yield* sourceControlProvider(input.cwd))
+    const pullRequest = yield* (yield* sourceControlProvider(input))
       .getChangeRequest({
         cwd: input.cwd,
         reference: normalizePullRequestReference(input.reference),
@@ -1537,21 +1543,21 @@ export const make = Effect.gen(function* () {
     return yield* Effect.gen(function* () {
       const normalizedReference = normalizePullRequestReference(input.reference);
       const rootWorktreePath = yield* canonicalizeExistingPath(input.cwd);
-      const pullRequestSummary = yield* (yield* sourceControlProvider(input.cwd)).getChangeRequest({
+      const pullRequestSummary = yield* (yield* sourceControlProvider(input)).getChangeRequest({
         cwd: input.cwd,
         reference: normalizedReference,
       });
       const pullRequest = toResolvedPullRequest(pullRequestSummary);
 
       if (input.mode === "local") {
-        yield* (yield* sourceControlProvider(input.cwd)).checkoutChangeRequest({
+        yield* (yield* sourceControlProvider(input)).checkoutChangeRequest({
           cwd: input.cwd,
           reference: normalizedReference,
           force: true,
         });
         const details = yield* gitCore.statusDetails(input.cwd);
         yield* configurePullRequestHeadUpstream(
-          input.cwd,
+          input,
           {
             ...pullRequest,
             ...toPullRequestHeadRemoteInfo(pullRequestSummary),
@@ -1570,7 +1576,7 @@ export const make = Effect.gen(function* () {
       ) {
         const details = yield* gitCore.statusDetails(worktreePath);
         yield* configurePullRequestHeadUpstream(
-          worktreePath,
+          { cwd: worktreePath, projectId: input.projectId },
           {
             ...pullRequest,
             ...toPullRequestHeadRemoteInfo(pullRequestSummary),
@@ -1637,7 +1643,7 @@ export const make = Effect.gen(function* () {
       }
 
       yield* materializePullRequestHeadBranch(
-        input.cwd,
+        input,
         pullRequestWithRemoteInfo,
         localPullRequestBranch,
       );
@@ -1821,7 +1827,7 @@ export const make = Effect.gen(function* () {
         const currentBranch = branchStep.name ?? initialStatus.branch;
         const commitAction = isCommitAction(input.action) ? input.action : null;
         const changeRequestTerms = wantsPr
-          ? yield* sourceControlProvider(input.cwd).pipe(
+          ? yield* sourceControlProvider(input).pipe(
               Effect.map((provider) => getChangeRequestTerminologyForKind(provider.kind)),
               Effect.orElseSucceed(() => getChangeRequestTerminologyForKind("unknown")),
             )
@@ -1868,12 +1874,12 @@ export const make = Effect.gen(function* () {
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
                 Effect.flatMap(() =>
-                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit),
+                  runPrStep(modelSelection, input, currentBranch, progress.emit),
                 ),
               )
           : { status: "skipped_not_requested" as const };
 
-        const toast = yield* buildCompletionToast(input.cwd, {
+        const toast = yield* buildCompletionToast(input, {
           action: input.action,
           branch: branchStep,
           commit,

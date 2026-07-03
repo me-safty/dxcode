@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import {
   type ProjectId,
   SourceControlProviderError,
@@ -132,16 +133,6 @@ function unsupportedProvider(
   });
 }
 
-function providerDetectionError(operation: string, cwd: string, cause: unknown) {
-  return new SourceControlProviderError({
-    provider: "unknown",
-    operation,
-    cwd,
-    detail: "Failed to detect source control provider.",
-    cause,
-  });
-}
-
 function providerDetectionCacheKey(input: SourceControlProviderResolveInput) {
   return `${input.cwd}${PROVIDER_DETECTION_CACHE_KEY_SEPARATOR}${input.projectId ?? ""}`;
 }
@@ -257,7 +248,16 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
 
         const handle = yield* vcsRegistry
           .resolve({ cwd })
-          .pipe(Effect.mapError((error) => providerDetectionError("detectProvider", cwd, error)));
+          .pipe(Effect.mapError(
+            (error) =>
+              new SourceControlProviderError({
+                provider: "unknown",
+                operation: "detectProvider",
+                cwd,
+                detail: "Failed to detect source control provider.",
+                cause: error,
+              }),
+          ));
         const repository = yield* handle.driver
           .detectRepository(cwd)
           .pipe(Effect.catch(() => Effect.succeed(null)));
@@ -285,7 +285,16 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
 
         const remotes = yield* handle.driver
           .listRemotes(cwd)
-          .pipe(Effect.mapError((error) => providerDetectionError("detectProvider", cwd, error)));
+          .pipe(Effect.mapError(
+            (error) =>
+              new SourceControlProviderError({
+                provider: "unknown",
+                operation: "detectProvider",
+                cwd,
+                detail: "Failed to detect source control provider.",
+                cause: error,
+              }),
+          ));
         const context = selectProviderContext(remotes.remotes);
 
         const refinedContext = yield* SourceControlProviderDiscovery.refineUnknownRemoteProvider({
@@ -309,6 +318,14 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       capacity: PROVIDER_DETECTION_CACHE_CAPACITY,
       timeToLive: (exit) => (Exit.isSuccess(exit) ? PROVIDER_DETECTION_CACHE_TTL : Duration.zero),
     });
+
+    // Saving a project's remote override must take effect immediately, not
+    // after the detection cache TTL expires.
+    yield* Effect.forkScoped(
+      Stream.runForEach(serverSettings.streamChanges, () =>
+        Cache.invalidateAll(providerContextCache),
+      ),
+    );
 
     const resolveHandle: SourceControlProviderRegistry["Service"]["resolveHandle"] = (input) =>
       Cache.get(providerContextCache, providerDetectionCacheKey(input)).pipe(

@@ -5301,6 +5301,7 @@ function ChatViewContent(props: ChatViewProps) {
                 environmentId={activeThread.environmentId}
                 threadId={activeThread.id}
                 cwd={activeProject?.workspaceRoot ?? null}
+                projectId={activeProject?.id ?? null}
                 initialReference={pullRequestDialogState.initialReference}
                 onOpenChange={(open) => {
                   if (!open) {

@@ -218,6 +218,23 @@ export const make = Effect.gen(function* () {
     return yield* Ref.get(cacheRef).pipe(Effect.map((cache) => cache.get(key) ?? null));
   });
 
+  const cachedProjectInputsForCwd = Effect.fn("VcsStatusBroadcaster.cachedProjectInputsForCwd")(
+    function* (cwd: string) {
+      const cache = yield* Ref.get(cacheRef);
+      const inputs: Array<VcsStatusInput> = [];
+      for (const key of cache.keys()) {
+        const separatorIndex = key.indexOf(VCS_STATUS_CACHE_KEY_SEPARATOR);
+        const keyCwd = key.slice(0, separatorIndex);
+        const projectId = key.slice(separatorIndex + VCS_STATUS_CACHE_KEY_SEPARATOR.length);
+        if (keyCwd === cwd && projectId) {
+          // Keys are only built from validated inputs, so the round-trip preserves the brand.
+          inputs.push({ cwd, projectId: projectId as VcsStatusInput["projectId"] });
+        }
+      }
+      return inputs;
+    },
+  );
+
   const updateCachedLocalStatus = Effect.fn("VcsStatusBroadcaster.updateCachedLocalStatus")(
     function* (key: string, local: VcsStatusLocalResult, options?: { publish?: boolean }) {
       const nextLocal = {
@@ -377,7 +394,23 @@ export const make = Effect.gen(function* () {
     "VcsStatusBroadcaster.refreshLocalStatus",
   )(function* (rawCwd) {
     const cwd = yield* withFileSystem(normalizeCwd(rawCwd));
-    return yield* refreshLocalStatusForInput({ cwd });
+    const result = yield* refreshLocalStatusForInput({ cwd });
+    // Also refresh project-scoped cache entries for this repository, or
+    // subscribers keyed by projectId keep serving the stale local snapshot.
+    const projectInputs = yield* cachedProjectInputsForCwd(cwd);
+    yield* Effect.forEach(
+      projectInputs,
+      (projectInput) =>
+        workflow
+          .localStatus(projectInput)
+          .pipe(
+            Effect.flatMap((local) =>
+              updateCachedLocalStatus(statusCacheKey(projectInput), local, { publish: true }),
+            ),
+          ),
+      { concurrency: "unbounded", discard: true },
+    );
+    return result;
   });
 
   const refreshRemoteStatus = Effect.fn("VcsStatusBroadcaster.refreshRemoteStatus")(function* (
@@ -390,23 +423,6 @@ export const make = Effect.gen(function* () {
     const remote = yield* workflow.remoteStatus(input, options);
     return yield* updateCachedRemoteStatus(statusCacheKey(input), remote, { publish: true });
   });
-
-  const cachedProjectInputsForCwd = Effect.fn("VcsStatusBroadcaster.cachedProjectInputsForCwd")(
-    function* (cwd: string) {
-      const cache = yield* Ref.get(cacheRef);
-      const inputs: Array<VcsStatusInput> = [];
-      for (const key of cache.keys()) {
-        const separatorIndex = key.indexOf(VCS_STATUS_CACHE_KEY_SEPARATOR);
-        const keyCwd = key.slice(0, separatorIndex);
-        const projectId = key.slice(separatorIndex + VCS_STATUS_CACHE_KEY_SEPARATOR.length);
-        if (keyCwd === cwd && projectId) {
-          // Keys are only built from validated inputs, so the round-trip preserves the brand.
-          inputs.push({ cwd, projectId: projectId as VcsStatusInput["projectId"] });
-        }
-      }
-      return inputs;
-    },
-  );
 
   const refreshStatusForInput = Effect.fn("VcsStatusBroadcaster.refreshStatusForInput")(function* (
     input: VcsStatusInput,

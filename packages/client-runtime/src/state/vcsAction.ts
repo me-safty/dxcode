@@ -6,6 +6,8 @@ import {
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   GitStackedAction,
+  ProjectId,
+  type ProjectId as ProjectIdType,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -55,11 +57,13 @@ export interface VcsActionState {
 export interface VcsActionTarget {
   readonly environmentId: EnvironmentIdType | null;
   readonly cwd: string | null;
+  readonly projectId?: ProjectIdType | null;
 }
 
 export interface ResolvedVcsActionTarget {
   readonly environmentId: EnvironmentIdType;
   readonly cwd: string;
+  readonly projectId: ProjectIdType | null;
 }
 
 export interface BeginVcsActionInput {
@@ -158,7 +162,7 @@ export const EMPTY_VCS_ACTION_STATE = Object.freeze<VcsActionState>({
 const nowMs = (): number => DateTime.toEpochMillis(DateTime.nowUnsafe());
 let nextLocalActionId = 0;
 const decodeVcsActionTargetKey = Schema.decodeUnknownSync(
-  Schema.Tuple([EnvironmentId, Schema.String]),
+  Schema.Tuple([EnvironmentId, Schema.String, Schema.NullOr(ProjectId)]),
 );
 
 export const vcsActionStateAtom = Atom.family((key: string) => {
@@ -177,13 +181,13 @@ export function getVcsActionTargetKey(target: VcsActionTarget): string | null {
   if (target.environmentId === null || target.cwd === null) {
     return null;
   }
-  return JSON.stringify([target.environmentId, target.cwd]);
+  return JSON.stringify([target.environmentId, target.cwd, target.projectId ?? null]);
 }
 
 export function parseVcsActionTargetKey(key: string): ResolvedVcsActionTarget {
   try {
-    const [environmentId, cwd] = decodeVcsActionTargetKey(JSON.parse(key));
-    return { environmentId, cwd };
+    const [environmentId, cwd, projectId] = decodeVcsActionTargetKey(JSON.parse(key));
+    return { environmentId, cwd, projectId };
   } catch (cause) {
     throw new VcsActionTargetKeyParseError({ keyLength: key.length, cause });
   }
@@ -459,6 +463,7 @@ export function createVcsActionManager<R, E>(
         const rpcInput: GitRunStackedActionInput = {
           actionId: transportActionId,
           cwd: target.cwd,
+          ...(target.projectId ? { projectId: target.projectId } : {}),
           action: input.action,
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),

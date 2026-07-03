@@ -79,7 +79,11 @@ import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
-import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
+import {
+  EMPTY_SERVER_PROVIDERS,
+  primaryServerKeybindingsAtom,
+  primaryServerProvidersAtom,
+} from "../state/server";
 
 const PROVIDER_LABELS: Record<SourceControlProviderKind, string> = {
   github: "GitHub",
@@ -202,7 +206,10 @@ function ProjectRouteView() {
   );
   const serverProviders =
     project?.environmentId && project.environmentId !== primaryEnvironmentId
-      ? (projectServerConfig?.providers ?? primaryProviders)
+      ? // Never fall back to the primary environment's providers here: saving
+        // while this project's config loads would persist instance IDs that do
+        // not exist on the project's environment.
+        (projectServerConfig?.providers ?? EMPTY_SERVER_PROVIDERS)
       : primaryProviders;
   const providerInstanceEntries = useMemo(
     () =>
@@ -492,9 +499,16 @@ function ProjectRouteView() {
       void commitProjectSettings({
         disabledProviderInstanceIds: nextDisabledProviderInstanceIds,
       });
+      if (!allowed && defaultModelSelection?.instanceId === instanceId) {
+        // The default model pointed at the instance that was just disabled;
+        // clear it so new threads fall back to an allowed provider.
+        commitDefaultModelSelection(null);
+      }
     },
     [
+      commitDefaultModelSelection,
       commitProjectSettings,
+      defaultModelSelection,
       disabledProviderInstanceIds,
       globallyEnabledProviderInstanceEntries,
       projectProviderInstanceEntries.length,
@@ -548,10 +562,16 @@ function ProjectRouteView() {
         server: readLocalApi()?.server,
       }),
     );
-    if (keybindingResult._tag === "Failure") {
-      return keybindingResult;
-    }
     refreshProjectDetails();
+    if (keybindingResult._tag === "Failure") {
+      // The script list is already persisted at this point, so report the
+      // shortcut failure separately instead of failing the whole save —
+      // retrying the save against stale details would duplicate the script.
+      showProjectSettingsError(
+        "Script saved, but updating its keyboard shortcut failed",
+        Cause.squash(keybindingResult.cause),
+      );
+    }
     return updateResult;
   };
 

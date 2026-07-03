@@ -6,10 +6,8 @@ import {
 import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_SERVER_SETTINGS,
-  type ModelSelection,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
-import { createDefaultModelSelection } from "@t3tools/shared/model";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -52,6 +50,7 @@ export function useNewThreadHandler() {
       },
     ): Promise<void> => {
       const {
+        applyStickyState,
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
         getDraftThread,
@@ -85,12 +84,17 @@ export function useNewThreadHandler() {
       if (storedDraftThreadRef && reusableStoredDraftThread === null) {
         markPromotedDraftThreadByRef(storedDraftThreadRef);
       }
-      const projectDefaultModelSelection: ModelSelection =
-        project?.defaultModelSelection ?? createDefaultModelSelection();
+      const projectDefaultModelSelection = project?.defaultModelSelection ?? null;
       const seedNewDraftModelState = (draftId: Parameters<typeof setModelSelection>[0]) => {
-        setModelSelection(draftId, projectDefaultModelSelection, {
-          preserveExistingOptions: false,
-        });
+        if (projectDefaultModelSelection) {
+          setModelSelection(draftId, projectDefaultModelSelection, {
+            preserveExistingOptions: false,
+          });
+          return;
+        }
+        // Without a per-project default, keep the user's sticky selection
+        // instead of resetting to the canonical default model.
+        applyStickyState(draftId);
       };
       const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
         ? currentRouteTarget.kind === "server"
