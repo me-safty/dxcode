@@ -9,25 +9,6 @@ import {
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
-export {
-  COMMAND_OUTPUT_TAIL_LINES,
-  buildSupplementalToolDetailBody,
-  deriveCommandOutputDisplay,
-  deriveExpandableWorkEntryDetails,
-  deriveFileChangeDisplayFiles,
-  filterChangedFilesWithoutInlineDiff,
-  getRenderableCommandOutputLines,
-  hasCommandWorkEntryDetails,
-  hasExpandableWorkEntryDetails,
-  hasFileChangeWorkEntryDetails,
-  hasRenderableCommandOutput,
-  type DerivedCommandOutputDisplay,
-  type DerivedCommandOutputSection,
-  type DerivedCommandWorkEntryDetails,
-  type DerivedExpandableWorkEntryDetails,
-  type DerivedFileChangeDisplayFile,
-  type DerivedFileChangeWorkEntryDetails,
-} from "../../lib/workLogEntryDetails";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;

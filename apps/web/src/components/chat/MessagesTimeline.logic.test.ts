@@ -1,26 +1,28 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { WorkLogEntry } from "../../session-logic";
 import {
-  buildSupplementalToolDetailBody,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
-  deriveCommandOutputDisplay,
-  deriveExpandableWorkEntryDetails,
-  deriveFileChangeDisplayFiles,
   deriveMessagesTimelineRows,
   deriveToolWorkEntryHeading,
   deriveWorkEntryDisplay,
   deriveWorkEntryPreview,
+  normalizeCompactToolLabel,
+  resolveAssistantMessageCopyState,
+  shouldToggleWorkEntryRowFromKeyDown,
+} from "./MessagesTimeline.logic";
+import {
+  buildSupplementalToolDetailBody,
+  deriveCommandOutputDisplay,
+  deriveExpandableWorkEntryDetails,
+  deriveFileChangeDisplayFiles,
   filterChangedFilesWithoutInlineDiff,
   getRenderableCommandOutputLines,
   hasCommandWorkEntryDetails,
   hasExpandableWorkEntryDetails,
   hasFileChangeWorkEntryDetails,
   hasRenderableCommandOutput,
-  normalizeCompactToolLabel,
-  resolveAssistantMessageCopyState,
-  shouldToggleWorkEntryRowFromKeyDown,
-} from "./MessagesTimeline.logic";
+} from "../../lib/workLogEntryDetails";
 
 let workLogEntrySequence = 0;
 
@@ -562,6 +564,19 @@ describe("activity detail expansion", () => {
     expect(details?.command?.outputs).toEqual([{ title: "Output", value: "legacy output\n" }]);
   });
 
+  it("keeps unknown duration labels for nullish command durations", () => {
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "command_execution",
+        command: "vp test",
+        durationMs: null as never,
+      }),
+      undefined,
+    );
+
+    expect(details?.command?.durationLabel).toBe("unknown");
+  });
+
   it("keeps collab-agent rows out of generic command and file detail derivation", () => {
     const details = deriveExpandableWorkEntryDetails(
       buildWorkLogEntry({
@@ -578,6 +593,19 @@ describe("activity detail expansion", () => {
     expect(details?.command).toBeNull();
     expect(details?.fileChange).toBeNull();
     expect(details?.genericDetail).toContain("vp test");
+  });
+
+  it("keeps raw-command-only generic tool entries expandable", () => {
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "mcp_tool_call",
+        rawCommand: "node scripts/report.mjs --json",
+      }),
+      undefined,
+    );
+
+    expect(details?.command).toBeNull();
+    expect(details?.genericDetail).toBe("node scripts/report.mjs --json");
   });
 
   it("derives generic MCP detail fallback outside command and file detail rows", () => {
@@ -600,6 +628,28 @@ describe("activity detail expansion", () => {
     expect(details?.genericDetail).toContain("Read package metadata");
   });
 
+  it("redacts and safely serializes MCP tool data", () => {
+    const toolData: Record<string, unknown> = {
+      server: "filesystem",
+      token: "secret-token",
+      nested: { apiKey: "secret-key" },
+    };
+    toolData.self = toolData;
+
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "mcp_tool_call",
+        toolData,
+      }),
+      undefined,
+    );
+
+    expect(details?.genericDetail).toContain("[Circular]");
+    expect(details?.genericDetail).toContain("[redacted]");
+    expect(details?.genericDetail).not.toContain("secret-token");
+    expect(details?.genericDetail).not.toContain("secret-key");
+  });
+
   it("keeps changed files not represented by inline diff paths", () => {
     expect(
       filterChangedFilesWithoutInlineDiff(
@@ -616,6 +666,7 @@ describe("activity detail expansion", () => {
     expect(filterChangedFilesWithoutInlineDiff(["index.ts"], ["apps/web/src/index.ts"])).toEqual([
       "index.ts",
     ]);
+    expect(filterChangedFilesWithoutInlineDiff(["index.ts"], ["index.ts"])).toEqual([]);
 
     expect(
       filterChangedFilesWithoutInlineDiff(["src/index.ts"], ["apps/web/src/index.ts"]),
@@ -649,6 +700,31 @@ describe("activity detail expansion", () => {
       suffix: "last 40 of 45 lines",
     });
     expect(deriveCommandOutputDisplay({ value, showFull: true }).suffix).toBe("45 lines");
+  });
+
+  it("guards null output and invalid visible line counts", () => {
+    expect(
+      deriveCommandOutputDisplay({
+        value: null,
+        showFull: false,
+        maxVisibleLines: Number.NaN,
+      }),
+    ).toEqual({
+      isTruncated: false,
+      visibleValue: "",
+      suffix: "0 lines",
+    });
+    expect(
+      deriveCommandOutputDisplay({
+        value: "one\ntwo\nthree",
+        showFull: false,
+        maxVisibleLines: -1,
+      }),
+    ).toEqual({
+      isTruncated: true,
+      visibleValue: "three",
+      suffix: "last 1 of 3 lines",
+    });
   });
 
   it("derives work entry headings and compact previews", () => {

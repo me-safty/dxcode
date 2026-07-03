@@ -1,12 +1,11 @@
-import type { WorkLogEntry } from "../session-logic";
-import { formatDuration } from "../session-logic";
+import { formatDuration, type WorkLogEntry } from "../session-logic";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
 import { createChangedFileDiffPathMatcher } from "./diffRendering";
 
 export const COMMAND_OUTPUT_TAIL_LINES = 40;
 
 export function hasRenderableCommandOutput(value: string | null | undefined): value is string {
-  return getRenderableCommandOutputLines(value).length > 0;
+  return typeof value === "string" && /\S/u.test(value);
 }
 
 export function getRenderableCommandOutputLines(value: string | null | undefined): string[] {
@@ -23,6 +22,70 @@ export function getRenderableCommandOutputLines(value: string | null | undefined
     endIndex -= 1;
   }
   return lines.slice(startIndex, endIndex);
+}
+
+function collectRenderableCommandOutputLineSummary(
+  value: string | null | undefined,
+  maxTailLines: number,
+): { lineCount: number; tailLines: string[] } {
+  if (typeof value !== "string" || value.length === 0) {
+    return { lineCount: 0, tailLines: [] };
+  }
+
+  let lineCount = 0;
+  const tailLines: string[] = [];
+  const pendingBlankLines: string[] = [];
+  let sawRenderableLine = false;
+
+  const appendLine = (line: string) => {
+    lineCount += 1;
+    if (maxTailLines <= 0) {
+      return;
+    }
+    tailLines.push(line);
+    if (tailLines.length > maxTailLines) {
+      tailLines.shift();
+    }
+  };
+
+  const processLine = (line: string) => {
+    if (line.trim().length === 0) {
+      if (sawRenderableLine) {
+        pendingBlankLines.push(line);
+      }
+      return;
+    }
+
+    sawRenderableLine = true;
+    for (const pendingLine of pendingBlankLines.splice(0)) {
+      appendLine(pendingLine);
+    }
+    appendLine(line);
+  };
+
+  let lineStartIndex = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) !== 10) {
+      continue;
+    }
+    const lineEndIndex =
+      index > lineStartIndex && value.charCodeAt(index - 1) === 13 ? index - 1 : index;
+    processLine(value.slice(lineStartIndex, lineEndIndex));
+    lineStartIndex = index + 1;
+  }
+  processLine(value.slice(lineStartIndex));
+
+  return { lineCount, tailLines };
+}
+
+function normalizeMaxVisibleLines(value: number | undefined): number {
+  if (value === undefined) {
+    return COMMAND_OUTPUT_TAIL_LINES;
+  }
+  if (!Number.isFinite(value)) {
+    return COMMAND_OUTPUT_TAIL_LINES;
+  }
+  return Math.max(1, Math.floor(value));
 }
 
 export function buildSupplementalToolDetailBody(
@@ -44,34 +107,112 @@ export function buildSupplementalToolDetailBody(
 }
 
 function commandOutputMatchesDetail(workEntry: WorkLogEntry, detail: string): boolean {
-  const stdoutLines = getRenderableCommandOutputLines(workEntry.stdout);
-  const stderrLines = getRenderableCommandOutputLines(workEntry.stderr);
-  const hasStreamOutput = stdoutLines.length > 0 || stderrLines.length > 0;
-  const outputLines = hasStreamOutput ? [] : getRenderableCommandOutputLines(workEntry.output);
-  const normalizedDetail = normalizeToolDetailLines(detail.split(/\r?\n/u));
+  if (!hasRenderableCommandOutput(detail)) {
+    return false;
+  }
+  const normalizedDetailLines = getRenderableCommandOutputLines(detail).map((line) => line.trim());
+  const hasStreamOutput =
+    hasRenderableCommandOutput(workEntry.stdout) || hasRenderableCommandOutput(workEntry.stderr);
+  const outputCandidates = hasStreamOutput
+    ? [workEntry.stdout, workEntry.stderr]
+    : [workEntry.output];
 
-  return [stdoutLines, stderrLines, outputLines].some(
-    (lines) => lines.length > 0 && normalizeToolDetailLines(lines) === normalizedDetail,
+  return outputCandidates.some((value) =>
+    commandOutputTextMatchesNormalizedLines(value, normalizedDetailLines),
   );
 }
 
-function normalizeToolDetailLines(lines: ReadonlyArray<string>): string {
-  const normalizedLines = lines.map((line) => line.trim());
-  let startIndex = 0;
-  let endIndex = normalizedLines.length;
-  while (startIndex < endIndex && normalizedLines[startIndex]?.length === 0) {
-    startIndex += 1;
+function commandOutputTextMatchesNormalizedLines(
+  value: string | null | undefined,
+  normalizedDetailLines: ReadonlyArray<string>,
+): boolean {
+  if (!hasRenderableCommandOutput(value)) {
+    return false;
   }
-  while (endIndex > startIndex && normalizedLines[endIndex - 1]?.length === 0) {
-    endIndex -= 1;
+
+  let expectedIndex = 0;
+  let pendingBlankLineCount = 0;
+  let sawRenderableLine = false;
+
+  const consumeExpectedLine = (normalizedLine: string): boolean => {
+    if (normalizedDetailLines[expectedIndex] !== normalizedLine) {
+      return false;
+    }
+    expectedIndex += 1;
+    return expectedIndex <= normalizedDetailLines.length;
+  };
+
+  const processLine = (line: string): boolean => {
+    const normalizedLine = line.trim();
+    if (normalizedLine.length === 0) {
+      if (sawRenderableLine) {
+        pendingBlankLineCount += 1;
+      }
+      return true;
+    }
+
+    sawRenderableLine = true;
+    while (pendingBlankLineCount > 0) {
+      if (!consumeExpectedLine("")) {
+        return false;
+      }
+      pendingBlankLineCount -= 1;
+    }
+    return consumeExpectedLine(normalizedLine);
+  };
+
+  let lineStartIndex = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) !== 10) {
+      continue;
+    }
+    const lineEndIndex =
+      index > lineStartIndex && value.charCodeAt(index - 1) === 13 ? index - 1 : index;
+    if (!processLine(value.slice(lineStartIndex, lineEndIndex))) {
+      return false;
+    }
+    lineStartIndex = index + 1;
   }
-  return normalizedLines.slice(startIndex, endIndex).join("\n");
+
+  return processLine(value.slice(lineStartIndex)) && expectedIndex === normalizedDetailLines.length;
 }
 
 function isCollabAgentWorkEntry(workEntry: WorkLogEntry): boolean {
   // Collab-agent rows own their nested activity UI; do not re-expand them as
   // command or file-change detail boxes.
   return workEntry.itemType === "collab_agent_tool_call";
+}
+
+const SENSITIVE_TOOL_DATA_KEY_PATTERN =
+  /(?:api[-_]?key|authorization|bearer|credential|password|secret|token)/iu;
+const MAX_TOOL_DATA_STRING_LENGTH = 2_000;
+
+function serializeToolDataForDisplay(toolData: unknown): string {
+  const seenObjects = new WeakSet<object>();
+  try {
+    return JSON.stringify(
+      toolData,
+      (key, value) => {
+        if (SENSITIVE_TOOL_DATA_KEY_PATTERN.test(key)) {
+          return "[redacted]";
+        }
+        if (typeof value === "string" && value.length > MAX_TOOL_DATA_STRING_LENGTH) {
+          return `${value.slice(0, MAX_TOOL_DATA_STRING_LENGTH)}... [truncated]`;
+        }
+        if (typeof value !== "object" || value === null) {
+          return value;
+        }
+        if (seenObjects.has(value)) {
+          return "[Circular]";
+        }
+        seenObjects.add(value);
+        return value;
+      },
+      2,
+    );
+  } catch {
+    return "[unserializable tool data]";
+  }
 }
 
 export function hasCommandWorkEntryDetails(workEntry: WorkLogEntry): boolean {
@@ -134,10 +275,11 @@ export interface DerivedExpandableWorkEntryDetails {
 
 function deriveRawCommand(workEntry: Pick<WorkLogEntry, "command" | "rawCommand">): string | null {
   const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
+  if (!rawCommand) {
     return null;
   }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
+  const command = workEntry.command?.trim();
+  return rawCommand === command ? null : rawCommand;
 }
 
 function buildGenericToolExpandedBody(
@@ -146,7 +288,7 @@ function buildGenericToolExpandedBody(
 ): string | null {
   const blocks: string[] = [];
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
+    blocks.push(`MCP call\n${serializeToolDataForDisplay(workEntry.toolData)}`);
   }
   const raw = deriveRawCommand(workEntry);
   if (raw?.trim()) {
@@ -212,8 +354,7 @@ function deriveCommandWorkEntryDetails(workEntry: WorkLogEntry): DerivedCommandW
     command,
     rawCommand,
     exitCodeLabel: String(workEntry.exitCode ?? "unknown"),
-    durationLabel:
-      workEntry.durationMs !== undefined ? formatDuration(workEntry.durationMs) : "unknown",
+    durationLabel: workEntry.durationMs != null ? formatDuration(workEntry.durationMs) : "unknown",
     outputs,
   };
 }
@@ -274,9 +415,14 @@ export function filterChangedFilesWithoutInlineDiff(
   if (inlineDiffPaths.length === 0) {
     return [...changedFiles];
   }
-  const inlineDiffMatchers = inlineDiffPaths.map(createChangedFileDiffPathMatcher);
+  const exactInlineDiffPaths = new Set(inlineDiffPaths);
+  const inlineDiffMatchers = inlineDiffPaths
+    .filter((inlineDiffPath) => inlineDiffPath.includes("/") || inlineDiffPath.includes("\\"))
+    .map(createChangedFileDiffPathMatcher);
   return changedFiles.filter(
-    (changedFile) => !inlineDiffMatchers.some((matchesDiffPath) => matchesDiffPath(changedFile)),
+    (changedFile) =>
+      !exactInlineDiffPaths.has(changedFile) &&
+      !inlineDiffMatchers.some((matchesDiffPath) => matchesDiffPath(changedFile)),
   );
 }
 
@@ -305,15 +451,29 @@ export interface DerivedCommandOutputDisplay {
 }
 
 export function deriveCommandOutputDisplay(input: {
-  value: string;
+  value: string | null | undefined;
   showFull: boolean;
   maxVisibleLines?: number;
 }): DerivedCommandOutputDisplay {
-  const maxVisibleLines = input.maxVisibleLines ?? COMMAND_OUTPUT_TAIL_LINES;
+  const maxVisibleLines = normalizeMaxVisibleLines(input.maxVisibleLines);
+  if (!input.showFull) {
+    const { lineCount, tailLines } = collectRenderableCommandOutputLineSummary(
+      input.value,
+      maxVisibleLines,
+    );
+    const isTruncated = lineCount > maxVisibleLines;
+    return {
+      isTruncated,
+      visibleValue: tailLines.join("\n"),
+      suffix: isTruncated
+        ? `last ${maxVisibleLines} of ${lineCount.toLocaleString()} lines`
+        : `${lineCount.toLocaleString()} line${lineCount === 1 ? "" : "s"}`,
+    };
+  }
+
   const lines = getRenderableCommandOutputLines(input.value);
   const isTruncated = lines.length > maxVisibleLines;
-  const visibleValue =
-    input.showFull || !isTruncated ? lines.join("\n") : lines.slice(-maxVisibleLines).join("\n");
+  const visibleValue = lines.join("\n");
   const suffix = isTruncated
     ? input.showFull
       ? `${lines.length.toLocaleString()} lines`
