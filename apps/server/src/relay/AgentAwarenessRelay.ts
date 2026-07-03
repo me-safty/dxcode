@@ -323,6 +323,14 @@ export const make = Effect.gen(function* () {
       });
       return;
     }
+    const threadOwner = yield* snapshotQuery.getThreadOwnerById(threadId);
+    if (Option.isSome(threadOwner) && threadOwner.value !== "user") {
+      yield* Effect.logDebug("agent activity publish skipped; thread is not user-owned", {
+        threadId,
+        owner: threadOwner.value,
+      });
+      return;
+    }
     const relayClient = yield* makeRelayClient(relayConfig);
     const environmentId = yield* serverEnvironment.getEnvironmentId;
 
