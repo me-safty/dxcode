@@ -24,6 +24,8 @@ export const PluginCapability = Schema.Literals([
   "environments.read",
   "secrets",
   "http",
+  "filesystem",
+  "httpClient",
   "sourceControl",
   "textGeneration",
 ]);

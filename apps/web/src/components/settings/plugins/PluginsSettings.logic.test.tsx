@@ -46,9 +46,7 @@ describe("Plugins settings logic", () => {
     expect(pluginRequiresRelaunch(plugin({ state: "disabled-by-host" }))).toBe(true);
     expect(pluginRequiresRelaunch(plugin({ state: "active" }))).toBe(false);
 
-    expect(effectiveInstallSourceId(ALL_PLUGIN_SOURCES_VALUE, [{ id: "src-one" }])).toBe(
-      "src-one",
-    );
+    expect(effectiveInstallSourceId(ALL_PLUGIN_SOURCES_VALUE, [{ id: "src-one" }])).toBe("src-one");
     expect(
       effectiveInstallSourceId(ALL_PLUGIN_SOURCES_VALUE, [{ id: "src-one" }, { id: "src-two" }]),
     ).toBeNull();

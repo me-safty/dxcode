@@ -51,13 +51,19 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { makeAgentsCapability } from "./capabilities/AgentsCapability.ts";
 import { makeDatabaseCapability } from "./capabilities/DatabaseCapability.ts";
 import { makeEnvironmentsReadCapability } from "./capabilities/EnvironmentsReadCapability.ts";
+import { makeFilesystemCapability } from "./capabilities/FilesystemCapability.ts";
 import { makeHttpCapability } from "./capabilities/HttpCapability.ts";
+import {
+  makeHttpClientCapability,
+  PluginHttpClientTransportService,
+} from "./capabilities/HttpClientCapability.ts";
 import { makeProjectionsReadCapability } from "./capabilities/ProjectionsReadCapability.ts";
 import { makeSecretsCapability } from "./capabilities/SecretsCapability.ts";
 import { makeSourceControlCapability } from "./capabilities/SourceControlCapability.ts";
 import { makeTerminalsCapability } from "./capabilities/TerminalsCapability.ts";
 import { makeTextGenerationCapability } from "./capabilities/TextGenerationCapability.ts";
 import { makeVcsCapability } from "./capabilities/VcsCapability.ts";
+import { OutboundUrlLookup } from "./OutboundUrlValidator.ts";
 import { PluginLockfileStore } from "./PluginLockfileStore.ts";
 import { PluginHttpRegistry } from "./PluginHttpRegistry.ts";
 import { PluginMigrator } from "./PluginMigrator.ts";
@@ -65,6 +71,7 @@ import { PluginModuleLoader } from "./PluginModuleLoader.ts";
 import { makePluginLogger } from "./PluginLogger.ts";
 import { pluginDataDir, pluginManifestPath, pluginVersionDir } from "./PluginPaths.ts";
 import { PluginRuntimeRegistry } from "./PluginRuntimeRegistry.ts";
+import { makePluginWorkspaceGrants, type PluginWorkspaceGrants } from "./PluginWorkspaceGrants.ts";
 
 const APP_VERSION = packageJson.version;
 const PRESERVE_DATA_MARKER = ".preserve-data-on-remove";
@@ -158,6 +165,7 @@ const makeHostApi = (input: {
   readonly capabilities: ReadonlyArray<PluginManifest["capabilities"][number]>;
   readonly dataDir: string;
   readonly logger: PluginLogger;
+  readonly grants: PluginWorkspaceGrants;
   readonly deps: {
     readonly sql: SqlClient.SqlClient;
     readonly secretStore: ServerSecretStore.ServerSecretStore["Service"];
@@ -177,6 +185,8 @@ const makeHostApi = (input: {
     readonly sourceControlRegistry: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"];
     readonly github: GitHubCli.GitHubCli["Service"];
     readonly terminals: TerminalManager.TerminalManager["Service"];
+    readonly outboundLookup: OutboundUrlLookup["Service"];
+    readonly httpClientTransport: PluginHttpClientTransportService["Service"];
   };
 }): { readonly api: PluginHostApi; readonly teardown: ReadonlyArray<Effect.Effect<void>> } => {
   const capabilities = new Set(input.capabilities);
@@ -216,6 +226,7 @@ const makeHostApi = (input: {
       makeVcsCapability({
         git: input.deps.git,
         checkpoints: input.deps.checkpointStore,
+        grants: input.grants,
       }),
     ),
     terminals: available("terminals", terminalsBundle.capability),
@@ -247,6 +258,20 @@ const makeHostApi = (input: {
       }),
     ),
     http: available("http", makeHttpCapability(input.pluginId)),
+    filesystem: available(
+      "filesystem",
+      makeFilesystemCapability({
+        snapshots: input.deps.snapshots,
+        grants: input.grants,
+      }),
+    ),
+    httpClient: available(
+      "httpClient",
+      makeHttpClientCapability({
+        lookup: input.deps.outboundLookup,
+        transport: input.deps.httpClientTransport,
+      }),
+    ),
     sourceControl: available(
       "sourceControl",
       makeSourceControlCapability({
@@ -345,6 +370,8 @@ export const make = Effect.fn("PluginHost.make")(function* () {
   const sourceControlRegistry = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const github = yield* GitHubCli.GitHubCli;
   const terminals = yield* TerminalManager.TerminalManager;
+  const outboundLookup = yield* OutboundUrlLookup;
+  const httpClientTransport = yield* PluginHttpClientTransportService;
   const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
 
   const publishPluginStateChanged = (pluginId: PluginId, state: PluginState) =>
@@ -424,11 +451,13 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       const readiness = yield* Deferred.make<void>();
       const logger = makePluginLogger(pluginId);
       const dataDir = pluginDataDir(config.pluginsDir, pluginId, path.join);
+      const grants = yield* makePluginWorkspaceGrants;
       const { api: hostApi, teardown: hostApiTeardown } = makeHostApi({
         pluginId,
         capabilities: manifest.capabilities,
         dataDir,
         logger,
+        grants,
         deps: {
           sql,
           secretStore,
@@ -448,6 +477,8 @@ export const make = Effect.fn("PluginHost.make")(function* () {
           sourceControlRegistry,
           github,
           terminals,
+          outboundLookup,
+          httpClientTransport,
         },
       });
 

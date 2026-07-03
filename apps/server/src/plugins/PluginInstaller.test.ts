@@ -496,6 +496,32 @@ it.effect("PluginInstaller begin-confirm updates the lockfile and hot-activates"
   );
 });
 
+it.effect("PluginInstaller describes filesystem and httpClient consent", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const installer = yield* PluginInstaller;
+      yield* seedSource;
+
+      const staged = yield* installer.beginInstall({ sourceId, pluginId, version: "1.0.0" });
+
+      assert.equal(
+        staged.capabilityDescriptions.filesystem,
+        "Read and write files in your project workspace and in worktrees this plugin creates",
+      );
+      assert.equal(
+        staged.capabilityDescriptions.httpClient,
+        "Make requests to public external HTTPS services",
+      );
+    }).pipe(
+      Effect.provide(
+        installerLayer({
+          tarball: tarballForManifest(manifest({ capabilities: ["filesystem", "httpClient"] })),
+        }),
+      ),
+    ),
+  ),
+);
+
 it.effect("PluginInstaller abort and expired tokens clean staging", () =>
   Effect.scoped(
     Effect.gen(function* () {

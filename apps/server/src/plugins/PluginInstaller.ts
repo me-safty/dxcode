@@ -80,6 +80,8 @@ export const PLUGIN_CAPABILITY_DESCRIPTIONS = {
   "environments.read": "Read environment metadata",
   secrets: "Store plugin secrets",
   http: "Serve plugin HTTP routes",
+  filesystem: "Read and write files in your project workspace and in worktrees this plugin creates",
+  httpClient: "Make requests to public external HTTPS services",
   sourceControl: "Use source control integrations",
   textGeneration: "Request text generation",
 } satisfies Record<PluginCapability, string>;

@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 
 import type { CheckpointStore } from "../../checkpointing/CheckpointStore.ts";
 import type * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+import type { PluginWorkspaceGrants } from "../PluginWorkspaceGrants.ts";
 
 export class PluginVcsPathError extends Schema.TaggedErrorClass<PluginVcsPathError>()(
   "PluginVcsPathError",
@@ -96,6 +97,7 @@ function gitCommandError(input: {
 export function makeVcsCapability(input: {
   readonly git: GitVcsDriver.GitVcsDriver["Service"];
   readonly checkpoints: CheckpointStore["Service"];
+  readonly grants?: PluginWorkspaceGrants | undefined;
 }): VcsCapability {
   const executeDiff = (request: {
     readonly worktreePath: string;
@@ -136,13 +138,17 @@ export function makeVcsCapability(input: {
       Effect.gen(function* () {
         const cwd = yield* requireAbsolute("repoRoot", request.repoRoot);
         const path = yield* requireAbsolute("path", request.path);
-        return yield* input.git.createWorktree({
+        const result = yield* input.git.createWorktree({
           cwd,
           refName: request.ref,
           newRefName: request.newBranch,
           baseRefName: request.baseRef,
           path,
         });
+        if (input.grants) {
+          yield* input.grants.grant(result.worktree.path ?? path);
+        }
+        return result;
       }),
 
     removeWorktree: (request) =>
@@ -154,6 +160,9 @@ export function makeVcsCapability(input: {
           path,
           force: request.force,
         });
+        if (input.grants) {
+          yield* input.grants.revoke(path);
+        }
       }),
 
     createBranch: (request) =>

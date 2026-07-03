@@ -33,6 +33,7 @@ import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as PluginHost from "./plugins/PluginHost.ts";
+import { PluginHttpClientTransportLive } from "./plugins/capabilities/HttpClientCapability.ts";
 import * as PluginHttpRegistry from "./plugins/PluginHttpRegistry.ts";
 import { pluginHttpRouteLayer } from "./plugins/PluginHttpRoutes.ts";
 import { pluginWebRouteLayer } from "./plugins/PluginWebRoutes.ts";
@@ -45,6 +46,7 @@ import * as PluginMigrator from "./plugins/PluginMigrator.ts";
 import * as PluginModuleLoader from "./plugins/PluginModuleLoader.ts";
 import * as PluginRpcDispatcher from "./plugins/PluginRpcDispatcher.ts";
 import * as PluginRuntimeRegistry from "./plugins/PluginRuntimeRegistry.ts";
+import { OutboundUrlLookupLive } from "./plugins/OutboundUrlValidator.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
@@ -322,6 +324,8 @@ const PluginHostCapabilityDepsLayerLive = Layer.mergeAll(
   TerminalLayerLive,
   ServerSecretStore.layer,
   ServerEnvironment.layer,
+  OutboundUrlLookupLive,
+  PluginHttpClientTransportLive,
 );
 const PluginHostLayerLive = PluginHost.layer.pipe(
   Layer.provideMerge(PluginLockfileStoreLayerLive),

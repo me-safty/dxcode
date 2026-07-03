@@ -40,11 +40,11 @@ describe("PluginManifest", () => {
       homepage: "https://example.test/plugin",
       license: "MIT",
       minAppVersion: "1.0.0",
-      capabilities: ["agents", "database"],
+      capabilities: ["agents", "database", "filesystem", "httpClient"],
       entries: { server: "dist/server.js", web: "dist/web.js" },
     });
     expect(decoded.name).toBe("Test Plugin");
-    expect(decoded.capabilities).toEqual(["agents", "database"]);
+    expect(decoded.capabilities).toEqual(["agents", "database", "filesystem", "httpClient"]);
   });
 
   it.each(["x", "1test-plugin", "test_plugin", "Test-Plugin", "a".repeat(42)])(
@@ -167,9 +167,14 @@ describe("PluginInstallStaged", () => {
       },
       capabilityDescriptions: {
         agents: "Run AI agents",
+        filesystem:
+          "Read and write files in your project workspace and in worktrees this plugin creates",
+        httpClient: "Make requests to public external HTTPS services",
       },
     });
 
     expect(decoded.capabilityDescriptions.agents).toBe("Run AI agents");
+    expect(decoded.capabilityDescriptions.filesystem).toContain("Read and write files");
+    expect(decoded.capabilityDescriptions.httpClient).toContain("HTTPS services");
   });
 });

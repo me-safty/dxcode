@@ -58,6 +58,11 @@ describe("PluginUiHost", () => {
                 title: "General",
                 component: () => null,
               });
+              ctx.registerCommand({
+                id: "refresh",
+                title: "Refresh",
+                run: () => undefined,
+              });
               void ctx.rpc.call("ping");
             },
           }),
@@ -77,6 +82,9 @@ describe("PluginUiHost", () => {
     expect(snapshot.routes).toHaveLength(1);
     expect(snapshot.sidebarSections).toHaveLength(1);
     expect(snapshot.settingsPages).toHaveLength(1);
+    expect(snapshot.commands).toHaveLength(1);
+    expect(snapshot.commands[0]?.pluginId).toBe(fixturePluginId);
+    expect(snapshot.commands[0]?.context.pluginId).toBe(fixturePluginId);
     expect(snapshot.failures).toEqual({});
   });
 
@@ -106,6 +114,7 @@ describe("PluginUiHost", () => {
       },
     });
     expect(failedSnapshot.routes).toHaveLength(0);
+    expect(failedSnapshot.commands).toHaveLength(0);
     expect(failedSnapshot.failures[failingPluginId]).toContain("boom");
 
     const emptySnapshot = await syncPluginUiHostRegistrations({

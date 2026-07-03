@@ -76,7 +76,7 @@ export function effectiveInstallSourceId(
   if (selectedSourceId !== ALL_PLUGIN_SOURCES_VALUE) {
     return selectedSourceId;
   }
-  return sources.length === 1 ? sources[0]?.id ?? null : null;
+  return sources.length === 1 ? (sources[0]?.id ?? null) : null;
 }
 
 export function humanErrorMessage(error: unknown, fallback = "The operation failed."): string {

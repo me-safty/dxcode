@@ -32,7 +32,9 @@ import type {
   VcsStatusResult,
   VcsSwitchRefResult,
 } from "@t3tools/contracts";
-import type * as Effect from "effect/Effect";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as Random from "effect/Random";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type * as Stream from "effect/Stream";
 
@@ -405,6 +407,154 @@ export interface HttpCapability {
    * registered when the plugin declares the `http` capability.
    */
   readonly basePath: string;
+}
+
+export interface FilesystemPathInput {
+  readonly root: string;
+  readonly relativePath: string;
+}
+
+export interface FilesystemRenameInput {
+  readonly root: string;
+  readonly fromRelativePath: string;
+  readonly toRelativePath: string;
+}
+
+export interface FileStat {
+  readonly type: "file" | "directory" | "other";
+  readonly size: number;
+  readonly mtime: number;
+}
+
+export interface DirEntry {
+  readonly name: string;
+  readonly relativePath: string;
+  readonly type: "file" | "directory" | "other";
+}
+
+export interface FilesystemCapability {
+  /**
+   * List currently granted absolute roots. This includes active project
+   * workspaces plus worktrees this plugin created through the VCS capability.
+   */
+  readonly listRoots: () => Effect.Effect<ReadonlyArray<string>, Error>;
+
+  /**
+   * Read a file as bytes. The host enforces a 16 MiB hard cap.
+   */
+  readonly readFile: (input: FilesystemPathInput) => Effect.Effect<Uint8Array, Error>;
+
+  /**
+   * Read a UTF-8 file as a string. The host enforces a 16 MiB hard cap.
+   */
+  readonly readFileString: (input: FilesystemPathInput) => Effect.Effect<string, Error>;
+
+  /**
+   * Read at most maxBytes from a UTF-8 file as a string.
+   */
+  readonly readFileStringCapped: (
+    input: FilesystemPathInput & { readonly maxBytes: number },
+  ) => Effect.Effect<string, Error>;
+
+  /**
+   * Write bytes to a file, creating missing parent directories after each
+   * parent has been validated inside the granted root.
+   */
+  readonly writeFile: (
+    input: FilesystemPathInput & { readonly contents: Uint8Array },
+  ) => Effect.Effect<void, Error>;
+
+  /**
+   * Write a UTF-8 string to a file.
+   */
+  readonly writeFileString: (
+    input: FilesystemPathInput & { readonly contents: string },
+  ) => Effect.Effect<void, Error>;
+
+  /**
+   * Create a file and fail if the final path already exists.
+   */
+  readonly createFileExclusive: (
+    input: FilesystemPathInput & { readonly contents: string | Uint8Array },
+  ) => Effect.Effect<void, Error>;
+
+  /**
+   * Test whether a path exists within a granted root.
+   */
+  readonly exists: (input: FilesystemPathInput) => Effect.Effect<boolean, Error>;
+
+  /**
+   * Read file metadata.
+   */
+  readonly stat: (input: FilesystemPathInput) => Effect.Effect<FileStat, Error>;
+
+  /**
+   * List direct directory children.
+   */
+  readonly listDir: (input: FilesystemPathInput) => Effect.Effect<ReadonlyArray<DirEntry>, Error>;
+
+  /**
+   * Recursively list directory children. The host caps results at 500 entries.
+   */
+  readonly listDirRecursive: (
+    input: FilesystemPathInput,
+  ) => Effect.Effect<ReadonlyArray<DirEntry>, Error>;
+
+  /**
+   * Create a directory path segment by segment after validating each parent.
+   */
+  readonly makeDirectory: (input: FilesystemPathInput) => Effect.Effect<void, Error>;
+
+  /**
+   * Remove a file or directory. Missing paths are treated as already removed.
+   */
+  readonly remove: (input: FilesystemPathInput) => Effect.Effect<void, Error>;
+
+  /**
+   * Rename within a granted root. Cross-root renames and overwrites are rejected.
+   */
+  readonly rename: (input: FilesystemRenameInput) => Effect.Effect<void, Error>;
+}
+
+export interface HttpClientRequestInput {
+  readonly method: string;
+  readonly url: string;
+  readonly headers?: Readonly<Record<string, string>> | undefined;
+  readonly body?: string | Uint8Array | undefined;
+  readonly maxResponseBytes?: number | undefined;
+  readonly timeoutMs?: number | undefined;
+}
+
+export interface HttpClientResponseResult {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: Uint8Array;
+}
+
+export interface HttpClientCapability {
+  /**
+   * Make an outbound request. The host allows public HTTPS targets by default,
+   * does not follow redirects, caps responses to 8 MiB by default / 32 MiB
+   * hard, and caps timeouts to 30s by default / 120s hard.
+   */
+  readonly request: (
+    input: HttpClientRequestInput,
+  ) => Effect.Effect<HttpClientResponseResult, Error>;
+
+  /**
+   * Request JSON and parse the response body.
+   */
+  readonly requestJson: <A = unknown>(
+    input: Omit<HttpClientRequestInput, "body"> & { readonly body?: unknown },
+  ) => Effect.Effect<A, Error>;
+
+  /**
+   * Convenience JSON GET wrapper.
+   */
+  readonly getJson: <A = unknown>(
+    url: string,
+    input?: Omit<HttpClientRequestInput, "method" | "url" | "body">,
+  ) => Effect.Effect<A, Error>;
 }
 
 export interface SourceControlCapability {
@@ -822,6 +972,8 @@ export interface PluginHostApi {
   readonly environmentsRead: Effect.Effect<EnvironmentsReadCapability, PluginCapabilityUnavailable>;
   readonly secrets: Effect.Effect<SecretsCapability, PluginCapabilityUnavailable>;
   readonly http: Effect.Effect<HttpCapability, PluginCapabilityUnavailable>;
+  readonly filesystem: Effect.Effect<FilesystemCapability, PluginCapabilityUnavailable>;
+  readonly httpClient: Effect.Effect<HttpClientCapability, PluginCapabilityUnavailable>;
   readonly sourceControl: Effect.Effect<SourceControlCapability, PluginCapabilityUnavailable>;
   readonly textGeneration: Effect.Effect<TextGenerationCapability, PluginCapabilityUnavailable>;
 }
@@ -913,6 +1065,47 @@ export interface PluginDefinition {
     | ((hostApi: PluginHostApi) => Effect.Effect<PluginRegistration, Error>)
     | ((hostApi: PluginHostApi) => Promise<PluginRegistration>)
     | ((hostApi: PluginHostApi) => PluginRegistration);
+}
+
+export function writeFileAtomic(
+  filesystem: Pick<FilesystemCapability, "writeFile" | "rename" | "remove">,
+  input: FilesystemPathInput & { readonly contents: string | Uint8Array },
+): Effect.Effect<void, Error> {
+  return Effect.gen(function* () {
+    const segments = input.relativePath.split("/");
+    const fileName = segments.pop() ?? "file";
+    const now = yield* Clock.currentTimeMillis;
+    const random = Math.abs(yield* Random.nextInt);
+    const tempName = `.${fileName}.${now.toString(36)}-${random.toString(36)}.tmp`;
+    const tempRelativePath = [...segments, tempName]
+      .filter((segment) => segment.length > 0)
+      .join("/");
+    const contents =
+      typeof input.contents === "string"
+        ? new TextEncoder().encode(input.contents)
+        : input.contents;
+
+    return yield* filesystem
+      .writeFile({
+        root: input.root,
+        relativePath: tempRelativePath,
+        contents,
+      })
+      .pipe(
+        Effect.andThen(
+          filesystem.rename({
+            root: input.root,
+            fromRelativePath: tempRelativePath,
+            toRelativePath: input.relativePath,
+          }),
+        ),
+        Effect.catch((error) =>
+          filesystem
+            .remove({ root: input.root, relativePath: tempRelativePath })
+            .pipe(Effect.ignore, Effect.andThen(Effect.fail(error))),
+        ),
+      );
+  });
 }
 
 export function definePlugin<const Definition extends PluginDefinition>(

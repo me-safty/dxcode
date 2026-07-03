@@ -16,6 +16,7 @@ import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as ServerConfig from "../../config.ts";
+import { makePluginWorkspaceGrants } from "../PluginWorkspaceGrants.ts";
 import { makeVcsCapability, PluginVcsPathError } from "./VcsCapability.ts";
 
 const ServerConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
@@ -95,7 +96,8 @@ it.layer(TestLayer)("VcsCapability", (it) => {
           yield* initRepoWithCommit(repo);
           const gitDriver = yield* GitVcsDriver.GitVcsDriver;
           const checkpointStore = yield* CheckpointStore.CheckpointStore;
-          const vcs = makeVcsCapability({ git: gitDriver, checkpoints: checkpointStore });
+          const grants = yield* makePluginWorkspaceGrants;
+          const vcs = makeVcsCapability({ git: gitDriver, checkpoints: checkpointStore, grants });
 
           const rejected = yield* Effect.exit(vcs.status({ worktreePath: "relative/path" }));
           expect(rejected._tag).toBe("Failure");
@@ -110,6 +112,7 @@ it.layer(TestLayer)("VcsCapability", (it) => {
             newBranch: "feature/worktree",
           });
           expect(created.worktree.path).toBe(worktreePath);
+          expect([...(yield* grants.snapshot())]).toContain(worktreePath);
 
           const listed = yield* vcs.listWorktrees({ repoRoot: repo });
           const fileSystem = yield* FileSystem.FileSystem;
@@ -120,6 +123,7 @@ it.layer(TestLayer)("VcsCapability", (it) => {
           expect(canonicalListedPaths.includes(canonicalWorktreePath)).toBe(true);
 
           yield* vcs.removeWorktree({ repoRoot: repo, path: worktreePath, force: true });
+          expect([...(yield* grants.snapshot())]).not.toContain(worktreePath);
           const afterRemove = yield* vcs.listWorktrees({ repoRoot: repo });
           const canonicalAfterRemovePaths = yield* Effect.forEach(
             afterRemove.worktrees,

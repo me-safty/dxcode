@@ -4,7 +4,6 @@ import type {
   PluginComponent,
   PluginRouteComponentProps,
   PluginSettingsComponentProps,
-  PluginSidebarSectionRegistration,
   PluginSidebarSectionRenderProps,
   PluginUiContext,
   PluginWebDefinition,
@@ -39,6 +38,7 @@ export interface RegisteredPluginSettingsPage {
 
 export interface RegisteredPluginCommand extends PluginCommandRegistration {
   readonly pluginId: PluginId;
+  readonly context: PluginUiContext;
 }
 
 export interface PluginUiRegistrySnapshot {
@@ -202,7 +202,7 @@ export async function syncPluginUiHostRegistrations({
           settingsPages.push({ ...registration, pluginId: plugin.id });
         },
         registerCommand: (registration) => {
-          commands.push({ ...registration, pluginId: plugin.id });
+          commands.push({ ...registration, pluginId: plugin.id, context: ctx });
         },
       };
       await maybeAwait(definition.register(ctx));

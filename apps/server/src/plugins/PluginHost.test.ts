@@ -36,6 +36,8 @@ import * as SourceControlProviderRegistry from "../sourceControl/SourceControlPr
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import { PluginHttpClientTransportService } from "./capabilities/HttpClientCapability.ts";
+import { OutboundUrlLookup } from "./OutboundUrlValidator.ts";
 import * as PluginHostModule from "./PluginHost.ts";
 import * as PluginHttpRegistry from "./PluginHttpRegistry.ts";
 import * as PluginLockfileStoreLayer from "./PluginLockfileStore.ts";
@@ -202,17 +204,25 @@ const testLayerBase = PluginHostModule.layer.pipe(
     }),
   ),
   Layer.provideMerge(
-    Layer.mock(TerminalManager.TerminalManager)({
-      open: unexpectedCapabilityUse,
-      attachStream: unexpectedCapabilityUse,
-      write: unexpectedCapabilityUse,
-      resize: unexpectedCapabilityUse,
-      clear: unexpectedCapabilityUse,
-      restart: unexpectedCapabilityUse,
-      close: unexpectedCapabilityUse,
-      subscribe: unexpectedCapabilityUse,
-      subscribeMetadata: unexpectedCapabilityUse,
-    }),
+    Layer.mergeAll(
+      Layer.mock(TerminalManager.TerminalManager)({
+        open: unexpectedCapabilityUse,
+        attachStream: unexpectedCapabilityUse,
+        write: unexpectedCapabilityUse,
+        resize: unexpectedCapabilityUse,
+        clear: unexpectedCapabilityUse,
+        restart: unexpectedCapabilityUse,
+        close: unexpectedCapabilityUse,
+        subscribe: unexpectedCapabilityUse,
+        subscribeMetadata: unexpectedCapabilityUse,
+      }),
+      Layer.succeed(OutboundUrlLookup, () =>
+        Effect.die(new Error("unexpected outbound lookup in host test")),
+      ),
+      Layer.succeed(PluginHttpClientTransportService, () =>
+        Effect.die(new Error("unexpected http client transport in host test")),
+      ),
+    ),
   ),
 );
 
@@ -232,6 +242,16 @@ const decodeCapabilityMarker = Schema.decodeEffect(
     Schema.Struct({
       httpBasePath: Schema.String,
       terminalsUnavailable: Schema.Boolean,
+    }),
+  ),
+);
+const decodeNewCapabilityMarker = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      filesystemAvailable: Schema.Boolean,
+      filesystemUnavailable: Schema.Boolean,
+      httpClientAvailable: Schema.Boolean,
+      httpClientUnavailable: Schema.Boolean,
     }),
   ),
 );
@@ -347,6 +367,35 @@ export default {
           },
         ],
       };
+    });
+  },
+};
+`;
+
+const newCapabilityGateEntrySource = () => `
+import { createRequire } from "node:module";
+const require = createRequire(${JSON.stringify(NodeURL.pathToFileURL(import.meta.url).href)});
+const Effect = require("effect/Effect");
+const NodeFs = require("node:fs");
+
+const available = (effect) => Effect.exit(effect).pipe(Effect.map((exit) => exit._tag === "Success"));
+const unavailable = (effect) =>
+  Effect.exit(effect).pipe(
+    Effect.map((exit) => exit._tag === "Failure" && String(exit.cause).includes("PluginCapabilityUnavailable")),
+  );
+
+export default {
+  register(hostApi) {
+    return Effect.gen(function* () {
+      const marker = {
+        filesystemAvailable: yield* available(hostApi.filesystem),
+        filesystemUnavailable: yield* unavailable(hostApi.filesystem),
+        httpClientAvailable: yield* available(hostApi.httpClient),
+        httpClientUnavailable: yield* unavailable(hostApi.httpClient),
+      };
+      NodeFs.mkdirSync(hostApi.config.dataDir, { recursive: true });
+      NodeFs.writeFileSync(hostApi.config.dataDir + "/new-capabilities.json", JSON.stringify(marker));
+      return {};
     });
   },
 };
@@ -533,6 +582,65 @@ layer("PluginHost", (it) => {
       assert.isTrue(Option.isSome(match));
       if (Option.isSome(match)) {
         assert.deepEqual(match.value.params, { name: "chris" });
+      }
+    }),
+  );
+
+  it.effect("gates filesystem and httpClient independently by manifest declaration", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const host = yield* PluginHostModule.PluginHost;
+
+      const cases = [
+        {
+          pluginId: PluginId.make("filesystem-only"),
+          capabilities: ["filesystem"] as const,
+          expected: {
+            filesystemAvailable: true,
+            filesystemUnavailable: false,
+            httpClientAvailable: false,
+            httpClientUnavailable: true,
+          },
+        },
+        {
+          pluginId: PluginId.make("http-client-only"),
+          capabilities: ["httpClient"] as const,
+          expected: {
+            filesystemAvailable: false,
+            filesystemUnavailable: true,
+            httpClientAvailable: true,
+            httpClientUnavailable: false,
+          },
+        },
+        {
+          pluginId: PluginId.make("neither-new-cap"),
+          capabilities: [] as const,
+          expected: {
+            filesystemAvailable: false,
+            filesystemUnavailable: true,
+            httpClientAvailable: false,
+            httpClientUnavailable: true,
+          },
+        },
+      ];
+
+      for (const testCase of cases) {
+        yield* installPlugin({
+          pluginId: testCase.pluginId,
+          capabilities: testCase.capabilities,
+          entrySource: newCapabilityGateEntrySource(),
+        });
+      }
+
+      yield* host.start;
+      yield* Effect.yieldNow;
+
+      for (const testCase of cases) {
+        const dataDir = pluginDataDir(config.pluginsDir, testCase.pluginId, path.join);
+        const marker = yield* fs.readFileString(path.join(dataDir, "new-capabilities.json"));
+        assert.deepEqual(yield* decodeNewCapabilityMarker(marker), testCase.expected);
       }
     }),
   );

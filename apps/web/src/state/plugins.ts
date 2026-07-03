@@ -184,8 +184,7 @@ export function pluginRpc(pluginId: PluginId, dependencies: PluginRpcDependencie
 
 export const listPluginSourcesCommand = createRuntimeCommand(connectionAtomRuntime, {
   label: "web-plugins:sources:list",
-  execute: (_input: void, registry) =>
-    runPrimaryPluginManagement(registry, listPluginSources()),
+  execute: (_input: void, registry) => runPrimaryPluginManagement(registry, listPluginSources()),
 });
 
 export const addPluginSourceCommand = createRuntimeCommand(connectionAtomRuntime, {
@@ -250,8 +249,7 @@ export const confirmPluginUpgradeCommand = createRuntimeCommand(connectionAtomRu
 
 export const checkPluginUpdatesCommand = createRuntimeCommand(connectionAtomRuntime, {
   label: "web-plugins:updates:check",
-  execute: (_input: void, registry) =>
-    runPrimaryPluginManagement(registry, checkPluginUpdates()),
+  execute: (_input: void, registry) => runPrimaryPluginManagement(registry, checkPluginUpdates()),
 });
 
 export { WS_METHODS };

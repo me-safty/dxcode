@@ -132,12 +132,8 @@ interface PluginSettingsCommands {
   readonly abortInstall: (
     input: PluginInstallConfirmInput,
   ) => Promise<AtomCommandResult<{}, unknown>>;
-  readonly setEnabled: (
-    input: PluginSetEnabledInput,
-  ) => Promise<AtomCommandResult<{}, unknown>>;
-  readonly uninstall: (
-    input: PluginUninstallInput,
-  ) => Promise<AtomCommandResult<{}, unknown>>;
+  readonly setEnabled: (input: PluginSetEnabledInput) => Promise<AtomCommandResult<{}, unknown>>;
+  readonly uninstall: (input: PluginUninstallInput) => Promise<AtomCommandResult<{}, unknown>>;
   readonly beginUpgrade: (
     input: PluginUpgradeBeginInput,
   ) => Promise<AtomCommandResult<PluginInstallStaged, unknown>>;
@@ -537,7 +533,12 @@ function CatalogEntryRow({
         <div className="space-y-1.5">
           {entry.author ? (
             <p>
-              By {entry.author.url ? <a href={entry.author.url}>{entry.author.name}</a> : entry.author.name}
+              By{" "}
+              {entry.author.url ? (
+                <a href={entry.author.url}>{entry.author.name}</a>
+              ) : (
+                entry.author.name
+              )}
             </p>
           ) : null}
           <CapabilityBadges capabilities={entry.capabilities} />
@@ -654,7 +655,9 @@ function ConsentDialog({
     <Dialog open={stagedAction !== null} onOpenChange={(open) => !open && onCancel()}>
       <DialogPopup>
         <DialogHeader>
-          <DialogTitle>{actionLabel} {stagedAction?.entryName ?? "plugin"}</DialogTitle>
+          <DialogTitle>
+            {actionLabel} {stagedAction?.entryName ?? "plugin"}
+          </DialogTitle>
           <DialogDescription>
             Review the capabilities this plugin requests before continuing.
           </DialogDescription>
@@ -662,7 +665,9 @@ function ConsentDialog({
         <DialogPanel className="space-y-3">
           <SectionError message={error} />
           {capabilityDescriptions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">This plugin does not request host capabilities.</p>
+            <p className="text-sm text-muted-foreground">
+              This plugin does not request host capabilities.
+            </p>
           ) : (
             <div className="space-y-2">
               {capabilityDescriptions.map(([capability, description]) => (
@@ -675,9 +680,7 @@ function ConsentDialog({
           )}
         </DialogPanel>
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" disabled={busy} />}>
-            Cancel
-          </DialogClose>
+          <DialogClose render={<Button variant="outline" disabled={busy} />}>Cancel</DialogClose>
           <Button disabled={busy} onClick={onConfirm}>
             {busy ? <Spinner /> : <ShieldCheckIcon />}
             {actionLabel}
