@@ -4,6 +4,7 @@ import { Alert } from "react-native";
 
 import { removeThreadOutboxMessage } from "../../state/thread-outbox";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
+import { setEditingQueuedMessageId } from "../../state/use-thread-outbox";
 
 export function usePendingTaskListActions(): {
   readonly openPendingTask: (pendingTask: PendingNewTask) => void;
@@ -35,6 +36,7 @@ export function usePendingTaskListActions(): {
           text: "Delete",
           style: "destructive",
           onPress: () => {
+            setEditingQueuedMessageId(null);
             void removeThreadOutboxMessage(pendingTask.message).catch((error) => {
               Alert.alert(
                 "Could not delete pending task",

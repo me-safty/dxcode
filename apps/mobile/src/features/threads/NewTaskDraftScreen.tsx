@@ -80,13 +80,25 @@ export function NewTaskDraftScreen(props: {
   const promptInputRef = useRef<ComposerEditorHandle>(null);
   const loadedBranchesProjectKeyRef = useRef<string | null>(null);
   const appliedInitialProjectKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    return () => {
+      appliedInitialProjectKeyRef.current = null;
+    };
+  }, []);
 
-  const { beginEditingPendingTask, editingPendingTask } = flow;
+  const { beginEditingPendingTask, cancelEditingPendingTask, editingPendingTask } = flow;
   useEffect(() => {
     if (props.pendingTaskId && editingPendingTask?.messageId !== props.pendingTaskId) {
       beginEditingPendingTask(props.pendingTaskId);
     }
   }, [beginEditingPendingTask, editingPendingTask?.messageId, props.pendingTaskId]);
+
+  useEffect(() => {
+    if (!props.pendingTaskId) return;
+    return () => {
+      cancelEditingPendingTask();
+    };
+  }, [props.pendingTaskId, cancelEditingPendingTask]);
 
   const borderColor = useThemeColor("--color-border");
   const bodyText = useScaledTextRole("body");

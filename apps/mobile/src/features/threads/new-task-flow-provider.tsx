@@ -135,6 +135,7 @@ type NewTaskFlowContextValue = {
   readonly setStartFromOrigin: (value: boolean) => void;
   readonly beginEditingPendingTask: (messageId: string) => void;
   readonly finishEditingPendingTask: () => void;
+  readonly cancelEditingPendingTask: () => void;
   readonly buildPendingTaskMessage: (metadata: TurnCommandMetadata) => QueuedThreadMessage | null;
   readonly setPrompt: (value: string) => void;
   readonly replaceAttachments: (attachments: ReadonlyArray<DraftComposerImageAttachment>) => void;
@@ -603,8 +604,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     setEditingQueuedMessageId(null);
   }, []);
 
-  // Leaving the flow mid-edit (sheet dismissed) saves the current edits back
-  // into the queued task so nothing typed here is lost.
+  // Leaving the flow mid-edit (sheet dismissed or draft screen popped) saves
+  // the current edits back into the queued task so nothing typed here is lost.
   const editingFlushRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     editingFlushRef.current = () => {
@@ -613,21 +614,38 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         return;
       }
       editingPendingTaskRef.current = null;
-      const message = buildPendingTaskMessage({
-        threadId: editing.threadId,
-        commandId: editing.commandId,
-        messageId: editing.messageId,
-        createdAt: editing.createdAt,
-      });
-      if (message) {
-        void enqueueThreadOutboxMessage(message).catch((error) => {
-          console.warn("[new-task] failed to save edited pending task", error);
-        });
-      }
+      setEditingPendingTask(null);
+
+      // If the task was deleted externally, skip re-enqueuing.
+      const stillQueued = findQueuedPendingTask(editing.messageId);
+
+      const message = stillQueued
+        ? buildPendingTaskMessage({
+            threadId: editing.threadId,
+            commandId: editing.commandId,
+            messageId: editing.messageId,
+            createdAt: editing.createdAt,
+          })
+        : null;
+
       clearComposerDraft(pendingTaskDraftKey(editing.messageId));
-      setEditingQueuedMessageId(null);
+
+      if (message) {
+        void enqueueThreadOutboxMessage(message)
+          .catch((error) => {
+            console.warn("[new-task] failed to save edited pending task", error);
+          })
+          .finally(() => {
+            setEditingQueuedMessageId(null);
+          });
+      } else {
+        setEditingQueuedMessageId(null);
+      }
     };
   }, [buildPendingTaskMessage]);
+  const cancelEditingPendingTask = useCallback(() => {
+    editingFlushRef.current?.();
+  }, []);
   useEffect(
     () => () => {
       editingFlushRef.current?.();
@@ -673,6 +691,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       setStartFromOrigin,
       beginEditingPendingTask,
       finishEditingPendingTask,
+      cancelEditingPendingTask,
       buildPendingTaskMessage,
       setPrompt,
       replaceAttachments,
@@ -694,6 +713,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       branchQuery,
       branchesLoading,
       buildPendingTaskMessage,
+      cancelEditingPendingTask,
       editingPendingTask,
       environments,
       expandedProvider,
