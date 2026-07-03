@@ -19,7 +19,6 @@ import {
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
-  TerminalOpenInput,
 } from "@t3tools/contracts";
 import {
   connectionStatusText,
@@ -100,7 +99,6 @@ import {
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
-  DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
   type SessionPhase,
@@ -146,6 +144,11 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
+import {
+  type ProjectActionTerminalReservations,
+  releaseProjectActionTerminalReservationsSeenRunning,
+  runProjectScriptInTerminal,
+} from "~/projectScriptTerminals";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useEnvironmentSettings } from "../hooks/useSettings";
@@ -188,6 +191,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
+import { projectActionTerminalEnvironment } from "../state/projectActionTerminal";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
@@ -329,9 +333,6 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
-const SCRIPT_TERMINAL_COLS = 120;
-const SCRIPT_TERMINAL_ROWS = 30;
-
 type ChatViewProps =
   | {
       environmentId: EnvironmentId;
@@ -998,6 +999,10 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
+  const requireProjectActionTerminalReady = useAtomCommand(
+    projectActionTerminalEnvironment.requireInputReady,
+    { label: "project action terminal require input ready", reportFailure: false },
+  );
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
@@ -1152,6 +1157,9 @@ function ChatViewContent(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const projectActionTerminalLaunchReservationsByThreadRef = useRef(
+    new Map<string, ProjectActionTerminalReservations>(),
+  );
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
   useLayoutEffect(() => {
@@ -1288,6 +1296,22 @@ function ChatViewContent(props: ChatViewProps) {
     () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
     [activeThread],
   );
+  const projectActionTerminalReservationsForThread = useCallback((threadRef: ScopedThreadRef) => {
+    const threadKey = scopedThreadKey(threadRef);
+    let reservations = projectActionTerminalLaunchReservationsByThreadRef.current.get(threadKey);
+    if (!reservations) {
+      reservations = new Map();
+      projectActionTerminalLaunchReservationsByThreadRef.current.set(threadKey, reservations);
+    }
+    return reservations;
+  }, []);
+  useEffect(() => {
+    if (!activeThreadRef) return;
+    releaseProjectActionTerminalReservationsSeenRunning({
+      runningTerminalIds,
+      reservedTerminalIds: projectActionTerminalReservationsForThread(activeThreadRef),
+    });
+  }, [activeThreadRef, projectActionTerminalReservationsForThread, runningTerminalIds]);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
   const [timelineAnchor, setTimelineAnchor] = useState<{
     readonly threadKey: string | null;
@@ -2463,11 +2487,6 @@ function ChatViewContent(props: ChatViewProps) {
         });
       }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
-      const baseTerminalId =
-        terminalUiState.activeTerminalId || activeKnownTerminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
-      const isBaseTerminalBusy = runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
-      const shouldCreateNewTerminal = wantsNewTerminal;
       const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
 
       setTerminalUiLaunchContext({
@@ -2488,55 +2507,34 @@ function ChatViewContent(props: ChatViewProps) {
         worktreePath: targetWorktreePath,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
-      const targetTerminalId = shouldCreateNewTerminal
-        ? nextTerminalId(activeKnownTerminalIds)
-        : baseTerminalId;
-      const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
-        ? {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
-            cols: SCRIPT_TERMINAL_COLS,
-            rows: SCRIPT_TERMINAL_ROWS,
+      const runResult = await runProjectScriptInTerminal({
+        script,
+        threadId: activeThreadId,
+        targetCwd,
+        targetWorktreePath,
+        runtimeEnv,
+        preferNewTerminal: Boolean(options?.preferNewTerminal),
+        knownTerminalIds: activeKnownTerminalIds,
+        serverTerminalIds: activeServerOrderedTerminalIds,
+        visibleTerminalIds: terminalUiState.terminalIds,
+        runningTerminalIds,
+        sessions: activeThreadKnownSessions,
+        reservedTerminalIds: projectActionTerminalReservationsForThread(activeThreadRef),
+        isCommandInterrupted: (result) => isAtomCommandInterrupted(result),
+        showTerminal: (terminalId, state) => {
+          if (!state.isVisibleTerminal) {
+            storeNewTerminal(activeThreadRef, terminalId);
+          } else {
+            storeSetActiveTerminal(activeThreadRef, terminalId);
           }
-        : {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
-          };
-
-      if (shouldCreateNewTerminal) {
-        storeNewTerminal(activeThreadRef, targetTerminalId);
-      } else {
-        storeSetActiveTerminal(activeThreadRef, targetTerminalId);
-      }
-
-      const openResult = await openTerminal({ environmentId, input: openTerminalInput });
-      if (openResult._tag === "Failure") {
-        if (!isAtomCommandInterrupted(openResult)) {
-          const error = squashAtomCommandFailure(openResult);
-          setThreadError(
-            activeThreadId,
-            error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
-          );
-        }
-        return;
-      }
-
-      const writeResult = await writeTerminal({
-        environmentId,
-        input: {
-          threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          data: `${script.command}\r`,
         },
+        openTerminal: (input) => openTerminal({ environmentId, input }),
+        writeTerminal: (input) => writeTerminal({ environmentId, input }),
+        waitForInputReady: (input) => requireProjectActionTerminalReady({ environmentId, input }),
+        requireInputReady: (input) => requireProjectActionTerminalReady({ environmentId, input }),
       });
-      if (writeResult._tag === "Failure" && !isAtomCommandInterrupted(writeResult)) {
-        const error = squashAtomCommandFailure(writeResult);
+      if (runResult._tag === "Failure") {
+        const error = squashAtomCommandFailure(runResult.result);
         setThreadError(
           activeThreadId,
           error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
@@ -2554,11 +2552,15 @@ function ChatViewContent(props: ChatViewProps) {
       storeNewTerminal,
       storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
+      activeThreadKnownSessions,
+      activeServerOrderedTerminalIds,
       environmentId,
       openTerminal,
       activeKnownTerminalIds,
       runningTerminalIds,
-      terminalUiState.activeTerminalId,
+      projectActionTerminalReservationsForThread,
+      requireProjectActionTerminalReady,
+      terminalUiState.terminalIds,
       writeTerminal,
     ],
   );
