@@ -97,7 +97,7 @@ it.effect("returns bounded structural preview snapshot failures", () =>
   ).pipe(Effect.provide(TestLayer)),
 );
 
-it.effect("returns not found for unsupported HTTP MCP session DELETE requests", () =>
+it.effect("terminates HTTP MCP sessions with DELETE", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const serverLayer = McpServer.layerHttp({
@@ -120,11 +120,10 @@ it.effect("returns not found for unsupported HTTP MCP session DELETE requests", 
       });
       const sessionId = initializeResponse.headers["mcp-session-id"];
       expect(initializeResponse.status).toBe(200);
-      expect(typeof sessionId).toBe("string");
-      const sessionHeader = sessionId as string;
+      expect(sessionId).not.toBeNull();
 
       const missingSessionResponse = yield* httpClient.del("/mcp");
-      expect(missingSessionResponse.status).toBe(404);
+      expect(missingSessionResponse.status).toBe(400);
 
       const unknownSessionResponse = yield* httpClient.del("/mcp", {
         headers: { "mcp-session-id": "unknown-session" },
@@ -132,21 +131,21 @@ it.effect("returns not found for unsupported HTTP MCP session DELETE requests", 
       expect(unknownSessionResponse.status).toBe(404);
 
       const terminateResponse = yield* httpClient.del("/mcp", {
-        headers: { "mcp-session-id": sessionHeader },
+        headers: { "mcp-session-id": sessionId! },
       });
-      expect(terminateResponse.status).toBe(404);
+      expect(terminateResponse.status).toBe(204);
 
       const reusedSessionResponse = yield* httpClient.post("/mcp", {
         headers: {
           accept: "application/json, text/event-stream",
-          "mcp-session-id": sessionHeader,
+          "mcp-session-id": sessionId!,
         },
         body: HttpBody.text(
           `{"jsonrpc":"2.0","id":2,"method":"ping","params":{}}`,
           "application/json",
         ),
       });
-      expect(reusedSessionResponse.status).toBe(200);
+      expect(reusedSessionResponse.status).toBe(404);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
