@@ -44,7 +44,11 @@ import {
   updateThreadOutboxMessage,
   type QueuedThreadMessage,
 } from "../../state/thread-outbox";
-import { setEditingQueuedMessageId, useThreadOutboxMessages } from "../../state/use-thread-outbox";
+import {
+  clearEditingQueuedMessageId,
+  setEditingQueuedMessageId,
+  useThreadOutboxMessages,
+} from "../../state/use-thread-outbox";
 import {
   setPendingConnectionError,
   useSavedRemoteConnections,
@@ -57,6 +61,11 @@ type WorkspaceMode = "local" | "worktree";
 function pendingTaskDraftKey(messageId: string): string {
   return `pending-task:${messageId}`;
 }
+
+// Bumped on every beginEditingPendingTask, across provider instances. An
+// in-flight flush from a dismissed session compares against it so it never
+// clears the draft or drain lock out from under a newer editing session.
+let editingSessionGeneration = 0;
 
 function findQueuedPendingTask(messageId: string): QueuedThreadMessage | null {
   const message = flattenQueuedThreadMessages(
@@ -579,6 +588,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     }
     setSelectedEnvironmentId(message.environmentId);
     setSelectedProjectKey(scopedProjectKey(message.environmentId, message.creation.projectId));
+    editingSessionGeneration += 1;
     editingPendingTaskRef.current = message;
     setEditingPendingTask(message);
     // Hold the outbox drain off this task while it is open in the editor.
@@ -599,6 +609,17 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       }
       const workspaceSelection = draft.workspaceSelection;
       const mode = workspaceSelection?.mode ?? "local";
+      // When the selection is the stand-in built from the queued snapshot,
+      // persist the original (possibly absent) snapshot values — the
+      // stand-in's placeholder title/workspaceRoot must never be written back
+      // as if they were real project metadata.
+      const usingPendingSnapshot = selectedProject === editingPendingProject;
+      const projectTitle = usingPendingSnapshot
+        ? editingPendingTask?.creation?.projectTitle
+        : selectedProject.title;
+      const projectCwd = usingPendingSnapshot
+        ? editingPendingTask?.creation?.projectCwd
+        : selectedProject.workspaceRoot;
       return {
         environmentId: selectedProject.environmentId,
         threadId: ThreadId.make(metadata.threadId),
@@ -611,8 +632,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         interactionMode: draft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
         creation: {
           projectId: selectedProject.id,
-          projectTitle: selectedProject.title,
-          projectCwd: selectedProject.workspaceRoot,
+          ...(projectTitle !== undefined ? { projectTitle } : {}),
+          ...(projectCwd !== undefined ? { projectCwd } : {}),
           workspaceMode: mode,
           branch: workspaceSelection?.branch ?? null,
           worktreePath: mode === "worktree" ? null : (workspaceSelection?.worktreePath ?? null),
@@ -621,7 +642,13 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         createdAt: metadata.createdAt,
       };
     },
-    [selectedModel, selectedProject, selectedProjectDraftKey],
+    [
+      editingPendingProject,
+      editingPendingTask,
+      selectedModel,
+      selectedProject,
+      selectedProjectDraftKey,
+    ],
   );
 
   const finishEditingPendingTask = useCallback(() => {
@@ -671,26 +698,32 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         createdAt: editing.createdAt,
       });
 
-      if (message) {
-        // update() rewrites the task only if it is still queued — a concurrent
-        // delete or delivery wins, so the flush cannot resurrect it. The drain
-        // lock is released only once the updated payload is durable, and the
-        // editing draft is discarded only once the save succeeded (a failed
-        // save keeps it around so the edits rehydrate on the next open).
-        void updateThreadOutboxMessage(message)
-          .then(() => {
-            clearComposerDraft(pendingTaskDraftKey(editing.messageId));
-          })
-          .catch((error) => {
-            console.warn("[new-task] failed to save edited pending task", error);
-          })
-          .finally(() => {
-            setEditingQueuedMessageId(null);
-          });
-      } else {
-        clearComposerDraft(pendingTaskDraftKey(editing.messageId));
-        setEditingQueuedMessageId(null);
+      if (!message) {
+        // The edits are currently unsendable (e.g. the prompt was cleared).
+        // Keep both the draft and the drain lock: the stale queued payload
+        // must not auto-send content the user just removed, and reopening the
+        // task resumes from the saved draft.
+        return;
       }
+
+      // update() rewrites the task only if it is still queued — a concurrent
+      // delete or delivery wins, so the flush cannot resurrect it.
+      const flushGeneration = editingSessionGeneration;
+      void updateThreadOutboxMessage(message)
+        .then(() => {
+          // If any editing session started (possibly in a fresh provider)
+          // while the save was in flight, it owns the draft and drain lock.
+          if (editingSessionGeneration !== flushGeneration) {
+            return;
+          }
+          clearComposerDraft(pendingTaskDraftKey(editing.messageId));
+          clearEditingQueuedMessageId(editing.messageId);
+        })
+        .catch((error) => {
+          // Keep the drain lock and the draft: delivering the stale payload
+          // would silently drop the newer edits. Reopening the task retries.
+          console.warn("[new-task] failed to save edited pending task", error);
+        });
     };
   }, [buildPendingTaskMessage]);
   const cancelEditingPendingTask = useCallback(() => {
