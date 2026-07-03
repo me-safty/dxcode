@@ -376,6 +376,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
               ? effectivePressedBackground
               : backgroundColor,
           borderRadius: SIDEBAR_ROW_RADIUS,
+          cursor: "pointer",
           minHeight: 64,
           justifyContent: "center",
           paddingHorizontal: 12,

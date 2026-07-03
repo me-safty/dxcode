@@ -17,5 +17,5 @@ index a0e3e24d6070c5ec0a220af3cb56fe3373fe1968..d610cc38dd8dee363ea2f1822aea0c4a
 -      context, getter, set == nil ? nil : setter, propertyNamesGetter, deallocate)
 +      context, getter, setter, propertyNamesGetter, deallocate)
      let hostObject = expo.HostObject.makeObject(pointee, consume callbacks)
-
+ 
      return JavaScriptObject(self, hostObject)

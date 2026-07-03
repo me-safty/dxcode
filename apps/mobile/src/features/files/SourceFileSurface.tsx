@@ -214,22 +214,8 @@ function NativeSourceFileSurface(
 
 function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
   const { codeSurface, codeWordBreak } = useAppearanceCodeSurface();
-  const { onRefresh } = props;
   const { lines, status, targetIndex, tokens } = useSourceFileModel(props);
   const listRef = useRef<FlatList<string>>(null);
-  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
-
-  const handlePullToRefresh = useCallback(async () => {
-    if (!onRefresh) {
-      return;
-    }
-    setIsPullRefreshing(true);
-    try {
-      await onRefresh();
-    } finally {
-      setIsPullRefreshing(false);
-    }
-  }, [onRefresh]);
 
   useEffect(() => {
     if (targetIndex === null) {
@@ -278,12 +264,6 @@ function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
         paddingTop: 8,
       }}
       renderItem={renderLine}
-      {...(onRefresh
-        ? {
-            refreshing: isPullRefreshing,
-            onRefresh: () => void handlePullToRefresh(),
-          }
-        : {})}
     />
   );
 
@@ -302,9 +282,8 @@ function JavaScriptSourceFileSurface(props: SourceFileSurfaceProps) {
 }
 
 export function SourceFileSurface(props: SourceFileSurfaceProps) {
-  const { codeWordBreak } = useAppearanceCodeSurface();
   const NativeView = resolveNativeReviewDiffView();
-  return NativeView && !codeWordBreak ? (
+  return NativeView ? (
     <NativeSourceFileSurface {...props} NativeView={NativeView} />
   ) : (
     <JavaScriptSourceFileSurface {...props} />

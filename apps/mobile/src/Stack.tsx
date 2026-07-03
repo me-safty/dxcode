@@ -10,17 +10,13 @@ import {
   createNativeStackScreen,
   type NativeStackNavigationOptions,
 } from "@react-navigation/native-stack";
-import { useLayoutEffect } from "react";
 import { DynamicColorIOS, Platform, Pressable, ScrollView, StyleSheet } from "react-native";
 import { useResolveClassNames } from "uniwind";
 
 import { AppText as Text } from "./components/AppText";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
-import {
-  ClerkSettingsSheetDetentProvider,
-  useClerkSettingsSheetDetent,
-} from "./features/cloud/ClerkSettingsSheetDetent";
+import { ClerkSettingsSheetDetentProvider } from "./features/cloud/ClerkSettingsSheetDetent";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
 import { HardwareKeyboardCommandProvider } from "./features/keyboard/HardwareKeyboardCommandProvider";
@@ -165,20 +161,6 @@ const SettingsSheetStack = createNativeStackNavigator({
     }),
   },
 });
-
-function SettingsSheetDetentLayout(props: { readonly children: React.ReactNode }) {
-  const { isExpanded } = useClerkSettingsSheetDetent();
-  const navigation = useNavigation();
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      sheetAllowedDetents: isExpanded ? [0.92] : [0.7, 0.92],
-      sheetGrabberVisible: true,
-    });
-  }, [isExpanded, navigation]);
-
-  return props.children;
-}
 
 // Thread routes live FLAT in the root stack (not in a nested navigator). A nested
 // stack means a second UINavigationController with its own UINavigationBar, which
@@ -422,7 +404,6 @@ export const RootStack = createNativeStackNavigator({
     SettingsSheet: createNativeStackScreen({
       screen: SettingsSheetStack,
       linking: "settings",
-      layout: ({ children }) => <SettingsSheetDetentLayout>{children}</SettingsSheetDetentLayout>,
       options: {
         gestureEnabled: true,
         headerShown: false,
@@ -435,7 +416,6 @@ export const RootStack = createNativeStackNavigator({
       screen: ConnectionsRouteScreen,
       linking: "connections",
       options: {
-        ...SHEET_SOLID_HEADER_OPTIONS,
         title: "Environments",
         presentation: "formSheet",
         sheetAllowedDetents: [0.55, 0.7],
@@ -446,8 +426,6 @@ export const RootStack = createNativeStackNavigator({
       screen: ConnectionsNewRouteScreen,
       linking: "connections/new",
       options: {
-        ...SHEET_SOLID_HEADER_OPTIONS,
-        title: "Add Environment",
         presentation: "formSheet",
         sheetAllowedDetents: [0.55, 0.7],
         sheetGrabberVisible: true,

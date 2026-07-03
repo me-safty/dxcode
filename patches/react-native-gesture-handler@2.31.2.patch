@@ -87,7 +87,7 @@ index b6134c908624adc590ebd264e90e558b88e235d5..41535348e937ad7762bd531d5b63ba6e
 @@ -537,6 +538,10 @@ const Swipeable = (props: SwipeableProps) => {
          dragStarted.value = false;
        });
-
+ 
 +    if (failOffsetY !== undefined) {
 +      pan.failOffsetY(failOffsetY);
 +    }
@@ -110,7 +110,7 @@ index 0c0e517e0d340faf50ff78c3d48e7a2bbcf808ec..d4b6ff508077728c8be83762923d866d
 @@ -77,6 +77,14 @@ export interface SwipeableProps {
     */
    dragOffsetFromRightEdge?: number;
-
+ 
 +  /**
 +   * Range along the Y axis (in points) that, once exceeded before the swipe
 +   * activates, makes the pan fail. Lets vertically-dominant pans (list

@@ -3,7 +3,7 @@ index 5c4e0da4292b15d3a27b5ea1555f11452a470815..ea19f2eec02dd78fbc78cc455c91b4e7
 --- a/ios/Shared/MenuViewImplementation.swift
 +++ b/ios/Shared/MenuViewImplementation.swift
 @@ -88,6 +88,41 @@ public class MenuViewImplementation: UIButton {
-
+ 
          self.menu = menu
          self.showsMenuAsPrimaryAction = !shouldOpenOnLongPress
 +        // In long-press mode the button must not intercept touches: as a
@@ -42,5 +42,5 @@ index 5c4e0da4292b15d3a27b5ea1555f11452a470815..ea19f2eec02dd78fbc78cc455c91b4e7
 +            longPressInteraction = nil
 +        }
      }
-
+ 
      public override func reactSetFrame(_ frame: CGRect) {
