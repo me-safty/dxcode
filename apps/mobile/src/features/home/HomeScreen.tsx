@@ -153,19 +153,16 @@ export function HomeScreen(props: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const accentColor = useThemeColor("--color-icon-muted");
 
-  const updateGroupDisplay = useCallback(
-    (key: string, action: HomeGroupDisplayAction) => {
-      setGroupDisplayStates((previous) => {
-        const next = new Map(previous);
-        next.set(
-          key,
-          nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
-        );
-        return next;
-      });
-    },
-    [],
-  );
+  const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+    setGroupDisplayStates((previous) => {
+      const next = new Map(previous);
+      next.set(
+        key,
+        nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
+      );
+      return next;
+    });
+  }, []);
 
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
     if (openSwipeableRef.current !== methods) {
@@ -386,38 +383,38 @@ export function HomeScreen(props: HomeScreenProps) {
           collapse/expand data changes. The flattened layout still exposes
           `stickyHeaderIndices` if this gets revisited. */}
       <SwipeableScrollGateProvider enabled={swipeEnabled}>
-      <LegendList
-        ref={listRef}
-        data={listLayout.items}
-        renderItem={renderItem}
-        keyExtractor={keyExtractor}
-        itemsAreEqual={homeListItemsAreEqual}
-        drawDistance={500}
-        estimatedItemSize={ESTIMATED_THREAD_ROW_HEIGHT}
-        extraData={extraData}
-        ListHeaderComponent={listHeader}
-        ListEmptyComponent={listEmpty}
-        style={{ flex: 1 }}
-        automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
-        contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
-        showsVerticalScrollIndicator={false}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="handled"
-        {...scrollGateHandlers}
-        recycleItems
-        scrollEventThrottle={16}
-        contentContainerStyle={{
-          paddingBottom: Platform.OS === "ios" ? Math.max(insets.bottom, 24) + 24 : 24,
-        }}
-        scrollIndicatorInsets={
-          Platform.OS === "ios"
-            ? {
-                bottom: Math.max(insets.bottom, 16) + 24,
-                top: 0,
-              }
-            : undefined
-        }
-      />
+        <LegendList
+          ref={listRef}
+          data={listLayout.items}
+          renderItem={renderItem}
+          keyExtractor={keyExtractor}
+          itemsAreEqual={homeListItemsAreEqual}
+          drawDistance={500}
+          estimatedItemSize={ESTIMATED_THREAD_ROW_HEIGHT}
+          extraData={extraData}
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={listEmpty}
+          style={{ flex: 1 }}
+          automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
+          contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+          showsVerticalScrollIndicator={false}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          {...scrollGateHandlers}
+          recycleItems
+          scrollEventThrottle={16}
+          contentContainerStyle={{
+            paddingBottom: Platform.OS === "ios" ? Math.max(insets.bottom, 24) + 24 : 24,
+          }}
+          scrollIndicatorInsets={
+            Platform.OS === "ios"
+              ? {
+                  bottom: Math.max(insets.bottom, 16) + 24,
+                  top: 0,
+                }
+              : undefined
+          }
+        />
       </SwipeableScrollGateProvider>
       {connectionStatus}
     </View>

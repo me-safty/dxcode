@@ -1068,11 +1068,7 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
       ) : null}
       {props.comment.text.length > 0 ? (
         <View className="border-t px-3 py-3" style={{ borderColor: props.colors.border }}>
-          <Text
-            selectable
-            className="text-base leading-snug"
-            style={{ color: props.colors.text }}
-          >
+          <Text selectable className="text-base leading-snug" style={{ color: props.colors.text }}>
             {props.comment.text}
           </Text>
         </View>

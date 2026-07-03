@@ -4,11 +4,7 @@ import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import type {
-  LayoutChangeEvent,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-} from "react-native";
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { Platform, StyleSheet, TextInput, View, useColorScheme } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
@@ -51,11 +47,7 @@ import { SidebarHeaderActions } from "./sidebar-header-actions";
 import { SidebarFilterButton } from "./sidebar-filter-button";
 import { createSidebarHeaderItems } from "./sidebar-native-header-items";
 import { SidebarNavigationShell } from "./sidebar-navigation-shell";
-import {
-  ThreadListGroupHeader,
-  ThreadListRow,
-  ThreadListShowMoreRow,
-} from "./thread-list-items";
+import { ThreadListGroupHeader, ThreadListRow, ThreadListShowMoreRow } from "./thread-list-items";
 
 /**
  * Shared capsule behind the sidebar header buttons — a native liquid-glass
@@ -540,46 +532,46 @@ function ThreadNavigationSidebarPane(
         />
         <View style={styles.container}>
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
-          <GestureDetector gesture={sidebarScrollGesture}>
-            <LegendList
-              data={listLayout.items}
-              drawDistance={500}
-              estimatedItemSize={64}
-              extraData={listExtraData}
-              getItemType={(item) => item.type}
-              itemsAreEqual={homeListItemsAreEqual}
-              keyExtractor={(item) => item.key}
-              renderItem={renderListItem}
-              automaticallyAdjustsScrollIndicatorInsets
-              contentInsetAdjustmentBehavior="automatic"
-              contentContainerStyle={[
-                styles.threadListContent,
-                {
-                  paddingBottom: Math.max(insets.bottom, 16) + 16,
-                  paddingTop: 6,
-                },
-              ]}
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="handled"
-              {...scrollGateHandlers}
-              recycleItems
-              scrollEventThrottle={16}
-              showsVerticalScrollIndicator={false}
-              style={styles.threadList}
-              ListHeaderComponent={
-                showsConnectionStatus ? (
-                  <View style={styles.connectionStatusNative}>
-                    <WorkspaceConnectionStatus
-                      onPress={props.onOpenEnvironmentSettings}
-                      state={catalogState}
-                      variant="sidebar"
-                    />
-                  </View>
-                ) : null
-              }
-              ListEmptyComponent={listEmpty}
-            />
-          </GestureDetector>
+            <GestureDetector gesture={sidebarScrollGesture}>
+              <LegendList
+                data={listLayout.items}
+                drawDistance={500}
+                estimatedItemSize={64}
+                extraData={listExtraData}
+                getItemType={(item) => item.type}
+                itemsAreEqual={homeListItemsAreEqual}
+                keyExtractor={(item) => item.key}
+                renderItem={renderListItem}
+                automaticallyAdjustsScrollIndicatorInsets
+                contentInsetAdjustmentBehavior="automatic"
+                contentContainerStyle={[
+                  styles.threadListContent,
+                  {
+                    paddingBottom: Math.max(insets.bottom, 16) + 16,
+                    paddingTop: 6,
+                  },
+                ]}
+                keyboardDismissMode="on-drag"
+                keyboardShouldPersistTaps="handled"
+                {...scrollGateHandlers}
+                recycleItems
+                scrollEventThrottle={16}
+                showsVerticalScrollIndicator={false}
+                style={styles.threadList}
+                ListHeaderComponent={
+                  showsConnectionStatus ? (
+                    <View style={styles.connectionStatusNative}>
+                      <WorkspaceConnectionStatus
+                        onPress={props.onOpenEnvironmentSettings}
+                        state={catalogState}
+                        variant="sidebar"
+                      />
+                    </View>
+                  ) : null
+                }
+                ListEmptyComponent={listEmpty}
+              />
+            </GestureDetector>
           </SwipeableScrollGateProvider>
         </View>
       </>
@@ -602,33 +594,33 @@ function ThreadNavigationSidebarPane(
       <View style={{ flex: 1, paddingBottom: insets.bottom }}>
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
-          <LegendList
-            data={listLayout.items}
-            drawDistance={500}
-            estimatedItemSize={64}
-            extraData={listExtraData}
-            getItemType={(item) => item.type}
-            itemsAreEqual={homeListItemsAreEqual}
-            keyExtractor={(item) => item.key}
-            renderItem={renderListItem}
-            contentContainerStyle={[
-              styles.threadListContent,
-              {
-                paddingBottom: 16 + insets.bottom,
-                paddingTop: topListInset,
-              },
-            ]}
-            keyboardDismissMode="on-drag"
-            keyboardShouldPersistTaps="handled"
-            {...scrollGateHandlers}
-            recycleItems
-            scrollEventThrottle={16}
-            showsVerticalScrollIndicator={false}
-            style={styles.threadList}
-            ListEmptyComponent={listEmpty}
-          />
-        </GestureDetector>
-          </SwipeableScrollGateProvider>
+            <LegendList
+              data={listLayout.items}
+              drawDistance={500}
+              estimatedItemSize={64}
+              extraData={listExtraData}
+              getItemType={(item) => item.type}
+              itemsAreEqual={homeListItemsAreEqual}
+              keyExtractor={(item) => item.key}
+              renderItem={renderListItem}
+              contentContainerStyle={[
+                styles.threadListContent,
+                {
+                  paddingBottom: 16 + insets.bottom,
+                  paddingTop: topListInset,
+                },
+              ]}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              {...scrollGateHandlers}
+              recycleItems
+              scrollEventThrottle={16}
+              showsVerticalScrollIndicator={false}
+              style={styles.threadList}
+              ListEmptyComponent={listEmpty}
+            />
+          </GestureDetector>
+        </SwipeableScrollGateProvider>
       </View>
 
       <View

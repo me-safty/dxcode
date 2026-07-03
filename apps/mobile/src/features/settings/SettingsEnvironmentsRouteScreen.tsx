@@ -211,9 +211,7 @@ function ConfiguredCloudEnvironmentRows(props: {
           <Text className="text-base font-t3-bold text-foreground">
             Could not load T3 Cloud environments
           </Text>
-          <Text className="text-sm text-foreground-muted">
-            {controller.relayDiscovery.error}
-          </Text>
+          <Text className="text-sm text-foreground-muted">{controller.relayDiscovery.error}</Text>
           {controller.relayDiscovery.errorTraceId ? (
             <CopyTraceIdButton traceId={controller.relayDiscovery.errorTraceId} />
           ) : null}

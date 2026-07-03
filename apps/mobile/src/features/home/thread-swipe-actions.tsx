@@ -10,7 +10,13 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
-import type { ColorValue, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from "react-native";
+import type {
+  ColorValue,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  StyleProp,
+  ViewStyle,
+} from "react-native";
 import { Pressable, View } from "react-native";
 import ReanimatedSwipeable, {
   type SwipeableMethods,

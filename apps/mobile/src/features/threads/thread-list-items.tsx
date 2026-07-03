@@ -165,7 +165,9 @@ export const ThreadListShowMoreRow = memo(function ThreadListShowMoreRow(props: 
 
   return (
     <View
-      className={compact ? "flex-row items-center gap-2.5 bg-screen" : "flex-row items-center gap-2"}
+      className={
+        compact ? "flex-row items-center gap-2.5 bg-screen" : "flex-row items-center gap-2"
+      }
       style={{
         paddingLeft: compact ? THREAD_LIST_COMPACT_INSET : 12,
         paddingRight: compact ? 18 : 12,
@@ -305,106 +307,106 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
 
   const rowContent = (close: () => void) =>
     compact ? (
-    <Pressable
-      accessibilityHint="Swipe left for archive and delete actions"
-      accessibilityLabel={thread.title}
-      accessibilityRole="button"
-      className="bg-screen"
-      onPress={() => {
-        close();
-        onSelectThread(thread);
-      }}
-      style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
-    >
-      <View
-        style={{
-          paddingLeft: THREAD_LIST_COMPACT_INSET,
-          paddingRight: 18,
-          paddingTop: 10,
+      <Pressable
+        accessibilityHint="Swipe left for archive and delete actions"
+        accessibilityLabel={thread.title}
+        accessibilityRole="button"
+        className="bg-screen"
+        onPress={() => {
+          close();
+          onSelectThread(thread);
         }}
+        style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
       >
         <View
           style={{
-            gap: 3,
-            borderBottomWidth: props.isLast ? 0 : 1,
-            borderBottomColor: separatorColor,
-            paddingBottom: 10,
+            paddingLeft: THREAD_LIST_COMPACT_INSET,
+            paddingRight: 18,
+            paddingTop: 10,
           }}
         >
+          <View
+            style={{
+              gap: 3,
+              borderBottomWidth: props.isLast ? 0 : 1,
+              borderBottomColor: separatorColor,
+              paddingBottom: 10,
+            }}
+          >
+            <View className="flex-row items-center justify-between gap-2">
+              <Text className="flex-1 text-lg font-t3-bold text-foreground" numberOfLines={1}>
+                {thread.title}
+              </Text>
+              <View className="flex-row items-center gap-2">
+                {statusPill}
+                <Text
+                  className="text-base text-foreground-tertiary"
+                  style={{ fontVariant: ["tabular-nums"] }}
+                >
+                  {timestamp}
+                </Text>
+                <SymbolView
+                  name="chevron.right"
+                  size={13}
+                  tintColor={iconSubtleColor}
+                  type="monochrome"
+                />
+              </View>
+            </View>
+            {subtitleRow}
+          </View>
+        </View>
+      </Pressable>
+    ) : (
+      <Pressable
+        accessibilityHint="Opens the thread"
+        accessibilityLabel={thread.title}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={() => setHovered(false)}
+        onPress={() => {
+          close();
+          onSelectThread(thread);
+        }}
+        style={({ pressed }) => ({
+          backgroundColor: selected
+            ? selectedBackgroundColor
+            : pressed || hovered
+              ? effectivePressedBackground
+              : backgroundColor,
+          borderRadius: SIDEBAR_ROW_RADIUS,
+          cursor: "pointer",
+          minHeight: 64,
+          justifyContent: "center",
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+        })}
+      >
+        <View style={{ gap: 3 }}>
           <View className="flex-row items-center justify-between gap-2">
-            <Text className="flex-1 text-lg font-t3-bold text-foreground" numberOfLines={1}>
+            <Text
+              className="flex-1 text-base font-t3-medium"
+              numberOfLines={1}
+              style={{ color: effectiveForeground }}
+            >
               {thread.title}
             </Text>
             <View className="flex-row items-center gap-2">
               {statusPill}
               <Text
-                className="text-base text-foreground-tertiary"
-                style={{ fontVariant: ["tabular-nums"] }}
+                className="text-xs"
+                numberOfLines={1}
+                style={{ color: effectiveMuted, fontVariant: ["tabular-nums"] }}
               >
                 {timestamp}
               </Text>
-              <SymbolView
-                name="chevron.right"
-                size={13}
-                tintColor={iconSubtleColor}
-                type="monochrome"
-              />
             </View>
           </View>
           {subtitleRow}
         </View>
-      </View>
-    </Pressable>
-  ) : (
-    <Pressable
-      accessibilityHint="Opens the thread"
-      accessibilityLabel={thread.title}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-      onPress={() => {
-        close();
-        onSelectThread(thread);
-      }}
-      style={({ pressed }) => ({
-        backgroundColor: selected
-          ? selectedBackgroundColor
-          : pressed || hovered
-            ? effectivePressedBackground
-            : backgroundColor,
-        borderRadius: SIDEBAR_ROW_RADIUS,
-        cursor: "pointer",
-        minHeight: 64,
-        justifyContent: "center",
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-      })}
-    >
-      <View style={{ gap: 3 }}>
-        <View className="flex-row items-center justify-between gap-2">
-          <Text
-            className="flex-1 text-base font-t3-medium"
-            numberOfLines={1}
-            style={{ color: effectiveForeground }}
-          >
-            {thread.title}
-          </Text>
-          <View className="flex-row items-center gap-2">
-            {statusPill}
-            <Text
-              className="text-xs"
-              numberOfLines={1}
-              style={{ color: effectiveMuted, fontVariant: ["tabular-nums"] }}
-            >
-              {timestamp}
-            </Text>
-          </View>
-        </View>
-        {subtitleRow}
-      </View>
-    </Pressable>
-  );
+      </Pressable>
+    );
 
   return (
     <ThreadSwipeable
