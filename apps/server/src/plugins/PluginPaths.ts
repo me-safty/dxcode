@@ -1,7 +1,9 @@
 import type { PluginId } from "@t3tools/contracts/plugin";
 
-export const pluginsRoot = (stateDir: string, join: (...segments: ReadonlyArray<string>) => string) =>
-  join(stateDir, "plugins");
+export const pluginsRoot = (
+  stateDir: string,
+  join: (...segments: ReadonlyArray<string>) => string,
+) => join(stateDir, "plugins");
 
 export const pluginVersionDir = (
   root: string,

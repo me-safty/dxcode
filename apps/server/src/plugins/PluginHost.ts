@@ -33,11 +33,8 @@ import * as ServerConfig from "../config.ts";
 import { PluginLockfileStore } from "./PluginLockfileStore.ts";
 import { PluginMigrator } from "./PluginMigrator.ts";
 import { PluginModuleLoader } from "./PluginModuleLoader.ts";
-import {
-  pluginDataDir,
-  pluginManifestPath,
-  pluginVersionDir,
-} from "./PluginPaths.ts";
+import { makePluginLogger } from "./PluginLogger.ts";
+import { pluginDataDir, pluginManifestPath, pluginVersionDir } from "./PluginPaths.ts";
 import { PluginRuntimeRegistry } from "./PluginRuntimeRegistry.ts";
 
 const APP_VERSION = packageJson.version;
@@ -121,13 +118,6 @@ function validateRegistration(
   return Effect.void;
 }
 
-const makeLogger = (pluginId: PluginId): PluginLogger => ({
-  debug: (message, attributes) => Effect.logDebug(message, { ...attributes, pluginId }),
-  info: (message, attributes) => Effect.logInfo(message, { ...attributes, pluginId }),
-  warn: (message, attributes) => Effect.logWarning(message, { ...attributes, pluginId }),
-  error: (message, attributes) => Effect.logError(message, { ...attributes, pluginId }),
-});
-
 const unavailable = (capability: string) =>
   Effect.die(new PluginCapabilityUnavailable({ capability }));
 
@@ -198,22 +188,19 @@ const startService = (input: {
   readonly logger: PluginLogger;
   readonly service: PluginServiceDescriptor;
 }) =>
-  input
-    .service
-    .run({ pluginId: input.pluginId, logger: input.logger })
-    .pipe(
-      Effect.catchCause((cause) =>
-        input.logger.error("plugin service failed; restarting", {
-          service: input.service.name,
-          cause: Cause.pretty(cause),
-        }),
-      ),
-      // Exponential backoff capped at 30s so a flapping service keeps
-      // retrying at a bounded cadence instead of backing off forever.
-      Effect.repeat(
-        Schedule.either(Schedule.exponential("250 millis"), Schedule.spaced("30 seconds")),
-      ),
-    );
+  input.service.run({ pluginId: input.pluginId, logger: input.logger }).pipe(
+    Effect.catchCause((cause) =>
+      input.logger.error("plugin service failed; restarting", {
+        service: input.service.name,
+        cause: Cause.pretty(cause),
+      }),
+    ),
+    // Exponential backoff capped at 30s so a flapping service keeps
+    // retrying at a bounded cadence instead of backing off forever.
+    Effect.repeat(
+      Schedule.either(Schedule.exponential("250 millis"), Schedule.spaced("30 seconds")),
+    ),
+  );
 
 export const make = Effect.fn("PluginHost.make")(function* () {
   const config = yield* ServerConfig.ServerConfig;
@@ -226,9 +213,9 @@ export const make = Effect.fn("PluginHost.make")(function* () {
   const clock = yield* Clock.Clock;
 
   const readManifest = (pluginDir: string) =>
-    fs.readFileString(pluginManifestPath(pluginDir, path.join)).pipe(
-      Effect.flatMap(decodeManifest),
-    );
+    fs
+      .readFileString(pluginManifestPath(pluginDir, path.join))
+      .pipe(Effect.flatMap(decodeManifest));
 
   const loadPlugin = (pluginId: PluginId, entry: PluginLockfilePlugin) =>
     Effect.gen(function* () {
@@ -280,7 +267,7 @@ export const make = Effect.fn("PluginHost.make")(function* () {
 
       const scope = yield* Scope.make("sequential");
       const readiness = yield* Deferred.make<void>();
-      const logger = makeLogger(pluginId);
+      const logger = makePluginLogger(pluginId);
       const dataDir = pluginDataDir(config.pluginsDir, pluginId, path.join);
       const hostApi = makeHostApi({ pluginId, dataDir, logger });
 
@@ -343,7 +330,11 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       }
       if (entry.state === "pending-upgrade") {
         if (!entry.staged) {
-          yield* updateFailure(store, pluginId, "pending upgrade is missing staged plugin metadata");
+          yield* updateFailure(
+            store,
+            pluginId,
+            "pending upgrade is missing staged plugin metadata",
+          );
           return false;
         }
         const staged = entry.staged;
@@ -412,9 +403,7 @@ export const make = Effect.fn("PluginHost.make")(function* () {
         ),
       );
       if (!shouldContinue || !entry.enabled) continue;
-      const currentLockfile = yield* store.readLockfile.pipe(
-        Effect.orElseSucceed(() => lockfile),
-      );
+      const currentLockfile = yield* store.readLockfile.pipe(Effect.orElseSucceed(() => lockfile));
       const currentEntry = getLockfilePlugin(currentLockfile, pluginId);
       if (!currentEntry?.enabled || currentEntry.state !== "active") continue;
       yield* loadPlugin(pluginId, currentEntry).pipe(

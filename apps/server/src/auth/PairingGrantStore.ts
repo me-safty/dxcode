@@ -1,7 +1,8 @@
 import {
   AuthAdministrativeScopes,
   AuthStandardClientScopes,
-  type AuthEnvironmentScope,
+  authEnvironmentScopes,
+  type AuthScope,
   type AuthPairingLink,
   type ServerAuthBootstrapMethod,
 } from "@t3tools/contracts";
@@ -22,7 +23,7 @@ import * as AuthPairingLinks from "../persistence/AuthPairingLinks.ts";
 
 export interface BootstrapGrant {
   readonly method: ServerAuthBootstrapMethod;
-  readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
+  readonly scopes: ReadonlyArray<AuthScope>;
   readonly subject: string;
   readonly label?: string;
   readonly proofKeyThumbprint?: string;
@@ -198,7 +199,7 @@ export class PairingGrantStore extends Context.Service<
   {
     readonly issueOneTimeToken: (input?: {
       readonly ttl?: Duration.Duration;
-      readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
+      readonly scopes?: ReadonlyArray<AuthScope>;
       readonly subject?: string;
       readonly label?: string;
       readonly proofKeyThumbprint?: string;
@@ -327,7 +328,7 @@ export const make = Effect.gen(function* () {
           ? ({
               id: row.id,
               credential: row.credential,
-              scopes: row.scopes,
+              scopes: authEnvironmentScopes(row.scopes),
               subject: row.subject,
               label: row.label,
               createdAt: row.createdAt,
@@ -336,7 +337,7 @@ export const make = Effect.gen(function* () {
           : ({
               id: row.id,
               credential: row.credential,
-              scopes: row.scopes,
+              scopes: authEnvironmentScopes(row.scopes),
               subject: row.subject,
               createdAt: row.createdAt,
               expiresAt: row.expiresAt,
@@ -408,7 +409,7 @@ export const make = Effect.gen(function* () {
     yield* emitUpsert({
       id,
       credential,
-      scopes: input?.scopes ?? AuthStandardClientScopes,
+      scopes: authEnvironmentScopes(input?.scopes ?? AuthStandardClientScopes),
       subject: input?.subject ?? "one-time-token",
       ...(input?.label ? { label: input.label } : {}),
       createdAt: now,

@@ -101,7 +101,9 @@ export class PluginLockfileStore extends Context.Service<
         context: PluginLockfileMutationContext,
       ) => Effect.Effect<PluginLockfilePlugin | undefined, PluginLockfileStoreError>,
     ) => Effect.Effect<PluginLockfile, PluginLockfileStoreError>;
-    readonly removePlugin: (id: PluginId) => Effect.Effect<PluginLockfile, PluginLockfileStoreError>;
+    readonly removePlugin: (
+      id: PluginId,
+    ) => Effect.Effect<PluginLockfile, PluginLockfileStoreError>;
     readonly transition: (
       id: PluginId,
       from: ReadonlyArray<PluginState>,
@@ -116,13 +118,15 @@ const isNotFound = (cause: { readonly reason?: { readonly _tag?: string } }) =>
 const readLockfileFromPath = (lockfilePath: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const raw = yield* fs.readFileString(lockfilePath).pipe(
-      Effect.catch((cause) =>
-        isNotFound(cause)
-          ? Effect.succeed(null)
-          : Effect.fail(new PluginLockfileReadError({ path: lockfilePath, cause })),
-      ),
-    );
+    const raw = yield* fs
+      .readFileString(lockfilePath)
+      .pipe(
+        Effect.catch((cause) =>
+          isNotFound(cause)
+            ? Effect.succeed(null)
+            : Effect.fail(new PluginLockfileReadError({ path: lockfilePath, cause })),
+        ),
+      );
     if (raw === null) return EMPTY_PLUGIN_LOCKFILE;
     return yield* decodePluginLockfileJson(raw).pipe(
       Effect.mapError(
@@ -158,14 +162,13 @@ const writeLockfileToPath = (input: {
       yield* file.writeAll(bytes);
       yield* file.sync;
       yield* fs.rename(tempPath, input.lockfilePath);
-      yield* fs
-        .open(input.pluginsDir, { flag: "r" })
-        .pipe(Effect.flatMap((directory) => directory.sync), Effect.ignore);
+      yield* fs.open(input.pluginsDir, { flag: "r" }).pipe(
+        Effect.flatMap((directory) => directory.sync),
+        Effect.ignore,
+      );
     }),
   ).pipe(
-    Effect.mapError(
-      (cause) => new PluginLockfileWriteError({ path: input.lockfilePath, cause }),
-    ),
+    Effect.mapError((cause) => new PluginLockfileWriteError({ path: input.lockfilePath, cause })),
   );
 
 const acquireAdvisoryLock = (input: {
@@ -175,11 +178,13 @@ const acquireAdvisoryLock = (input: {
   Effect.acquireRelease(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      yield* fs.makeDirectory(input.pluginsDir, { recursive: true }).pipe(
-        Effect.mapError(
-          (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
-        ),
-      );
+      yield* fs
+        .makeDirectory(input.pluginsDir, { recursive: true })
+        .pipe(
+          Effect.mapError(
+            (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
+          ),
+        );
 
       const openLock = Effect.scoped(
         Effect.gen(function* () {
@@ -194,11 +199,13 @@ const acquireAdvisoryLock = (input: {
       const opened = yield* openLock.pipe(Effect.result);
       if (Result.isSuccess(opened)) return input.advisoryLockPath;
 
-      const stat = yield* fs.stat(input.advisoryLockPath).pipe(
-        Effect.mapError(
-          (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
-        ),
-      );
+      const stat = yield* fs
+        .stat(input.advisoryLockPath)
+        .pipe(
+          Effect.mapError(
+            (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
+          ),
+        );
       const mtime = Option.getOrUndefined(stat.mtime);
       const ageMs = mtime ? (yield* Clock.currentTimeMillis) - mtime.getTime() : 0;
       if (ageMs <= STALE_LOCK_MS) {
@@ -212,11 +219,13 @@ const acquireAdvisoryLock = (input: {
         path: input.advisoryLockPath,
         ageMs,
       });
-      yield* fs.remove(input.advisoryLockPath, { force: true }).pipe(
-        Effect.mapError(
-          (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
-        ),
-      );
+      yield* fs
+        .remove(input.advisoryLockPath, { force: true })
+        .pipe(
+          Effect.mapError(
+            (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
+          ),
+        );
       yield* openLock.pipe(
         Effect.mapError(
           (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
@@ -251,24 +260,26 @@ export const make = Effect.fn("PluginLockfileStore.make")(function* () {
   const mutate = (
     update: (lockfile: PluginLockfile) => Effect.Effect<PluginLockfile, PluginLockfileStoreError>,
   ) =>
-    provideLocalServices(semaphore.withPermits(1)(
-      Effect.scoped(
-        acquireAdvisoryLock({ pluginsDir: config.pluginsDir, advisoryLockPath }).pipe(
-          Effect.flatMap(() =>
-            Effect.gen(function* () {
-              const current = yield* readLockfile;
-              const next = yield* update(current);
-              yield* writeLockfileToPath({
-                pluginsDir: config.pluginsDir,
-                lockfilePath,
-                lockfile: next,
-              });
-              return next;
-            }),
+    provideLocalServices(
+      semaphore.withPermits(1)(
+        Effect.scoped(
+          acquireAdvisoryLock({ pluginsDir: config.pluginsDir, advisoryLockPath }).pipe(
+            Effect.flatMap(() =>
+              Effect.gen(function* () {
+                const current = yield* readLockfile;
+                const next = yield* update(current);
+                yield* writeLockfileToPath({
+                  pluginsDir: config.pluginsDir,
+                  lockfilePath,
+                  lockfile: next,
+                });
+                return next;
+              }),
+            ),
           ),
         ),
       ),
-    ));
+    );
 
   const updatePlugin: PluginLockfileStore["Service"]["updatePlugin"] = (id, fn) =>
     mutate((lockfile) =>

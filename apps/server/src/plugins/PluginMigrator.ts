@@ -147,7 +147,9 @@ const validateMigrationObjects = (input: {
       if (entry.type !== "trigger" && entry.type !== "view") continue;
       const body = entry.sql ?? "";
       for (const tableName of preMigrationCoreTables) {
-        if (new RegExp(`\\b${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(body)) {
+        if (
+          new RegExp(`\\b${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(body)
+        ) {
           return yield* new PluginMigrationViolation({
             pluginId: input.pluginId,
             version: input.version,
@@ -237,7 +239,8 @@ export const make = Effect.fn("PluginMigrator.make")(function* () {
             if (attached) {
               // Best-effort DETACH so a rogue attach cannot persist on the
               // shared connection past this violation.
-              yield* sql.unsafe(`DETACH DATABASE "${attached.name.replaceAll('"', '""')}"`)
+              yield* sql
+                .unsafe(`DETACH DATABASE "${attached.name.replaceAll('"', '""')}"`)
                 .unprepared.pipe(Effect.ignore);
               return yield* new PluginMigrationViolation({
                 pluginId,

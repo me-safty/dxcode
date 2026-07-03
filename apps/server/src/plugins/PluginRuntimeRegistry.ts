@@ -18,10 +18,7 @@ export interface ActivePluginRuntime {
 export class PluginRuntimeRegistry extends Context.Service<
   PluginRuntimeRegistry,
   {
-    readonly put: (
-      pluginId: PluginId,
-      runtime: ActivePluginRuntime,
-    ) => Effect.Effect<void>;
+    readonly put: (pluginId: PluginId, runtime: ActivePluginRuntime) => Effect.Effect<void>;
     readonly remove: (pluginId: PluginId) => Effect.Effect<void>;
     readonly list: Effect.Effect<ReadonlyArray<ActivePluginRuntime>>;
     readonly get: (pluginId: PluginId) => Effect.Effect<Option.Option<ActivePluginRuntime>>;
@@ -43,7 +40,7 @@ export const make = Effect.fn("PluginRuntimeRegistry.make")(function* () {
         const next = new Map(current);
         next.delete(pluginId);
         return next;
-    }),
+      }),
     list: Ref.get(runtimes).pipe(Effect.map((current) => Array.from(current.values()))),
     get: (pluginId) =>
       Ref.get(runtimes).pipe(

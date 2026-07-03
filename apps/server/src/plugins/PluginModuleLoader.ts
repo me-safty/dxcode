@@ -5,7 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { pathToFileURL } from "node:url";
+import * as NodeURL from "node:url";
 
 import * as ServerConfig from "../config.ts";
 
@@ -64,7 +64,10 @@ function isPluginDefinition(value: unknown): value is PluginDefinition {
 }
 
 function isInside(parent: string, child: string, separator: string): boolean {
-  return child === parent || child.startsWith(parent.endsWith(separator) ? parent : `${parent}${separator}`);
+  return (
+    child === parent ||
+    child.startsWith(parent.endsWith(separator) ? parent : `${parent}${separator}`)
+  );
 }
 
 export const make = Effect.fn("PluginModuleLoader.make")(function* () {
@@ -86,7 +89,7 @@ export const make = Effect.fn("PluginModuleLoader.make")(function* () {
       nodeModule.register(new URL("./pluginResolveHooks.ts", import.meta.url), {
         parentURL: import.meta.url,
         data: {
-          pluginsRootUrl: pathToFileURL(config.pluginsDir).href,
+          pluginsRootUrl: NodeURL.pathToFileURL(config.pluginsDir).href,
         },
       }),
     ).pipe(
@@ -103,13 +106,21 @@ export const make = Effect.fn("PluginModuleLoader.make")(function* () {
     entryRelPath,
   ) =>
     Effect.gen(function* () {
-      const realPluginDir = yield* fs.realPath(pluginDir).pipe(
-        Effect.mapError((cause) => new PluginModuleLoadError({ pluginDir, entry: entryRelPath, cause })),
-      );
+      const realPluginDir = yield* fs
+        .realPath(pluginDir)
+        .pipe(
+          Effect.mapError(
+            (cause) => new PluginModuleLoadError({ pluginDir, entry: entryRelPath, cause }),
+          ),
+        );
       const resolvedEntry = path.resolve(realPluginDir, entryRelPath);
-      const realEntry = yield* fs.realPath(resolvedEntry).pipe(
-        Effect.mapError((cause) => new PluginModuleLoadError({ pluginDir, entry: entryRelPath, cause })),
-      );
+      const realEntry = yield* fs
+        .realPath(resolvedEntry)
+        .pipe(
+          Effect.mapError(
+            (cause) => new PluginModuleLoadError({ pluginDir, entry: entryRelPath, cause }),
+          ),
+        );
       if (!isInside(realPluginDir, realEntry, path.sep)) {
         return yield* new PluginModulePathError({
           pluginDir,
@@ -118,7 +129,7 @@ export const make = Effect.fn("PluginModuleLoader.make")(function* () {
         });
       }
       const imported = yield* Effect.tryPromise({
-        try: () => import(pathToFileURL(realEntry).href),
+        try: () => import(NodeURL.pathToFileURL(realEntry).href),
         catch: (cause) => new PluginModuleLoadError({ pluginDir, entry: entryRelPath, cause }),
       });
       if (!isPluginDefinition(imported.default)) {

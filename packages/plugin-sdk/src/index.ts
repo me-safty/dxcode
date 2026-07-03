@@ -1,5 +1,6 @@
 import type * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as Stream from "effect/Stream";
 
 export type {
   PluginCapability,
@@ -85,10 +86,7 @@ export interface PluginHostApi {
   readonly terminals: Effect.Effect<TerminalsCapability, PluginCapabilityUnavailable>;
   readonly database: Effect.Effect<DatabaseCapability, PluginCapabilityUnavailable>;
   readonly projectionsRead: Effect.Effect<ProjectionsReadCapability, PluginCapabilityUnavailable>;
-  readonly environmentsRead: Effect.Effect<
-    EnvironmentsReadCapability,
-    PluginCapabilityUnavailable
-  >;
+  readonly environmentsRead: Effect.Effect<EnvironmentsReadCapability, PluginCapabilityUnavailable>;
   readonly secrets: Effect.Effect<SecretsCapability, PluginCapabilityUnavailable>;
   readonly http: Effect.Effect<HttpCapability, PluginCapabilityUnavailable>;
   readonly sourceControl: Effect.Effect<SourceControlCapability, PluginCapabilityUnavailable>;
@@ -111,7 +109,7 @@ export interface PluginStreamDescriptor {
   readonly method: string;
   readonly scope: PluginRpcScope;
   readonly readiness?: PluginReadiness | undefined;
-  readonly handler: (payload: unknown, ctx: PluginRpcContext) => Effect.Effect<unknown, Error>;
+  readonly handler: (payload: unknown, ctx: PluginRpcContext) => Stream.Stream<unknown, Error>;
 }
 
 export interface PluginHttpDescriptor {

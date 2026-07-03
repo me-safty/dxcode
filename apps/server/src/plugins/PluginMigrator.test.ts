@@ -116,20 +116,16 @@ layer("PluginMigrator", (it) => {
 
       const result = yield* Effect.result(
         migrator.run(pluginId, [
-          migration(
-            1,
-            "Trigger",
-            [
-              `CREATE TABLE ${prefix}items (id TEXT PRIMARY KEY)`,
-              `
+          migration(1, "Trigger", [
+            `CREATE TABLE ${prefix}items (id TEXT PRIMARY KEY)`,
+            `
               CREATE TRIGGER ${prefix}items_ai
               AFTER INSERT ON ${prefix}items
               BEGIN
                 INSERT INTO core_items (id) VALUES (NEW.id);
               END
             `,
-            ],
-          ),
+          ]),
         ]),
       );
 
@@ -219,9 +215,7 @@ layer("PluginMigrator", (it) => {
       const pluginId = PluginId.make("temp-plugin");
 
       const result = yield* Effect.result(
-        migrator.run(pluginId, [
-          migration(1, "Temp", "CREATE TEMP TABLE sneaky (id TEXT)"),
-        ]),
+        migrator.run(pluginId, [migration(1, "Temp", "CREATE TEMP TABLE sneaky (id TEXT)")]),
       );
 
       assert.isTrue(Result.isFailure(result));
@@ -251,23 +245,15 @@ layer("PluginMigrator", (it) => {
       const prefix = pluginPrefix(pluginId);
 
       yield* migrator.run(pluginId, [
-        migration(
-          1,
-          "Index",
-          [
-            `CREATE TABLE ${prefix}items (id TEXT PRIMARY KEY)`,
-            `CREATE INDEX ${prefix}items_id_idx ON ${prefix}items (id)`,
-          ],
-        ),
+        migration(1, "Index", [
+          `CREATE TABLE ${prefix}items (id TEXT PRIMARY KEY)`,
+          `CREATE INDEX ${prefix}items_id_idx ON ${prefix}items (id)`,
+        ]),
       ]);
 
       const result = yield* Effect.result(
         migrator.run(pluginId, [
-          migration(
-            2,
-            "BadView",
-            `CREATE VIEW bad_items_view AS SELECT id FROM ${prefix}items`,
-          ),
+          migration(2, "BadView", `CREATE VIEW bad_items_view AS SELECT id FROM ${prefix}items`),
         ]),
       );
       assert.isTrue(Result.isFailure(result));

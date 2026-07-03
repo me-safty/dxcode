@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
 
 import { AuthSessionId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { PLUGIN_ID_PATTERN_SOURCE } from "./plugin.ts";
 
 /**
  * Declares the server's overall authentication posture.
@@ -81,6 +82,7 @@ export const AuthAccessReadScope = "access:read" as const;
 export const AuthAccessWriteScope = "access:write" as const;
 export const AuthRelayReadScope = "relay:read" as const;
 export const AuthRelayWriteScope = "relay:write" as const;
+export const AuthPluginsManageScope = "plugins:manage" as const;
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -90,10 +92,29 @@ export const AuthEnvironmentScope = Schema.Literals([
   AuthAccessWriteScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  AuthPluginsManageScope,
 ]);
 export type AuthEnvironmentScope = typeof AuthEnvironmentScope.Type;
 export const AuthEnvironmentScopes = Schema.Array(AuthEnvironmentScope);
 export type AuthEnvironmentScopes = typeof AuthEnvironmentScopes.Type;
+export const isAuthEnvironmentScope = Schema.is(AuthEnvironmentScope);
+
+const PLUGIN_SCOPE_PATTERN = new RegExp(`^plugin:${PLUGIN_ID_PATTERN_SOURCE}:(read|operate)$`);
+export const PluginScope = TrimmedNonEmptyString.check(Schema.isPattern(PLUGIN_SCOPE_PATTERN)).pipe(
+  Schema.brand("PluginScope"),
+);
+export type PluginScope = typeof PluginScope.Type;
+export const isPluginScope = Schema.is(PluginScope);
+const decodePluginScope = Schema.decodeUnknownSync(PluginScope);
+
+export const pluginReadScope = (id: string): PluginScope => decodePluginScope(`plugin:${id}:read`);
+export const pluginOperateScope = (id: string): PluginScope =>
+  decodePluginScope(`plugin:${id}:operate`);
+
+export const AuthScope = Schema.Union([AuthEnvironmentScope, PluginScope]);
+export type AuthScope = typeof AuthScope.Type;
+export const AuthScopes = Schema.Array(AuthScope);
+export type AuthScopes = typeof AuthScopes.Type;
 
 export const AuthStandardClientScopes = [
   AuthOrchestrationReadScope,
@@ -101,6 +122,7 @@ export const AuthStandardClientScopes = [
   AuthTerminalOperateScope,
   AuthReviewWriteScope,
   AuthRelayReadScope,
+  AuthPluginsManageScope,
 ] as const;
 export const AuthAdministrativeScopes = [
   ...AuthStandardClientScopes,
@@ -108,6 +130,20 @@ export const AuthAdministrativeScopes = [
   AuthAccessWriteScope,
   AuthRelayWriteScope,
 ] as const;
+
+export function satisfiesScope(required: AuthScope, granted: ReadonlyArray<AuthScope>): boolean {
+  if (!isPluginScope(required)) {
+    return granted.includes(required);
+  }
+  return (
+    granted.includes(required) ||
+    AuthStandardClientScopes.every((standardScope) => granted.includes(standardScope))
+  );
+}
+
+export const authEnvironmentScopes = (
+  scopes: ReadonlyArray<AuthScope>,
+): ReadonlyArray<AuthEnvironmentScope> => scopes.filter(isAuthEnvironmentScope);
 
 export const AuthTokenExchangeGrantType =
   "urn:ietf:params:oauth:grant-type:token-exchange" as const;
@@ -150,7 +186,7 @@ export type AuthBrowserSessionRequest = typeof AuthBrowserSessionRequest.Type;
 
 export const AuthBrowserSessionResult = Schema.Struct({
   authenticated: Schema.Literal(true),
-  scopes: AuthEnvironmentScopes,
+  scopes: AuthScopes,
   sessionMethod: ServerAuthSessionMethod,
   expiresAt: Schema.DateTimeUtc,
 });
@@ -330,14 +366,14 @@ export type AuthRevokeClientSessionInput = typeof AuthRevokeClientSessionInput.T
 
 export const AuthCreatePairingCredentialInput = Schema.Struct({
   label: Schema.optionalKey(TrimmedNonEmptyString),
-  scopes: Schema.optionalKey(AuthEnvironmentScopes),
+  scopes: Schema.optionalKey(AuthScopes),
 });
 export type AuthCreatePairingCredentialInput = typeof AuthCreatePairingCredentialInput.Type;
 
 export const AuthSessionState = Schema.Struct({
   authenticated: Schema.Boolean,
   auth: ServerAuthDescriptor,
-  scopes: Schema.optionalKey(AuthEnvironmentScopes),
+  scopes: Schema.optionalKey(AuthScopes),
   sessionMethod: Schema.optionalKey(ServerAuthSessionMethod),
   expiresAt: Schema.optionalKey(Schema.DateTimeUtc),
 });

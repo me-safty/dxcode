@@ -1,6 +1,7 @@
 import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
+  AuthPluginsManageScope,
   AuthStandardClientScopes,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -19,9 +20,10 @@ import {
   EnvironmentScopeRequiredError,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
+  isPluginScope,
 } from "@t3tools/contracts";
-import type { AuthEnvironmentScope } from "@t3tools/contracts";
-import { parseAllowedOAuthScope } from "@t3tools/shared/oauthScope";
+import type { AuthEnvironmentScope, AuthScope } from "@t3tools/contracts";
+import { parseOAuthScope } from "@t3tools/shared/oauthScope";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -109,7 +111,7 @@ export function failEnvironmentInvalidRequest(reason: EnvironmentRequestInvalidR
   );
 }
 
-export function failEnvironmentScopeRequired(requiredScope: AuthEnvironmentScope) {
+export function failEnvironmentScopeRequired(requiredScope: AuthScope) {
   return currentEnvironmentTraceId.pipe(
     Effect.flatMap((traceId) =>
       Effect.fail(
@@ -160,6 +162,32 @@ export const requireEnvironmentScope = Effect.fn("environment.auth.requireScope"
   }
   return session;
 });
+
+const TOKEN_EXCHANGE_CORE_SCOPES = new Set<AuthEnvironmentScope>([
+  AuthOrchestrationReadScope,
+  AuthOrchestrationOperateScope,
+  AuthTerminalOperateScope,
+  AuthReviewWriteScope,
+  AuthAccessReadScope,
+  AuthAccessWriteScope,
+  AuthRelayReadScope,
+  AuthRelayWriteScope,
+  AuthPluginsManageScope,
+]);
+
+function parseTokenExchangeScope(value: string): ReadonlyArray<AuthScope> | null {
+  const scopes = parseOAuthScope(value);
+  if (scopes === null) return null;
+  if (
+    !scopes.every(
+      (scope): scope is AuthScope =>
+        TOKEN_EXCHANGE_CORE_SCOPES.has(scope as AuthEnvironmentScope) || isPluginScope(scope),
+    )
+  ) {
+    return null;
+  }
+  return scopes;
+}
 
 export const environmentAuthenticatedAuthLayer = Layer.effect(
   EnvironmentAuthenticatedAuth,
@@ -250,19 +278,7 @@ export const authHttpApiLayer = HttpApiBuilder.group(
             const requestedScopes =
               args.payload.scope === undefined
                 ? undefined
-                : parseAllowedOAuthScope({
-                    value: args.payload.scope,
-                    allowedScopes: new Set<AuthEnvironmentScope>([
-                      AuthOrchestrationReadScope,
-                      AuthOrchestrationOperateScope,
-                      AuthTerminalOperateScope,
-                      AuthReviewWriteScope,
-                      AuthAccessReadScope,
-                      AuthAccessWriteScope,
-                      AuthRelayReadScope,
-                      AuthRelayWriteScope,
-                    ]),
-                  });
+                : parseTokenExchangeScope(args.payload.scope);
             if (requestedScopes === null) {
               return yield* failEnvironmentInvalidRequest("invalid_scope");
             }
@@ -330,7 +346,7 @@ export const authHttpApiLayer = HttpApiBuilder.group(
             const delegatedScopes = args.payload.scopes ?? AuthStandardClientScopes;
             if (
               delegatedScopes.length === 0 ||
-              new Set<AuthEnvironmentScope>(delegatedScopes).size !== delegatedScopes.length
+              new Set<AuthScope>(delegatedScopes).size !== delegatedScopes.length
             ) {
               return yield* failEnvironmentInvalidRequest("invalid_scope");
             }

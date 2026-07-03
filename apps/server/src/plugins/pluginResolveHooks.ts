@@ -12,9 +12,7 @@ export function initialize(data: unknown) {
 function shouldResolveFromHost(specifier: string, parentURL: string | undefined): boolean {
   if (!parentURL || !pluginsRootUrl || !parentURL.startsWith(pluginsRootUrl)) return false;
   return (
-    specifier === "effect" ||
-    specifier.startsWith("effect/") ||
-    specifier === "@t3tools/plugin-sdk"
+    specifier === "effect" || specifier.startsWith("effect/") || specifier === "@t3tools/plugin-sdk"
   );
 }
 

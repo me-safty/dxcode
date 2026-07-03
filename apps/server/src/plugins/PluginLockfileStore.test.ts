@@ -11,7 +11,10 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
 import * as PluginLockfileStoreModule from "./PluginLockfileStore.ts";
-import { PluginLockfileCorruptError, PluginLockfileTransitionError } from "./PluginLockfileStore.ts";
+import {
+  PluginLockfileCorruptError,
+  PluginLockfileTransitionError,
+} from "./PluginLockfileStore.ts";
 
 const layer = it.layer(
   PluginLockfileStoreModule.layer.pipe(

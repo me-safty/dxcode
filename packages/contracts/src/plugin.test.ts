@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import {
-  HOST_API_VERSION,
-  PluginLockfile,
-  PluginManifest,
-  hostApiSatisfies,
-} from "./plugin.ts";
+import { HOST_API_VERSION, PluginLockfile, PluginManifest, hostApiSatisfies } from "./plugin.ts";
 
 const decodeManifest = Schema.decodeUnknownSync(PluginManifest);
 const decodeLockfile = Schema.decodeUnknownSync(PluginLockfile);
@@ -51,9 +46,7 @@ describe("PluginManifest", () => {
   );
 
   it("rejects unknown capabilities", () => {
-    expect(() =>
-      decodeManifest({ ...minimalManifest, capabilities: ["not-real"] }),
-    ).toThrow();
+    expect(() => decodeManifest({ ...minimalManifest, capabilities: ["not-real"] })).toThrow();
   });
 
   it("rejects duplicate capabilities", () => {
@@ -81,8 +74,12 @@ describe("PluginManifest", () => {
   });
 
   it("rejects unsafe entry paths", () => {
-    expect(() => decodeManifest({ ...minimalManifest, entries: { server: "../server.js" } })).toThrow();
-    expect(() => decodeManifest({ ...minimalManifest, entries: { server: "/server.js" } })).toThrow();
+    expect(() =>
+      decodeManifest({ ...minimalManifest, entries: { server: "../server.js" } }),
+    ).toThrow();
+    expect(() =>
+      decodeManifest({ ...minimalManifest, entries: { server: "/server.js" } }),
+    ).toThrow();
   });
 
   it("rejects bad hostApi ranges", () => {

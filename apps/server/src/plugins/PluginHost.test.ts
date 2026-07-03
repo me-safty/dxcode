@@ -8,7 +8,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { pathToFileURL } from "node:url";
+import * as NodeURL from "node:url";
 
 import * as ServerConfig from "../config.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
@@ -52,7 +52,7 @@ const makeLockEntry = (overrides: Partial<PluginLockfilePlugin> = {}): PluginLoc
 
 const pluginEntrySource = () => `
 import { createRequire } from "node:module";
-const require = createRequire(${JSON.stringify(pathToFileURL(import.meta.url).href)});
+const require = createRequire(${JSON.stringify(NodeURL.pathToFileURL(import.meta.url).href)});
 const Effect = require("effect/Effect");
 const SqlClient = require("effect/unstable/sql/SqlClient");
 const NodeFs = require("node:fs");
@@ -100,15 +100,18 @@ const installPlugin = (input: {
 
     yield* fs.makeDirectory(pluginDir, { recursive: true });
     const encodedManifest = yield* encodeManifestJson({
-        id: input.pluginId,
-        name: "Test Plugin",
-        version: entry.version,
-        hostApi: input.manifestHostApi ?? "^1.0.0",
-        capabilities: [],
-        entries: { server: "server.js" },
-      });
+      id: input.pluginId,
+      name: "Test Plugin",
+      version: entry.version,
+      hostApi: input.manifestHostApi ?? "^1.0.0",
+      capabilities: [],
+      entries: { server: "server.js" },
+    });
     yield* fs.writeFileString(path.join(pluginDir, "manifest.json"), encodedManifest);
-    yield* fs.writeFileString(path.join(pluginDir, "server.js"), input.entrySource ?? pluginEntrySource());
+    yield* fs.writeFileString(
+      path.join(pluginDir, "server.js"),
+      input.entrySource ?? pluginEntrySource(),
+    );
     yield* store.updatePlugin(input.pluginId, () => Effect.succeed(entry));
     return { pluginDir, entry };
   });
@@ -180,7 +183,9 @@ layer("PluginHost", (it) => {
       `;
       assert.deepEqual(migrationRows, [{ version: 1 }]);
       assert.isTrue(
-        yield* fs.exists(path.join(pluginDataDir(config.pluginsDir, pluginId, path.join), "service-ran")),
+        yield* fs.exists(
+          path.join(pluginDataDir(config.pluginsDir, pluginId, path.join), "service-ran"),
+        ),
       );
 
       let lockfile = yield* store.readLockfile;
