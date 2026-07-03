@@ -246,9 +246,8 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
           }
         }
 
-        const handle = yield* vcsRegistry
-          .resolve({ cwd })
-          .pipe(Effect.mapError(
+        const handle = yield* vcsRegistry.resolve({ cwd }).pipe(
+          Effect.mapError(
             (error) =>
               new SourceControlProviderError({
                 provider: "unknown",
@@ -257,7 +256,8 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
                 detail: "Failed to detect source control provider.",
                 cause: error,
               }),
-          ));
+          ),
+        );
         const repository = yield* handle.driver
           .detectRepository(cwd)
           .pipe(Effect.catch(() => Effect.succeed(null)));
@@ -283,9 +283,8 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
           }
         }
 
-        const remotes = yield* handle.driver
-          .listRemotes(cwd)
-          .pipe(Effect.mapError(
+        const remotes = yield* handle.driver.listRemotes(cwd).pipe(
+          Effect.mapError(
             (error) =>
               new SourceControlProviderError({
                 provider: "unknown",
@@ -294,7 +293,8 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
                 detail: "Failed to detect source control provider.",
                 cause: error,
               }),
-          ));
+          ),
+        );
         const context = selectProviderContext(remotes.remotes);
 
         const refinedContext = yield* SourceControlProviderDiscovery.refineUnknownRemoteProvider({
