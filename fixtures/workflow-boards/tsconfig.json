@@ -7,5 +7,5 @@
     "types": ["node"],
     "plugins": [{ "name": "@effect/language-service" }]
   },
-  "include": ["server/**/*.ts"]
+  "include": ["server/**/*.ts", "contracts/**/*.ts"]
 }
