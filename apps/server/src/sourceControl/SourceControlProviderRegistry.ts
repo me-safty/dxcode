@@ -235,10 +235,21 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
         const input = providerDetectionInputFromCacheKey(cacheKey);
         const { cwd, projectId } = input;
 
+        // A settings read failure falls back to remote-based detection instead
+        // of failing every source-control operation; the warning keeps the
+        // skipped override visible, and the cache is invalidated on the next
+        // settings change.
+        const settingsForOverrideLookup = serverSettings.getSettings.pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning("project remote override lookup skipped: settings unavailable", {
+              cause: error,
+            }),
+          ),
+          Effect.catch(() => Effect.succeed(null)),
+        );
+
         if (projectId) {
-          const settings = yield* serverSettings.getSettings.pipe(
-            Effect.catch(() => Effect.succeed(null)),
-          );
+          const settings = yield* settingsForOverrideLookup;
           const override = settings?.projectSettings[projectId]?.remoteOverride ?? null;
           const overrideContext = override ? providerContextFromOverride(override) : null;
           if (overrideContext) {
@@ -272,9 +283,7 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
             Effect.catch(() => Effect.succeed(Option.none())),
           );
         if (!projectId && Option.isSome(projectOption)) {
-          const settings = yield* serverSettings.getSettings.pipe(
-            Effect.catch(() => Effect.succeed(null)),
-          );
+          const settings = yield* settingsForOverrideLookup;
           const override =
             settings?.projectSettings[projectOption.value.id]?.remoteOverride ?? null;
           const overrideContext = override ? providerContextFromOverride(override) : null;

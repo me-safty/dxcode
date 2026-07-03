@@ -210,7 +210,7 @@ describe("vcsActionState", () => {
         environmentId,
         cwd,
       }),
-    ).toBe(JSON.stringify([environmentId, cwd, null]));
+    ).toBe(JSON.stringify([environmentId, cwd]));
     expect(getVcsActionTargetKey({ environmentId: null, cwd })).toBeNull();
     expect(
       getVcsActionTargetKey({

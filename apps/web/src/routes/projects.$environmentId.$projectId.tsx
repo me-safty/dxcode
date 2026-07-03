@@ -1,6 +1,7 @@
 import { ArrowLeftIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { createFileRoute, redirect, useCanGoBack, useNavigate } from "@tanstack/react-router";
 import type { AuthGateBeforeLoadArgs } from "./-authGateRouteContext";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { createDefaultModelSelection, createModelSelection } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -183,7 +184,7 @@ function ProjectRouteView() {
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryProviders = useAtomValue(primaryServerProvidersAtom);
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const primaryKeybindings = useAtomValue(primaryServerKeybindingsAtom);
   const primarySettings = usePrimarySettings();
   const serverConfigs = useServerConfigs();
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
@@ -194,6 +195,10 @@ function ProjectRouteView() {
   const projectServerConfig = project?.environmentId
     ? (serverConfigs.get(project.environmentId) ?? null)
     : null;
+  const keybindings =
+    project?.environmentId && project.environmentId !== primaryEnvironmentId
+      ? (projectServerConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS)
+      : primaryKeybindings;
   const settings = useMemo(
     () =>
       project?.environmentId && project.environmentId !== primaryEnvironmentId
@@ -336,6 +341,10 @@ function ProjectRouteView() {
         },
       });
       if (result._tag === "Failure") {
+        // Drop the optimistic draft so the UI falls back to the persisted
+        // values instead of showing the rejected edit as saved.
+        setDraft(null);
+        refreshProjectDetails();
         showProjectSettingsError(
           "Failed to update project settings",
           squashAtomCommandFailure(result),
@@ -361,6 +370,10 @@ function ProjectRouteView() {
             },
           });
           if (result._tag === "Failure") {
+            // Drop the optimistic draft so the UI falls back to the persisted
+            // values instead of showing the rejected edit as saved.
+            setDraft(null);
+            refreshProjectDetails();
             showProjectSettingsError(
               "Failed to update project settings",
               squashAtomCommandFailure(result),

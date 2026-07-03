@@ -6,7 +6,6 @@ import {
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   GitStackedAction,
-  ProjectId,
   type ProjectId as ProjectIdType,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -63,7 +62,7 @@ export interface VcsActionTarget {
 export interface ResolvedVcsActionTarget {
   readonly environmentId: EnvironmentIdType;
   readonly cwd: string;
-  readonly projectId: ProjectIdType | null;
+  readonly projectId?: ProjectIdType | null;
 }
 
 export interface BeginVcsActionInput {
@@ -162,7 +161,7 @@ export const EMPTY_VCS_ACTION_STATE = Object.freeze<VcsActionState>({
 const nowMs = (): number => DateTime.toEpochMillis(DateTime.nowUnsafe());
 let nextLocalActionId = 0;
 const decodeVcsActionTargetKey = Schema.decodeUnknownSync(
-  Schema.Tuple([EnvironmentId, Schema.String, Schema.NullOr(ProjectId)]),
+  Schema.Tuple([EnvironmentId, Schema.String]),
 );
 
 export const vcsActionStateAtom = Atom.family((key: string) => {
@@ -181,13 +180,16 @@ export function getVcsActionTargetKey(target: VcsActionTarget): string | null {
   if (target.environmentId === null || target.cwd === null) {
     return null;
   }
-  return JSON.stringify([target.environmentId, target.cwd, target.projectId ?? null]);
+  // Keyed by environment + worktree only: all VCS operations against the same
+  // repository must share one serial lock, regardless of which project view
+  // initiated them.
+  return JSON.stringify([target.environmentId, target.cwd]);
 }
 
 export function parseVcsActionTargetKey(key: string): ResolvedVcsActionTarget {
   try {
-    const [environmentId, cwd, projectId] = decodeVcsActionTargetKey(JSON.parse(key));
-    return { environmentId, cwd, projectId };
+    const [environmentId, cwd] = decodeVcsActionTargetKey(JSON.parse(key));
+    return { environmentId, cwd };
   } catch (cause) {
     throw new VcsActionTargetKeyParseError({ keyLength: key.length, cause });
   }
@@ -463,7 +465,9 @@ export function createVcsActionManager<R, E>(
         const rpcInput: GitRunStackedActionInput = {
           actionId: transportActionId,
           cwd: target.cwd,
-          ...(target.projectId ? { projectId: target.projectId } : {}),
+          // The command is cached per [environment, cwd]; the project context
+          // rides along from whichever target requested it.
+          ...(requestedTarget.projectId ? { projectId: requestedTarget.projectId } : {}),
           action: input.action,
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),

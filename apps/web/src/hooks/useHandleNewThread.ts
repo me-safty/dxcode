@@ -8,6 +8,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
+import { createDefaultModelSelection } from "@t3tools/shared/model";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -94,6 +95,17 @@ export function useNewThreadHandler() {
         }
         // Without a per-project default, keep the user's sticky selection
         // instead of resetting to the canonical default model.
+        const { stickyModelSelectionByProvider, stickyActiveProvider } =
+          useComposerDraftStore.getState();
+        if (
+          stickyActiveProvider === null &&
+          Object.keys(stickyModelSelectionByProvider).length === 0
+        ) {
+          setModelSelection(draftId, createDefaultModelSelection(), {
+            preserveExistingOptions: false,
+          });
+          return;
+        }
         applyStickyState(draftId);
       };
       const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
