@@ -31,6 +31,7 @@ import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { isGitRepository } from "../../git/Utils.ts";
+import { forkDomainEventListener } from "../DomainEventListener.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -1694,19 +1695,21 @@ const make = Effect.gen(function* () {
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
-      const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
-      yield* Effect.forkScoped(
-        Stream.runForEach(providerService.streamEvents, (event) =>
-          worker.enqueue({ source: "runtime", event }),
-        ),
-      );
-      yield* Effect.forkScoped(
-        Stream.runForEach(Stream.fromSubscription(domainEventSubscription), (event) => {
+      yield* forkDomainEventListener(
+        orchestrationEngine,
+        (event) => {
           if (event.type !== "thread.turn-start-requested") {
             return Effect.void;
           }
           return worker.enqueue({ source: "domain", event });
-        }),
+        },
+        { label: "provider runtime ingestion" },
+      );
+
+      yield* Effect.forkScoped(
+        Stream.runForEach(providerService.streamEvents, (event) =>
+          worker.enqueue({ source: "runtime", event }),
+        ),
       );
     });
 

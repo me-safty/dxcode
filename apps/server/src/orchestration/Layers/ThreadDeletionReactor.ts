@@ -3,10 +3,10 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
+import { forkDomainEventListener } from "../DomainEventListener.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   ThreadDeletionReactor,
@@ -80,14 +80,15 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(processThreadDeletedSafely);
 
   const start: ThreadDeletionReactorShape["start"] = Effect.fn("start")(function* () {
-    const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
-    yield* Effect.forkScoped(
-      Stream.runForEach(Stream.fromSubscription(domainEventSubscription), (event) => {
+    yield* forkDomainEventListener(
+      orchestrationEngine,
+      (event) => {
         if (event.type !== "thread.deleted") {
           return Effect.void;
         }
         return worker.enqueue(event);
-      }),
+      },
+      { label: "thread deletion reactor" },
     );
   });
 

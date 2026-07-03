@@ -35,6 +35,7 @@ import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+import { forkDomainEventListener } from "../DomainEventListener.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -833,9 +834,9 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(processInputSafely);
 
   const start: CheckpointReactorShape["start"] = Effect.fn("start")(function* () {
-    const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
-    yield* Effect.forkScoped(
-      Stream.runForEach(Stream.fromSubscription(domainEventSubscription), (event) => {
+    yield* forkDomainEventListener(
+      orchestrationEngine,
+      (event) => {
         if (
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&
@@ -845,7 +846,8 @@ const make = Effect.gen(function* () {
           return Effect.void;
         }
         return worker.enqueue({ source: "domain", event });
-      }),
+      },
+      { label: "checkpoint reactor" },
     );
 
     yield* Effect.forkScoped(

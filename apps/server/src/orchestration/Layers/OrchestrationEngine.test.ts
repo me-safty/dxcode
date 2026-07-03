@@ -15,7 +15,6 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -438,14 +437,8 @@ describe("OrchestrationEngine", () => {
     const eventTypes: string[] = [];
     await system.run(
       Effect.gen(function* () {
-        const eventQueue = yield* Queue.unbounded<OrchestrationEvent>();
         const domainEventSubscription = yield* engine.subscribeDomainEvents;
-        yield* Effect.forkScoped(
-          Stream.take(Stream.fromSubscription(domainEventSubscription), 2).pipe(
-            Stream.runForEach((event) => Queue.offer(eventQueue, event).pipe(Effect.asVoid)),
-          ),
-        );
-        yield* Effect.sleep("10 millis");
+        const domainEventStream = Stream.fromSubscription(domainEventSubscription);
         yield* engine.dispatch({
           type: "thread.create",
           commandId: CommandId.make("cmd-stream-thread-create"),
@@ -468,8 +461,8 @@ describe("OrchestrationEngine", () => {
           threadId: ThreadId.make("thread-stream"),
           title: "domain-stream-updated",
         });
-        eventTypes.push((yield* Queue.take(eventQueue)).type);
-        eventTypes.push((yield* Queue.take(eventQueue)).type);
+        const events = yield* Stream.take(domainEventStream, 2).pipe(Stream.runCollect);
+        eventTypes.push(...Array.from(events, (event) => event.type));
       }).pipe(Effect.scoped),
     );
 
