@@ -68,6 +68,10 @@ export interface AcpSessionRuntimeOptions {
     readonly version: string;
   };
   readonly authMethodId: string;
+  readonly skipAuthentication?: boolean;
+  readonly resolveAuthMethodId?: (
+    initializeResult: EffectAcpSchema.InitializeResponse,
+  ) => string | undefined;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -276,6 +280,32 @@ export const make = (
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
     const eventQueue = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
+    const outstandingEventStreamBarriersRef = yield* Ref.make(new Set<Deferred.Deferred<void>>());
+    // Once the runtime scope closes there may be no event consumer left, so
+    // reject new offers and acknowledge queued or dequeued barriers to keep
+    // `drainEvents` callers from waiting on a barrier nobody will process.
+    yield* Scope.addFinalizer(
+      runtimeScope,
+      Effect.gen(function* () {
+        yield* Queue.interrupt(eventQueue);
+        const remaining = yield* Queue.clear(eventQueue).pipe(
+          Effect.catchCause(() => Effect.succeed([] as Array<AcpSessionRuntimeEvent>)),
+        );
+        const outstanding = yield* Ref.get(outstandingEventStreamBarriersRef);
+        yield* Ref.set(outstandingEventStreamBarriersRef, new Set());
+        const acknowledgements = new Set(outstanding);
+        for (const event of remaining) {
+          if (event._tag === "EventStreamBarrier") {
+            acknowledgements.add(event.acknowledge);
+          }
+        }
+        yield* Effect.forEach(
+          acknowledgements,
+          (acknowledge) => Deferred.succeed(acknowledge, undefined).pipe(Effect.asVoid),
+          { discard: true },
+        );
+      }),
+    );
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
@@ -529,15 +559,17 @@ export const make = (
         acp.agent.initialize(initializePayload),
       );
 
-      const authenticatePayload = {
-        methodId: options.authMethodId,
-      } satisfies EffectAcpSchema.AuthenticateRequest;
+      if (!options.skipAuthentication) {
+        const authenticatePayload = {
+          methodId: options.resolveAuthMethodId?.(initializeResult) ?? options.authMethodId,
+        } satisfies EffectAcpSchema.AuthenticateRequest;
 
-      yield* runLoggedRequest(
-        "authenticate",
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
-      );
+        yield* runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        );
+      }
 
       let sessionId: string;
       let sessionSetupResult:
@@ -696,11 +728,29 @@ export const make = (
       getEvents: () => Stream.fromQueue(eventQueue),
       drainEvents: Effect.gen(function* () {
         const acknowledge = yield* Deferred.make<void>();
-        yield* Queue.offer(eventQueue, {
-          _tag: "EventStreamBarrier",
-          acknowledge,
+        yield* Ref.update(outstandingEventStreamBarriersRef, (barriers) => {
+          const next = new Set(barriers);
+          next.add(acknowledge);
+          return next;
         });
-        yield* Deferred.await(acknowledge);
+        yield* Effect.gen(function* () {
+          const offered = yield* Queue.offer(eventQueue, {
+            _tag: "EventStreamBarrier",
+            acknowledge,
+          });
+          if (!offered) {
+            return;
+          }
+          yield* Deferred.await(acknowledge);
+        }).pipe(
+          Effect.ensuring(
+            Ref.update(outstandingEventStreamBarriersRef, (barriers) => {
+              const next = new Set(barriers);
+              next.delete(acknowledge);
+              return next;
+            }),
+          ),
+        );
       }),
       getModeState: Ref.get(modeStateRef),
       getConfigOptions: Ref.get(configOptionsRef),

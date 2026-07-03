@@ -19,7 +19,8 @@
     "build:bundle": "vp pack",
     "start": "node dist/bin.mjs",
     "typecheck": "tsgo --noEmit",
-    "test": "vp test run"
+    "test": "vp test run",
+    "test:devin": "vp test run src/provider/Layers/DevinAdapter.test.ts src/provider/Layers/DevinProvider.test.ts src/provider/acp/DevinAcpSupport.test.ts src/provider/acp/DevinElicitation.test.ts src/provider/acp/AcpAdapterRuntime.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.170",

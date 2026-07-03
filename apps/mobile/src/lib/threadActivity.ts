@@ -195,14 +195,12 @@ function parseUserInputQuestions(
           };
         })
         .filter((option): option is UserInputQuestion["options"][number] => option !== null);
-      if (options.length === 0) {
-        return null;
-      }
       return {
         id: question.id,
         header: question.header,
         question: question.question,
         options,
+        required: question.required !== false,
         multiSelect: question.multiSelect === true,
       };
     })
@@ -227,6 +225,10 @@ function resolvePendingUserInputAnswer(
     return customAnswer;
   }
   return normalizeDraftAnswer(draft?.selectedOptionLabel);
+}
+
+function isRequiredQuestion(question: UserInputQuestion): boolean {
+  return question.required !== false;
 }
 
 function deriveWorkLogEntries(
@@ -1301,7 +1303,10 @@ export function buildPendingUserInputAnswers(
   for (const question of questions) {
     const answer = resolvePendingUserInputAnswer(draftAnswers[question.id]);
     if (!answer) {
-      return null;
+      if (isRequiredQuestion(question)) {
+        return null;
+      }
+      continue;
     }
     answers[question.id] = answer;
   }

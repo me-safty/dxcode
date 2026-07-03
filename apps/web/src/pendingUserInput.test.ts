@@ -153,6 +153,31 @@ describe("buildPendingUserInputAnswers", () => {
   it("returns null when any question is unanswered", () => {
     expect(buildPendingUserInputAnswers([singleSelectQuestion], {})).toBeNull();
   });
+
+  it("omits unanswered optional questions", () => {
+    expect(
+      buildPendingUserInputAnswers(
+        [
+          singleSelectQuestion,
+          {
+            id: "notes",
+            header: "Notes",
+            question: "Any notes?",
+            options: [],
+            required: false,
+            multiSelect: false,
+          },
+        ],
+        {
+          scope: {
+            selectedOptionLabels: ["Orchestration-first"],
+          },
+        },
+      ),
+    ).toEqual({
+      scope: "Orchestration-first",
+    });
+  });
 });
 
 describe("pending user input question progress", () => {
@@ -243,6 +268,29 @@ describe("pending user input question progress", () => {
     ).toMatchObject({
       selectedOptionLabels: ["Server", "Web"],
       resolvedAnswer: ["Server", "Web"],
+      canAdvance: true,
+      isComplete: true,
+    });
+  });
+
+  it("allows advancement through unanswered optional questions", () => {
+    expect(
+      derivePendingUserInputProgress(
+        [
+          {
+            id: "notes",
+            header: "Notes",
+            question: "Any notes?",
+            options: [],
+            required: false,
+            multiSelect: false,
+          },
+        ],
+        {},
+        0,
+      ),
+    ).toMatchObject({
+      resolvedAnswer: null,
       canAdvance: true,
       isComplete: true,
     });

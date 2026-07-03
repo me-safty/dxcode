@@ -258,7 +258,49 @@ describe("derivePendingUserInputs", () => {
                 description: "Allow workspace writes only",
               },
             ],
+            required: true,
             multiSelect: true,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("tracks free-text user-input prompts with no options", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "user-input-free-text",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {
+          requestId: "req-user-input-free-text",
+          questions: [
+            {
+              id: "notes",
+              header: "Devin",
+              question: "Any notes?",
+              options: [],
+              multiSelect: false,
+            },
+          ],
+        },
+      }),
+    ];
+
+    expect(derivePendingUserInputs(activities)).toEqual([
+      {
+        requestId: "req-user-input-free-text",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        questions: [
+          {
+            id: "notes",
+            header: "Devin",
+            question: "Any notes?",
+            options: [],
+            required: true,
+            multiSelect: false,
           },
         ],
       },

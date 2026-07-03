@@ -65,6 +65,37 @@ describe("AcpSessionRuntime", () => {
     );
   });
 
+  it.effect("can skip authenticate for ACP agents that read stored credentials", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const started = yield* runtime.start();
+
+      expect(started.sessionId).toBe("mock-session-1");
+      expect(requestEvents.some((event) => event.method === "authenticate")).toBe(false);
+      expect(requestEvents.some((event) => event.method === "session/new")).toBe(true);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "unused",
+          skipAuthentication: true,
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
   it.effect("starts a session, prompts, and emits normalized events against the mock agent", () =>
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
@@ -566,6 +597,40 @@ describe("AcpSessionRuntime", () => {
       Effect.provide(NodeServices.layer),
       TestClock.withLive,
     ),
+  );
+
+  it.effect("acknowledges a dequeued drainEvents barrier when the runtime scope closes", () =>
+    Effect.gen(function* () {
+      const drainFiber = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+          yield* runtime.start();
+          const fiber = yield* runtime.drainEvents.pipe(Effect.forkDetach);
+          const event = yield* Stream.runHead(runtime.getEvents()).pipe(Effect.timeout("1 second"));
+
+          expect(Option.isSome(event)).toBe(true);
+          if (Option.isSome(event)) {
+            expect(event.value._tag).toBe("EventStreamBarrier");
+          }
+
+          return fiber;
+        }).pipe(
+          Effect.provide(
+            AcpSessionRuntime.layer({
+              authMethodId: "test",
+              spawn: {
+                command: mockAgentCommand,
+                args: mockAgentArgs,
+              },
+              cwd: process.cwd(),
+              clientInfo: { name: "t3-test", version: "0.0.0" },
+            }),
+          ),
+        ),
+      );
+
+      yield* Fiber.join(drainFiber).pipe(Effect.timeout("1 second"));
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("rejects invalid config option values before sending session/set_config_option", () => {
