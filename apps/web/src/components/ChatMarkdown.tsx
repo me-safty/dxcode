@@ -40,6 +40,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
+import { extractMosaicArtifactId, MosaicArtifact } from "./chat/mosaic";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
@@ -1497,6 +1498,19 @@ function ChatMarkdown({
         }
 
         const language = extractFenceLanguage(codeBlock.className);
+        if (language === "mosaic") {
+          // A ```mosaic fence is a UI artifact, not source to highlight: hand it
+          // to the Mosaic renderer, which draws it with t3code's own components.
+          // Streaming state matters: a partial fence never compiles, so the
+          // renderer waits for the final text before reporting diagnostics.
+          return (
+            <MosaicArtifact
+              source={codeBlock.code}
+              artifactId={extractMosaicArtifactId(extractPreCodeMeta(node))}
+              isStreaming={isStreaming}
+            />
+          );
+        }
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
         return (
           <MarkdownCodeBlock

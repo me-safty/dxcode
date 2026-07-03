@@ -24,6 +24,8 @@
     "@formkit/auto-animate": "^0.9.0",
     "@legendapp/list": "3.2.0",
     "@lexical/react": "^0.41.0",
+    "@mosaicjs/core": "^0.8.0",
+    "@mosaicjs/react": "^0.8.0",
     "@pierre/diffs": "catalog:",
     "@pierre/trees": "1.0.0-beta.4",
     "@t3tools/client-runtime": "workspace:*",
