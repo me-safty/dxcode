@@ -28,6 +28,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import { PluginLockfileStore } from "./PluginLockfileStore.ts";
 import { PluginMigrator } from "./PluginMigrator.ts";
@@ -39,7 +40,7 @@ import {
 } from "./PluginPaths.ts";
 import { PluginRuntimeRegistry } from "./PluginRuntimeRegistry.ts";
 
-const APP_VERSION = "0.0.28";
+const APP_VERSION = packageJson.version;
 const decodeManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(PluginManifest));
 
 const healthyActivationDelay = () => {
@@ -207,7 +208,11 @@ const startService = (input: {
           cause: Cause.pretty(cause),
         }),
       ),
-      Effect.repeat(Schedule.exponential("250 millis")),
+      // Exponential backoff capped at 30s so a flapping service keeps
+      // retrying at a bounded cadence instead of backing off forever.
+      Effect.repeat(
+        Schedule.either(Schedule.exponential("250 millis"), Schedule.spaced("30 seconds")),
+      ),
     );
 
 export const make = Effect.fn("PluginHost.make")(function* () {

@@ -140,6 +140,110 @@ layer("PluginMigrator", (it) => {
     }),
   );
 
+  it.effect("rejects migrations that drop objects outside the plugin namespace", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const migrator = yield* setup;
+      const pluginId = PluginId.make("drop-plugin");
+      yield* sql`CREATE TABLE core_victim (id TEXT PRIMARY KEY)`;
+
+      const result = yield* Effect.result(
+        migrator.run(pluginId, [migration(1, "Drop", "DROP TABLE core_victim")]),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginMigrationViolation);
+      }
+      const tables = yield* sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_master WHERE name = 'core_victim'
+      `;
+      assert.equal(tables.length, 1);
+    }),
+  );
+
+  it.effect("rejects migrations that rename a core table into the plugin namespace", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const migrator = yield* setup;
+      const pluginId = PluginId.make("rename-plugin");
+      const prefix = pluginPrefix(pluginId);
+      yield* sql`CREATE TABLE core_renamed (id TEXT PRIMARY KEY)`;
+
+      const result = yield* Effect.result(
+        migrator.run(pluginId, [
+          migration(1, "Rename", `ALTER TABLE core_renamed RENAME TO ${prefix}stolen`),
+        ]),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginMigrationViolation);
+      }
+      const tables = yield* sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_master WHERE name = 'core_renamed'
+      `;
+      assert.equal(tables.length, 1);
+    }),
+  );
+
+  it.effect("rejects ATTACH DATABASE in plugin migrations", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const migrator = yield* setup;
+      const pluginId = PluginId.make("attach-plugin");
+
+      // SQLite itself refuses ATTACH inside the migration transaction, so
+      // this surfaces as a migration failure; the PRAGMA database_list gate
+      // additionally covers a migration that breaks out of the transaction.
+      const result = yield* Effect.result(
+        migrator.run(pluginId, [
+          migration(1, "Attach", [
+            "ATTACH DATABASE ':memory:' AS escape_hatch",
+            "CREATE TABLE escape_hatch.evil (id TEXT)",
+          ]),
+        ]),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      const rows = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM plugin_migrations WHERE plugin_id = ${pluginId}
+      `;
+      assert.equal(rows[0]?.count, 0);
+    }),
+  );
+
+  it.effect("rejects TEMP objects in plugin migrations", () =>
+    Effect.gen(function* () {
+      const migrator = yield* setup;
+      const pluginId = PluginId.make("temp-plugin");
+
+      const result = yield* Effect.result(
+        migrator.run(pluginId, [
+          migration(1, "Temp", "CREATE TEMP TABLE sneaky (id TEXT)"),
+        ]),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginMigrationViolation);
+      }
+    }),
+  );
+
+  it.effect("treats an empty migration list as a no-op even with recorded history", () =>
+    Effect.gen(function* () {
+      const migrator = yield* setup;
+      const pluginId = PluginId.make("empty-plugin");
+      const prefix = pluginPrefix(pluginId);
+
+      yield* migrator.run(pluginId, [
+        migration(1, "Init", `CREATE TABLE ${prefix}items (id TEXT PRIMARY KEY)`),
+      ]);
+      yield* migrator.run(pluginId, []);
+    }),
+  );
+
   it.effect("enforces prefixes for indexes and views", () =>
     Effect.gen(function* () {
       const migrator = yield* setup;

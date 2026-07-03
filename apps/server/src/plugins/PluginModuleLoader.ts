@@ -106,7 +106,7 @@ export const make = Effect.fn("PluginModuleLoader.make")(function* () {
       const realPluginDir = yield* fs.realPath(pluginDir).pipe(
         Effect.mapError((cause) => new PluginModuleLoadError({ pluginDir, entry: entryRelPath, cause })),
       );
-      const resolvedEntry = path.resolve(pluginDir, entryRelPath);
+      const resolvedEntry = path.resolve(realPluginDir, entryRelPath);
       const realEntry = yield* fs.realPath(resolvedEntry).pipe(
         Effect.mapError((cause) => new PluginModuleLoadError({ pluginDir, entry: entryRelPath, cause })),
       );

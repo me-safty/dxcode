@@ -101,6 +101,14 @@ const changedObjects = (
   return after.filter((entry) => beforeByKey.get(objectKey(entry))?.sql !== entry.sql);
 };
 
+const removedObjects = (
+  before: ReadonlyArray<SqliteMasterObject>,
+  after: ReadonlyArray<SqliteMasterObject>,
+) => {
+  const afterKeys = new Set(after.map(objectKey));
+  return before.filter((entry) => !afterKeys.has(objectKey(entry)));
+};
+
 const validateMigrationObjects = (input: {
   readonly pluginId: PluginId;
   readonly version: number;
@@ -112,6 +120,20 @@ const validateMigrationObjects = (input: {
     const preMigrationCoreTables = input.before
       .filter((entry) => entry.type === "table" && !entry.name.startsWith(input.prefix))
       .map((entry) => entry.name);
+
+    // Dropping (or renaming away) an object the plugin does not own is a
+    // violation: a dropped object never appears in the after-snapshot, so it
+    // must be detected from the before side.
+    for (const entry of removedObjects(input.before, input.after)) {
+      if (!entry.name.startsWith(input.prefix)) {
+        return yield* new PluginMigrationViolation({
+          pluginId: input.pluginId,
+          version: input.version,
+          objectName: entry.name,
+          detail: "migration removed an object outside the plugin namespace",
+        });
+      }
+    }
 
     for (const entry of changedObjects(input.before, input.after)) {
       if (!entry.name.startsWith(input.prefix)) {
@@ -162,6 +184,9 @@ export const make = Effect.fn("PluginMigrator.make")(function* () {
 
   const run: PluginMigrator["Service"]["run"] = (pluginId, migrations) =>
     Effect.gen(function* () {
+      // No migrations means nothing to run — not a downgrade (a plugin may
+      // legitimately ship no migrations even after earlier versions did).
+      if (migrations.length === 0) return;
       yield* validateMigrationList(pluginId, migrations);
       const sorted = Array.from(migrations).sort((left, right) => left.version - right.version);
       const providedHead = sorted.at(-1)?.version ?? 0;
@@ -185,6 +210,9 @@ export const make = Effect.fn("PluginMigrator.make")(function* () {
         yield* sql.withTransaction(
           Effect.gen(function* () {
             const before = yield* sqliteMasterSnapshot(sql);
+            const tempBefore = yield* sql<{ readonly name: string }>`
+              SELECT name FROM sqlite_temp_master
+            `.pipe(Effect.orElseSucceed(() => []));
             yield* migration.up.pipe(
               Effect.provideService(SqlClient.SqlClient, sql),
               Effect.mapError(
@@ -197,6 +225,40 @@ export const make = Effect.fn("PluginMigrator.make")(function* () {
               ),
             );
             const after = yield* sqliteMasterSnapshot(sql);
+            // ATTACH and TEMP objects live outside the main sqlite_master
+            // snapshot, so the diff gate cannot see them — forbid them
+            // outright rather than pretend they are covered.
+            // database_list always reports "main" (and "temp" once the temp
+            // schema exists); anything else is an ATTACHed database.
+            const databases = yield* sql<{ readonly name: string }>`PRAGMA database_list`;
+            const attached = databases.find(
+              (database) => database.name !== "main" && database.name !== "temp",
+            );
+            if (attached) {
+              // Best-effort DETACH so a rogue attach cannot persist on the
+              // shared connection past this violation.
+              yield* sql.unsafe(`DETACH DATABASE "${attached.name.replaceAll('"', '""')}"`)
+                .unprepared.pipe(Effect.ignore);
+              return yield* new PluginMigrationViolation({
+                pluginId,
+                version: migration.version,
+                objectName: attached.name,
+                detail: "ATTACH DATABASE is not permitted in plugin migrations",
+              });
+            }
+            const tempAfter = yield* sql<{ readonly name: string }>`
+              SELECT name FROM sqlite_temp_master
+            `.pipe(Effect.orElseSucceed(() => []));
+            const tempBeforeNames = new Set(tempBefore.map((row) => row.name));
+            const newTempObject = tempAfter.find((row) => !tempBeforeNames.has(row.name));
+            if (newTempObject) {
+              return yield* new PluginMigrationViolation({
+                pluginId,
+                version: migration.version,
+                objectName: newTempObject.name,
+                detail: "TEMP objects are not permitted in plugin migrations",
+              });
+            }
             yield* validateMigrationObjects({
               pluginId,
               version: migration.version,
