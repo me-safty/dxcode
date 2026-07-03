@@ -78,11 +78,9 @@ export function makeTerminalsCapability(input: {
 
   // Suspend so the live set is read at teardown time, not at construction.
   const shutdown = Effect.suspend(() =>
-    Effect.forEach(
-      Array.from(live.values()),
-      (handle) => closeHandle(handle).pipe(Effect.ignore),
-      { discard: true },
-    ),
+    Effect.forEach(Array.from(live.values()), (handle) => closeHandle(handle).pipe(Effect.ignore), {
+      discard: true,
+    }),
   );
 
   return { capability, shutdown };

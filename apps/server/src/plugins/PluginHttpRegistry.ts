@@ -38,10 +38,7 @@ const pathSegments = (path: string) =>
     .split("/")
     .filter((segment) => segment.length > 0);
 
-const matchPath = (
-  pattern: string,
-  path: string,
-): Readonly<Record<string, string>> | null => {
+const matchPath = (pattern: string, path: string): Readonly<Record<string, string>> | null => {
   const patternSegments = pathSegments(pattern);
   const requestSegments = pathSegments(path);
   if (patternSegments.length !== requestSegments.length) return null;
@@ -69,9 +66,7 @@ const matchPath = (
 };
 
 export const make = Effect.fn("PluginHttpRegistry.make")(function* () {
-  const routesRef = yield* Ref.make(
-    new Map<PluginId, ReadonlyArray<PluginHttpDescriptor>>(),
-  );
+  const routesRef = yield* Ref.make(new Map<PluginId, ReadonlyArray<PluginHttpDescriptor>>());
 
   return PluginHttpRegistry.of({
     put: (pluginId, routes) =>

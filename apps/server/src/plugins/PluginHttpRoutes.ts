@@ -1,7 +1,4 @@
-import {
-  pluginOperateScope,
-  satisfiesScope,
-} from "@t3tools/contracts";
+import { pluginOperateScope, satisfiesScope } from "@t3tools/contracts";
 import type { PluginId } from "@t3tools/contracts/plugin";
 import type { PluginHttpResponse } from "@t3tools/plugin-sdk";
 import * as Cause from "effect/Cause";
@@ -9,7 +6,12 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { HttpRouter, HttpServerRequest, HttpServerRespondable, HttpServerResponse } from "effect/unstable/http";
+import {
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerRespondable,
+  HttpServerResponse,
+} from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import {
@@ -30,12 +32,10 @@ function bodyLimit(value: number | undefined): number {
   return Math.min(MAX_BODY_BYTES, Math.max(0, Math.floor(value)));
 }
 
-function parsePluginPath(pathname: string):
-  | {
-      readonly pluginId: PluginId;
-      readonly routePath: string;
-    }
-  | null {
+function parsePluginPath(pathname: string): {
+  readonly pluginId: PluginId;
+  readonly routePath: string;
+} | null {
   if (!pathname.startsWith(`${ROUTE_PREFIX}/`)) return null;
   const suffix = pathname.slice(`${ROUTE_PREFIX}/`.length);
   const separatorIndex = suffix.indexOf("/");

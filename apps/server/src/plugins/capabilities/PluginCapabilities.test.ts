@@ -34,10 +34,9 @@ it.effect("database executes parameterized SQL and rolls back failed transaction
       "one",
       "kept",
     ]);
-    const rows = yield* database.execute(
-      "SELECT id, value FROM p_test_plugin_items WHERE id = ?",
-      ["one"],
-    );
+    const rows = yield* database.execute("SELECT id, value FROM p_test_plugin_items WHERE id = ?", [
+      "one",
+    ]);
     assert.deepEqual(rows, [{ id: "one", value: "kept" }]);
 
     yield* database
@@ -198,7 +197,10 @@ it.effect("projections read returns contract-shaped thread data with caps", () =
 
     assert.deepEqual(yield* capability.getThreadShellById("thread-1" as any), threadShell);
     assert.deepEqual(yield* capability.getThreadDetailById("thread-1" as any), threadDetail);
-    assert.equal((yield* capability.listTurnsByThreadId({ threadId: "thread-1" as any })).length, 1);
+    assert.equal(
+      (yield* capability.listTurnsByThreadId({ threadId: "thread-1" as any })).length,
+      1,
+    );
     assert.deepEqual(
       yield* capability.listMessagesByThreadId({ threadId: "thread-1" as any, limit: 1 }),
       [
@@ -232,7 +234,8 @@ it.effect("text generation delegates the existing one-shot operations", () =>
     const capability = makeTextGenerationCapability({
       generateCommitMessage: (input) =>
         Effect.succeed({ subject: `commit:${input.branch}`, body: input.stagedSummary }),
-      generatePrContent: (input) => Effect.succeed({ title: input.headBranch, body: input.diffSummary }),
+      generatePrContent: (input) =>
+        Effect.succeed({ title: input.headBranch, body: input.diffSummary }),
       generateBranchName: (input) => Effect.succeed({ branch: `feature/${input.message}` }),
       generateThreadTitle: (input) => Effect.succeed({ title: input.message.slice(0, 10) }),
     });
@@ -265,7 +268,11 @@ it.effect("text generation delegates the existing one-shot operations", () =>
       { branch: "feature/work" },
     );
     assert.deepEqual(
-      yield* capability.generateThreadTitle({ cwd: "/repo", message: "hello world", modelSelection }),
+      yield* capability.generateThreadTitle({
+        cwd: "/repo",
+        message: "hello world",
+        modelSelection,
+      }),
       { title: "hello worl" },
     );
   }),
@@ -289,9 +296,23 @@ it.effect("source control exposes provider detection and existing GitHub CLI PR 
       } as any,
       github: {
         listOpenPullRequests: () =>
-          Effect.succeed([{ number: 1, title: "PR", url: "https://github.com/o/r/pull/1", baseRefName: "main", headRefName: "feature" }]),
+          Effect.succeed([
+            {
+              number: 1,
+              title: "PR",
+              url: "https://github.com/o/r/pull/1",
+              baseRefName: "main",
+              headRefName: "feature",
+            },
+          ]),
         getPullRequest: () =>
-          Effect.succeed({ number: 2, title: "Detail", url: "https://github.com/o/r/pull/2", baseRefName: "main", headRefName: "fix" }),
+          Effect.succeed({
+            number: 2,
+            title: "Detail",
+            url: "https://github.com/o/r/pull/2",
+            baseRefName: "main",
+            headRefName: "fix",
+          }),
         createPullRequest: (input: any) =>
           Effect.sync(() => {
             createInputs.push(input);
@@ -307,7 +328,11 @@ it.effect("source control exposes provider detection and existing GitHub CLI PR 
       remoteUrl: "git@github.com:owner/repo.git",
     });
     assert.equal((yield* capability.discoverProviders)[0]?.kind, "github");
-    assert.equal((yield* capability.listOpenPullRequests({ cwd: "/repo", headSelector: "feature" }))[0]?.number, 1);
+    assert.equal(
+      (yield* capability.listOpenPullRequests({ cwd: "/repo", headSelector: "feature" }))[0]
+        ?.number,
+      1,
+    );
     assert.equal((yield* capability.getPullRequest({ cwd: "/repo", reference: "2" })).number, 2);
     yield* capability.createPullRequest({
       cwd: "/repo",
@@ -322,83 +347,88 @@ it.effect("source control exposes provider detection and existing GitHub CLI PR 
   }),
 );
 
-it.effect("terminals spawn through a plugin-owned shell session and expose observe/input/kill", () =>
-  Effect.gen(function* () {
-    const writes: string[] = [];
-    const closes: unknown[] = [];
-    const snapshot: TerminalSessionSnapshot = {
-      threadId: "plugin:terminal-plugin:run-1",
-      terminalId: "run-1",
-      cwd: "/repo",
-      worktreePath: null,
-      status: "running",
-      pid: 123,
-      history: "",
-      exitCode: null,
-      exitSignal: null,
-      label: "run",
-      updatedAt: "2026-07-03T00:00:00.000Z",
-    };
-    const { capability, shutdown } = makeTerminalsCapability({
-      pluginId: PluginId.make("terminal-plugin"),
-      manager: {
-        open: () => Effect.succeed(snapshot),
-        attachStream: (_input: any, listener: (event: TerminalAttachStreamEvent) => Effect.Effect<void>) =>
-          listener({ type: "snapshot", snapshot } satisfies TerminalAttachStreamEvent).pipe(
-            Effect.as(() => undefined),
-          ),
-        write: (input: any) =>
-          Effect.sync(() => {
-            writes.push(input.data);
-          }),
-        close: (input: any) =>
-          Effect.sync(() => {
-            closes.push(input);
-          }),
-      } as any,
-    });
+it.effect(
+  "terminals spawn through a plugin-owned shell session and expose observe/input/kill",
+  () =>
+    Effect.gen(function* () {
+      const writes: string[] = [];
+      const closes: unknown[] = [];
+      const snapshot: TerminalSessionSnapshot = {
+        threadId: "plugin:terminal-plugin:run-1",
+        terminalId: "run-1",
+        cwd: "/repo",
+        worktreePath: null,
+        status: "running",
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        label: "run",
+        updatedAt: "2026-07-03T00:00:00.000Z",
+      };
+      const { capability, shutdown } = makeTerminalsCapability({
+        pluginId: PluginId.make("terminal-plugin"),
+        manager: {
+          open: () => Effect.succeed(snapshot),
+          attachStream: (
+            _input: any,
+            listener: (event: TerminalAttachStreamEvent) => Effect.Effect<void>,
+          ) =>
+            listener({ type: "snapshot", snapshot } satisfies TerminalAttachStreamEvent).pipe(
+              Effect.as(() => undefined),
+            ),
+          write: (input: any) =>
+            Effect.sync(() => {
+              writes.push(input.data);
+            }),
+          close: (input: any) =>
+            Effect.sync(() => {
+              closes.push(input);
+            }),
+        } as any,
+      });
 
-    const spawned = yield* capability.spawn({
-      terminalId: "run-1",
-      cwd: "/repo",
-      command: "echo",
-      args: ["hello world"],
-    });
-    assert.deepEqual(spawned.handle, {
-      threadId: "plugin:terminal-plugin:run-1",
-      terminalId: "run-1",
-    });
-    assert.deepEqual(writes, ["'echo' 'hello world'\n"]);
+      const spawned = yield* capability.spawn({
+        terminalId: "run-1",
+        cwd: "/repo",
+        command: "echo",
+        args: ["hello world"],
+      });
+      assert.deepEqual(spawned.handle, {
+        threadId: "plugin:terminal-plugin:run-1",
+        terminalId: "run-1",
+      });
+      assert.deepEqual(writes, ["'echo' 'hello world'\n"]);
 
-    const events: TerminalAttachStreamEvent[] = [];
-    const unsubscribe = yield* capability.observe(spawned.handle, (event) =>
-      Effect.sync(() => {
-        events.push(event);
-      }),
-    );
-    unsubscribe();
-    assert.equal(events[0]?.type, "snapshot");
+      const events: TerminalAttachStreamEvent[] = [];
+      const unsubscribe = yield* capability.observe(spawned.handle, (event) =>
+        Effect.sync(() => {
+          events.push(event);
+        }),
+      );
+      unsubscribe();
+      assert.equal(events[0]?.type, "snapshot");
 
-    yield* capability.sendInput({ ...spawned.handle, data: "q" });
-    yield* capability.kill({ ...spawned.handle, deleteHistory: true });
-    assert.equal(writes.at(-1), "q");
-    assert.deepEqual(closes, [{ ...spawned.handle, deleteHistory: true }]);
+      yield* capability.sendInput({ ...spawned.handle, data: "q" });
+      yield* capability.kill({ ...spawned.handle, deleteHistory: true });
+      assert.equal(writes.at(-1), "q");
+      assert.deepEqual(closes, [{ ...spawned.handle, deleteHistory: true }]);
 
-    // A killed terminal is no longer tracked, so shutdown closes nothing.
-    yield* shutdown;
-    assert.equal(closes.length, 1);
+      // A killed terminal is no longer tracked, so shutdown closes nothing.
+      yield* shutdown;
+      assert.equal(closes.length, 1);
 
-    // A terminal left open IS closed by shutdown (the scope-close leak guard).
-    const leaked = yield* capability.spawn({
-      terminalId: "run-2",
-      cwd: "/repo",
-      command: "sleep",
-      args: ["100"],
-    });
-    yield* shutdown;
-    assert.deepEqual(closes.at(-1), {
-      threadId: leaked.handle.threadId,
-      terminalId: leaked.handle.terminalId,
-    });
-  }),
+      // A terminal left open IS closed by shutdown (the scope-close leak guard).
+      const leaked = yield* capability.spawn({
+        terminalId: "run-2",
+        cwd: "/repo",
+        command: "sleep",
+        args: ["100"],
+      });
+      yield* shutdown;
+      assert.deepEqual(closes.at(-1), {
+        threadId: leaked.handle.threadId,
+        terminalId: leaked.handle.terminalId,
+      });
+    }),
 );

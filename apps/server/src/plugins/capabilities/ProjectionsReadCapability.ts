@@ -1,7 +1,4 @@
-import type {
-  OrchestrationMessage,
-  OrchestrationThreadActivity,
-} from "@t3tools/contracts";
+import type { OrchestrationMessage, OrchestrationThreadActivity } from "@t3tools/contracts";
 import type { ProjectionsReadCapability } from "@t3tools/plugin-sdk";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
