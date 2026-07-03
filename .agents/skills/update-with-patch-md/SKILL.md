@@ -53,9 +53,10 @@ retiring an entry. Compare new upstream code, backed-up downstream code,
 
 ## Verify or roll back
 
-Run all applicable `PATCH.md` verification commands. If a required check fails
-while a rebase is active, abort it. Otherwise reset the branch to the backup
-ref. Preserve recovery files and report the failure and locations.
+Run all applicable `PATCH.md` verification commands. On a required-check
+failure, abort an active rebase; if the rebase already finished, reset the
+branch to the backup ref. Preserve recovery files and report the failure and
+locations. Keep the updated branch when every required check passes.
 
 ## Review
 
