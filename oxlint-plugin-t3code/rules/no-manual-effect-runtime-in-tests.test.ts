@@ -1,4 +1,4 @@
-import { assert, describe } from "vite-plus/test";
+import { assert, describe } from "@effect/vitest";
 
 import { createOxlintRuleHarness } from "../test/utils.ts";
 
