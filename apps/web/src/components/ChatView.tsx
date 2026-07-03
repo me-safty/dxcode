@@ -290,16 +290,6 @@ const TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR = [
   '[data-slot="combobox-popup"]',
   '[data-slot="autocomplete-popup"]',
 ].join(",");
-const TIMELINE_SCROLL_NAVIGATION_KEYS = new Set([
-  "ArrowDown",
-  "ArrowUp",
-  "End",
-  "Home",
-  "PageDown",
-  "PageUp",
-  "Spacebar",
-  " ",
-]);
 
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
@@ -327,45 +317,6 @@ function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
   if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
 
   return true;
-}
-
-function shouldTreatKeyAsTimelineScrollNavigation(event: KeyboardEvent): boolean {
-  if (event.defaultPrevented || event.isComposing) return false;
-  if (event.metaKey || event.ctrlKey || event.altKey) return false;
-  if (!TIMELINE_SCROLL_NAVIGATION_KEYS.has(event.key)) return false;
-
-  if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
-  if (eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
-  if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
-
-  return true;
-}
-
-function isPointerInNativeScrollbarGutter(scrollNode: HTMLElement, event: PointerEvent): boolean {
-  const verticalScrollbarWidth = scrollNode.offsetWidth - scrollNode.clientWidth;
-  const horizontalScrollbarHeight = scrollNode.offsetHeight - scrollNode.clientHeight;
-  if (verticalScrollbarWidth <= 0 && horizontalScrollbarHeight <= 0) {
-    return false;
-  }
-
-  const rect = scrollNode.getBoundingClientRect();
-  const isRtl = getComputedStyle(scrollNode).direction === "rtl";
-  const verticalScrollbarStart = isRtl ? rect.left : rect.right - verticalScrollbarWidth;
-  const verticalScrollbarEnd = isRtl ? rect.left + verticalScrollbarWidth : rect.right;
-  const isInVerticalScrollbar =
-    verticalScrollbarWidth > 0 &&
-    event.clientX >= verticalScrollbarStart &&
-    event.clientX <= verticalScrollbarEnd &&
-    event.clientY >= rect.top &&
-    event.clientY <= rect.bottom;
-  const isInHorizontalScrollbar =
-    horizontalScrollbarHeight > 0 &&
-    event.clientX >= rect.left &&
-    event.clientX <= rect.right &&
-    event.clientY >= rect.bottom - horizontalScrollbarHeight &&
-    event.clientY <= rect.bottom;
-
-  return isInVerticalScrollbar || isInHorizontalScrollbar;
 }
 
 function formatOutgoingPrompt(params: {
@@ -3217,26 +3168,6 @@ function ChatViewContent(props: ChatViewProps) {
     readonly userScrollGeneration: number;
   } | null>(null);
   const anchorScrollRestoreFrameRef = useRef<number | null>(null);
-  const clearFailedTimelineAnchor = useCallback((threadKey: string, messageId: MessageId) => {
-    timelineScrollModeRef.current = "following-end";
-    liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
-    pendingTimelineAnchorRef.current = null;
-    if (positionedTimelineAnchorRef.current === messageId) {
-      positionedTimelineAnchorRef.current = null;
-    }
-    if (settledTimelineAnchorRef.current === messageId) {
-      settledTimelineAnchorRef.current = null;
-    }
-    activeTimelineAnchorIndexRef.current = null;
-    if (pendingAnchorScrollRestoreRef.current?.messageId === messageId) {
-      pendingAnchorScrollRestoreRef.current = null;
-    }
-    setTimelineAnchor((current) =>
-      current.threadKey === threadKey && current.messageId === messageId
-        ? { threadKey: current.threadKey, messageId: null }
-        : current,
-    );
-  }, []);
   const cancelTimelineLiveFollowForUserNavigation = useCallback(() => {
     anchorUserScrollGenerationRef.current += 1;
     timelineScrollModeRef.current = "free-scrolling";
@@ -3328,37 +3259,19 @@ function ChatViewContent(props: ChatViewProps) {
       const handleManualNavigation = () => {
         cancelTimelineLiveFollowForUserNavigationRef.current();
       };
-      const handleKeyboardNavigation = (event: KeyboardEvent) => {
-        if (shouldTreatKeyAsTimelineScrollNavigation(event)) {
-          handleManualNavigation();
-        }
-      };
-      const handleScrollbarPointerNavigation = (event: PointerEvent) => {
-        if (isPointerInNativeScrollbarGutter(scrollNode, event)) {
-          handleManualNavigation();
-        }
-      };
       scrollNode.addEventListener("wheel", handleManualNavigation, {
         passive: true,
       });
       scrollNode.addEventListener("touchmove", handleManualNavigation, {
         passive: true,
       });
-      scrollNode.addEventListener("keydown", handleKeyboardNavigation, {
-        capture: true,
-      });
-      scrollNode.addEventListener("pointerdown", handleScrollbarPointerNavigation, {
-        capture: true,
+      scrollNode.addEventListener("pointerdown", handleManualNavigation, {
+        passive: true,
       });
       removeListeners = () => {
         scrollNode.removeEventListener("wheel", handleManualNavigation);
         scrollNode.removeEventListener("touchmove", handleManualNavigation);
-        scrollNode.removeEventListener("keydown", handleKeyboardNavigation, {
-          capture: true,
-        });
-        scrollNode.removeEventListener("pointerdown", handleScrollbarPointerNavigation, {
-          capture: true,
-        });
+        scrollNode.removeEventListener("pointerdown", handleManualNavigation);
       };
     });
 
@@ -3391,12 +3304,6 @@ function ChatViewContent(props: ChatViewProps) {
           return;
         }
         const scrollNode = list.getScrollableNode();
-        if (!scrollNode) {
-          if (remainingAttempts > 0) {
-            positionAnchor(remainingAttempts - 1);
-          }
-          return;
-        }
         let finished = false;
         const finishAnimatedPositioning = () => {
           if (finished) {
@@ -4129,11 +4036,8 @@ function ChatViewContent(props: ChatViewProps) {
     activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    const timelineAnchorThreadKey = scopedThreadKey(
-      scopeThreadRef(activeThread.environmentId, threadIdForSend),
-    );
     setTimelineAnchor({
-      threadKey: timelineAnchorThreadKey,
+      threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
       messageId: messageIdForSend,
     });
     setOptimisticUserMessages((existing) => [
@@ -4285,7 +4189,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
-      clearFailedTimelineAnchor(timelineAnchorThreadKey, messageIdForSend);
       if (
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&
@@ -4570,11 +4473,8 @@ function ChatViewContent(props: ChatViewProps) {
       activeTimelineAnchorIndexRef.current = null;
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
-      const timelineAnchorThreadKey = scopedThreadKey(
-        scopeThreadRef(activeThread.environmentId, threadIdForSend),
-      );
       setTimelineAnchor({
-        threadKey: timelineAnchorThreadKey,
+        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
         messageId: messageIdForSend,
       });
 
@@ -4651,7 +4551,6 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
-      clearFailedTimelineAnchor(timelineAnchorThreadKey, messageIdForSend);
       setOptimisticUserMessages((existing) =>
         existing.filter((message) => message.id !== messageIdForSend),
       );
@@ -4669,7 +4568,6 @@ function ChatViewContent(props: ChatViewProps) {
       activeThread,
       activeProposedPlan,
       beginLocalDispatch,
-      clearFailedTimelineAnchor,
       isConnecting,
       isSendBusy,
       isServerThread,
