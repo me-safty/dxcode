@@ -183,7 +183,7 @@ export function isQueuedThreadCreationSendable(message: QueuedThreadMessage): bo
   if (message.text.trim().length === 0 || message.modelSelection === undefined) {
     return false;
   }
-  return message.creation.workspaceMode !== "worktree" || message.creation.branch !== null;
+  return message.creation.workspaceMode !== "worktree" || Boolean(message.creation.branch);
 }
 
 function errorMessage(error: unknown): string | null {

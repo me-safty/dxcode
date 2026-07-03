@@ -244,7 +244,7 @@ export function useThreadOutboxDrain(): void {
     async (
       queuedMessage: QueuedThreadMessage,
       creation: QueuedThreadCreation,
-      project: EnvironmentProject,
+      projectCwd: string,
     ) => {
       const modelSelection = queuedMessage.modelSelection;
       if (modelSelection === undefined) {
@@ -255,7 +255,7 @@ export function useThreadOutboxDrain(): void {
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
           projectId: creation.projectId,
-          projectCwd: project.workspaceRoot,
+          projectCwd,
           threadId: queuedMessage.threadId,
           commandId: queuedMessage.commandId,
           messageId: queuedMessage.messageId,
@@ -314,13 +314,22 @@ export function useThreadOutboxDrain(): void {
       if (deliveryAction === "wait") {
         continue;
       }
+      // The live project shell is preferred for the workspace path, with the
+      // snapshot taken at enqueue time as the fallback so a task never dies
+      // just because its project shell is not loaded.
+      const creationProjectCwd =
+        creation !== undefined
+          ? (findCreationProject(projects, nextQueuedMessage)?.workspaceRoot ??
+            creation.projectCwd ??
+            null)
+          : null;
       // An incomplete pending task (e.g. worktree mode without a branch) stays
       // queued until the user finishes it in the editor.
       if (deliveryAction === "send" && creation !== undefined) {
         if (!isQueuedThreadCreationSendable(nextQueuedMessage)) {
           continue;
         }
-        if (!findCreationProject(projects, nextQueuedMessage) && shellStatus !== "live") {
+        if (creationProjectCwd === null && shellStatus !== "live") {
           continue;
         }
       }
@@ -339,14 +348,12 @@ export function useThreadOutboxDrain(): void {
             return false;
           },
         );
-      const creationProject =
-        creation !== undefined ? findCreationProject(projects, nextQueuedMessage) : undefined;
       const delivery =
         deliveryAction === "remove"
           ? removeQueuedMessage("[thread-outbox] failed to remove message for a missing thread")
           : creation !== undefined
-            ? creationProject !== undefined
-              ? sendQueuedCreation(nextQueuedMessage, creation, creationProject)
+            ? creationProjectCwd !== null
+              ? sendQueuedCreation(nextQueuedMessage, creation, creationProjectCwd)
               : removeQueuedMessage("[thread-outbox] dropped pending task for a missing project")
             : thread !== undefined
               ? sendQueuedMessage(nextQueuedMessage, thread)

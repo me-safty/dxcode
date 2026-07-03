@@ -258,12 +258,39 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     [projects, selectedEnvironmentId],
   );
 
+  // Stand-in for the edited task's project while its shell is not loaded
+  // (environment offline / still synchronizing), built from the metadata
+  // snapshotted at enqueue time.
+  const editingPendingProject = useMemo<EnvironmentProject | null>(() => {
+    const creation = editingPendingTask?.creation;
+    if (!editingPendingTask || !creation) {
+      return null;
+    }
+    return {
+      environmentId: editingPendingTask.environmentId,
+      id: creation.projectId,
+      title: creation.projectTitle ?? "Unknown project",
+      workspaceRoot: creation.projectCwd ?? String(creation.projectId),
+      repositoryIdentity: null,
+      defaultModelSelection: editingPendingTask.modelSelection ?? null,
+      scripts: [],
+      createdAt: editingPendingTask.createdAt,
+      updatedAt: editingPendingTask.createdAt,
+    };
+  }, [editingPendingTask]);
+
   const selectedProject =
     projectsForEnvironment.find(
       (project) => scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
     ) ??
-    projectsForEnvironment[0] ??
-    null;
+    // While editing a queued task whose project shell is absent, keep the task
+    // pinned to its own project — falling through to an arbitrary first
+    // project would silently retarget it (and its reused turn identifiers).
+    (editingPendingProject !== null &&
+    selectedProjectKey ===
+      scopedProjectKey(editingPendingProject.environmentId, editingPendingProject.id)
+      ? editingPendingProject
+      : (projectsForEnvironment[0] ?? null));
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
     selectedProject?.environmentId ?? null,
   );
@@ -644,13 +671,16 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         createdAt: editing.createdAt,
       });
 
-      clearComposerDraft(pendingTaskDraftKey(editing.messageId));
-
       if (message) {
         // update() rewrites the task only if it is still queued — a concurrent
         // delete or delivery wins, so the flush cannot resurrect it. The drain
-        // lock is released only once the updated payload is durable.
+        // lock is released only once the updated payload is durable, and the
+        // editing draft is discarded only once the save succeeded (a failed
+        // save keeps it around so the edits rehydrate on the next open).
         void updateThreadOutboxMessage(message)
+          .then(() => {
+            clearComposerDraft(pendingTaskDraftKey(editing.messageId));
+          })
           .catch((error) => {
             console.warn("[new-task] failed to save edited pending task", error);
           })
@@ -658,6 +688,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
             setEditingQueuedMessageId(null);
           });
       } else {
+        clearComposerDraft(pendingTaskDraftKey(editing.messageId));
         setEditingQueuedMessageId(null);
       }
     };

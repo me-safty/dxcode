@@ -104,6 +104,8 @@ export function NewTaskDraftScreen(props: {
   useEffect(() => {
     if (!props.pendingTaskId) return;
     return () => {
+      // Allow a later navigation for the same pending task to re-hydrate it.
+      attemptedPendingTaskIdRef.current = null;
       cancelEditingPendingTask();
     };
   }, [props.pendingTaskId, cancelEditingPendingTask]);
