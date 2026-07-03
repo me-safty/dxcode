@@ -17,6 +17,10 @@ const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
+const emitPostSettleMonitorFlow = process.env.T3_ACP_EMIT_POST_SETTLE_MONITOR_FLOW === "1";
+const emitInTurnTaskOutputThenLateDuplicate =
+  process.env.T3_ACP_EMIT_IN_TURN_TASKOUTPUT_THEN_LATE_DUPLICATE === "1";
+const injectedReportTriggerPath = process.env.T3_ACP_INJECTED_REPORT_TRIGGER_PATH;
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION === "1";
 const emitXAiPromptCompleteThenHang = process.env.T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG === "1";
@@ -794,6 +798,159 @@ const program = Effect.gen(function* () {
             },
           },
         });
+
+        return { stopReason: "end_turn" };
+      }
+
+      // In-turn monitor + TaskOutput hydrate, then a late post-finalize
+      // duplicate terminal TaskOutput for the same task. Exercises the
+      // already-handled short-circuit: must not pin hasPendingBackgroundWork.
+      if (emitInTurnTaskOutputThenLateDuplicate) {
+        const monitorToolCallId = "tool-call-monitor-1";
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: monitorToolCallId,
+            title: "Monitor: mock background task",
+            kind: "execute",
+            status: "pending",
+            rawInput: {},
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: monitorToolCallId,
+            status: "in_progress",
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-call-fetch-1",
+            title: "get_command_or_subagent_output",
+            kind: "other",
+            status: "pending",
+            rawInput: { task_id: "task-monitor-1" },
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tool-call-fetch-1",
+            status: "completed",
+            rawOutput: { output: "MONITOR_LISTING_TOKEN" },
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Monitor listing ready in-turn." },
+          },
+        });
+        // After deferred finalize (~2s) clears activeTurn, re-emit a terminal
+        // TaskOutput for the same task so bufferPostSettleWake sees
+        // alreadyHandledToolUpdate with a non-empty wake path.
+        yield* Effect.gen(function* () {
+          yield* Effect.sleep("2500 millis");
+          yield* Effect.sync(() => {
+            writeJsonRpcNotification("session/update", {
+              sessionId: requestedSessionId,
+              update: {
+                sessionUpdate: "tool_call_update",
+                toolCallId: "tool-call-fetch-1",
+                title: "get_command_or_subagent_output",
+                kind: "other",
+                status: "completed",
+                rawOutput: { output: "MONITOR_LISTING_TOKEN_LATE" },
+              },
+            });
+          });
+        }).pipe(Effect.forkDetach);
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitPostSettleMonitorFlow) {
+        const monitorToolCallId = "tool-call-monitor-1";
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: monitorToolCallId,
+            title: "Monitor: mock background task",
+            kind: "execute",
+            status: "pending",
+            rawInput: {},
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: monitorToolCallId,
+            status: "in_progress",
+          },
+        });
+
+        // After the prompt settles, replay the CLI-injected monitor-event
+        // turn: end notice, TaskOutput hydration, then (once the trigger
+        // file exists) the report chunk. Detached fiber on the real clock;
+        // it outlives the prompt handler.
+        yield* Effect.gen(function* () {
+          yield* Effect.sleep("150 millis");
+          yield* Effect.sync(() => {
+            writeJsonRpcNotification("session/update", {
+              sessionId: requestedSessionId,
+              update: {
+                sessionUpdate: "user_message_chunk",
+                content: {
+                  type: "text",
+                  text: 'Monitor "task-monitor-1" ended: [monitor ended: exit 0]',
+                },
+              },
+            });
+            writeJsonRpcNotification("session/update", {
+              sessionId: requestedSessionId,
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tool-call-fetch-1",
+                title: "get_command_or_subagent_output",
+                kind: "other",
+                status: "pending",
+                rawInput: { task_id: "task-monitor-1" },
+              },
+            });
+            writeJsonRpcNotification("session/update", {
+              sessionId: requestedSessionId,
+              update: {
+                sessionUpdate: "tool_call_update",
+                toolCallId: "tool-call-fetch-1",
+                status: "completed",
+                rawOutput: { output: "MONITOR_LISTING_TOKEN" },
+              },
+            });
+          });
+          if (injectedReportTriggerPath === undefined) return;
+          while (!(yield* Effect.sync(() => NodeFS.existsSync(injectedReportTriggerPath)))) {
+            yield* Effect.sleep("20 millis");
+          }
+          yield* Effect.sync(() => {
+            writeJsonRpcNotification("session/update", {
+              sessionId: requestedSessionId,
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "Monitor finished. MONITOR_REPORT_TOKEN" },
+              },
+            });
+          });
+        }).pipe(Effect.forkDetach);
 
         return { stopReason: "end_turn" };
       }
