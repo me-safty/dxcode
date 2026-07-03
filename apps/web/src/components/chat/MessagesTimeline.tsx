@@ -69,12 +69,8 @@ import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
-  deriveCommandOutputDisplay,
-  deriveExpandableWorkEntryDetails,
-  deriveFileChangeDisplayFiles,
   deriveMessagesTimelineRows,
   deriveWorkEntryDisplay,
-  hasExpandableWorkEntryDetails,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
@@ -82,14 +78,20 @@ import {
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapTopPercent,
   shouldToggleWorkEntryRowFromKeyDown,
-  type DerivedCommandWorkEntryDetails,
-  type DerivedExpandableWorkEntryDetails,
-  type DerivedFileChangeWorkEntryDetails,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
+import {
+  deriveCommandOutputDisplay,
+  deriveExpandableWorkEntryDetails,
+  deriveFileChangeDisplayFiles,
+  hasExpandableWorkEntryDetails,
+  type DerivedCommandWorkEntryDetails,
+  type DerivedExpandableWorkEntryDetails,
+  type DerivedFileChangeWorkEntryDetails,
+} from "../../lib/workLogEntryDetails";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
