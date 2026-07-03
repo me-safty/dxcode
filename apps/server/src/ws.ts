@@ -8,7 +8,6 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
@@ -274,7 +273,6 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
-const ORCHESTRATION_DOMAIN_EVENT_SUBSCRIPTION_BUFFER_CAPACITY = 1_024;
 
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
@@ -616,25 +614,25 @@ const makeWsRpcLayer = (
 
       const subscribeDomainEventStream = <A, E, R>(
         makeStream: (events: Stream.Stream<OrchestrationEvent>) => Stream.Stream<A, E, R>,
-      ): Effect.Effect<Stream.Stream<A, E, R>, never, Scope.Scope> =>
-        Effect.map(orchestrationEngine.subscribeDomainEvents, (subscription) =>
-          makeStream(
-            Stream.fromSubscription(subscription).pipe(
-              Stream.buffer({
-                capacity: ORCHESTRATION_DOMAIN_EVENT_SUBSCRIPTION_BUFFER_CAPACITY,
-                strategy: "suspend",
-              }),
-            ),
-          ),
-        );
+      ) => {
+        if (orchestrationEngine.subscribeDomainEvents === undefined) {
+          return Effect.succeed(makeStream(orchestrationEngine.streamDomainEvents));
+        }
 
-      const streamThreadDetailEvents = (
+        return Effect.map(orchestrationEngine.subscribeDomainEvents, (subscription) =>
+          makeStream(Stream.fromSubscription(subscription)),
+        );
+      };
+
+      const streamThreadDetailEventsAfterSnapshot = (
         events: Stream.Stream<OrchestrationEvent>,
         threadId: ThreadId,
+        snapshotSequence: number,
       ) =>
         events.pipe(
           Stream.filter(
             (event) =>
+              event.sequence > snapshotSequence &&
               event.aggregateKind === "thread" &&
               event.aggregateId === threadId &&
               isThreadDetailEvent(event),
@@ -1096,15 +1094,6 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
             Effect.gen(function* () {
-              const liveDomainEventStream = yield* subscribeDomainEventStream((events) =>
-                events.pipe(
-                  Stream.mapEffect(toShellStreamEvent),
-                  Stream.flatMap((event) =>
-                    Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
-                  ),
-                ),
-              );
-
               const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
                 Effect.tapError((cause) =>
                   Effect.logError("orchestration shell snapshot load failed", { cause }),
@@ -1118,8 +1107,11 @@ const makeWsRpcLayer = (
                 ),
               );
 
-              const liveStream = liveDomainEventStream.pipe(
-                Stream.filter((item) => item.sequence > snapshot.snapshotSequence),
+              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+                Stream.mapEffect(toShellStreamEvent),
+                Stream.flatMap((event) =>
+                  Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+                ),
               );
 
               return Stream.concat(
@@ -1154,7 +1146,7 @@ const makeWsRpcLayer = (
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
               const liveDomainEventStream = yield* subscribeDomainEventStream((events) =>
-                streamThreadDetailEvents(events, input.threadId),
+                streamThreadDetailEventsAfterSnapshot(events, input.threadId, 0),
               );
 
               const [threadDetail, snapshotSequence] = yield* Effect.all([

@@ -48,17 +48,20 @@ export interface OrchestrationEngineShape {
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>;
 
   /**
+   * Stream persisted domain events in dispatch order.
+   *
+   * This is a hot runtime stream (new events only), not a historical replay.
+   */
+  readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>;
+
+  /**
    * Acquire a scoped live-domain-event subscription before doing work that
    * depends on the subscription being attached.
    *
    * This is a hot runtime event source for new events only, not a historical
    * replay. Use `readEvents` when persisted replay is required.
-   *
-   * The returned subscription is released with the enclosing Scope. Callers
-   * should drain it promptly after snapshot work because unconsumed events
-   * accumulate according to the underlying PubSub subscription strategy.
    */
-  readonly subscribeDomainEvents: Effect.Effect<
+  readonly subscribeDomainEvents?: Effect.Effect<
     PubSub.Subscription<OrchestrationEvent>,
     never,
     Scope.Scope

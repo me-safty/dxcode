@@ -165,7 +165,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),
           ),
-        subscribeDomainEvents: Effect.die("unused"),
+        streamDomainEvents: Stream.empty,
       } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
       Effect.provide(NodeServices.layer),
     );
@@ -207,7 +207,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),
           ),
-        subscribeDomainEvents: Effect.die("unused"),
+        streamDomainEvents: Stream.empty,
       } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
       Effect.provide(NodeServices.layer),
     );
@@ -255,7 +255,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),
           ),
-        subscribeDomainEvents: Effect.die("unused"),
+        streamDomainEvents: Stream.empty,
       } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
       Effect.provideService(Crypto.Crypto, {
         ...crypto,
