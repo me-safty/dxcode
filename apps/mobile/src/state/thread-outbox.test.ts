@@ -384,9 +384,9 @@ describe("thread outbox", () => {
         creation: { ...creationMessage.creation, branch: null },
       }),
     ).toBe(false);
-    expect(
-      isQueuedThreadCreationSendable({ ...creationMessage, modelSelection: undefined }),
-    ).toBe(false);
+    expect(isQueuedThreadCreationSendable({ ...creationMessage, modelSelection: undefined })).toBe(
+      false,
+    );
     expect(isQueuedThreadCreationSendable(base)).toBe(false);
   });
 

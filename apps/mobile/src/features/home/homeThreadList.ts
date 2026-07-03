@@ -81,10 +81,7 @@ export function buildHomeThreadGroups(input: {
   }
 
   for (const pendingTask of input.pendingTasks ?? []) {
-    if (
-      input.environmentId !== null &&
-      pendingTask.message.environmentId !== input.environmentId
-    ) {
+    if (input.environmentId !== null && pendingTask.message.environmentId !== input.environmentId) {
       continue;
     }
 

@@ -1,5 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentProject, EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type {
+  EnvironmentProject,
+  EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/shell";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import {
   CommandId,
@@ -228,7 +231,13 @@ export function useThreadOutboxDrain(): void {
       });
       return completeDelivery(deliveryResult);
     },
-    [makeDeliveryHelpers, setThreadInteractionMode, setThreadRuntimeMode, startTurn, updateThreadMetadata],
+    [
+      makeDeliveryHelpers,
+      setThreadInteractionMode,
+      setThreadRuntimeMode,
+      startTurn,
+      updateThreadMetadata,
+    ],
   );
 
   const sendQueuedCreation = useCallback(

@@ -34,10 +34,7 @@ import {
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { getComposerDraftSnapshot } from "../../state/use-composer-drafts";
 import { useProjects } from "../../state/entities";
-import {
-  enqueueThreadOutboxMessage,
-  removeThreadOutboxMessage,
-} from "../../state/thread-outbox";
+import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from "../../state/thread-outbox";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { branchBadgeLabel, useNewTaskFlow } from "./new-task-flow-provider";
 import { useCreateProjectThread } from "./use-project-actions";
