@@ -56,13 +56,11 @@ export interface VcsActionState {
 export interface VcsActionTarget {
   readonly environmentId: EnvironmentIdType | null;
   readonly cwd: string | null;
-  readonly projectId?: ProjectIdType | null;
 }
 
 export interface ResolvedVcsActionTarget {
   readonly environmentId: EnvironmentIdType;
   readonly cwd: string;
-  readonly projectId?: ProjectIdType | null;
 }
 
 export interface BeginVcsActionInput {
@@ -74,6 +72,7 @@ export interface BeginVcsActionInput {
 export interface RunVcsStackedActionInput {
   readonly actionId: string;
   readonly action: GitStackedAction;
+  readonly projectId?: ProjectIdType | null;
   readonly commitMessage?: string;
   readonly featureBranch?: boolean;
   readonly filePaths?: ReadonlyArray<string>;
@@ -465,9 +464,10 @@ export function createVcsActionManager<R, E>(
         const rpcInput: GitRunStackedActionInput = {
           actionId: transportActionId,
           cwd: target.cwd,
-          // The command is cached per [environment, cwd]; the project context
-          // rides along from whichever target requested it.
-          ...(requestedTarget.projectId ? { projectId: requestedTarget.projectId } : {}),
+          // The command is cached per [environment, cwd], so the project
+          // context must come from each invocation, never from the target
+          // captured when the command was first created.
+          ...(input.projectId ? { projectId: input.projectId } : {}),
           action: input.action,
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),

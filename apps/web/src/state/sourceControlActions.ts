@@ -244,6 +244,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
       return runStackedAction({
         actionId: input.actionId,
         action: input.action,
+        ...(scope.projectId ? { projectId: scope.projectId } : {}),
         ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
         ...(input.featureBranch ? { featureBranch: true } : {}),
         ...(input.filePaths?.length ? { filePaths: input.filePaths } : {}),
@@ -362,7 +363,7 @@ export interface PullRequestResolutionTarget {
 
 function pullRequestResolutionInput(target: {
   readonly cwd: string;
-  readonly projectId?: ProjectId | null;
+  readonly projectId?: ProjectId | null | undefined;
   readonly reference: string;
 }) {
   return {
