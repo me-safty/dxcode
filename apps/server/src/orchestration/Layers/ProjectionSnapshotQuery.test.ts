@@ -869,10 +869,16 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           threadCount: 1,
         });
 
+        // The decider's read model keeps plugin-owned threads: commands and
+        // events on them must still validate after a restart.
         const commandReadModel = yield* snapshotQuery.getCommandReadModel();
         assert.deepEqual(
           commandReadModel.threads.map((thread) => thread.id),
-          [ThreadId.make("thread-user-active")],
+          [
+            ThreadId.make("thread-plugin-active"),
+            ThreadId.make("thread-user-active"),
+            ThreadId.make("thread-plugin-archived"),
+          ],
         );
 
         const fullSnapshot = yield* snapshotQuery.getSnapshot();

@@ -124,7 +124,7 @@ export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
-const THREAD_PLUGIN_OWNER_PATTERN = /^plugin:[a-zA-Z][a-zA-Z0-9_-]*$/;
+const THREAD_PLUGIN_OWNER_PATTERN = /^plugin:[a-z][a-z0-9-]{1,40}$/;
 export const ThreadOwner = Schema.Union([
   Schema.Literal("user"),
   TrimmedNonEmptyString.check(

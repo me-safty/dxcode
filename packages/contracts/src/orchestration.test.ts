@@ -324,6 +324,34 @@ it.effect("decodes thread ownership with legacy user defaults and plugin-owned i
     const invalidOwner = yield* Effect.exit(decodeThreadOwner("plugin:"));
     assert.strictEqual(invalidOwner._tag, "Failure");
 
+    // Owner ids follow the plugin manifest id grammar: lowercase, digits,
+    // hyphens only.
+    const uppercaseOwner = yield* Effect.exit(decodeThreadOwner("plugin:Test"));
+    assert.strictEqual(uppercaseOwner._tag, "Failure");
+    const underscoreOwner = yield* Effect.exit(decodeThreadOwner("plugin:my_plugin"));
+    assert.strictEqual(underscoreOwner._tag, "Failure");
+
+    // Encode direction: a decoded legacy payload re-encodes WITH an explicit
+    // owner — new serializations of old events are self-describing.
+    const encodedLegacy = yield* encodeThreadCreatedPayload(
+      yield* decodeThreadCreatedPayload({
+        threadId: "thread-legacy-encode",
+        projectId: "project-1",
+        title: "Legacy encode",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual((encodedLegacy as { owner?: unknown }).owner, "user");
+
     const payload = yield* decodeThreadCreatedPayload({
       threadId: "thread-1",
       projectId: "project-1",
