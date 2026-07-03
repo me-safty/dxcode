@@ -117,34 +117,32 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
   return { ...settings, providerInstances };
 }
 
-export interface ServerSettingsShape {
-  /** Start the settings runtime and attach file watching. */
-  readonly start: Effect.Effect<void, ServerSettingsError>;
-
-  /** Await settings runtime readiness. */
-  readonly ready: Effect.Effect<void, ServerSettingsError>;
-
-  /** Read the current settings. */
-  readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
-
-  /** Patch settings and persist. Returns the new full settings object. */
-  readonly updateSettings: (
-    patch: ServerSettingsPatch,
-  ) => Effect.Effect<ServerSettings, ServerSettingsError>;
-
-  /** Update one project's settings from the latest persisted snapshot. */
-  readonly updateProjectSettings: (
-    projectId: ProjectId,
-    patch: ProjectSettingsPatch,
-  ) => Effect.Effect<ProjectSettings, ServerSettingsError>;
-
-  /** Stream of settings change events. */
-  readonly streamChanges: Stream.Stream<ServerSettings>;
-}
-
 export class ServerSettingsService extends Context.Service<
   ServerSettingsService,
-  ServerSettingsShape
+  {
+    /** Start the settings runtime and attach file watching. */
+    readonly start: Effect.Effect<void, ServerSettingsError>;
+
+    /** Await settings runtime readiness. */
+    readonly ready: Effect.Effect<void, ServerSettingsError>;
+
+    /** Read the current settings. */
+    readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
+
+    /** Patch settings and persist. Returns the new full settings object. */
+    readonly updateSettings: (
+      patch: ServerSettingsPatch,
+    ) => Effect.Effect<ServerSettings, ServerSettingsError>;
+
+    /** Update one project's settings from the latest persisted snapshot. */
+    readonly updateProjectSettings: (
+      projectId: ProjectId,
+      patch: ProjectSettingsPatch,
+    ) => Effect.Effect<ProjectSettings, ServerSettingsError>;
+
+    /** Stream of settings change events. */
+    readonly streamChanges: Stream.Stream<ServerSettings>;
+  }
 >()("t3/serverSettings/ServerSettingsService") {
   /** @deprecated Import and use `layerTest` from this module. */
   static readonly layerTest = (overrides: DeepPartial<ServerSettings> = {}) => layerTest(overrides);

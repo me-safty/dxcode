@@ -57,25 +57,23 @@ interface StreamStatusOptions {
   readonly automaticRemoteRefreshInterval?: Effect.Effect<Duration.Duration, never>;
 }
 
-export interface VcsStatusBroadcasterShape {
-  readonly getStatus: (
-    input: VcsStatusInput,
-  ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
-  readonly refreshLocalStatus: (
-    cwd: string,
-  ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>;
-  readonly refreshStatus: (
-    input: VcsStatusRefreshInput,
-  ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
-  readonly streamStatus: (
-    input: VcsStatusInput,
-    options?: StreamStatusOptions,
-  ) => Stream.Stream<VcsStatusStreamEvent, GitManagerServiceError>;
-}
-
 export class VcsStatusBroadcaster extends Context.Service<
   VcsStatusBroadcaster,
-  VcsStatusBroadcasterShape
+  {
+    readonly getStatus: (
+      input: VcsStatusInput,
+    ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
+    readonly refreshLocalStatus: (
+      cwd: string,
+    ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>;
+    readonly refreshStatus: (
+      input: VcsStatusRefreshInput,
+    ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
+    readonly streamStatus: (
+      input: VcsStatusInput,
+      options?: StreamStatusOptions,
+    ) => Stream.Stream<VcsStatusStreamEvent, GitManagerServiceError>;
+  }
 >()("t3/vcs/VcsStatusBroadcaster") {}
 
 function boundedDiagnosticValue(value: string): string {
@@ -356,7 +354,7 @@ export const make = Effect.gen(function* () {
     return yield* loadRemoteStatus(input);
   });
 
-  const getStatus: VcsStatusBroadcasterShape["getStatus"] = Effect.fn(
+  const getStatus: VcsStatusBroadcaster["Service"]["getStatus"] = Effect.fn(
     "VcsStatusBroadcaster.getStatus",
   )(function* (input) {
     const normalizedInput = yield* normalizeStatusInput(input);
@@ -375,7 +373,7 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const refreshLocalStatus: VcsStatusBroadcasterShape["refreshLocalStatus"] = Effect.fn(
+  const refreshLocalStatus: VcsStatusBroadcaster["Service"]["refreshLocalStatus"] = Effect.fn(
     "VcsStatusBroadcaster.refreshLocalStatus",
   )(function* (rawCwd) {
     const cwd = yield* withFileSystem(normalizeCwd(rawCwd));
@@ -393,7 +391,36 @@ export const make = Effect.gen(function* () {
     return yield* updateCachedRemoteStatus(statusCacheKey(input), remote, { publish: true });
   });
 
-  const refreshStatus: VcsStatusBroadcasterShape["refreshStatus"] = Effect.fn(
+  const cachedProjectInputsForCwd = Effect.fn("VcsStatusBroadcaster.cachedProjectInputsForCwd")(
+    function* (cwd: string) {
+      const cache = yield* Ref.get(cacheRef);
+      const inputs: Array<VcsStatusInput> = [];
+      for (const key of cache.keys()) {
+        const separatorIndex = key.indexOf(VCS_STATUS_CACHE_KEY_SEPARATOR);
+        const keyCwd = key.slice(0, separatorIndex);
+        const projectId = key.slice(separatorIndex + VCS_STATUS_CACHE_KEY_SEPARATOR.length);
+        if (keyCwd === cwd && projectId) {
+          // Keys are only built from validated inputs, so the round-trip preserves the brand.
+          inputs.push({ cwd, projectId: projectId as VcsStatusInput["projectId"] });
+        }
+      }
+      return inputs;
+    },
+  );
+
+  const refreshStatusForInput = Effect.fn("VcsStatusBroadcaster.refreshStatusForInput")(function* (
+    input: VcsStatusInput,
+  ) {
+    const [local, remote] = yield* Effect.all(
+      [workflow.localStatus(input), workflow.remoteStatus(input)],
+      { concurrency: "unbounded" },
+    );
+    return yield* updateCachedStatus(statusCacheKey(input), local, remote, {
+      publish: true,
+    });
+  });
+
+  const refreshStatus: VcsStatusBroadcaster["Service"]["refreshStatus"] = Effect.fn(
     "VcsStatusBroadcaster.refreshStatus",
   )(function* (input) {
     const normalizedInput = yield* normalizeStatusInput(refreshInputToStatusInput(input));
@@ -404,13 +431,17 @@ export const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded", discard: true },
     );
-    const [local, remote] = yield* Effect.all(
-      [workflow.localStatus(normalizedInput), workflow.remoteStatus(normalizedInput)],
-      { concurrency: "unbounded" },
-    );
-    return yield* updateCachedStatus(statusCacheKey(normalizedInput), local, remote, {
-      publish: true,
-    });
+    const result = yield* refreshStatusForInput(normalizedInput);
+    if (normalizedInput.projectId === undefined) {
+      // A bare-cwd refresh must also update project-scoped cache entries for the same
+      // repository, or subscribers keyed by projectId keep serving stale status.
+      const projectInputs = yield* cachedProjectInputsForCwd(normalizedInput.cwd);
+      yield* Effect.forEach(projectInputs, refreshStatusForInput, {
+        concurrency: "unbounded",
+        discard: true,
+      });
+    }
+    return result;
   });
 
   const makeRemoteRefreshLoop = (
@@ -538,7 +569,7 @@ export const make = Effect.gen(function* () {
     }
   });
 
-  const streamStatus: VcsStatusBroadcasterShape["streamStatus"] = (input, options) =>
+  const streamStatus: VcsStatusBroadcaster["Service"]["streamStatus"] = (input, options) =>
     Stream.unwrap(
       Effect.gen(function* () {
         const normalizedInput = yield* normalizeStatusInput(input);

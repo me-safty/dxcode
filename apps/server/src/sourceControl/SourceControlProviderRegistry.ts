@@ -48,28 +48,26 @@ export interface SourceControlProviderHandle {
   readonly contextSource: "override" | "detected" | null;
 }
 
-export interface SourceControlProviderRegistryShape {
-  readonly get: (
-    kind: SourceControlProviderKind,
-  ) => Effect.Effect<
-    SourceControlProvider.SourceControlProvider["Service"],
-    SourceControlProviderError
-  >;
-  readonly resolveHandle: (
-    input: SourceControlProviderResolveInput,
-  ) => Effect.Effect<SourceControlProviderHandle, SourceControlProviderError>;
-  readonly resolve: (
-    input: SourceControlProviderResolveInput,
-  ) => Effect.Effect<
-    SourceControlProvider.SourceControlProvider["Service"],
-    SourceControlProviderError
-  >;
-  readonly discover: Effect.Effect<ReadonlyArray<SourceControlProviderDiscoveryItem>>;
-}
-
 export class SourceControlProviderRegistry extends Context.Service<
   SourceControlProviderRegistry,
-  SourceControlProviderRegistryShape
+  {
+    readonly get: (
+      kind: SourceControlProviderKind,
+    ) => Effect.Effect<
+      SourceControlProvider.SourceControlProvider["Service"],
+      SourceControlProviderError
+    >;
+    readonly resolveHandle: (
+      input: SourceControlProviderResolveInput,
+    ) => Effect.Effect<SourceControlProviderHandle, SourceControlProviderError>;
+    readonly resolve: (
+      input: SourceControlProviderResolveInput,
+    ) => Effect.Effect<
+      SourceControlProvider.SourceControlProvider["Service"],
+      SourceControlProviderError
+    >;
+    readonly discover: Effect.Effect<ReadonlyArray<SourceControlProviderDiscoveryItem>>;
+  }
 >()("t3/sourceControl/SourceControlProviderRegistry") {}
 
 function unsupportedProvider(
@@ -248,9 +246,9 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
 
         if (projectId) {
           const settings = yield* serverSettings.getSettings.pipe(
-            Effect.mapError((error) => providerDetectionError("detectProvider", cwd, error)),
+            Effect.catch(() => Effect.succeed(null)),
           );
-          const override = settings.projectSettings[projectId]?.remoteOverride ?? null;
+          const override = settings?.projectSettings[projectId]?.remoteOverride ?? null;
           const overrideContext = override ? providerContextFromOverride(override) : null;
           if (overrideContext) {
             return { context: overrideContext, source: "override" as const };
@@ -267,7 +265,7 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
           .getActiveProjectByWorkspaceRoot(cwd)
           .pipe(
             Effect.flatMap((project) =>
-              Option.isSome(project) || repository === null || repository.rootPath === cwd
+              Option.isSome(project) || repository === null
                 ? Effect.succeed(project)
                 : projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(repository.rootPath),
             ),
@@ -275,9 +273,10 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
           );
         if (!projectId && Option.isSome(projectOption)) {
           const settings = yield* serverSettings.getSettings.pipe(
-            Effect.mapError((error) => providerDetectionError("detectProvider", cwd, error)),
+            Effect.catch(() => Effect.succeed(null)),
           );
-          const override = settings.projectSettings[projectOption.value.id]?.remoteOverride ?? null;
+          const override =
+            settings?.projectSettings[projectOption.value.id]?.remoteOverride ?? null;
           const overrideContext = override ? providerContextFromOverride(override) : null;
           if (overrideContext) {
             return { context: overrideContext, source: "override" as const };
@@ -311,7 +310,7 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       timeToLive: (exit) => (Exit.isSuccess(exit) ? PROVIDER_DETECTION_CACHE_TTL : Duration.zero),
     });
 
-    const resolveHandle: SourceControlProviderRegistryShape["resolveHandle"] = (input) =>
+    const resolveHandle: SourceControlProviderRegistry["Service"]["resolveHandle"] = (input) =>
       Cache.get(providerContextCache, providerDetectionCacheKey(input)).pipe(
         Effect.map(({ context, source }) => {
           const kind = context?.provider.kind ?? "unknown";

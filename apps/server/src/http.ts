@@ -1,3 +1,4 @@
+import Mime from "@effect/platform-node/Mime";
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -44,38 +45,6 @@ import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./ht
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
-
-const contentTypeForExtension = (extension: string) => {
-  switch (extension.toLowerCase()) {
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".ico":
-      return "image/x-icon";
-    case ".jpeg":
-    case ".jpg":
-      return "image/jpeg";
-    case ".js":
-    case ".mjs":
-      return "text/javascript; charset=utf-8";
-    case ".json":
-    case ".map":
-      return "application/json";
-    case ".png":
-      return "image/png";
-    case ".svg":
-      return "image/svg+xml";
-    case ".txt":
-      return "text/plain; charset=utf-8";
-    case ".wasm":
-      return "application/wasm";
-    case ".webp":
-      return "image/webp";
-    default:
-      return "application/octet-stream";
-  }
-};
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -238,21 +207,15 @@ export const assetRouteLayer = HttpRouter.add(
       });
     }
 
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const data = yield* fileSystem.readFile(asset.path).pipe(Effect.orElseSucceed(() => null));
-    if (!data) {
-      return HttpServerResponse.text("Internal Server Error", { status: 500 });
-    }
-
-    return HttpServerResponse.uint8Array(data, {
+    return yield* HttpServerResponse.file(asset.path, {
       status: 200,
-      contentType: contentTypeForExtension(path.extname(asset.path)),
       headers: {
         "Cache-Control": "private, max-age=3600",
         "X-Content-Type-Options": "nosniff",
       },
-    });
+    }).pipe(
+      Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
+    );
   }),
 );
 
@@ -331,7 +294,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       });
     }
 
-    const contentType = contentTypeForExtension(path.extname(filePath));
+    const contentType = Mime.getType(filePath) ?? "application/octet-stream";
     const data = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null));
     if (!data) {
       return HttpServerResponse.text("Internal Server Error", { status: 500 });

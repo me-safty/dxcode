@@ -50,9 +50,7 @@ export function providerName(kind: SourceControlProviderKind, baseUrl: string | 
 export function providerInfoFromOverride(
   override: ProjectRemoteOverride,
 ): SourceControlProviderInfo | null {
-  const baseUrl = override.webUrl
-    ? parseBaseUrl(override.webUrl)
-    : parseBaseUrl(override.remoteUrl);
+  const baseUrl = parseBaseUrl(override.webUrl ?? "") ?? parseBaseUrl(override.remoteUrl);
   if (!baseUrl) {
     return null;
   }

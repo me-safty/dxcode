@@ -398,9 +398,12 @@ function effectiveRemoteFromDetected(
 }
 
 function pickPrimaryRemote(remotes: ReadonlyArray<ProjectDetectedRemote>) {
+  const hasKnownProvider = (remote: ProjectDetectedRemote) =>
+    remote.provider !== null && remote.provider.kind !== "unknown";
   return (
+    remotes.find((remote) => remote.name === "origin" && hasKnownProvider(remote)) ??
+    remotes.find(hasKnownProvider) ??
     remotes.find((remote) => remote.name === "origin") ??
-    remotes.find((remote) => remote.provider !== null && remote.provider.kind !== "unknown") ??
     remotes[0] ??
     null
   );

@@ -114,10 +114,12 @@ export async function syncProjectScriptKeybinding(input: {
     return;
   }
 
+  // Persist the new binding before removing the old ones so a failed upsert
+  // does not leave the command with no binding at all.
+  await input.server.upsertKeybinding(nextRule);
   for (const target of existingTargets) {
     if (target.key !== nextRule.key) {
       await input.server.removeKeybinding(target);
     }
   }
-  await input.server.upsertKeybinding(nextRule);
 }

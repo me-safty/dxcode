@@ -121,6 +121,12 @@ export function useNewThreadHandler() {
             },
           );
           if (
+            reusableStoredDraftThread.projectId !== projectRef.projectId ||
+            reusableStoredDraftThread.environmentId !== projectRef.environmentId
+          ) {
+            seedNewDraftModelState(reusableStoredDraftThread.draftId);
+          }
+          if (
             currentRouteTarget?.kind === "draft" &&
             currentRouteTarget.draftId === reusableStoredDraftThread.draftId
           ) {
@@ -162,6 +168,12 @@ export function useNewThreadHandler() {
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
           ...(hasStartFromOriginOption ? { startFromOrigin: options?.startFromOrigin } : {}),
         });
+        if (
+          latestActiveDraftThread.projectId !== projectRef.projectId ||
+          latestActiveDraftThread.environmentId !== projectRef.environmentId
+        ) {
+          seedNewDraftModelState(currentRouteTarget.draftId);
+        }
         return Promise.resolve();
       }
 
