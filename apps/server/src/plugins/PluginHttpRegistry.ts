@@ -54,7 +54,13 @@ const matchPath = (
     if (patternSegment.startsWith(":")) {
       const name = patternSegment.slice(1);
       if (name.length === 0) return null;
-      params[name] = decodeURIComponent(requestSegment);
+      // Malformed percent-escapes must not become route defects (public,
+      // unauthenticated surface): an undecodable segment simply doesn't match.
+      try {
+        params[name] = decodeURIComponent(requestSegment);
+      } catch {
+        return null;
+      }
       continue;
     }
     if (patternSegment !== requestSegment) return null;

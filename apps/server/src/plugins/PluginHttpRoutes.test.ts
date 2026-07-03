@@ -130,6 +130,53 @@ it.layer(PluginHttpRegistryLayer.layer)("PluginHttpRegistry", (it) => {
       }
     }),
   );
+
+  it.effect("does not match (rather than throwing) on a malformed percent-escape", () =>
+    Effect.gen(function* () {
+      const registry = yield* PluginHttpRegistry;
+      yield* registry.put(pluginId, [
+        {
+          method: "GET",
+          path: "/item/:id",
+          auth: "public",
+          handler: () => Effect.succeed({ status: 204 }),
+        },
+      ]);
+
+      // A bare "%" is an invalid escape; decodeURIComponent throws on it.
+      // The matcher must degrade to no-match, so the route layer 404s rather
+      // than turning a public request into a 500 defect.
+      const matched = yield* registry.match({
+        pluginId,
+        method: "get",
+        path: "/item/%E0%A4%A",
+      });
+
+      assert.isTrue(Option.isNone(matched));
+    }),
+  );
+
+  it.effect("removes a plugin's routes so a closed-scope plugin stops matching", () =>
+    Effect.gen(function* () {
+      const registry = yield* PluginHttpRegistry;
+      yield* registry.put(pluginId, [
+        {
+          method: "GET",
+          path: "/ping",
+          auth: "public",
+          handler: () => Effect.succeed({ status: 204 }),
+        },
+      ]);
+      assert.isTrue(
+        Option.isSome(yield* registry.match({ pluginId, method: "get", path: "/ping" })),
+      );
+
+      yield* registry.remove(pluginId);
+      assert.isTrue(
+        Option.isNone(yield* registry.match({ pluginId, method: "get", path: "/ping" })),
+      );
+    }),
+  );
 });
 
 if (loopbackAvailable) {

@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -70,13 +71,21 @@ it.effect("secrets enforce and strip the plugin key prefix", () =>
 
     const value = new TextEncoder().encode("secret-value");
     yield* secrets.set("api-key", value);
-    yield* secrets.set("plugin:other:key", new TextEncoder().encode("scoped"));
 
     const stored = yield* secrets.get("api-key");
     assert.deepEqual(Array.from(stored ?? []), Array.from(value));
-    assert.deepEqual(yield* secrets.list, ["api-key", "plugin:other:key"]);
-    assert.isTrue(Option.isNone(yield* store.get("plugin:other:key")));
-    assert.isTrue(Option.isSome(yield* store.get(`plugin:${pluginId}:plugin:other:key`)));
+    assert.deepEqual(yield* secrets.list, ["api-key"]);
+    assert.isTrue(Option.isNone(yield* store.get("api-key")));
+    assert.isTrue(Option.isSome(yield* store.get(`plugin:${pluginId}:api-key`)));
+
+    // Names outside the safe grammar are rejected: the backing store maps
+    // keys to file paths, so separators/colons/traversal must never reach it.
+    for (const invalidName of ["plugin:other:key", "../escape", "a/b", "a\\b", ".hidden", ""]) {
+      const rejected = yield* Effect.result(
+        secrets.set(invalidName, new TextEncoder().encode("nope")),
+      );
+      assert.isTrue(Result.isFailure(rejected), `expected rejection for ${invalidName}`);
+    }
 
     yield* secrets.delete("api-key");
     assert.isNull(yield* secrets.get("api-key"));
@@ -330,7 +339,7 @@ it.effect("terminals spawn through a plugin-owned shell session and expose obser
       label: "run",
       updatedAt: "2026-07-03T00:00:00.000Z",
     };
-    const capability = makeTerminalsCapability({
+    const { capability, shutdown } = makeTerminalsCapability({
       pluginId: PluginId.make("terminal-plugin"),
       manager: {
         open: () => Effect.succeed(snapshot),
@@ -374,5 +383,22 @@ it.effect("terminals spawn through a plugin-owned shell session and expose obser
     yield* capability.kill({ ...spawned.handle, deleteHistory: true });
     assert.equal(writes.at(-1), "q");
     assert.deepEqual(closes, [{ ...spawned.handle, deleteHistory: true }]);
+
+    // A killed terminal is no longer tracked, so shutdown closes nothing.
+    yield* shutdown;
+    assert.equal(closes.length, 1);
+
+    // A terminal left open IS closed by shutdown (the scope-close leak guard).
+    const leaked = yield* capability.spawn({
+      terminalId: "run-2",
+      cwd: "/repo",
+      command: "sleep",
+      args: ["100"],
+    });
+    yield* shutdown;
+    assert.deepEqual(closes.at(-1), {
+      threadId: leaked.handle.threadId,
+      terminalId: leaked.handle.terminalId,
+    });
   }),
 );

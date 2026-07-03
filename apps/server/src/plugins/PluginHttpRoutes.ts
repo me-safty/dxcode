@@ -7,6 +7,8 @@ import type { PluginHttpResponse } from "@t3tools/plugin-sdk";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable, HttpServerResponse } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
@@ -67,6 +69,38 @@ const contentLength = (request: HttpServerRequest.HttpServerRequest): number | n
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
+
+class PluginHttpBodyTooLarge extends Schema.TaggedErrorClass<PluginHttpBodyTooLarge>()(
+  "PluginHttpBodyTooLarge",
+  { limit: Schema.Number },
+) {}
+
+// Read the body INCREMENTALLY with a hard cap: the content-length precheck
+// is advisory (headers can lie, chunked bodies have none) — this is what
+// actually bounds memory on public webhook routes.
+const readBodyCapped = (request: HttpServerRequest.HttpServerRequest, maxBodyBytes: number) =>
+  request.stream.pipe(
+    Stream.runFoldEffect(
+      () => ({ chunks: [] as Array<Uint8Array>, total: 0 }),
+      (acc, chunk: Uint8Array) => {
+        const total = acc.total + chunk.byteLength;
+        if (total > maxBodyBytes) {
+          return Effect.fail(new PluginHttpBodyTooLarge({ limit: maxBodyBytes }));
+        }
+        acc.chunks.push(chunk);
+        return Effect.succeed({ chunks: acc.chunks, total });
+      },
+    ),
+    Effect.map(({ chunks, total }) => {
+      const body = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return body;
+    }),
+  );
 
 const authenticatePluginRoute = (pluginId: PluginId) =>
   Effect.gen(function* () {
@@ -140,10 +174,22 @@ export const pluginHttpRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Payload Too Large", { status: 413 });
     }
 
-    const body = new Uint8Array(yield* request.arrayBuffer);
-    if (body.byteLength > maxBodyBytes) {
-      return HttpServerResponse.text("Payload Too Large", { status: 413 });
+    const bodyOutcome = yield* readBodyCapped(request, maxBodyBytes).pipe(
+      Effect.map((body) => ({ kind: "ok" as const, body })),
+      Effect.catch((error) =>
+        Effect.succeed({
+          kind: "rejected" as const,
+          response:
+            (error as { readonly _tag?: string })._tag === "PluginHttpBodyTooLarge"
+              ? HttpServerResponse.text("Payload Too Large", { status: 413 })
+              : HttpServerResponse.text("Bad Request", { status: 400 }),
+        }),
+      ),
+    );
+    if (bodyOutcome.kind === "rejected") {
+      return bodyOutcome.response;
     }
+    const body = bodyOutcome.body;
 
     const logger = makePluginLogger(parsed.pluginId);
     const exit = yield* descriptor

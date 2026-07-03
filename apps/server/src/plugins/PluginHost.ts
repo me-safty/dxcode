@@ -162,12 +162,21 @@ const makeHostApi = (input: {
     readonly github: GitHubCli.GitHubCli["Service"];
     readonly terminals: TerminalManager.TerminalManager["Service"];
   };
-}): PluginHostApi => {
+}): { readonly api: PluginHostApi; readonly teardown: ReadonlyArray<Effect.Effect<void>> } => {
   const capabilities = new Set(input.capabilities);
   const available = <A>(capability: PluginManifest["capabilities"][number], value: A) =>
     capabilities.has(capability) ? Effect.succeed(value) : unavailable(capability);
 
-  return {
+  const terminalsBundle = makeTerminalsCapability({
+    pluginId: input.pluginId,
+    manager: input.deps.terminals,
+  });
+  const teardown: Array<Effect.Effect<void>> = [];
+  if (capabilities.has("terminals")) {
+    teardown.push(terminalsBundle.shutdown);
+  }
+
+  const api: PluginHostApi = {
     hostApiVersion: HOST_API_VERSION,
     config: {
       appVersion: APP_VERSION,
@@ -177,13 +186,7 @@ const makeHostApi = (input: {
     },
     agents: unavailable("agents"),
     vcs: unavailable("vcs"),
-    terminals: available(
-      "terminals",
-      makeTerminalsCapability({
-        pluginId: input.pluginId,
-        manager: input.deps.terminals,
-      }),
-    ),
+    terminals: available("terminals", terminalsBundle.capability),
     database: available("database", makeDatabaseCapability(input.deps.sql)),
     projectionsRead: available(
       "projections.read",
@@ -224,6 +227,8 @@ const makeHostApi = (input: {
       makeTextGenerationCapability(input.deps.textGeneration),
     ),
   };
+
+  return { api, teardown };
 };
 
 const upgradeLockfileEntry = (
@@ -362,7 +367,7 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       const readiness = yield* Deferred.make<void>();
       const logger = makePluginLogger(pluginId);
       const dataDir = pluginDataDir(config.pluginsDir, pluginId, path.join);
-      const hostApi = makeHostApi({
+      const { api: hostApi, teardown: hostApiTeardown } = makeHostApi({
         pluginId,
         capabilities: manifest.capabilities,
         dataDir,
@@ -386,6 +391,12 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       });
 
       const activation = Effect.gen(function* () {
+        // Register capability teardowns (e.g. killing leaked terminals) on the
+        // plugin scope before running any plugin code, so cleanup fires on
+        // EVERY exit path — activation failure, stop, disable, crash.
+        for (const teardown of hostApiTeardown) {
+          yield* Scope.addFinalizer(scope, teardown);
+        }
         yield* fs.makeDirectory(dataDir, { recursive: true });
         const definition = yield* loader.loadServerEntry(pluginDir, serverEntry);
         const registration = yield* resolveRegistration(pluginId, definition, hostApi);

@@ -16,11 +16,30 @@ const defaultHandle = (pluginId: PluginId, terminalId: string): TerminalSessionH
   terminalId,
 });
 
+export interface TerminalsCapabilityBundle {
+  readonly capability: TerminalsCapability;
+  /** Closes every terminal the plugin still holds open; run on plugin scope close. */
+  readonly shutdown: Effect.Effect<void>;
+}
+
 export function makeTerminalsCapability(input: {
   readonly pluginId: PluginId;
   readonly manager: TerminalManager.TerminalManager["Service"];
-}): TerminalsCapability {
-  return {
+}): TerminalsCapabilityBundle {
+  // Track live terminals so a plugin that forgets to kill one, throws after
+  // spawn, or has its scope aborted cannot leak the underlying PTY/process.
+  const live = new Map<string, TerminalSessionHandle>();
+
+  const closeHandle = (handle: TerminalSessionHandle, deleteHistory?: boolean) =>
+    input.manager
+      .close({
+        threadId: handle.threadId,
+        terminalId: handle.terminalId,
+        ...(deleteHistory === undefined ? {} : { deleteHistory }),
+      })
+      .pipe(Effect.ensuring(Effect.sync(() => live.delete(handle.terminalId))));
+
+  const capability: TerminalsCapability = {
     spawn: (request) =>
       Effect.gen(function* () {
         const terminalId =
@@ -34,6 +53,7 @@ export function makeTerminalsCapability(input: {
           cols: request.cols ?? 120,
           rows: request.rows ?? 30,
         });
+        live.set(terminalId, handle);
         yield* input.manager.write({
           ...handle,
           data: `${commandLine(request.command, request.args)}\n`,
@@ -50,10 +70,20 @@ export function makeTerminalsCapability(input: {
       ),
     sendInput: (request) => input.manager.write(request),
     kill: (request) =>
-      input.manager.close({
-        threadId: request.threadId,
-        terminalId: request.terminalId,
-        ...(request.deleteHistory === undefined ? {} : { deleteHistory: request.deleteHistory }),
-      }),
+      closeHandle(
+        { threadId: request.threadId, terminalId: request.terminalId },
+        request.deleteHistory,
+      ),
   };
+
+  // Suspend so the live set is read at teardown time, not at construction.
+  const shutdown = Effect.suspend(() =>
+    Effect.forEach(
+      Array.from(live.values()),
+      (handle) => closeHandle(handle).pipe(Effect.ignore),
+      { discard: true },
+    ),
+  );
+
+  return { capability, shutdown };
 }
