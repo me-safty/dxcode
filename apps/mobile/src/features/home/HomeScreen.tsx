@@ -38,7 +38,7 @@ import {
   type HomeListItem,
 } from "./homeListItems";
 import { buildHomeThreadGroups, type HomeProjectSortOrder } from "./homeThreadList";
-import { useSwipeableScrollGate } from "./thread-swipe-actions";
+import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { WorkspaceConnectionStatus } from "./WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "./workspace-connection-status";
 
@@ -229,8 +229,8 @@ export function HomeScreen(props: HomeScreenProps) {
   }, [props.projects]);
 
   const extraData = useMemo(
-    () => ({ savedConnectionsById: props.savedConnectionsById, projectCwdByKey, swipeEnabled }),
-    [props.savedConnectionsById, projectCwdByKey, swipeEnabled],
+    () => ({ savedConnectionsById: props.savedConnectionsById, projectCwdByKey }),
+    [props.savedConnectionsById, projectCwdByKey],
   );
 
   const renderItem = useCallback(
@@ -268,7 +268,6 @@ export function HomeScreen(props: HomeScreenProps) {
               onSelectThread={props.onSelectThread}
               onSwipeableClose={handleSwipeableClose}
               onSwipeableWillOpen={handleSwipeableWillOpen}
-              swipeEnabled={swipeEnabled}
             />
           );
         }
@@ -292,7 +291,6 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onDeleteThread,
       props.onSelectThread,
       props.savedConnectionsById,
-      swipeEnabled,
       updateGroupDisplay,
     ],
   );
@@ -387,6 +385,7 @@ export function HomeScreen(props: HomeScreenProps) {
           the first scroll event) and blanks non-pinned headers after
           collapse/expand data changes. The flattened layout still exposes
           `stickyHeaderIndices` if this gets revisited. */}
+      <SwipeableScrollGateProvider enabled={swipeEnabled}>
       <LegendList
         ref={listRef}
         data={listLayout.items}
@@ -419,6 +418,7 @@ export function HomeScreen(props: HomeScreenProps) {
             : undefined
         }
       />
+      </SwipeableScrollGateProvider>
       {connectionStatus}
     </View>
   );

@@ -193,8 +193,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly isLast: boolean;
   /** Sidebar only: the thread currently open in the detail pane. */
   readonly selected?: boolean;
-  /** Gate from useSwipeableScrollGate — false while the list is scrolling. */
-  readonly swipeEnabled?: boolean;
   /** Defaults to window width minus compact margins. */
   readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
@@ -414,7 +412,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       containerStyle={
         compact ? undefined : { borderRadius: SIDEBAR_ROW_RADIUS, overflow: "hidden" }
       }
-      enabled={props.swipeEnabled}
       enableTrackpadSwipe
       fullSwipeWidth={props.fullSwipeWidth ?? windowWidth - 32}
       onDelete={handleDelete}

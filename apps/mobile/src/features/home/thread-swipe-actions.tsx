@@ -1,6 +1,15 @@
 import { SymbolView } from "expo-symbols";
 import * as Haptics from "expo-haptics";
-import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import type { ColorValue, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from "react-native";
 import { Pressable, View } from "react-native";
 import ReanimatedSwipeable, {
@@ -34,6 +43,26 @@ interface ThreadSwipePrimaryAction {
   readonly icon: ComponentProps<typeof SymbolView>["name"];
   readonly label: string;
   readonly onPress: () => void;
+}
+
+/**
+ * Delivers the scroll gate to swipeables via context so that flipping it does
+ * NOT re-render whole rows: putting the flag in list extraData/renderItem deps
+ * re-rendered every visible row (hooks, subscriptions and all) exactly at
+ * scroll start — peak frame pressure. As a context value only the
+ * ThreadSwipeable consumers re-render.
+ */
+const SwipeableScrollGateContext = createContext(true);
+
+export function SwipeableScrollGateProvider(props: {
+  readonly enabled: boolean;
+  readonly children: ReactNode;
+}) {
+  return (
+    <SwipeableScrollGateContext.Provider value={props.enabled}>
+      {props.children}
+    </SwipeableScrollGateContext.Provider>
+  );
 }
 
 /**
@@ -151,6 +180,7 @@ export function ThreadSwipeable(props: {
   const fullSwipeArmedRef = useRef(false);
   const fullSwipeThreshold = Math.max(THREAD_SWIPE_ACTIONS_WIDTH + 44, props.fullSwipeWidth * 0.58);
   const close = useCallback(() => swipeableRef.current?.close(), []);
+  const gateEnabled = use(SwipeableScrollGateContext);
   const resetKey = props.resetKey;
   useEffect(() => {
     if (resetKey === undefined) {
@@ -173,7 +203,7 @@ export function ThreadSwipeable(props: {
       childrenContainerStyle={{ backgroundColor: props.backgroundColor }}
       containerStyle={[{ backgroundColor: props.backgroundColor }, props.containerStyle]}
       dragOffsetFromRightEdge={8}
-      enabled={props.enabled}
+      enabled={props.enabled !== false && gateEnabled}
       enableTrackpadTwoFingerGesture={props.enableTrackpadSwipe ?? true}
       // Fail the swipe once the pan is vertically dominant (patched-in RNGH
       // prop) — otherwise trackpad scrolls with ~8px of horizontal drift

@@ -43,7 +43,7 @@ import {
   type HomeListItem,
 } from "../home/homeListItems";
 import { buildHomeThreadGroups } from "../home/homeThreadList";
-import { useSwipeableScrollGate } from "../home/thread-swipe-actions";
+import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { useThreadListActions } from "../home/useThreadListActions";
 import { WorkspaceConnectionStatus } from "../home/WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "../home/workspace-connection-status";
@@ -382,7 +382,7 @@ function ThreadNavigationSidebarPane(
     onScroll: handleScroll,
     onScrollBeginDrag: handleScrollBeginDrag,
   });
-  const listExtraData = `${props.selectedThreadKey ?? ""}:${props.searchQuery}:${swipeEnabled}`;
+  const listExtraData = props.selectedThreadKey ?? "";
   const focusSearch = useCallback(() => {
     const focus = () => {
       if (props.nativeChrome) {
@@ -440,7 +440,6 @@ function ThreadNavigationSidebarPane(
               onSwipeableClose={handleSwipeableClose}
               onSwipeableWillOpen={handleSwipeableWillOpen}
               simultaneousSwipeGesture={sidebarScrollGesture}
-              swipeEnabled={swipeEnabled}
             />
           );
         }
@@ -467,7 +466,6 @@ function ThreadNavigationSidebarPane(
       props.width,
       savedConnectionsById,
       sidebarScrollGesture,
-      swipeEnabled,
       updateGroupDisplay,
     ],
   );
@@ -541,6 +539,7 @@ function ThreadNavigationSidebarPane(
           }}
         />
         <View style={styles.container}>
+          <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
               data={listLayout.items}
@@ -581,6 +580,7 @@ function ThreadNavigationSidebarPane(
               ListEmptyComponent={listEmpty}
             />
           </GestureDetector>
+          </SwipeableScrollGateProvider>
         </View>
       </>
     );
@@ -600,7 +600,8 @@ function ThreadNavigationSidebarPane(
       ]}
     >
       <View style={{ flex: 1, paddingBottom: insets.bottom }}>
-        <GestureDetector gesture={sidebarScrollGesture}>
+        <SwipeableScrollGateProvider enabled={swipeEnabled}>
+          <GestureDetector gesture={sidebarScrollGesture}>
           <LegendList
             data={listLayout.items}
             drawDistance={500}
@@ -627,6 +628,7 @@ function ThreadNavigationSidebarPane(
             ListEmptyComponent={listEmpty}
           />
         </GestureDetector>
+          </SwipeableScrollGateProvider>
       </View>
 
       <View
