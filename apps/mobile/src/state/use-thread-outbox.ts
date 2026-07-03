@@ -21,24 +21,32 @@ const threadOutboxShellStatusesAtom = Atom.make(
 ).pipe(Atom.withLabel("mobile:thread-outbox:shell-statuses"));
 
 /**
- * The queued pending task currently open in the new-task editor. The outbox
- * drain must not deliver it mid-edit; the editor flushes or removes it when
- * editing ends.
+ * Queued pending tasks the outbox drain must not deliver right now: the one
+ * open in the new-task editor, plus any whose latest edits could not be saved
+ * back yet (delivering those would send stale content). Editing sessions hold
+ * their message id here and release it once the queued payload is current.
  */
-export const editingQueuedMessageIdAtom = Atom.make<MessageId | null>(null).pipe(
+export const editingQueuedMessageIdsAtom = Atom.make<Readonly<Record<MessageId, true>>>({}).pipe(
   Atom.keepAlive,
-  Atom.withLabel("mobile:thread-outbox:editing-message-id"),
+  Atom.withLabel("mobile:thread-outbox:editing-message-ids"),
 );
 
-export function setEditingQueuedMessageId(messageId: MessageId | null): void {
-  appAtomRegistry.set(editingQueuedMessageIdAtom, messageId);
+export function holdEditingQueuedMessage(messageId: MessageId): void {
+  const current = appAtomRegistry.get(editingQueuedMessageIdsAtom);
+  if (current[messageId]) {
+    return;
+  }
+  appAtomRegistry.set(editingQueuedMessageIdsAtom, { ...current, [messageId]: true });
 }
 
-/** Release the edit lock only if it is held for this specific message. */
-export function clearEditingQueuedMessageId(messageId: MessageId): void {
-  if (appAtomRegistry.get(editingQueuedMessageIdAtom) === messageId) {
-    appAtomRegistry.set(editingQueuedMessageIdAtom, null);
+export function releaseEditingQueuedMessage(messageId: MessageId): void {
+  const current = appAtomRegistry.get(editingQueuedMessageIdsAtom);
+  if (!current[messageId]) {
+    return;
   }
+  const next = { ...current };
+  delete next[messageId];
+  appAtomRegistry.set(editingQueuedMessageIdsAtom, next);
 }
 
 export function useThreadOutboxMessages() {

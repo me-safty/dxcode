@@ -35,7 +35,7 @@ import {
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
 import {
-  editingQueuedMessageIdAtom,
+  editingQueuedMessageIdsAtom,
   useThreadOutboxMessages,
   useThreadOutboxShellStatuses,
 } from "./use-thread-outbox";
@@ -92,7 +92,7 @@ export function useThreadOutboxDrain(): void {
     reportFailure: false,
   });
   const dispatchingQueuedMessageId = useAtomValue(dispatchingQueuedMessageIdAtom);
-  const editingQueuedMessageId = useAtomValue(editingQueuedMessageIdAtom);
+  const editingQueuedMessageIds = useAtomValue(editingQueuedMessageIdsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
   const shellStatuses = useThreadOutboxShellStatuses();
   const threads = useThreadShells();
@@ -287,7 +287,7 @@ export function useThreadOutboxDrain(): void {
       if (!nextQueuedMessage) {
         continue;
       }
-      if (nextQueuedMessage.messageId === editingQueuedMessageId) {
+      if (editingQueuedMessageIds[nextQueuedMessage.messageId]) {
         continue;
       }
       if ((retryNotBeforeRef.current.get(nextQueuedMessage.messageId) ?? 0) > Date.now()) {
@@ -393,7 +393,7 @@ export function useThreadOutboxDrain(): void {
   }, [
     connectedEnvironments,
     dispatchingQueuedMessageId,
-    editingQueuedMessageId,
+    editingQueuedMessageIds,
     projects,
     queuedMessagesByThreadKey,
     retryTick,

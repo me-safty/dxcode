@@ -45,8 +45,8 @@ import {
   type QueuedThreadMessage,
 } from "../../state/thread-outbox";
 import {
-  clearEditingQueuedMessageId,
-  setEditingQueuedMessageId,
+  holdEditingQueuedMessage,
+  releaseEditingQueuedMessage,
   useThreadOutboxMessages,
 } from "../../state/use-thread-outbox";
 import {
@@ -62,10 +62,11 @@ function pendingTaskDraftKey(messageId: string): string {
   return `pending-task:${messageId}`;
 }
 
-// Bumped on every beginEditingPendingTask, across provider instances. An
-// in-flight flush from a dismissed session compares against it so it never
-// clears the draft or drain lock out from under a newer editing session.
-let editingSessionGeneration = 0;
+// The message id owned by the currently active editing session, tracked
+// across provider instances. An in-flight flush from a dismissed session
+// consults it so it never drops the draft or releases the drain lock out from
+// under a newer session editing the same task.
+let activeEditingMessageId: string | null = null;
 
 function findQueuedPendingTask(messageId: string): QueuedThreadMessage | null {
   const message = flattenQueuedThreadMessages(
@@ -219,9 +220,15 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     setSubmitting(false);
     setBranchQuery("");
     setExpandedProvider(null);
+    const editing = editingPendingTaskRef.current;
     editingPendingTaskRef.current = null;
     setEditingPendingTask(null);
-    setEditingQueuedMessageId(null);
+    if (editing) {
+      if (activeEditingMessageId === editing.messageId) {
+        activeEditingMessageId = null;
+      }
+      releaseEditingQueuedMessage(editing.messageId);
+    }
   }, []);
 
   const environments = useMemo(
@@ -279,7 +286,10 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       environmentId: editingPendingTask.environmentId,
       id: creation.projectId,
       title: creation.projectTitle ?? "Unknown project",
-      workspaceRoot: creation.projectCwd ?? String(creation.projectId),
+      // Deliberately empty when the snapshot has no cwd — downstream consumers
+      // (branch queries, worktree bootstrap) must skip it, not receive a
+      // fabricated path.
+      workspaceRoot: creation.projectCwd ?? "",
       repositoryIdentity: null,
       defaultModelSelection: editingPendingTask.modelSelection ?? null,
       scripts: [],
@@ -435,7 +445,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const branchTarget = useMemo(
     () => ({
       environmentId: selectedProject?.environmentId ?? null,
-      cwd: selectedProject?.workspaceRoot ?? null,
+      // `|| null` also skips the stand-in project's empty workspaceRoot.
+      cwd: selectedProject?.workspaceRoot || null,
       query: null,
     }),
     [selectedProject?.environmentId, selectedProject?.workspaceRoot],
@@ -588,11 +599,11 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     }
     setSelectedEnvironmentId(message.environmentId);
     setSelectedProjectKey(scopedProjectKey(message.environmentId, message.creation.projectId));
-    editingSessionGeneration += 1;
+    activeEditingMessageId = message.messageId;
     editingPendingTaskRef.current = message;
     setEditingPendingTask(message);
     // Hold the outbox drain off this task while it is open in the editor.
-    setEditingQueuedMessageId(message.messageId);
+    holdEditingQueuedMessage(message.messageId);
     return true;
   }, []);
 
@@ -655,10 +666,13 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     const editing = editingPendingTaskRef.current;
     editingPendingTaskRef.current = null;
     if (editing) {
+      if (activeEditingMessageId === editing.messageId) {
+        activeEditingMessageId = null;
+      }
       clearComposerDraft(pendingTaskDraftKey(editing.messageId));
+      releaseEditingQueuedMessage(editing.messageId);
     }
     setEditingPendingTask(null);
-    setEditingQueuedMessageId(null);
   }, []);
 
   // If the queued task disappears mid-edit (deleted from the list, or
@@ -690,6 +704,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       }
       editingPendingTaskRef.current = null;
       setEditingPendingTask(null);
+      if (activeEditingMessageId === editing.messageId) {
+        activeEditingMessageId = null;
+      }
 
       const message = buildPendingTaskMessage({
         threadId: editing.threadId,
@@ -708,16 +725,15 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
 
       // update() rewrites the task only if it is still queued — a concurrent
       // delete or delivery wins, so the flush cannot resurrect it.
-      const flushGeneration = editingSessionGeneration;
       void updateThreadOutboxMessage(message)
         .then(() => {
-          // If any editing session started (possibly in a fresh provider)
-          // while the save was in flight, it owns the draft and drain lock.
-          if (editingSessionGeneration !== flushGeneration) {
+          // If this task was reopened (possibly in a fresh provider) while
+          // the save was in flight, that session owns the draft and the lock.
+          if (activeEditingMessageId === editing.messageId) {
             return;
           }
           clearComposerDraft(pendingTaskDraftKey(editing.messageId));
-          clearEditingQueuedMessageId(editing.messageId);
+          releaseEditingQueuedMessage(editing.messageId);
         })
         .catch((error) => {
           // Keep the drain lock and the draft: delivering the stale payload
