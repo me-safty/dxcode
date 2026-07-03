@@ -3,6 +3,7 @@ import {
   CommandId,
   EnvironmentId,
   MessageId,
+  ProjectId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -12,6 +13,7 @@ import {
   decodeQueuedThreadMessage,
   encodeQueuedThreadMessage,
   groupQueuedThreadMessages,
+  isQueuedThreadCreationSendable,
   modelSelectionsEqual,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxFailureAction,
@@ -295,6 +297,7 @@ describe("thread outbox", () => {
   it("only removes a missing-thread message after shell synchronization is live", () => {
     expect(
       resolveThreadOutboxDeliveryAction({
+        isCreation: false,
         threadExists: false,
         shellStatus: "synchronizing",
         environmentConnected: true,
@@ -303,6 +306,7 @@ describe("thread outbox", () => {
     ).toBe("wait");
     expect(
       resolveThreadOutboxDeliveryAction({
+        isCreation: false,
         threadExists: false,
         shellStatus: "live",
         environmentConnected: true,
@@ -311,12 +315,79 @@ describe("thread outbox", () => {
     ).toBe("remove");
     expect(
       resolveThreadOutboxDeliveryAction({
+        isCreation: false,
         threadExists: true,
         shellStatus: "live",
         environmentConnected: true,
         threadBusy: false,
       }),
     ).toBe("send");
+  });
+
+  it("sends queued creations once connected and removes already-created ones", () => {
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: true,
+        threadExists: false,
+        shellStatus: "cached",
+        environmentConnected: false,
+        threadBusy: false,
+      }),
+    ).toBe("wait");
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: true,
+        threadExists: false,
+        shellStatus: "live",
+        environmentConnected: true,
+        threadBusy: false,
+      }),
+    ).toBe("send");
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: true,
+        threadExists: true,
+        shellStatus: "live",
+        environmentConnected: true,
+        threadBusy: true,
+      }),
+    ).toBe("remove");
+  });
+
+  it("round-trips queued creations and gates incomplete ones from sending", () => {
+    const base = queuedMessage({
+      messageId: "message-1",
+      createdAt: "2026-06-08T10:00:01.000Z",
+    });
+    const creationMessage = {
+      ...base,
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
+      creation: {
+        projectId: ProjectId.make("project-1"),
+        workspaceMode: "worktree",
+        branch: "main",
+        worktreePath: null,
+        startFromOrigin: true,
+      },
+    } satisfies QueuedThreadMessage;
+
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(creationMessage))).toEqual(
+      creationMessage,
+    );
+    expect(isQueuedThreadCreationSendable(creationMessage)).toBe(true);
+    expect(
+      isQueuedThreadCreationSendable({
+        ...creationMessage,
+        creation: { ...creationMessage.creation, branch: null },
+      }),
+    ).toBe(false);
+    expect(
+      isQueuedThreadCreationSendable({ ...creationMessage, modelSelection: undefined }),
+    ).toBe(false);
+    expect(isQueuedThreadCreationSendable(base)).toBe(false);
   });
 
   it("retries transport failures but drops deterministic command failures", () => {

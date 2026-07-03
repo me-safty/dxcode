@@ -1,8 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, MessageId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
+import { appAtomRegistry } from "./atom-registry";
 import { environmentShell } from "./shell";
 import { threadOutboxManager } from "./thread-outbox";
 
@@ -18,6 +19,20 @@ const threadOutboxShellStatusesAtom = Atom.make(
     return statuses;
   },
 ).pipe(Atom.withLabel("mobile:thread-outbox:shell-statuses"));
+
+/**
+ * The queued pending task currently open in the new-task editor. The outbox
+ * drain must not deliver it mid-edit; the editor flushes or removes it when
+ * editing ends.
+ */
+export const editingQueuedMessageIdAtom = Atom.make<MessageId | null>(null).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("mobile:thread-outbox:editing-message-id"),
+);
+
+export function setEditingQueuedMessageId(messageId: MessageId | null): void {
+  appAtomRegistry.set(editingQueuedMessageIdAtom, messageId);
+}
 
 export function useThreadOutboxMessages() {
   return useAtomValue(threadOutboxManager.queuedMessagesByThreadKeyAtom);

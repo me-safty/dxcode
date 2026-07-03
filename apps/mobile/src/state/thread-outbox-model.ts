@@ -6,10 +6,12 @@ import {
   IsoDateTime,
   MessageId,
   ModelSelection,
+  ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
   type ModelSelection as ModelSelectionType,
+  type ProjectId as ProjectIdType,
   type ProviderInteractionMode as ProviderInteractionModeType,
   type RuntimeMode as RuntimeModeType,
 } from "@t3tools/contracts";
@@ -19,11 +21,19 @@ import { DraftComposerImageAttachmentSchema } from "../lib/composer-image-schema
 import type { DraftComposerImageAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 
-const THREAD_OUTBOX_SCHEMA_VERSION = 2;
+const THREAD_OUTBOX_SCHEMA_VERSION = 3;
 const THREAD_OUTBOX_MAX_RETRY_DELAY_MS = 16_000;
 
+const QueuedThreadCreationSchema = Schema.Struct({
+  projectId: ProjectId,
+  workspaceMode: Schema.Literals(["local", "worktree"]),
+  branch: Schema.NullOr(Schema.String),
+  worktreePath: Schema.NullOr(Schema.String),
+  startFromOrigin: Schema.optional(Schema.Boolean),
+});
+
 export const QueuedThreadMessageSchema = Schema.Struct({
-  schemaVersion: Schema.Literals([1, THREAD_OUTBOX_SCHEMA_VERSION]),
+  schemaVersion: Schema.Literals([1, 2, THREAD_OUTBOX_SCHEMA_VERSION]),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   messageId: MessageId,
@@ -33,11 +43,22 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  // Present when the queued item creates a brand-new thread (pending task)
+  // instead of appending a turn to an existing one.
+  creation: Schema.optional(QueuedThreadCreationSchema),
   createdAt: IsoDateTime,
 });
 
 const decodeStoredQueuedThreadMessage = Schema.decodeUnknownSync(QueuedThreadMessageSchema);
 const encodeStoredQueuedThreadMessage = Schema.encodeUnknownSync(QueuedThreadMessageSchema);
+
+export interface QueuedThreadCreation {
+  readonly projectId: ProjectIdType;
+  readonly workspaceMode: "local" | "worktree";
+  readonly branch: string | null;
+  readonly worktreePath: string | null;
+  readonly startFromOrigin?: boolean;
+}
 
 export interface QueuedThreadMessage {
   readonly environmentId: EnvironmentId;
@@ -49,6 +70,7 @@ export interface QueuedThreadMessage {
   readonly modelSelection?: ModelSelectionType;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
+  readonly creation?: QueuedThreadCreation;
   readonly createdAt: string;
 }
 
@@ -121,15 +143,38 @@ export function threadOutboxRetryDelayMs(attempt: number): number {
 export type ThreadOutboxDeliveryAction = "wait" | "remove" | "send";
 
 export function resolveThreadOutboxDeliveryAction(input: {
+  readonly isCreation: boolean;
   readonly threadExists: boolean;
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
   readonly threadBusy: boolean;
 }): ThreadOutboxDeliveryAction {
+  if (input.isCreation) {
+    // A pending task creates its thread on delivery. If the thread already
+    // exists the creation command went through and only cleanup remains.
+    if (input.threadExists) {
+      return "remove";
+    }
+    return input.environmentConnected ? "send" : "wait";
+  }
   if (!input.threadExists) {
     return input.shellStatus === "live" ? "remove" : "wait";
   }
   return input.environmentConnected && !input.threadBusy ? "send" : "wait";
+}
+
+/**
+ * A queued creation can only be dispatched once its payload would pass server
+ * validation; incomplete payloads stay pending until the user edits them.
+ */
+export function isQueuedThreadCreationSendable(message: QueuedThreadMessage): boolean {
+  if (!message.creation) {
+    return false;
+  }
+  if (message.text.trim().length === 0 || message.modelSelection === undefined) {
+    return false;
+  }
+  return message.creation.workspaceMode !== "worktree" || message.creation.branch !== null;
 }
 
 function errorMessage(error: unknown): string | null {

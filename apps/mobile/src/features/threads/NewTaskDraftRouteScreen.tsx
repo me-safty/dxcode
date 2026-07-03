@@ -7,6 +7,7 @@ type NewTaskDraftRouteParams = {
   readonly environmentId?: string | string[];
   readonly projectId?: string | string[];
   readonly title?: string | string[];
+  readonly pendingTaskId?: string | string[];
 };
 
 export function NewTaskDraftRouteScreen({ route }: StaticScreenProps<NewTaskDraftRouteParams>) {
@@ -26,6 +27,9 @@ export function NewTaskDraftRouteScreen({ route }: StaticScreenProps<NewTaskDraf
             : params.environmentId,
           projectId: Array.isArray(params.projectId) ? params.projectId[0] : params.projectId,
         }}
+        pendingTaskId={
+          Array.isArray(params.pendingTaskId) ? params.pendingTaskId[0] : params.pendingTaskId
+        }
       />
     </>
   );
