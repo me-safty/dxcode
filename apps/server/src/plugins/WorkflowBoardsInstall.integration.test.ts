@@ -1,10 +1,23 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { type PluginCapability, PluginId, ProjectId } from "@t3tools/contracts";
+import {
+  type AuthScope,
+  type PluginCapability,
+  PluginId,
+  ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+  pluginOperateScope,
+  pluginReadScope,
+} from "@t3tools/contracts";
 import * as Data from "effect/Data";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -16,6 +29,12 @@ import {
   OWNED_INDEXES,
   OWNED_TABLES,
 } from "../../../../fixtures/workflow-boards/server/migrations/renameMap.ts";
+import {
+  WORKFLOW_WS_METHODS,
+  type BoardSnapshot,
+  type BoardStreamItem,
+  type WorkflowTicketDetailView,
+} from "../../../../fixtures/workflow-boards/contracts/workflow.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -53,6 +72,34 @@ const WORKSPACE_ROOT_ENV = "T3_WORKFLOW_BOARDS_WORKSPACE_ROOT";
 const fixtureRoot = decodeURIComponent(
   new URL("../../../../fixtures/workflow-boards", import.meta.url).pathname,
 );
+const testProjectId = ProjectId.make("workflow-boards-project");
+const testAgentInstanceId = ProviderInstanceId.make("fixture-agent");
+const testModel = "fixture-model";
+
+const projectShell = () => ({
+  id: testProjectId,
+  title: "Workflow Boards Project",
+  workspaceRoot: process.env[WORKSPACE_ROOT_ENV] ?? process.cwd(),
+  repositoryIdentity: null,
+  defaultModelSelection: null,
+  scripts: [],
+  createdAt: "2026-07-03T00:00:00.000Z",
+  updatedAt: "2026-07-03T00:00:00.000Z",
+});
+
+const fixtureProvider: ServerProvider = {
+  instanceId: testAgentInstanceId,
+  driver: ProviderDriverKind.make("codex"),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-07-03T00:00:00.000Z",
+  models: [{ slug: testModel, name: "Fixture Model", isCustom: false, capabilities: null }],
+  slashCommands: [],
+  skills: [],
+};
 
 const LEGACY_TABLE_NAMES = [
   "workflow_events",
@@ -159,7 +206,7 @@ const PluginHostCapabilityDepsLayerLive = Layer.mergeAll(
   }),
   Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
     readEvents: () => Stream.empty,
-    dispatch: unexpectedCapabilityUse,
+    dispatch: () => Effect.succeed({ sequence: 1 }),
     streamDomainEvents: Stream.empty,
   }),
   Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
@@ -171,55 +218,69 @@ const PluginHostCapabilityDepsLayerLive = Layer.mergeAll(
         updatedAt: "2026-07-03T00:00:00.000Z",
         projects: [
           {
-            id: ProjectId.make("workflow-boards-project"),
-            title: "Workflow Boards Project",
-            workspaceRoot: process.env[WORKSPACE_ROOT_ENV] ?? process.cwd(),
-            repositoryIdentity: null,
-            defaultModelSelection: null,
-            scripts: [],
-            createdAt: "2026-07-03T00:00:00.000Z",
-            updatedAt: "2026-07-03T00:00:00.000Z",
+            ...projectShell(),
           },
         ],
         threads: [],
       })),
     getArchivedShellSnapshot: unexpectedCapabilityUse,
-    getSnapshotSequence: unexpectedCapabilityUse,
+    getSnapshotSequence: () => Effect.succeed(1 as never),
     getCounts: unexpectedCapabilityUse,
     getActiveProjectByWorkspaceRoot: unexpectedCapabilityUse,
-    getProjectShellById: unexpectedCapabilityUse,
+    getProjectShellById: (projectId) =>
+      Effect.succeed(projectId === testProjectId ? Option.some(projectShell()) : Option.none()),
     getFirstActiveThreadIdByProjectId: unexpectedCapabilityUse,
-    getThreadOwnerById: unexpectedCapabilityUse,
+    getThreadOwnerById: () => Effect.succeed(Option.some(`plugin:${pluginId}` as const)),
     getThreadCheckpointContext: unexpectedCapabilityUse,
     getFullThreadDiffContext: unexpectedCapabilityUse,
-    getThreadShellById: unexpectedCapabilityUse,
-    getThreadDetailById: unexpectedCapabilityUse,
+    getThreadShellById: () => Effect.succeed(Option.none()),
+    getThreadDetailById: () => Effect.succeed(Option.none()),
   }),
   Layer.mock(ProjectionTurns.ProjectionTurnRepository)({
     upsertByTurnId: unexpectedCapabilityUse,
     replacePendingTurnStart: unexpectedCapabilityUse,
     getPendingTurnStartByThreadId: unexpectedCapabilityUse,
     deletePendingTurnStartByThreadId: unexpectedCapabilityUse,
-    listByThreadId: unexpectedCapabilityUse,
-    getByTurnId: unexpectedCapabilityUse,
+    listByThreadId: () => Effect.succeed([]),
+    getByTurnId: ({ threadId, turnId }) =>
+      Effect.succeed(
+        Option.some({
+          threadId,
+          turnId,
+          pendingMessageId: null,
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          assistantMessageId: null,
+          state: "completed" as const,
+          requestedAt: "2026-07-03T00:00:00.000Z",
+          startedAt: "2026-07-03T00:00:00.000Z",
+          completedAt: "2026-07-03T00:00:00.000Z",
+          checkpointTurnCount: null,
+          checkpointRef: null,
+          checkpointStatus: null,
+          checkpointFiles: [],
+        }),
+      ),
     clearCheckpointTurnConflict: unexpectedCapabilityUse,
     deleteByThreadId: unexpectedCapabilityUse,
   }),
   Layer.mock(ProjectionThreadMessages.ProjectionThreadMessageRepository)({
     upsert: unexpectedCapabilityUse,
-    getByMessageId: unexpectedCapabilityUse,
-    listByThreadId: unexpectedCapabilityUse,
+    getByMessageId: () => Effect.succeed(Option.none()),
+    listByThreadId: () => Effect.succeed([]),
     deleteByThreadId: unexpectedCapabilityUse,
   }),
   Layer.mock(ProjectionThreadActivities.ProjectionThreadActivityRepository)({
     upsert: unexpectedCapabilityUse,
-    listByThreadId: unexpectedCapabilityUse,
+    listByThreadId: () => Effect.succeed([]),
     deleteByThreadId: unexpectedCapabilityUse,
   }),
   Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
     getInstance: unexpectedCapabilityUse,
-    listInstances: unexpectedCapabilityUse(),
-    listUnavailable: unexpectedCapabilityUse(),
+    listInstances: Effect.succeed([
+      { snapshot: { getSnapshot: Effect.succeed(fixtureProvider) } },
+    ] as never),
+    listUnavailable: Effect.succeed([]),
     streamChanges: Stream.empty,
     subscribeChanges: unexpectedCapabilityUse(),
   }),
@@ -354,6 +415,8 @@ const testLayer = PluginLayerLive.pipe(
 
 const layer = it.layer(testLayer);
 
+const session = (scopes: ReadonlyArray<AuthScope>) => ({ scopes });
+
 const collectText = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
   stream.pipe(
     Stream.decodeText(),
@@ -450,6 +513,7 @@ layer("workflow-boards fixture plugin", (it) => {
           const sql = yield* SqlClient.SqlClient;
           const handlers = yield* PluginManagementRpcHandlersModule.PluginManagementRpcHandlers;
           const catalog = yield* PluginCatalogModule.PluginCatalog;
+          const dispatcher = yield* PluginRpcDispatcherModule.PluginRpcDispatcher;
           const outDir = yield* fs.makeTempDirectoryScoped({
             prefix: "workflow-boards-fixture-",
           });
@@ -509,6 +573,111 @@ layer("workflow-boards fixture plugin", (it) => {
               lastError: null,
             },
           );
+
+          const rpcSession = session([pluginReadScope(pluginId), pluginOperateScope(pluginId)]);
+          const created = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.createBoard,
+            {
+              projectId: testProjectId,
+              name: "Acceptance Board",
+              agent: { instance: testAgentInstanceId, model: testModel },
+            },
+            rpcSession,
+          )) as { readonly boardId: string; readonly snapshot: BoardSnapshot };
+          assert.equal(created.snapshot.board.name, "Acceptance Board");
+          assert.deepEqual(
+            created.snapshot.board.lanes.slice(0, 3).map((lane) => lane.key),
+            ["backlog", "planning", "specifying"],
+          );
+
+          const board = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoard,
+            { boardId: created.boardId },
+            rpcSession,
+          )) as BoardSnapshot;
+          assert.equal(board.board.boardId, created.boardId);
+          assert.equal(board.tickets.length, 0);
+
+          const createdTicket = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.createTicket,
+            {
+              boardId: created.boardId,
+              title: "Drive the board",
+              description: "Acceptance ticket",
+              initialLane: "backlog",
+            },
+            rpcSession,
+          )) as { readonly ticketId: string };
+          assert.isString(createdTicket.ticketId);
+
+          const streamItems: BoardStreamItem[] = [];
+          const snapshotReceived = yield* Deferred.make<void>();
+          const streamFiber = yield* dispatcher
+            .subscribe(
+              pluginId,
+              WORKFLOW_WS_METHODS.subscribeBoard,
+              { boardId: created.boardId },
+              rpcSession,
+            )
+            .pipe(
+              Stream.take(2),
+              Stream.tap((item) =>
+                Effect.sync(() => {
+                  streamItems.push(item as BoardStreamItem);
+                }).pipe(
+                  Effect.andThen(
+                    (item as BoardStreamItem).kind === "snapshot"
+                      ? Deferred.succeed(snapshotReceived, undefined).pipe(Effect.ignore)
+                      : Effect.void,
+                  ),
+                ),
+              ),
+              Stream.runDrain,
+              Effect.forkScoped,
+            );
+          yield* Deferred.await(snapshotReceived);
+
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.moveTicket,
+            { ticketId: createdTicket.ticketId, toLane: "planning" },
+            rpcSession,
+          );
+          yield* Fiber.join(streamFiber);
+          assert.equal(streamItems[0]?.kind, "snapshot");
+          if (streamItems[0]?.kind === "snapshot") {
+            // The subscribe snapshot reflects the created ticket (read model wrote it).
+            assert.equal(streamItems[0].snapshot.tickets.length, 1);
+            assert.equal(streamItems[0].snapshot.tickets[0]?.ticketId, createdTicket.ticketId);
+          }
+          assert.equal(streamItems[1]?.kind, "ticket");
+          if (streamItems[1]?.kind === "ticket") {
+            // The post-commit PubSub published the moveTicket transition.
+            assert.equal(streamItems[1].ticket.ticketId, createdTicket.ticketId);
+            assert.equal(streamItems[1].ticket.currentLaneKey, "planning");
+          }
+
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.runLane,
+            { ticketId: createdTicket.ticketId },
+            rpcSession,
+          );
+
+          const detail = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getTicketDetail,
+            { ticketId: createdTicket.ticketId },
+            rpcSession,
+          )) as WorkflowTicketDetailView;
+          assert.equal(detail.ticket.ticketId, createdTicket.ticketId);
+          // runLane executed the "planning" lane pipeline: the ticket is in that
+          // lane and the engine created at least one step run for it.
+          assert.equal(detail.ticket.currentLaneKey, "planning");
+          assert.isAtLeast(detail.steps.length, 1);
 
           const tables = yield* sql<{ readonly name: string }>`
             SELECT name FROM sqlite_master
