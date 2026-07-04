@@ -295,7 +295,11 @@ const make = Effect.gen(function* () {
           })
         : null;
       const endpoint = provisioned?.endpoint ?? verified.endpoint;
-      if (!isSecureManagedEndpoint(endpoint)) {
+      // The secure-endpoint requirement only matters when the relay advertises
+      // this endpoint for other devices to reach (managed tunnel). Publish-only
+      // links are reached out of band (e.g. Tailscale) and their stored endpoint
+      // is never used for routing, so a nominal endpoint is acceptable.
+      if (input.request.managedTunnelsEnabled && !isSecureManagedEndpoint(endpoint)) {
         return yield* new EnvironmentLinkProofInvalid({
           userId: input.userId,
           environmentId: verified.environmentId,

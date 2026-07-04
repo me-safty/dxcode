@@ -173,6 +173,71 @@ describe("EnvironmentLinker", () => {
     );
   });
 
+  it.effect("links a publish-only environment with a non-secure nominal endpoint", () => {
+    let persistedEndpoint: string | null = null;
+    return Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const expiresAt = DateTime.add(now, { minutes: 5 });
+      const relayTokens = yield* RelayTokens.RelayTokens;
+      const challenge = yield* relayTokens.issueLinkChallenge({
+        userId: "user_123",
+        request: {
+          notificationsEnabled: true,
+          liveActivitiesEnabled: true,
+          managedTunnelsEnabled: false,
+        },
+        jti: "publish-only-challenge-jti",
+        issuedAtEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
+        expiresAtEpochSeconds: Math.floor(expiresAt.epochMilliseconds / 1_000),
+      });
+      const payload = {
+        iss: "t3-env:env-link-test",
+        aud: "https://relay.example.test",
+        sub: "env-link-test",
+        jti: "publish-only-proof-jti",
+        iat: Math.floor(now.epochMilliseconds / 1_000),
+        exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
+        challenge,
+        environmentId: "env-link-test" as RelayEnvironmentLinkProofPayload["environmentId"],
+        descriptor: {
+          environmentId: "env-link-test" as RelayEnvironmentLinkProofPayload["environmentId"],
+          label: "Link Test Environment",
+          platform: { os: "darwin", arch: "arm64" },
+          serverVersion: "0.0.0-test",
+          capabilities: { repositoryIdentity: true },
+        },
+        environmentPublicKey: environmentKeyPair.publicKey.trim(),
+        endpoint: {
+          httpBaseUrl: "http://127.0.0.1:3773/",
+          wsBaseUrl: "ws://127.0.0.1:3773/",
+          providerKind: "manual",
+        },
+        origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+        scopes: ["agent_activity_notifications"],
+      } satisfies RelayEnvironmentLinkProofPayload;
+      const request = {
+        proof: signTestJwt(payload, RELAY_LINK_PROOF_TYP, environmentKeyPair.privateKey),
+        notificationsEnabled: true,
+        liveActivitiesEnabled: true,
+        managedTunnelsEnabled: false,
+      } satisfies RelayEnvironmentLinkRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* linker.link({ userId: "user_123", request });
+      expect(result.environmentCredential).toBe("t3env_credential_secret");
+      expect(result.endpointRuntime).toBeNull();
+      expect(persistedEndpoint).toBe("http://127.0.0.1:3773/");
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          upsert: (input) =>
+            Effect.sync(() => {
+              persistedEndpoint = input.endpoint.httpBaseUrl;
+            }),
+        }),
+      ),
+    );
+  });
+
   it.effect("rejects a tampered compact proof before persistence", () => {
     let persisted = false;
     return Effect.gen(function* () {

@@ -35,12 +35,21 @@ export const RelayAgentAwarenessPreferences = Schema.Struct({
 });
 export type RelayAgentAwarenessPreferences = typeof RelayAgentAwarenessPreferences.Type;
 
+export const RelayApnsEnvironment = Schema.Literals(["sandbox", "production"]);
+export type RelayApnsEnvironment = typeof RelayApnsEnvironment.Type;
+
 export const RelayDeviceRegistrationRequest = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   platform: RelayAgentAwarenessPlatform,
   iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
   appVersion: Schema.optional(TrimmedNonEmptyString),
+  // APNs routing for this install: the topic must match the app's bundle id
+  // (dev/preview/prod variants differ) and development-signed builds receive
+  // sandbox tokens. Optional so older app builds keep registering; the relay
+  // falls back to its configured defaults.
+  bundleId: Schema.optional(TrimmedNonEmptyString),
+  apsEnvironment: Schema.optional(RelayApnsEnvironment),
   pushToken: Schema.optional(TrimmedNonEmptyString),
   pushToStartToken: Schema.optional(TrimmedNonEmptyString),
   preferences: RelayAgentAwarenessPreferences,

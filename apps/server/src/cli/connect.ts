@@ -29,7 +29,11 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as CliState from "../cloud/CliState.ts";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
-import { CLOUD_LINKED_USER_ID, RELAY_URL_SECRET } from "../cloud/config.ts";
+import {
+  CLOUD_LINKED_USER_ID,
+  PUBLISH_AGENT_ACTIVITY_SECRET,
+  RELAY_URL_SECRET,
+} from "../cloud/config.ts";
 import { relayUrlConfig } from "../cloud/publicConfig.ts";
 import { headlessRelayClientTracingLayer } from "../cloud/relayTracing.ts";
 import * as ServerConfig from "../config.ts";
@@ -46,12 +50,21 @@ function bytesToString(value: Uint8Array): string {
   return new TextDecoder().decode(value);
 }
 
+function stringToBytes(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+export function isPublishAgentActivityEnabledValue(value: string | null): boolean {
+  return value === "true";
+}
+
 interface CloudCliStatus {
   readonly desired: boolean;
   readonly authenticated: boolean;
   readonly linked: boolean;
   readonly cloudUserId: string | null;
   readonly relayUrl: string | null;
+  readonly publishAgentActivity: boolean;
   readonly relayClient: RelayClient.RelayClientStatus;
 }
 
@@ -104,6 +117,7 @@ function formatCloudStatus(status: CloudCliStatus, options?: { readonly json?: b
     `  Authorization: ${status.authenticated ? "stored credential" : "missing"}`,
     `  Environment link: ${provisioned}`,
     `  Relay: ${status.relayUrl ?? "not provisioned"}`,
+    `  Publish agent activity: ${status.publishAgentActivity ? "enabled" : "disabled"}`,
     ...formatRelayClientStatus(status.relayClient),
     ...(nextStep ? ["", `Next: ${nextStep}`] : []),
   ].join("\n");
@@ -368,31 +382,46 @@ const connectLoginCommand = Command.make("login", {
 
 const connectLinkCommand = Command.make("link", {
   ...projectLocationFlags,
+  publishOnly: Flag.boolean("publish-only").pipe(
+    Flag.withDescription(
+      "Link to publish agent activity only — no managed tunnel. Reach this environment out of band (e.g. Tailscale).",
+    ),
+    Flag.withDefault(false),
+  ),
 }).pipe(
   Command.withDescription("Authorize this environment for T3 Connect on next start."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
-        const relayClient = yield* RelayClient.RelayClient;
-        const installed = yield* acquireRelayClientForLink(
-          relayClient,
-          confirmRelayClientInstall,
-          reportRelayClientInstallProgress,
-        );
-        if (Option.isNone(installed)) {
-          yield* Console.log("T3 Connect setup cancelled. The relay client was not installed.");
-          return;
+        // A publish-only link needs no Cloudflare tunnel, so skip installing the
+        // relay client entirely.
+        if (!flags.publishOnly) {
+          const relayClient = yield* RelayClient.RelayClient;
+          const installed = yield* acquireRelayClientForLink(
+            relayClient,
+            confirmRelayClientInstall,
+            reportRelayClientInstallProgress,
+          );
+          if (Option.isNone(installed)) {
+            yield* Console.log("T3 Connect setup cancelled. The relay client was not installed.");
+            return;
+          }
+          yield* Console.log(
+            `Using relay client ${installed.value.version} from ${installed.value.executablePath}.`,
+          );
         }
-        yield* Console.log(
-          `Using relay client ${installed.value.version} from ${installed.value.executablePath}.`,
-        );
 
         const tokens = yield* CliTokenManager.CloudCliTokenManager;
         yield* tokens.get;
-        yield* CliState.setCliDesiredCloudLink(true);
+        yield* CliState.setCliDesiredCloudLink(
+          true,
+          flags.publishOnly ? "publish_only" : "managed",
+        );
         yield* Console.log(
-          "This T3 environment will be available through T3 Connect the next time T3 starts.",
+          flags.publishOnly
+            ? "This environment will publish agent activity to your mobile clients the next time T3 starts (no managed tunnel)."
+            : "This T3 environment will be available through T3 Connect the next time T3 starts.",
         );
       }),
     ),
@@ -411,22 +440,27 @@ const connectStatusCommand = Command.make("status", {
         const secrets = yield* ServerSecretStore.ServerSecretStore;
         const relayClient = yield* RelayClient.RelayClient;
         const tokens = yield* CliTokenManager.CloudCliTokenManager;
-        const [desired, authenticated, cloudUserId, relayUrl, executable] = yield* Effect.all(
-          [
-            CliState.readCliDesiredCloudLink,
-            tokens.hasCredential,
-            secrets.get(CLOUD_LINKED_USER_ID),
-            secrets.get(RELAY_URL_SECRET),
-            relayClient.resolve,
-          ],
-          { concurrency: "unbounded" },
-        );
+        const [desired, authenticated, cloudUserId, relayUrl, publishAgentActivity, executable] =
+          yield* Effect.all(
+            [
+              CliState.readCliDesiredCloudLink,
+              tokens.hasCredential,
+              secrets.get(CLOUD_LINKED_USER_ID),
+              secrets.get(RELAY_URL_SECRET),
+              secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
+              relayClient.resolve,
+            ],
+            { concurrency: "unbounded" },
+          );
         const status: CloudCliStatus = {
           desired,
           authenticated,
           linked: Option.isSome(cloudUserId),
           cloudUserId: Option.isSome(cloudUserId) ? bytesToString(cloudUserId.value) : null,
           relayUrl: Option.isSome(relayUrl) ? bytesToString(relayUrl.value) : null,
+          publishAgentActivity: isPublishAgentActivityEnabledValue(
+            Option.isSome(publishAgentActivity) ? bytesToString(publishAgentActivity.value) : null,
+          ),
           relayClient: executable,
         };
         yield* Console.log(formatCloudStatus(status, { json: flags.json }));
@@ -434,6 +468,57 @@ const connectStatusCommand = Command.make("status", {
       {
         quietLogs: flags.json,
       },
+    ),
+  ),
+);
+
+const connectPublishCommand = Command.make("publish", {
+  ...projectLocationFlags,
+  disable: Flag.boolean("disable").pipe(
+    Flag.withDescription("Stop publishing agent activity to your mobile clients."),
+    Flag.withDefault(false),
+  ),
+}).pipe(
+  Command.withDescription(
+    "Toggle publishing agent activity (push notifications and Live Activities) to your mobile clients.",
+  ),
+  Command.withHandler((flags) =>
+    runCloudCommand(
+      flags,
+      Effect.gen(function* () {
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const tokens = yield* CliTokenManager.CloudCliTokenManager;
+        const enabled = !flags.disable;
+        yield* secrets.set(
+          PUBLISH_AGENT_ACTIVITY_SECRET,
+          stringToBytes(enabled ? "true" : "false"),
+        );
+        if (!enabled) {
+          yield* Console.log("Publishing agent activity disabled.");
+          return;
+        }
+
+        yield* Console.log("Publishing agent activity enabled.");
+        const linked = Option.isSome(yield* secrets.get(CLOUD_LINKED_USER_ID));
+        if (linked) {
+          return;
+        }
+
+        // Publishing needs the relay to know this environment belongs to you.
+        // Establish a tunnel-free publish-only link automatically so signing in
+        // is all it takes — the mobile client can still reach the environment
+        // out of band without T3 Connect.
+        if (!(yield* tokens.hasCredential)) {
+          yield* Console.log(
+            "Run `t3 connect login` first so this environment can be authorized to publish.",
+          );
+          return;
+        }
+        yield* CliState.setCliDesiredCloudLink(true, "publish_only");
+        yield* Console.log(
+          "Restart T3 to finish authorizing this environment to publish (no managed tunnel is created).",
+        );
+      }),
     ),
   ),
 );
@@ -461,6 +546,7 @@ export const connectCommand = Command.make("connect").pipe(
   Command.withSubcommands([
     connectLoginCommand,
     connectLinkCommand,
+    connectPublishCommand,
     connectStatusCommand,
     connectUnlinkCommand,
     connectLogoutCommand,

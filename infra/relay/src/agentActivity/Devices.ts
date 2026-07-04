@@ -130,6 +130,8 @@ export const make = Effect.gen(function* () {
           platform: registration.platform,
           iosMajorVersion: registration.iosMajorVersion,
           appVersion: registration.appVersion ?? null,
+          bundleId: registration.bundleId ?? null,
+          apsEnvironment: registration.apsEnvironment ?? null,
           pushToken: registration.pushToken ?? null,
           pushToStartToken: registration.pushToStartToken ?? null,
           preferencesJson: registration.preferences,
@@ -143,6 +145,13 @@ export const make = Effect.gen(function* () {
             label: registration.label,
             iosMajorVersion: registration.iosMajorVersion,
             appVersion: registration.appVersion ?? null,
+            // Preserve routing from newer app builds when an older build
+            // re-registers without these fields.
+            bundleId: sql`coalesce(excluded.bundle_id, ${relayMobileDevices.bundleId})`,
+            apsEnvironment: sql`coalesce(
+                excluded.aps_environment,
+                ${relayMobileDevices.apsEnvironment}
+              )`,
             pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
             pushToStartToken: sql`coalesce(
                 excluded.push_to_start_token,
