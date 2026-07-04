@@ -33,6 +33,13 @@ import {
   WORKFLOW_WS_METHODS,
   type BoardSnapshot,
   type BoardStreamItem,
+  type WorkflowBoardDigest,
+  type WorkflowBoardMetrics,
+  type WorkflowBoardVersionSummary,
+  type WorkflowGetBoardDefinitionResult,
+  type WorkflowGetBoardVersionResult,
+  type WorkflowNeedsAttentionTicketView,
+  type WorkflowSaveBoardDefinitionResult,
   type WorkflowTicketDetailView,
 } from "../../../../fixtures/workflow-boards/contracts/workflow.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
@@ -591,6 +598,85 @@ layer("workflow-boards fixture plugin", (it) => {
             ["backlog", "planning", "specifying"],
           );
 
+          const initialDefinition = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoardDefinition,
+            { boardId: created.boardId },
+            rpcSession,
+          )) as WorkflowGetBoardDefinitionResult;
+          assert.equal(initialDefinition.definition.name, "Acceptance Board");
+
+          const renamedDefinition = {
+            ...initialDefinition.definition,
+            name: "Acceptance Board Saved",
+          };
+          const savedDefinition = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.saveBoardDefinition,
+            {
+              boardId: created.boardId,
+              definition: renamedDefinition,
+              expectedVersionHash: initialDefinition.versionHash,
+              source: "save",
+            },
+            rpcSession,
+          )) as WorkflowSaveBoardDefinitionResult;
+          assert.isTrue(savedDefinition.ok);
+          if (savedDefinition.ok) {
+            assert.equal(savedDefinition.definition.name, "Acceptance Board Saved");
+            assert.equal(savedDefinition.snapshot.board.name, "Acceptance Board Saved");
+            assert.notEqual(savedDefinition.versionHash, initialDefinition.versionHash);
+          }
+
+          const savedVersionHash = savedDefinition.ok
+            ? savedDefinition.versionHash
+            : initialDefinition.versionHash;
+          const savedDefinitionRead = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoardDefinition,
+            { boardId: created.boardId },
+            rpcSession,
+          )) as WorkflowGetBoardDefinitionResult;
+          assert.equal(savedDefinitionRead.definition.name, "Acceptance Board Saved");
+          assert.equal(savedDefinitionRead.versionHash, savedVersionHash);
+
+          const versions = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.listBoardVersions,
+            { boardId: created.boardId },
+            rpcSession,
+          )) as WorkflowBoardVersionSummary[];
+          assert.isAtLeast(versions.length, 2);
+          assert.equal(versions[0]?.versionHash, savedVersionHash);
+          assert.equal(versions[0]?.isCurrent, true);
+
+          const currentVersion = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoardVersion,
+            { boardId: created.boardId, versionId: versions[0]?.versionId ?? -1 },
+            rpcSession,
+          )) as WorkflowGetBoardVersionResult;
+          assert.equal(currentVersion.versionHash, savedVersionHash);
+          assert.equal(currentVersion.definition.name, "Acceptance Board Saved");
+
+          const staleSave = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.saveBoardDefinition,
+            {
+              boardId: created.boardId,
+              definition: { ...renamedDefinition, name: "Should Conflict" },
+              expectedVersionHash: initialDefinition.versionHash,
+            },
+            rpcSession,
+          )) as WorkflowSaveBoardDefinitionResult;
+          assert.isFalse(staleSave.ok);
+          if (!staleSave.ok && "conflict" in staleSave) {
+            assert.equal(staleSave.conflict, true);
+            assert.equal(staleSave.currentVersionHash, savedVersionHash);
+          } else {
+            assert.fail("expected stale save to return an optimistic-concurrency conflict");
+          }
+
           const board = (yield* dispatcher.call(
             pluginId,
             WORKFLOW_WS_METHODS.getBoard,
@@ -598,6 +684,7 @@ layer("workflow-boards fixture plugin", (it) => {
             rpcSession,
           )) as BoardSnapshot;
           assert.equal(board.board.boardId, created.boardId);
+          assert.equal(board.board.name, "Acceptance Board Saved");
           assert.equal(board.tickets.length, 0);
 
           const createdTicket = (yield* dispatcher.call(
@@ -612,6 +699,57 @@ layer("workflow-boards fixture plugin", (it) => {
             rpcSession,
           )) as { readonly ticketId: string };
           assert.isString(createdTicket.ticketId);
+
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.editTicket,
+            {
+              ticketId: createdTicket.ticketId,
+              title: "Drive the saved board",
+              description: "Edited acceptance ticket",
+              tokenBudget: 42,
+            },
+            rpcSession,
+          );
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.postTicketMessage,
+            { ticketId: createdTicket.ticketId, text: "Manual note" },
+            rpcSession,
+          );
+          const editedDetail = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getTicketDetail,
+            { ticketId: createdTicket.ticketId },
+            rpcSession,
+          )) as WorkflowTicketDetailView;
+          assert.equal(editedDetail.ticket.title, "Drive the saved board");
+          assert.equal(editedDetail.ticket.description, "Edited acceptance ticket");
+          assert.equal(editedDetail.ticket.tokenBudget, 42);
+          const postedMessage = editedDetail.messages.find((message) => message.body === "Manual note");
+          assert.isDefined(postedMessage);
+          if (postedMessage === undefined) {
+            return yield* Effect.die("posted workflow ticket message was not projected");
+          }
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.editTicketMessage,
+            {
+              ticketId: createdTicket.ticketId,
+              messageId: postedMessage.messageId,
+              body: "Manual note edited",
+            },
+            rpcSession,
+          );
+          const messageDetail = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getTicketDetail,
+            { ticketId: createdTicket.ticketId },
+            rpcSession,
+          )) as WorkflowTicketDetailView;
+          assert.isTrue(
+            messageDetail.messages.some((message) => message.body === "Manual note edited"),
+          );
 
           const streamItems: BoardStreamItem[] = [];
           const snapshotReceived = yield* Deferred.make<void>();
@@ -678,6 +816,83 @@ layer("workflow-boards fixture plugin", (it) => {
           // lane and the engine created at least one step run for it.
           assert.equal(detail.ticket.currentLaneKey, "planning");
           assert.isAtLeast(detail.steps.length, 1);
+
+          const digest = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoardDigest,
+            { boardId: created.boardId, windowHours: 999 },
+            rpcSession,
+          )) as WorkflowBoardDigest;
+          assert.equal(digest.windowHours, 168);
+          assert.isAtLeast(digest.createdCount, 1);
+
+          const metrics = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoardMetrics,
+            { boardId: created.boardId, windowDays: 2 },
+            rpcSession,
+          )) as WorkflowBoardMetrics;
+          assert.equal(metrics.windowDays, 7);
+          assert.isAtLeast(metrics.throughput.created, 1);
+
+          const needsAttention = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.listNeedsAttentionTickets,
+            {},
+            rpcSession,
+          )) as WorkflowNeedsAttentionTicketView[];
+          assert.isArray(needsAttention);
+
+          // --- renameBoard + deleteBoard on a throwaway board (the delete cascade
+          // is the highest-blast-radius handler; assert it actually removes the
+          // board's owned rows, not just that the call succeeds).
+          const disposable = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.createBoard,
+            {
+              projectId: testProjectId,
+              name: "Disposable Board",
+              agent: { instance: testAgentInstanceId, model: testModel },
+            },
+            rpcSession,
+          )) as { readonly boardId: string; readonly snapshot: BoardSnapshot };
+
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.renameBoard,
+            { boardId: disposable.boardId, name: "Renamed Board" },
+            rpcSession,
+          );
+          const renamed = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoard,
+            { boardId: disposable.boardId },
+            rpcSession,
+          )) as BoardSnapshot;
+          assert.equal(renamed.board.name, "Renamed Board");
+
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.deleteBoard,
+            { boardId: disposable.boardId },
+            rpcSession,
+          );
+          // The cascade removed the board's projection + version rows.
+          const remainingBoardRows = yield* sql<{ readonly count: number }>`
+            SELECT count(*) AS "count" FROM p_workflow_boards_projection_board
+            WHERE board_id = ${disposable.boardId}
+          `;
+          assert.equal(remainingBoardRows[0]?.count, 0);
+          const remainingVersionRows = yield* sql<{ readonly count: number }>`
+            SELECT count(*) AS "count" FROM p_workflow_boards_board_version
+            WHERE board_id = ${disposable.boardId}
+          `;
+          assert.equal(remainingVersionRows[0]?.count, 0);
+          // getBoard on the deleted board now fails (definition unregistered).
+          const getDeletedExit = yield* dispatcher
+            .call(pluginId, WORKFLOW_WS_METHODS.getBoard, { boardId: disposable.boardId }, rpcSession)
+            .pipe(Effect.exit);
+          assert.isTrue(getDeletedExit._tag === "Failure");
 
           const tables = yield* sql<{ readonly name: string }>`
             SELECT name FROM sqlite_master
