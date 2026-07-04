@@ -469,7 +469,10 @@ layer("workflow-boards fixture plugin", (it) => {
             version: "0.1.0",
           });
           assert.equal(staged.manifest.id, pluginId);
-          assert.deepEqual(Object.keys(staged.capabilityDescriptions).sort(), ["database"]);
+          assert.deepEqual(Object.keys(staged.capabilityDescriptions).sort(), [
+            "database",
+            "filesystem",
+          ]);
 
           const confirmed = yield* handlers.confirmInstall(staged.stageToken);
           assert.equal(confirmed.plugin.id, pluginId);
@@ -487,7 +490,7 @@ layer("workflow-boards fixture plugin", (it) => {
               id: pluginId,
               state: "active",
               hasWeb: false,
-              capabilities: ["database"],
+              capabilities: ["database", "filesystem"],
               lastError: null,
             },
           );
