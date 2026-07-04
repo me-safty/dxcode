@@ -490,7 +490,7 @@ const pluginSdkWebExports = [
   "useAtomValue",
   "useSidebar",
   "useSidebarVisibility",
-  // Host surface re-exported by the SDK for the workflow-boards board UI (kept in
+  // Host UI/util surface re-exported by the SDK for plugin web bundles (kept in
   // sync with packages/plugin-sdk-web/src/index.ts; validated by hostSingletons.test).
   "cn",
   "randomUUID",

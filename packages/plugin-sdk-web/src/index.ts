@@ -73,9 +73,9 @@ export { useEnvironmentProjectRefs } from "../../../apps/web/src/state/entities.
 // effect/* subpaths the browser import map can't resolve).
 export { formatSchemaError } from "@t3tools/shared/schemaJson";
 
-// Host surface consumed by the workflow-boards board UI (and available to any
-// plugin). These are re-exports of live host modules — a separately-built plugin
-// externalises `@t3tools/plugin-sdk-web`, so at runtime it shares the host's
+// Host UI/util surface available to plugin web bundles. These are re-exports of
+// live host modules — a separately-built plugin externalises
+// `@t3tools/plugin-sdk-web`, so at runtime it shares the host's
 // singleton instances (React, atoms, settings, provider state) through the import
 // map rather than bundling its own copies.
 export { cn, randomUUID } from "../../../apps/web/src/lib/utils.ts";
