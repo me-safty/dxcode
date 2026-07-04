@@ -15,7 +15,12 @@ import {
   getConnectionAtomRuntime,
   type PluginWebRpc,
 } from "@t3tools/plugin-sdk-web";
-import type { MessageId, ProjectId } from "@t3tools/contracts";
+import type {
+  EnvironmentApi as HostEnvironmentApi,
+  MessageId,
+  ProjectId
+} from "@t3tools/contracts";
+import { useMemo } from "react";
 
 import { WORKFLOW_WS_METHODS } from "../contracts/workflow.ts";
 import type {
@@ -59,7 +64,6 @@ import type {
   WorkflowTicketArtifactsResult,
   WorkflowTicketDetailView,
   WorkflowWebhookConfig,
-  WorkSourceConnectionView,
   WorkSourceProviderName,
 } from "../contracts/workflow.ts";
 import type {
@@ -69,6 +73,7 @@ import type {
 import type {
   ImportWorkItemsResult,
   ListImportableWorkItemsResult,
+  WorkSourceConnectionView,
 } from "../contracts/workSource.ts";
 
 /**
@@ -226,6 +231,16 @@ export interface WorkflowApi {
   }) => Promise<ImportWorkItemsResult>;
 }
 
+export interface WorkflowEnvironmentApi {
+  readonly workflow: WorkflowApi;
+  readonly orchestration?:
+    | Pick<HostEnvironmentApi["orchestration"], "subscribeThread">
+    | undefined;
+  // The worktree terminal API (post-#2978) has no `attachHistory`; `attach` with
+  // `restartIfNotRunning: false` is the read-existing-output equivalent.
+  readonly terminal?: Pick<HostEnvironmentApi["terminal"], "attach"> | undefined;
+}
+
 /**
  * Raw board subscription: mount an atom over the `workflow.subscribeBoard` stream
  * on the host's connection runtime and forward each emitted `BoardStreamItem` to
@@ -241,7 +256,10 @@ function subscribeBoardRaw(
   const runtime = getConnectionAtomRuntime();
   const registry = getAppAtomRegistry();
   const stream = rpc.subscribe(WORKFLOW_WS_METHODS.subscribeBoard, input);
-  const atom = runtime.atom(stream);
+  // `as never`: the SDK types the subscription's Effect context (R) as `unknown`,
+  // wider than the runtime context, so `runtime.atom` rejects it. Runtime-safe — the
+  // stream is self-contained and this is the host's own connection runtime.
+  const atom = runtime.atom(stream as never);
   const unmount = registry.mount(atom);
   const unsubscribe = registry.subscribe(atom, (result) => {
     if (AsyncResult.isSuccess(result)) {
@@ -309,4 +327,8 @@ export function createWorkflowApi(rpc: PluginWebRpc): WorkflowApi {
     listImportableWorkItems: (input) => call(M.listImportableWorkItems, input),
     importWorkItems: (input) => call(M.importWorkItems, input),
   };
+}
+
+export function useWorkflowApi(rpc: PluginWebRpc): WorkflowApi {
+  return useMemo(() => createWorkflowApi(rpc), [rpc]);
 }

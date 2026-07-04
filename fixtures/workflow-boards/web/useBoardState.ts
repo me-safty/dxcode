@@ -42,7 +42,12 @@ export function makeBoardStateAtom(
         applyBoardStreamItem(state, item as BoardStreamItem),
       ),
     );
-  return runtime.atom(folded);
+  // `as never`: `PluginWebRpc.subscribe` types its stream's Effect context (R) as
+  // `unknown`, which is wider than the runtime's context, so `runtime.atom` rejects
+  // it at the type level. At runtime the subscription is a self-contained websocket
+  // stream needing no context, and this is the host's own connection runtime — it
+  // runs fine. The cast masks SDK typing imprecision, not a missing service.
+  return runtime.atom(folded as never);
 }
 
 /**

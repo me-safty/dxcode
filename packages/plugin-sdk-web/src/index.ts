@@ -64,6 +64,10 @@ export {
 } from "../../../apps/web/src/components/chat/TraitsPicker.tsx";
 export { useAtomCommand } from "../../../apps/web/src/state/use-atom-command.ts";
 export { useAtomQueryRunner } from "../../../apps/web/src/state/use-atom-query-runner.ts";
+// Environment/project context so a plugin surface can resolve the active
+// project(s) for the environment it renders in (e.g. the board list needs a real
+// projectId — the environment id is NOT a project id).
+export { useEnvironmentProjectRefs } from "../../../apps/web/src/state/entities.ts";
 
 // Host surface consumed by the workflow-boards board UI (and available to any
 // plugin). These are re-exports of live host modules — a separately-built plugin

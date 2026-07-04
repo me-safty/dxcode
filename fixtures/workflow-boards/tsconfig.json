@@ -16,13 +16,21 @@
     "erasableSyntaxOnly": false,
     "verbatimModuleSyntax": false,
     "paths": {
-      "~/*": ["../../apps/web/src/*"]
+      "~/*": ["../../apps/web/src/*"],
+      "lucide-react": ["../../apps/web/node_modules/lucide-react"],
+      "@dnd-kit/core": ["../../apps/web/node_modules/@dnd-kit/core"],
+      "@dnd-kit/sortable": ["../../apps/web/node_modules/@dnd-kit/sortable"],
+      "@dnd-kit/utilities": ["../../apps/web/node_modules/@dnd-kit/utilities"],
+      "class-variance-authority": ["../../apps/web/node_modules/class-variance-authority"],
+      "react-dom": ["../../apps/web/node_modules/@types/react-dom"],
+      "react-dom/*": ["../../apps/web/node_modules/@types/react-dom/*"]
     },
     "plugins": [{ "name": "@effect/language-service" }]
   },
   "include": [
     "server/**/*.ts",
     "contracts/**/*.ts",
+    "web/**/*.ts",
     "web/**/*.tsx",
     "../../apps/web/src/*.d.ts"
   ]
