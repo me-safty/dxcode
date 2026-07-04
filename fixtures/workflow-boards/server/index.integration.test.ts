@@ -145,9 +145,7 @@ it.effect(
         IdlePollerLayer,
       );
 
-      const fiber = yield* runWorkflowRuntimeService(appLayer, runtimeReady).pipe(
-        Effect.forkChild,
-      );
+      const fiber = yield* runWorkflowRuntimeService(appLayer, runtimeReady).pipe(Effect.forkChild);
       const exit = yield* Deferred.await(runtimeReady).pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       yield* Fiber.interrupt(fiber);

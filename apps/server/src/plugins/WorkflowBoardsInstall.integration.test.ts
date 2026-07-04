@@ -42,6 +42,7 @@ import {
   type WorkflowSaveBoardDefinitionResult,
   type WorkflowTicketDetailView,
 } from "../../../../fixtures/workflow-boards/contracts/workflow.ts";
+import type { WorkSourceConnectionView } from "../../../../fixtures/workflow-boards/contracts/workSource.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -174,6 +175,52 @@ class WorkflowBoardsFixtureBuildError extends Data.TaggedError("WorkflowBoardsFi
 const unexpectedCapabilityUse = () =>
   Effect.die(new Error("unexpected capability use in workflow-boards fixture test"));
 
+const testSecretValues = new Map<string, Uint8Array>();
+
+const TestServerSecretStoreLive = Layer.effect(
+  ServerSecretStore.ServerSecretStore,
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const config = yield* ServerConfig.ServerConfig;
+    const markerPath = (name: string) => path.join(config.secretsDir, `${name}.bin`);
+    const writeMarker = (name: string) =>
+      fs
+        .makeDirectory(config.secretsDir, { recursive: true })
+        .pipe(Effect.andThen(fs.writeFile(markerPath(name), new Uint8Array())));
+    const removeMarker = (name: string) => fs.remove(markerPath(name), { force: true });
+
+    return {
+      get: (name) =>
+        Effect.sync(() => {
+          const value = testSecretValues.get(name);
+          return value === undefined ? Option.none() : Option.some(Uint8Array.from(value));
+        }),
+      set: (name, value) =>
+        Effect.sync(() => {
+          testSecretValues.set(name, Uint8Array.from(value));
+        }).pipe(Effect.andThen(writeMarker(name)), Effect.orDie),
+      create: (name, value) =>
+        Effect.sync(() => {
+          testSecretValues.set(name, Uint8Array.from(value));
+        }).pipe(Effect.andThen(writeMarker(name)), Effect.orDie),
+      getOrCreateRandom: (name, bytes) =>
+        Effect.gen(function* () {
+          const existing = testSecretValues.get(name);
+          if (existing !== undefined) return Uint8Array.from(existing);
+          const generated = new Uint8Array(bytes);
+          testSecretValues.set(name, generated);
+          yield* writeMarker(name);
+          return generated;
+        }).pipe(Effect.orDie),
+      remove: (name) =>
+        Effect.sync(() => {
+          testSecretValues.delete(name);
+        }).pipe(Effect.andThen(removeMarker(name)), Effect.orDie),
+    } satisfies ServerSecretStore.ServerSecretStore["Service"];
+  }),
+);
+
 const TestHttpClientLive = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make((request) =>
@@ -200,13 +247,7 @@ const PluginRuntimeRegistryLayerLive = PluginRuntimeRegistryLayer.layer;
 const PluginHttpRegistryLayerLive = PluginHttpRegistry.layer;
 const PluginLockfileStoreLayerLive = PluginLockfileStoreLayer.layer;
 const PluginHostCapabilityDepsLayerLive = Layer.mergeAll(
-  Layer.mock(ServerSecretStore.ServerSecretStore)({
-    get: unexpectedCapabilityUse,
-    set: unexpectedCapabilityUse,
-    create: unexpectedCapabilityUse,
-    getOrCreateRandom: unexpectedCapabilityUse,
-    remove: unexpectedCapabilityUse,
-  }),
+  TestServerSecretStoreLive,
   Layer.mock(ServerEnvironment.ServerEnvironment)({
     getEnvironmentId: unexpectedCapabilityUse(),
     getDescriptor: unexpectedCapabilityUse(),
@@ -529,6 +570,7 @@ layer("workflow-boards fixture plugin", (it) => {
             prefix: "workflow-boards-workspace-",
           });
           const config = yield* ServerConfig.ServerConfig;
+          testSecretValues.clear();
           process.env[WORKSPACE_ROOT_ENV] = workspaceRoot;
 
           yield* buildFixture(outDir);
@@ -551,8 +593,10 @@ layer("workflow-boards fixture plugin", (it) => {
             "http",
             "agents",
             "projections.read",
+            "secrets",
             "vcs",
             "terminals",
+            "httpClient",
             "sourceControl",
             "environments.read",
           ];
@@ -728,7 +772,9 @@ layer("workflow-boards fixture plugin", (it) => {
           assert.equal(editedDetail.ticket.title, "Drive the saved board");
           assert.equal(editedDetail.ticket.description, "Edited acceptance ticket");
           assert.equal(editedDetail.ticket.tokenBudget, 42);
-          const postedMessage = editedDetail.messages.find((message) => message.body === "Manual note");
+          const postedMessage = editedDetail.messages.find(
+            (message) => message.body === "Manual note",
+          );
           assert.isDefined(postedMessage);
           if (postedMessage === undefined) {
             return yield* Effect.die("posted workflow ticket message was not projected");
@@ -844,6 +890,111 @@ layer("workflow-boards fixture plugin", (it) => {
             rpcSession,
           )) as WorkflowNeedsAttentionTicketView[];
           assert.isArray(needsAttention);
+
+          const workSourceToken = "ghp_fixture_connection_token";
+          const createdConnection = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.createWorkSourceConnection,
+            {
+              provider: "github",
+              displayName: "Fixture GitHub",
+              token: workSourceToken,
+            },
+            rpcSession,
+          )) as WorkSourceConnectionView;
+          assert.match(createdConnection.connectionRef, /^conn-evt-/);
+          assert.equal(createdConnection.provider, "github");
+          assert.equal(createdConnection.displayName, "Fixture GitHub");
+          assert.equal(createdConnection.authMode, "pat");
+          assert.equal(createdConnection.baseUrl, null);
+          assert.notProperty(createdConnection as Record<string, unknown>, "token");
+
+          const createdConnectionRows = yield* sql<{
+            readonly connectionRef: string;
+            readonly provider: string;
+            readonly displayName: string;
+            readonly authMode: string;
+            readonly tokenSecretName: string;
+          }>`
+            SELECT
+              connection_ref AS "connectionRef",
+              provider,
+              display_name AS "displayName",
+              auth_mode AS "authMode",
+              token_secret_name AS "tokenSecretName"
+            FROM p_workflow_boards_work_source_connection
+            WHERE connection_ref = ${createdConnection.connectionRef}
+          `;
+          assert.equal(createdConnectionRows.length, 1);
+          const createdConnectionRow = createdConnectionRows[0];
+          if (createdConnectionRow === undefined) {
+            return yield* Effect.die("work-source connection row was not inserted");
+          }
+          const expectedSecretName = `work-source-token-${createdConnection.connectionRef}`;
+          assert.equal(createdConnectionRow.provider, "github");
+          assert.equal(createdConnectionRow.displayName, "Fixture GitHub");
+          assert.equal(createdConnectionRow.authMode, "pat");
+          assert.equal(createdConnectionRow.tokenSecretName, expectedSecretName);
+          const storedToken = testSecretValues.get(`plugin:${pluginId}:${expectedSecretName}`);
+          assert.isDefined(storedToken);
+          assert.equal(new TextDecoder().decode(storedToken), workSourceToken);
+
+          const listedConnections = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.listWorkSourceConnections,
+            {},
+            rpcSession,
+          )) as WorkSourceConnectionView[];
+          assert.deepInclude(listedConnections, createdConnection);
+          for (const connection of listedConnections) {
+            assert.notProperty(connection as Record<string, unknown>, "token");
+            assert.notEqual(connection.displayName, workSourceToken);
+            assert.notEqual(connection.connectionRef, workSourceToken);
+            assert.notEqual(connection.baseUrl, workSourceToken);
+          }
+
+          yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.deleteWorkSourceConnection,
+            { connectionRef: createdConnection.connectionRef },
+            rpcSession,
+          );
+          const remainingConnectionRows = yield* sql<{ readonly count: number }>`
+            SELECT count(*) AS "count" FROM p_workflow_boards_work_source_connection
+            WHERE connection_ref = ${createdConnection.connectionRef}
+          `;
+          assert.equal(remainingConnectionRows[0]?.count, 0);
+          assert.isUndefined(testSecretValues.get(`plugin:${pluginId}:${expectedSecretName}`));
+          const listedAfterDelete = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.listWorkSourceConnections,
+            {},
+            rpcSession,
+          )) as WorkSourceConnectionView[];
+          assert.isFalse(
+            listedAfterDelete.some(
+              (connection) => connection.connectionRef === createdConnection.connectionRef,
+            ),
+          );
+
+          // A jira connection whose base URL resolves to a blocked (SSRF) host is
+          // rejected at create time (isBlockedHost pre-check), before any token is stored.
+          const ssrfJira = yield* dispatcher
+            .call(
+              pluginId,
+              WORKFLOW_WS_METHODS.createWorkSourceConnection,
+              {
+                provider: "jira",
+                displayName: "Blocked Jira",
+                token: "jira-token",
+                authMode: "basic",
+                baseUrl: "http://169.254.169.254/",
+                email: "ops@example.com",
+              },
+              rpcSession,
+            )
+            .pipe(Effect.exit);
+          assert.isTrue(ssrfJira._tag === "Failure");
 
           // --- renameBoard + deleteBoard on a throwaway board (the delete cascade
           // is the highest-blast-radius handler; assert it actually removes the
@@ -1079,7 +1230,12 @@ layer("workflow-boards fixture plugin", (it) => {
           assert.equal(remainingDeliveryRows[0]?.count, 0);
           // getBoard on the deleted board now fails (definition unregistered).
           const getDeletedExit = yield* dispatcher
-            .call(pluginId, WORKFLOW_WS_METHODS.getBoard, { boardId: disposable.boardId }, rpcSession)
+            .call(
+              pluginId,
+              WORKFLOW_WS_METHODS.getBoard,
+              { boardId: disposable.boardId },
+              rpcSession,
+            )
             .pipe(Effect.exit);
           assert.isTrue(getDeletedExit._tag === "Failure");
 
