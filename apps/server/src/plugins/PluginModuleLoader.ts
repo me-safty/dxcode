@@ -90,6 +90,12 @@ export const make = Effect.fn("PluginModuleLoader.make")(function* () {
         parentURL: import.meta.url,
         data: {
           pluginsRootUrl: NodeURL.pathToFileURL(config.pluginsDir).href,
+          // A host module URL used as the resolution anchor inside the loader-hook
+          // worker: `import.meta.resolve` is unavailable there, so the hook resolves
+          // shared `effect`/SDK specifiers by delegating to `nextResolve` from this
+          // host parent (which finds the host's node_modules), keeping plugins on the
+          // host's singleton instances.
+          hostAnchorUrl: import.meta.url,
         },
       }),
     ).pipe(
