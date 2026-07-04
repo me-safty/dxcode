@@ -1,0 +1,30 @@
+name: Codex review gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  codex-review-required:
+    name: codex-review-required
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a Codex review on this PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          count=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+            --jq '[.[] | select((.user.type == "Bot") and (.user.login | ascii_downcase | contains("codex")))] | length')
+          if [ "$count" -ge 1 ]; then
+            echo "Codex has reviewed this PR ($count review(s))."
+          else
+            echo "::error::No Codex review found on this PR yet. This check re-runs automatically when Codex submits its review."
+            exit 1
+          fi
