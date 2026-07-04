@@ -85,8 +85,36 @@ export const make = Effect.fn("PluginModuleLoader.make")(function* () {
       );
       return;
     }
+    // The loader hook must be its own module file (it runs in a loader-hook
+    // worker, loaded by URL), so it cannot be inlined into bin.mjs. It ships next
+    // to this file in source (./pluginResolveHooks.ts) and next to bin.mjs in the
+    // bundle (./plugins/pluginResolveHooks.mjs, emitted as a second pack entry).
+    // Register whichever exists so host-singleton resolution works in both the
+    // source server (dev) and the bundled server (desktop / production).
+    const hookCandidates = [
+      new URL("./plugins/pluginResolveHooks.mjs", import.meta.url),
+      new URL("./pluginResolveHooks.mjs", import.meta.url),
+      new URL("./pluginResolveHooks.ts", import.meta.url),
+    ];
+    let hookUrl: URL | undefined;
+    for (const candidate of hookCandidates) {
+      const present = yield* fs
+        .exists(NodeURL.fileURLToPath(candidate))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (present) {
+        hookUrl = candidate;
+        break;
+      }
+    }
+    if (hookUrl === undefined) {
+      yield* Effect.logWarning(
+        "Plugin host singleton resolution hook module was not found; plugin host singleton resolution is disabled",
+      );
+      return;
+    }
+    const registeredHookUrl = hookUrl;
     yield* Effect.sync(() =>
-      nodeModule.register(new URL("./pluginResolveHooks.ts", import.meta.url), {
+      nodeModule.register(registeredHookUrl, {
         parentURL: import.meta.url,
         data: {
           pluginsRootUrl: NodeURL.pathToFileURL(config.pluginsDir).href,
