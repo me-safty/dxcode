@@ -1,4 +1,4 @@
-import type { MessageId, ProjectId } from "@t3tools/contracts";
+import { ProjectId, type MessageId, type ProjectId as ProjectIdType } from "@t3tools/contracts";
 import type { BoardId, ScriptRunId, StepRunId, TicketId } from "../../../contracts/workflow.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -34,6 +34,7 @@ import {
   WorkflowAgentPort,
   type WorkflowDispatchTerminalResult,
 } from "../Services/WorkflowAgentPort.ts";
+import { WorkflowEnvironmentsReadCapability } from "../Services/WorkflowCapabilities.ts";
 import { deleteWorkflowBoardOwnedState } from "../boardDeletion.ts";
 import { truncateTicketMessageBody } from "../ticketMessageBody.ts";
 
@@ -60,7 +61,7 @@ interface ScriptRecoveryRow {
 
 interface PersistedBoardRecoveryRow {
   readonly boardId: BoardId;
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectIdType;
   readonly workflowFilePath: string;
 }
 
@@ -73,7 +74,7 @@ const PR_LAND_RESTART_ERROR = "land interrupted by restart";
 interface MergeRecoveryRow {
   readonly ticketId: TicketId;
   readonly stepRunId: StepRunId;
-  readonly repoRoot: string | null;
+  readonly projectId: string | null;
 }
 
 interface StrandedPipelineRow {
@@ -183,6 +184,7 @@ const make = Effect.gen(function* () {
   const leases = yield* WorktreeLeaseService;
   const boardRegistry = yield* BoardRegistry;
   const readModel = yield* WorkflowReadModel;
+  const environments = yield* WorkflowEnvironmentsReadCapability;
   const saveLocks = yield* WorkflowBoardSaveLocks;
   const versionStore = yield* WorkflowBoardVersionStore;
   const worktreeJanitor = Context.getOption(
@@ -230,6 +232,20 @@ const make = Effect.gen(function* () {
 
   const ticketEvents = (ticketId: TicketId) =>
     Stream.runCollect(store.readByTicket(ticketId)).pipe(Effect.map((chunk) => Array.from(chunk)));
+
+  const repoRootForProjectId = (projectId: string | null) =>
+    projectId === null
+      ? Effect.succeed(null)
+      : environments.getProjectById(ProjectId.make(projectId)).pipe(
+          Effect.matchEffect({
+            onSuccess: (project) => Effect.succeed(project?.workspaceRoot ?? null),
+            onFailure: (cause) =>
+              Effect.logWarning("workflow.recovery.project-lookup-failed", {
+                projectId,
+                cause,
+              }).pipe(Effect.as(null)),
+          }),
+        );
 
   const hasTerminalStepEvent = (
     events: ReadonlyArray<PersistedWorkflowEvent>,
@@ -548,14 +564,12 @@ const make = Effect.gen(function* () {
         step.ticket_id AS "ticketId",
         step.step_run_id AS "stepRunId",
         (
-          SELECT projects.workspace_root
+          SELECT board.project_id
           FROM p_workflow_boards_projection_ticket AS ticket
           INNER JOIN p_workflow_boards_projection_board AS board
             ON board.board_id = ticket.board_id
-          INNER JOIN projection_projects AS projects
-            ON projects.project_id = board.project_id
           WHERE ticket.ticket_id = step.ticket_id
-        ) AS "repoRoot"
+        ) AS "projectId"
       FROM p_workflow_boards_projection_step_run AS step
       WHERE step.step_type = 'merge'
         AND step.status IN ('running', 'dispatch_requested')
@@ -574,7 +588,8 @@ const make = Effect.gen(function* () {
         );
         continue;
       }
-      const result = yield* inspectInterruptedMerge(row.repoRoot, row.ticketId);
+      const repoRoot = yield* repoRootForProjectId(row.projectId);
+      const result = yield* inspectInterruptedMerge(repoRoot, row.ticketId);
       yield* engine.completeRecoveredStep(row.stepRunId, result);
     }
   });
@@ -607,7 +622,7 @@ const make = Effect.gen(function* () {
       readonly stepRunId: StepRunId;
       readonly stepKey: string;
       readonly boardId: BoardId;
-      readonly repoRoot: string | null;
+      readonly projectId: string | null;
     }>`
       SELECT
         step.ticket_id AS "ticketId",
@@ -615,12 +630,10 @@ const make = Effect.gen(function* () {
         step.step_key AS "stepKey",
         ticket.board_id AS "boardId",
         (
-          SELECT projects.workspace_root
+          SELECT board.project_id
           FROM p_workflow_boards_projection_board AS board
-          INNER JOIN projection_projects AS projects
-            ON projects.project_id = board.project_id
           WHERE board.board_id = ticket.board_id
-        ) AS "repoRoot"
+        ) AS "projectId"
       FROM p_workflow_boards_projection_step_run AS step
       INNER JOIN p_workflow_boards_projection_ticket AS ticket
         ON ticket.ticket_id = step.ticket_id
@@ -643,10 +656,11 @@ const make = Effect.gen(function* () {
 
       const action = yield* resolvePullRequestAction(row.boardId, row.stepKey);
       const prState = yield* readModel.getTicketPrState(row.ticketId);
+      const repoRoot = yield* repoRootForProjectId(row.projectId);
 
       if (action === "land") {
         // A land cannot have landed without a recorded PR to merge.
-        if (prState === null || Option.isNone(gitHub) || row.repoRoot === null) {
+        if (prState === null || Option.isNone(gitHub) || repoRoot === null) {
           yield* engine.completeRecoveredStep(row.stepRunId, {
             _tag: "failed",
             error: PR_LAND_RESTART_ERROR,
@@ -664,7 +678,7 @@ const make = Effect.gen(function* () {
         // merge, so fail NON-retryably and leave it for honest manual recovery
         // rather than auto-driving an already-merged PR into 'blocked'.
         const recovered = yield* gitHub.value
-          .prDetail({ cwd: row.repoRoot, prNumber: prState.prNumber })
+          .prDetail({ cwd: repoRoot, prNumber: prState.prNumber })
           .pipe(
             Effect.matchEffect({
               onSuccess: (detail) =>
@@ -708,7 +722,7 @@ const make = Effect.gen(function* () {
       // No recorded PR. A PR may still have been created on the remote before
       // the crash; adopt it by branch, committing the missing TicketPrOpened.
       // Without a gh port or a repo root there is no way to look one up.
-      if (Option.isNone(gitHub) || row.repoRoot === null) {
+      if (Option.isNone(gitHub) || repoRoot === null) {
         yield* engine.completeRecoveredStep(row.stepRunId, {
           _tag: "failed",
           error: PR_OPEN_RESTART_ERROR,
@@ -716,7 +730,6 @@ const make = Effect.gen(function* () {
         continue;
       }
       const github = gitHub.value;
-      const repoRoot = row.repoRoot;
       const branch = `workflow/${row.ticketId}`;
       const found = yield* github
         .findPrForBranch({ cwd: repoRoot, branch })
@@ -1071,7 +1084,7 @@ const make = Effect.gen(function* () {
             }
 
             const workspaceRoot = yield* projectWorkspaceResolver.value
-              .resolve(currentBoard.projectId as ProjectId)
+              .resolve(currentBoard.projectId as ProjectIdType)
               .pipe(Effect.mapError(toRecoveryError("workflow recovery project resolve failed")));
             const workflowFilePath = currentBoard.workflowFilePath;
             const fileExists = Option.isSome(filePort)
@@ -1113,7 +1126,7 @@ const make = Effect.gen(function* () {
             yield* fileLoader.value
               .loadAndRegister({
                 boardId: row.boardId,
-                projectId: currentBoard.projectId as ProjectId,
+                projectId: currentBoard.projectId as ProjectIdType,
                 workspaceRoot,
                 relativePath: workflowFilePath,
               })

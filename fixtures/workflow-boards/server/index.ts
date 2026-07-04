@@ -1,6 +1,11 @@
 import { definePlugin, type PluginRegistration } from "@t3tools/plugin-sdk";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
+import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { migration001 } from "./migrations/001_WorkflowSchema.ts";
@@ -15,6 +20,9 @@ import {
   WorkflowAgentsCapability,
   WorkflowProjectionsReadCapability,
 } from "./workflow/Services/WorkflowAgentPort.ts";
+import { WorkflowGitHubPoller } from "./workflow/Services/WorkflowGitHubPoller.ts";
+import { WorkflowRecovery } from "./workflow/Services/WorkflowRecovery.ts";
+import { WorkflowRuntimeLive } from "./workflow/WorkflowRuntimeLive.ts";
 
 const toPluginError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
@@ -32,22 +40,63 @@ export default definePlugin({
       const terminals = yield* hostApi.terminals;
       const sourceControl = yield* hostApi.sourceControl;
       const environmentsRead = yield* hostApi.environmentsRead;
-      void workflowCapabilityLayers({
-        agents,
-        databaseClient: database.client,
-        environmentsRead,
-        filesystem,
-        projectionsRead,
-        sourceControl,
-        terminals,
-        vcs,
-      });
+      const appLayer = WorkflowRuntimeLive.pipe(
+        Layer.provide(
+          workflowCapabilityLayers({
+            agents,
+            databaseClient: database.client,
+            environmentsRead,
+            filesystem,
+            projectionsRead,
+            sourceControl,
+            terminals,
+            vcs,
+          }),
+        ),
+      );
       const registration: PluginRegistration = {
         migrations: [migration001],
+        services: [
+          {
+            name: "workflow-runtime",
+            run: () => runWorkflowRuntimeService(appLayer),
+          },
+        ],
       };
       return registration;
     }).pipe(Effect.mapError(toPluginError)),
 });
+
+export const runWorkflowRuntimeService = <ROut, E>(
+  appLayer: Layer.Layer<ROut, E, never>,
+): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    return yield* Effect.gen(function* () {
+      const context = yield* Layer.buildWithScope(appLayer, scope);
+      const recovery = Context.get(
+        context as Context.Context<ROut | WorkflowRecovery>,
+        WorkflowRecovery,
+      );
+      // TODO(A4): switch to the RPC-gated continue-anyway recovery policy once
+      // the workflow plugin has the A4 RPC layer. Until then, keep recovery
+      // fatal after a small bounded retry to avoid flapping on transient DB
+      // hiccups.
+      yield* recovery
+        .recover()
+        .pipe(
+          Effect.retry(
+            Schedule.recurs(2).pipe(Schedule.addDelay(() => Effect.succeed(Duration.seconds(1)))),
+          ),
+        );
+      const poller = Context.get(
+        context as Context.Context<ROut | WorkflowGitHubPoller>,
+        WorkflowGitHubPoller,
+      );
+      yield* poller.start().pipe(Effect.provideService(Scope.Scope, scope));
+      return yield* Effect.never;
+    }).pipe(Effect.ensuring(Scope.close(scope, Exit.void).pipe(Effect.ignore)));
+  }).pipe(Effect.mapError(toPluginError));
 
 type WorkflowCapabilityLayerInput = {
   readonly agents: WorkflowAgentsCapability["Service"];

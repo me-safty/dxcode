@@ -32,6 +32,7 @@ import { WorkflowFileLoader, WorkflowFilePort } from "../Services/WorkflowFileLo
 import { WorkflowReadModel, type TicketDetail } from "../Services/WorkflowReadModel.ts";
 import { WorkflowRecovery } from "../Services/WorkflowRecovery.ts";
 import { WorktreeLeaseService } from "../Services/WorktreeLeaseService.ts";
+import { WorkflowEnvironmentsReadCapability } from "../Services/WorkflowCapabilities.ts";
 import {
   makeWorkflowAgentPortFake,
   type WorkflowAgentPortFake,
@@ -286,6 +287,23 @@ const RecoveryProjectWorkspaceResolverLayer = Layer.succeed(ProjectWorkspaceReso
   resolve: (projectId) => Effect.succeed(`/workspace/${String(projectId)}`),
 } satisfies ProjectWorkspaceResolver["Service"]);
 
+const RecoveryEnvironmentsLayer = Layer.succeed(WorkflowEnvironmentsReadCapability, {
+  getEnvironmentId: Effect.die("unused getEnvironmentId"),
+  getDescriptor: Effect.die("unused getDescriptor"),
+  listProjects: Effect.die("unused listProjects"),
+  getProjectById: (projectId) =>
+    Effect.succeed({
+      id: projectId,
+      title: "Recovery project",
+      workspaceRoot: "/tmp/pr-repo",
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: "2026-06-07T00:00:00.000Z",
+      updatedAt: "2026-06-07T00:00:00.000Z",
+    }),
+  resolveProjectByWorkspaceRoot: () => Effect.succeed(null),
+} satisfies WorkflowEnvironmentsReadCapability["Service"]);
+
 const scriptCancelNoop = Layer.succeed(ScriptCancelRegistry, {
   register: () => Effect.void,
   unregister: () => Effect.void,
@@ -331,12 +349,12 @@ const realRecoveryLayer = (fake: WorkflowAgentPortFake) =>
     Layer.provideMerge(RecoveryFilePortLayer),
     Layer.provideMerge(RecoveryFileLoaderLayer),
     Layer.provideMerge(RecoveryProjectWorkspaceResolverLayer),
+    Layer.provideMerge(RecoveryEnvironmentsLayer),
   ).pipe(
     Layer.provideMerge(RecoveryGitHubPortLayer),
     Layer.provideMerge(workflowAgentPortLayer(fake)),
     Layer.provideMerge(WorkflowFoundationLive),
     Layer.provideMerge(DeterministicWorkflowIds),
-    Layer.provideMerge(ProjectionProjectsTableLive),
     Layer.provideMerge(TestSql),
   );
 
@@ -355,22 +373,6 @@ const RecoveryWorktreeLeaseLayer = Layer.effect(
         `.pipe(Effect.asVoid, Effect.orDie),
       isValid: () => Effect.succeed(true),
     } satisfies WorktreeLeaseService["Service"];
-  }),
-);
-
-const ProjectionProjectsTableLive = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`
-      CREATE TABLE IF NOT EXISTS projection_projects (
-        project_id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        workspace_root TEXT NOT NULL,
-        scripts_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `;
   }),
 );
 
@@ -423,10 +425,10 @@ const recoveryLayer = it.layer(
     Layer.provideMerge(RecoveryFilePortLayer),
     Layer.provideMerge(RecoveryFileLoaderLayer),
     Layer.provideMerge(RecoveryProjectWorkspaceResolverLayer),
+    Layer.provideMerge(RecoveryEnvironmentsLayer),
     Layer.provideMerge(RecoveryGitHubPortLayer),
     Layer.provideMerge(RecoveryAgentPortLayer),
     Layer.provideMerge(WorkflowFoundationLive),
-    Layer.provideMerge(ProjectionProjectsTableLive),
     Layer.provideMerge(TestSql),
   ),
 );
@@ -443,7 +445,6 @@ const resetRecoveryState = () =>
     yield* sql`DELETE FROM p_workflow_boards_projection_ticket`;
     yield* sql`DELETE FROM p_workflow_boards_projection_board`;
     yield* sql`DELETE FROM p_workflow_boards_events`;
-    yield* sql`DELETE FROM projection_projects`;
     completedRecoveredSteps.length = 0;
     recoveredBoardWip.length = 0;
     loadedRecoveryBoards.length = 0;
@@ -1038,15 +1039,6 @@ recoveryLayer("WorkflowRecovery", (it) => {
       const sql = yield* SqlClient.SqlClient;
       const registry = yield* BoardRegistry;
       yield* registry.register(input.boardId as never, prBoardDefinition);
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id, title, workspace_root, scripts_json, created_at, updated_at
-        )
-        VALUES (
-          ${`${input.boardId}-project`}, 'PR repo', '/tmp/pr-repo', '{}',
-          '2026-06-07T00:00:00.000Z', '2026-06-07T00:00:00.000Z'
-        )
-      `;
       yield* sql`
         INSERT INTO p_workflow_boards_projection_board (
           board_id, project_id, name, workflow_file_path,
