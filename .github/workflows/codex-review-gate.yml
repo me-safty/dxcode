@@ -14,17 +14,23 @@ jobs:
     name: codex-review-required
     runs-on: ubuntu-latest
     steps:
-      - name: Require a Codex review on this PR
+      - name: Require a Codex review of the current head commit
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           count=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
-            --jq '[.[] | select((.user.type == "Bot") and (.user.login | ascii_downcase | contains("codex")))] | length')
+            | jq -s --arg head "$HEAD_SHA" '[add[] | select(
+                (.user.type == "Bot")
+                and (.user.login | ascii_downcase | contains("codex"))
+                and (.state != "DISMISSED")
+                and (.commit_id == $head)
+              )] | length')
           if [ "$count" -ge 1 ]; then
-            echo "Codex has reviewed this PR ($count review(s))."
+            echo "Codex has reviewed head commit $HEAD_SHA ($count review(s))."
           else
-            echo "::error::No Codex review found on this PR yet. This check re-runs automatically when Codex submits its review."
+            echo "::error::No Codex review of head commit $HEAD_SHA yet. This check re-runs automatically when Codex submits its review; comment '@codex review' to request one."
             exit 1
           fi
