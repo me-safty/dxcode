@@ -43,6 +43,10 @@ import {
   type WorkflowTicketDetailView,
 } from "../../../../fixtures/workflow-boards/contracts/workflow.ts";
 import type { WorkSourceConnectionView } from "../../../../fixtures/workflow-boards/contracts/workSource.ts";
+import type {
+  ImportWorkItemsResult,
+  ListImportableWorkItemsResult,
+} from "../../../../fixtures/workflow-boards/contracts/workSource.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -61,7 +65,10 @@ import * as TerminalManager from "../terminal/Manager.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
-import { PluginHttpClientTransportService } from "./capabilities/HttpClientCapability.ts";
+import {
+  PluginHttpClientTransportService,
+  type PluginPinnedHttpRequest,
+} from "./capabilities/HttpClientCapability.ts";
 import { OutboundUrlError, OutboundUrlLookup } from "./OutboundUrlValidator.ts";
 import * as PluginCatalogModule from "./PluginCatalog.ts";
 import * as PluginHostModule from "./PluginHost.ts";
@@ -228,19 +235,48 @@ const TestHttpClientLive = Layer.succeed(
   ),
 );
 const TestOutboundLookupLive = Layer.succeed(OutboundUrlLookup, (host: string) =>
-  host === "fixture.test"
+  host === "fixture.test" || host === "api.github.com"
     ? Effect.succeed([{ address: "140.82.112.3", family: 4 as const }])
     : Effect.fail(new OutboundUrlError({ reason: `unexpected lookup ${host}` })),
 );
+const fixtureGithubIssue = {
+  number: 42,
+  state: "open",
+  title: "Import fixture issue",
+  body: "Issue body from GitHub",
+  html_url: "https://github.com/acme/sprockets/issues/42",
+  updated_at: "2026-07-03T12:00:00.000Z",
+  assignees: [{ login: "octocat" }],
+  labels: [{ name: "bug" }, { name: "sync" }],
+};
+const jsonHttpResponse = (request: PluginPinnedHttpRequest, body: unknown) =>
+  HttpClientResponse.fromWeb(
+    HttpClientRequest.make(request.method as "GET")(request.url.toString()),
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
 const TestPluginHttpClientTransportLive = Layer.succeed(
   PluginHttpClientTransportService,
   (request) =>
-    Effect.succeed(
-      HttpClientResponse.fromWeb(
+    Effect.sync(() => {
+      if (request.url.hostname === "api.github.com") {
+        if (request.url.pathname === "/repos/acme/sprockets/issues") {
+          return jsonHttpResponse(request, [fixtureGithubIssue]);
+        }
+        if (request.url.pathname === "/repos/acme/sprockets/issues/42") {
+          return jsonHttpResponse(request, fixtureGithubIssue);
+        }
+        if (request.url.pathname === "/user") {
+          return jsonHttpResponse(request, { login: "octocat" });
+        }
+      }
+      return HttpClientResponse.fromWeb(
         HttpClientRequest.make(request.method as "GET")(request.url.toString()),
         new Response("hello http", { status: 200 }),
-      ),
-    ),
+      );
+    }),
 );
 
 const PluginRuntimeRegistryLayerLive = PluginRuntimeRegistryLayer.layer;
@@ -952,6 +988,128 @@ layer("workflow-boards fixture plugin", (it) => {
             assert.notEqual(connection.connectionRef, workSourceToken);
             assert.notEqual(connection.baseUrl, workSourceToken);
           }
+
+          const sourceId = "github-main";
+          const sourceDefinitionSave = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.saveBoardDefinition,
+            {
+              boardId: created.boardId,
+              definition: {
+                ...savedDefinitionRead.definition,
+                sources: [
+                  ...(savedDefinitionRead.definition.sources ?? []),
+                  {
+                    id: sourceId,
+                    provider: "github",
+                    connectionRef: createdConnection.connectionRef,
+                    selector: { owner: "acme", repo: "sprockets", state: "all" },
+                    destinationLane: "backlog",
+                    closedLane: "done",
+                    enabled: false,
+                  },
+                ],
+              },
+              expectedVersionHash: savedDefinitionRead.versionHash,
+              source: "save",
+            },
+            rpcSession,
+          )) as WorkflowSaveBoardDefinitionResult;
+          assert.isTrue(sourceDefinitionSave.ok);
+          if (!sourceDefinitionSave.ok) {
+            return yield* Effect.die("work-source board definition failed to save");
+          }
+
+          const importable = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.listImportableWorkItems,
+            { boardId: created.boardId },
+            rpcSession,
+          )) as ListImportableWorkItemsResult;
+          assert.deepEqual(importable.sourceErrors, {});
+          assert.deepEqual(importable.truncated, { [sourceId]: false });
+          assert.deepEqual(importable.viewer[sourceId], { id: "octocat", aliases: ["octocat"] });
+          assert.deepEqual(importable.sources, [
+            {
+              sourceId,
+              provider: "github",
+              container: "acme/sprockets",
+              destinationLane:
+                "backlog" as ListImportableWorkItemsResult["sources"][number]["destinationLane"],
+            },
+          ]);
+          assert.deepEqual(importable.items, [
+            {
+              provider: "github",
+              sourceId,
+              externalId: "42",
+              displayRef: "#42",
+              title: "Import fixture issue",
+              container: "acme/sprockets",
+              url: "https://github.com/acme/sprockets/issues/42",
+              assignees: ["octocat"],
+              lifecycle: "open",
+              mappedTicketId: null,
+              mappedLane: null,
+            },
+          ]);
+
+          const importResult = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.importWorkItems,
+            {
+              boardId: created.boardId,
+              sourceId,
+              externalIds: ["42"],
+              destinationLane: "backlog",
+            },
+            rpcSession,
+          )) as ImportWorkItemsResult;
+          assert.deepEqual(importResult.skipped, []);
+          assert.equal(importResult.imported.length, 1);
+          assert.equal(importResult.imported[0]?.externalId, "42");
+          const importedTicketId = importResult.imported[0]?.ticketId;
+          assert.isString(importedTicketId);
+          if (importedTicketId === undefined) {
+            return yield* Effect.die("work-source import did not return a ticket id");
+          }
+
+          const boardAfterImport = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoard,
+            { boardId: created.boardId },
+            rpcSession,
+          )) as BoardSnapshot;
+          const importedTicket = boardAfterImport.tickets.find(
+            (ticket) => ticket.ticketId === importedTicketId,
+          );
+          assert.isDefined(importedTicket);
+          assert.equal(importedTicket?.title, "Import fixture issue");
+          assert.equal(importedTicket?.currentLaneKey, "backlog");
+
+          const importedDetail = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getTicketDetail,
+            { ticketId: importedTicketId },
+            rpcSession,
+          )) as WorkflowTicketDetailView;
+          assert.equal(importedDetail.ticket.title, "Import fixture issue");
+          assert.equal(importedDetail.ticket.description, "Issue body from GitHub");
+          assert.deepEqual(importedDetail.syncedSource, {
+            provider: "github",
+            url: "https://github.com/acme/sprockets/issues/42",
+            assignees: ["octocat"],
+            labels: ["bug", "sync"],
+          });
+
+          const importableAfterImport = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.listImportableWorkItems,
+            { boardId: created.boardId },
+            rpcSession,
+          )) as ListImportableWorkItemsResult;
+          assert.equal(importableAfterImport.items[0]?.mappedTicketId, importedTicketId);
+          assert.equal(importableAfterImport.items[0]?.mappedLane, "backlog");
 
           yield* dispatcher.call(
             pluginId,

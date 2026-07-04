@@ -10,6 +10,7 @@ import * as Scope from "effect/Scope";
 import { runWorkflowRuntimeService } from "./index.ts";
 import { WorkflowGitHubPoller } from "./workflow/Services/WorkflowGitHubPoller.ts";
 import { WorkflowRecovery } from "./workflow/Services/WorkflowRecovery.ts";
+import { WorkflowSourceSyncer } from "./workflow/Services/WorkflowSourceSyncer.ts";
 
 const IdlePollerLayer = Layer.succeed(WorkflowGitHubPoller, {
   sweep: () =>
@@ -22,12 +23,17 @@ const IdlePollerLayer = Layer.succeed(WorkflowGitHubPoller, {
   start: () => Effect.void,
 } satisfies WorkflowGitHubPoller["Service"]);
 
+const IdleSourceSyncerLayer = Layer.succeed(WorkflowSourceSyncer, {
+  sweep: Effect.void,
+  start: () => Effect.void,
+} satisfies WorkflowSourceSyncer["Service"]);
+
 it.effect("workflow runtime service runs recovery once and closes daemon scope on interrupt", () =>
   Effect.gen(function* () {
     const events: string[] = [];
     const recovered = yield* Deferred.make<void>();
     const runtimeReady = yield* Deferred.make<
-      Context.Context<WorkflowRecovery | WorkflowGitHubPoller>,
+      Context.Context<WorkflowRecovery | WorkflowGitHubPoller | WorkflowSourceSyncer>,
       Error
     >();
     const stopped = yield* Deferred.make<void>();
@@ -54,7 +60,10 @@ it.effect("workflow runtime service runs recovery once and closes daemon scope o
       }),
     );
 
-    const appLayerWithPoller = appLayer.pipe(Layer.provideMerge(IdlePollerLayer));
+    const appLayerWithPoller = appLayer.pipe(
+      Layer.provideMerge(IdlePollerLayer),
+      Layer.provideMerge(IdleSourceSyncerLayer),
+    );
     const fiber = yield* runWorkflowRuntimeService(appLayerWithPoller, runtimeReady).pipe(
       Effect.forkChild,
     );
@@ -71,12 +80,12 @@ it.effect("workflow runtime service runs recovery once and closes daemon scope o
   }),
 );
 
-it.effect("workflow runtime service starts the GitHub poller only after recovery", () =>
+it.effect("workflow runtime service starts daemons only after recovery", () =>
   Effect.gen(function* () {
     const events: string[] = [];
     const recovered = yield* Deferred.make<void>();
     const runtimeReady = yield* Deferred.make<
-      Context.Context<WorkflowRecovery | WorkflowGitHubPoller>,
+      Context.Context<WorkflowRecovery | WorkflowGitHubPoller | WorkflowSourceSyncer>,
       Error
     >();
 
@@ -107,6 +116,20 @@ it.effect("workflow runtime service starts the GitHub poller only after recovery
             );
           }),
       } satisfies WorkflowGitHubPoller["Service"]),
+      Layer.succeed(WorkflowSourceSyncer, {
+        sweep: Effect.void,
+        start: () =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            events.push("source-syncer-start");
+            yield* Scope.addFinalizer(
+              scope,
+              Effect.sync(() => {
+                events.push("source-syncer-stop");
+              }),
+            );
+          }),
+      } satisfies WorkflowSourceSyncer["Service"]),
     );
 
     const buildScope = yield* Scope.make();
@@ -119,10 +142,11 @@ it.effect("workflow runtime service starts the GitHub poller only after recovery
       yield* Deferred.await(recovered);
       yield* Deferred.await(runtimeReady);
       yield* Effect.yieldNow;
-      assert.deepEqual(events, ["recover", "poller-start"]);
+      assert.deepEqual(events, ["recover", "poller-start", "source-syncer-start"]);
 
       yield* Fiber.interrupt(fiber);
-      assert.deepEqual(events, ["recover", "poller-start", "poller-stop"]);
+      assert.deepEqual(events.slice(0, 3), ["recover", "poller-start", "source-syncer-start"]);
+      assert.sameMembers(events.slice(3), ["poller-stop", "source-syncer-stop"]);
     }).pipe(Effect.ensuring(Fiber.interrupt(fiber)));
   }),
 );
@@ -135,7 +159,7 @@ it.effect(
       // `runtimeReady` — otherwise every handler awaiting it hangs forever.
       // `Effect.retry` does not retry defects, so this resolves immediately.
       const runtimeReady = yield* Deferred.make<
-        Context.Context<WorkflowRecovery | WorkflowGitHubPoller>,
+        Context.Context<WorkflowRecovery | WorkflowGitHubPoller | WorkflowSourceSyncer>,
         Error
       >();
       const appLayer = Layer.mergeAll(
@@ -143,6 +167,7 @@ it.effect(
           recover: () => Effect.die(new Error("recovery defect")),
         } satisfies WorkflowRecovery["Service"]),
         IdlePollerLayer,
+        IdleSourceSyncerLayer,
       );
 
       const fiber = yield* runWorkflowRuntimeService(appLayer, runtimeReady).pipe(Effect.forkChild);
