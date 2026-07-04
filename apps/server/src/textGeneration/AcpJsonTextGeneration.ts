@@ -140,10 +140,13 @@ export function makeAcpJsonTextGeneration(
 
       yield* runtime.drainEvents;
 
-      if (promptResult.stopReason === "cancelled") {
+      if (promptResult.stopReason !== "end_turn") {
         return yield* new TextGenerationError({
           operation,
-          detail: `${options.requestLabel} request was cancelled.`,
+          detail:
+            promptResult.stopReason === "cancelled"
+              ? `${options.requestLabel} request was cancelled.`
+              : `${options.requestLabel} request stopped before completing: ${promptResult.stopReason}.`,
         });
       }
 
