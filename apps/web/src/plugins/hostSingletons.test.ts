@@ -10,6 +10,7 @@ describe("hostSingletons", () => {
 
     expect(Object.keys(host).sort()).toEqual([
       "@effect/atom-react",
+      "@t3tools/contracts",
       "@t3tools/plugin-sdk-web",
       "effect",
       "react",

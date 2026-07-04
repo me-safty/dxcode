@@ -11,7 +11,7 @@ import {
   LaneKey,
   WorkflowDefinition
 } from "../../../../contracts/workflow.ts";
-import { formatSchemaError } from "@t3tools/shared/schemaJson";
+import { formatSchemaError } from "@t3tools/plugin-sdk-web";
 import { Exit, Schema } from "effect";
 import {
   DatabaseIcon,

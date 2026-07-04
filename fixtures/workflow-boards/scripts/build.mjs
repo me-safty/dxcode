@@ -121,6 +121,11 @@ bundle(
   "browser",
   [
     "@effect/atom-react",
+    // @t3tools/contracts is served as a host singleton (import map) so the plugin
+    // does NOT bundle it — bundling pulls heavy effect/* subpaths (incl. server
+    // HTTP code) that the browser import map cannot resolve. Server bundle still
+    // bundles it (Node resolve hook handles subpaths there).
+    "@t3tools/contracts",
     "@t3tools/plugin-sdk-web",
     "effect",
     "effect/*",

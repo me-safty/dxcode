@@ -68,6 +68,10 @@ export { useAtomQueryRunner } from "../../../apps/web/src/state/use-atom-query-r
 // project(s) for the environment it renders in (e.g. the board list needs a real
 // projectId — the environment id is NOT a project id).
 export { useEnvironmentProjectRefs } from "../../../apps/web/src/state/entities.ts";
+// Schema-error formatting from @t3tools/shared. Re-exported through the SDK
+// singleton so plugins don't bundle @t3tools/shared/schemaJson (which imports
+// effect/* subpaths the browser import map can't resolve).
+export { formatSchemaError } from "@t3tools/shared/schemaJson";
 
 // Host surface consumed by the workflow-boards board UI (and available to any
 // plugin). These are re-exports of live host modules — a separately-built plugin

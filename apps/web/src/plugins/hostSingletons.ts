@@ -1,4 +1,5 @@
 import * as atomReact from "@effect/atom-react";
+import * as contracts from "@t3tools/contracts";
 import * as pluginSdkWeb from "@t3tools/plugin-sdk-web";
 import * as effect from "effect";
 import * as React from "react";
@@ -15,6 +16,7 @@ export interface PluginHostSingletons {
   readonly "react/jsx-dev-runtime": typeof jsxDevRuntime;
   readonly "@effect/atom-react": typeof atomReact;
   readonly effect: typeof effect;
+  readonly "@t3tools/contracts": typeof contracts;
   readonly "@t3tools/plugin-sdk-web": typeof pluginSdkWeb;
 }
 
@@ -51,6 +53,7 @@ const pluginHost: PluginHostSingletons = {
   "react/jsx-dev-runtime": jsxDevRuntime,
   "@effect/atom-react": atomReact,
   effect,
+  "@t3tools/contracts": contracts,
   "@t3tools/plugin-sdk-web": pluginSdkWeb,
 };
 
