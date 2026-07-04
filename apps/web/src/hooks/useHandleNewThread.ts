@@ -8,6 +8,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
+import { createDefaultModelSelection } from "@t3tools/shared/model";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -25,7 +26,7 @@ import {
 } from "../logicalProject";
 import { readThreadShell, useProjects, useServerConfigs, useThread } from "../state/entities";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
-import { resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadRouteTarget, type ThreadRouteTargetParams } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
@@ -50,12 +51,13 @@ export function useNewThreadHandler() {
       },
     ): Promise<void> => {
       const {
+        applyStickyState,
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
         getDraftThread,
-        applyStickyState,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
+        setModelSelection,
       } = useComposerDraftStore.getState();
       const currentRouteTarget = getCurrentRouteTarget();
       const project = projects.find(
@@ -83,6 +85,29 @@ export function useNewThreadHandler() {
       if (storedDraftThreadRef && reusableStoredDraftThread === null) {
         markPromotedDraftThreadByRef(storedDraftThreadRef);
       }
+      const projectDefaultModelSelection = project?.defaultModelSelection ?? null;
+      const seedNewDraftModelState = (draftId: Parameters<typeof setModelSelection>[0]) => {
+        if (projectDefaultModelSelection) {
+          setModelSelection(draftId, projectDefaultModelSelection, {
+            preserveExistingOptions: false,
+          });
+          return;
+        }
+        // Without a per-project default, keep the user's sticky selection
+        // instead of resetting to the canonical default model.
+        const { stickyModelSelectionByProvider, stickyActiveProvider } =
+          useComposerDraftStore.getState();
+        if (
+          stickyActiveProvider === null &&
+          Object.keys(stickyModelSelectionByProvider).length === 0
+        ) {
+          setModelSelection(draftId, createDefaultModelSelection(), {
+            preserveExistingOptions: false,
+          });
+          return;
+        }
+        applyStickyState(draftId);
+      };
       const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
         ? currentRouteTarget.kind === "server"
           ? getDraftThread(currentRouteTarget.threadRef)
@@ -111,6 +136,12 @@ export function useNewThreadHandler() {
               threadId: reusableStoredDraftThread.threadId,
             },
           );
+          if (
+            reusableStoredDraftThread.projectId !== projectRef.projectId ||
+            reusableStoredDraftThread.environmentId !== projectRef.environmentId
+          ) {
+            seedNewDraftModelState(reusableStoredDraftThread.draftId);
+          }
           if (
             currentRouteTarget?.kind === "draft" &&
             currentRouteTarget.draftId === reusableStoredDraftThread.draftId
@@ -153,6 +184,12 @@ export function useNewThreadHandler() {
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
           ...(hasStartFromOriginOption ? { startFromOrigin: options?.startFromOrigin } : {}),
         });
+        if (
+          latestActiveDraftThread.projectId !== projectRef.projectId ||
+          latestActiveDraftThread.environmentId !== projectRef.environmentId
+        ) {
+          seedNewDraftModelState(currentRouteTarget.draftId);
+        }
         return Promise.resolve();
       }
 
@@ -175,7 +212,7 @@ export function useNewThreadHandler() {
             }),
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
-        applyStickyState(draftId);
+        seedNewDraftModelState(draftId);
 
         await router.navigate({
           to: "/draft/$draftId",
@@ -191,7 +228,7 @@ export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const routeTarget = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
+    select: (params: ThreadRouteTargetParams) => resolveThreadRouteTarget(params),
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const activeThread = useThread(routeThreadRef);

@@ -4,7 +4,10 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import {
+  type ProjectId,
   SourceControlProviderError,
   type SourceControlProviderDiscoveryItem,
 } from "@t3tools/contracts";
@@ -15,18 +18,24 @@ import * as AzureDevOpsSourceControlProvider from "./AzureDevOpsSourceControlPro
 import * as BitbucketSourceControlProvider from "./BitbucketSourceControlProvider.ts";
 import * as GitHubSourceControlProvider from "./GitHubSourceControlProvider.ts";
 import * as GitLabSourceControlProvider from "./GitLabSourceControlProvider.ts";
+import { providerContextFromOverride } from "./RemoteOverride.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
-import {
-  probeSourceControlProvider,
-  refineUnknownRemoteProvider,
-  type SourceControlProviderDiscoverySpec,
-} from "./SourceControlProviderDiscovery.ts";
+import { type SourceControlProviderDiscoverySpec } from "./SourceControlProviderDiscovery.ts";
+import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
 import { ServerConfig } from "../config.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 
 const PROVIDER_DETECTION_CACHE_CAPACITY = 2_048;
 const PROVIDER_DETECTION_CACHE_TTL = Duration.seconds(5);
+const PROVIDER_DETECTION_CACHE_KEY_SEPARATOR = "\u0000";
+
+interface SourceControlProviderResolveInput {
+  readonly cwd: string;
+  readonly projectId?: ProjectId | undefined;
+}
 
 export interface SourceControlProviderRegistration {
   readonly kind: SourceControlProviderKind;
@@ -37,6 +46,7 @@ export interface SourceControlProviderRegistration {
 export interface SourceControlProviderHandle {
   readonly provider: SourceControlProvider.SourceControlProvider["Service"];
   readonly context: SourceControlProvider.SourceControlProviderContext | null;
+  readonly contextSource: "override" | "detected" | null;
 }
 
 export class SourceControlProviderRegistry extends Context.Service<
@@ -48,12 +58,12 @@ export class SourceControlProviderRegistry extends Context.Service<
       SourceControlProvider.SourceControlProvider["Service"],
       SourceControlProviderError
     >;
-    readonly resolveHandle: (input: {
-      readonly cwd: string;
-    }) => Effect.Effect<SourceControlProviderHandle, SourceControlProviderError>;
-    readonly resolve: (input: {
-      readonly cwd: string;
-    }) => Effect.Effect<
+    readonly resolveHandle: (
+      input: SourceControlProviderResolveInput,
+    ) => Effect.Effect<SourceControlProviderHandle, SourceControlProviderError>;
+    readonly resolve: (
+      input: SourceControlProviderResolveInput,
+    ) => Effect.Effect<
       SourceControlProvider.SourceControlProvider["Service"],
       SourceControlProviderError
     >;
@@ -121,6 +131,17 @@ function unsupportedProvider(
         detail: `No ${kind} source control provider is registered.`,
       }),
   });
+}
+
+function providerDetectionCacheKey(input: SourceControlProviderResolveInput) {
+  return `${input.cwd}${PROVIDER_DETECTION_CACHE_KEY_SEPARATOR}${input.projectId ?? ""}`;
+}
+
+function providerDetectionInputFromCacheKey(key: string): SourceControlProviderResolveInput {
+  const separatorIndex = key.lastIndexOf(PROVIDER_DETECTION_CACHE_KEY_SEPARATOR);
+  const cwd = separatorIndex === -1 ? key : key.slice(0, separatorIndex);
+  const projectId = separatorIndex === -1 ? "" : key.slice(separatorIndex + 1);
+  return projectId ? { cwd, projectId: projectId as ProjectId } : { cwd };
 }
 
 function selectProviderContext(
@@ -196,6 +217,8 @@ function bindProviderContext(
 export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWithProviders")(
   function* (registrations: ReadonlyArray<SourceControlProviderRegistration>) {
     const config = yield* ServerConfig;
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const serverSettings = yield* ServerSettingsService;
     const process = yield* VcsProcess.VcsProcess;
     const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
     const providers = new Map<
@@ -208,7 +231,32 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       Effect.succeed(providers.get(kind) ?? unsupportedProvider(kind));
 
     const detectProviderContext = Effect.fn("SourceControlProviderRegistry.detectProviderContext")(
-      function* (cwd: string) {
+      function* (cacheKey: string) {
+        const input = providerDetectionInputFromCacheKey(cacheKey);
+        const { cwd, projectId } = input;
+
+        // A settings read failure falls back to remote-based detection instead
+        // of failing every source-control operation; the warning keeps the
+        // skipped override visible, and the cache is invalidated on the next
+        // settings change.
+        const settingsForOverrideLookup = serverSettings.getSettings.pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning("project remote override lookup skipped: settings unavailable", {
+              cause: error,
+            }),
+          ),
+          Effect.catch(() => Effect.succeed(null)),
+        );
+
+        if (projectId) {
+          const settings = yield* settingsForOverrideLookup;
+          const override = settings?.projectSettings[projectId]?.remoteOverride ?? null;
+          const overrideContext = override ? providerContextFromOverride(override) : null;
+          if (overrideContext) {
+            return { context: overrideContext, source: "override" as const };
+          }
+        }
+
         const handle = yield* vcsRegistry.resolve({ cwd }).pipe(
           Effect.mapError(
             (error) =>
@@ -221,6 +269,29 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
               }),
           ),
         );
+        const repository = yield* handle.driver
+          .detectRepository(cwd)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        const projectOption = yield* projectionSnapshotQuery
+          .getActiveProjectByWorkspaceRoot(cwd)
+          .pipe(
+            Effect.flatMap((project) =>
+              Option.isSome(project) || repository === null
+                ? Effect.succeed(project)
+                : projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(repository.rootPath),
+            ),
+            Effect.catch(() => Effect.succeed(Option.none())),
+          );
+        if (!projectId && Option.isSome(projectOption)) {
+          const settings = yield* settingsForOverrideLookup;
+          const override =
+            settings?.projectSettings[projectOption.value.id]?.remoteOverride ?? null;
+          const overrideContext = override ? providerContextFromOverride(override) : null;
+          if (overrideContext) {
+            return { context: overrideContext, source: "override" as const };
+          }
+        }
+
         const remotes = yield* handle.driver.listRemotes(cwd).pipe(
           Effect.mapError(
             (error) =>
@@ -235,32 +306,45 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
         );
         const context = selectProviderContext(remotes.remotes);
 
-        return yield* refineUnknownRemoteProvider({
+        const refinedContext = yield* SourceControlProviderDiscovery.refineUnknownRemoteProvider({
           specs: discoverySpecs,
           process,
           cwd,
           context,
         });
+        return { context: refinedContext, source: refinedContext ? ("detected" as const) : null };
       },
     );
 
     const providerContextCache = yield* Cache.makeWith<
       string,
-      SourceControlProvider.SourceControlProviderContext | null,
+      {
+        readonly context: SourceControlProvider.SourceControlProviderContext | null;
+        readonly source: "override" | "detected" | null;
+      },
       SourceControlProviderError
     >(detectProviderContext, {
       capacity: PROVIDER_DETECTION_CACHE_CAPACITY,
       timeToLive: (exit) => (Exit.isSuccess(exit) ? PROVIDER_DETECTION_CACHE_TTL : Duration.zero),
     });
 
+    // Saving a project's remote override must take effect immediately, not
+    // after the detection cache TTL expires.
+    yield* Effect.forkScoped(
+      Stream.runForEach(serverSettings.streamChanges, () =>
+        Cache.invalidateAll(providerContextCache),
+      ),
+    );
+
     const resolveHandle: SourceControlProviderRegistry["Service"]["resolveHandle"] = (input) =>
-      Cache.get(providerContextCache, input.cwd).pipe(
-        Effect.map((context) => {
+      Cache.get(providerContextCache, providerDetectionCacheKey(input)).pipe(
+        Effect.map(({ context, source }) => {
           const kind = context?.provider.kind ?? "unknown";
           const provider = providers.get(kind) ?? unsupportedProvider(kind);
           return {
             provider: bindProviderContext(provider, context),
             context,
+            contextSource: source,
           } satisfies SourceControlProviderHandle;
         }),
       );
@@ -271,7 +355,7 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       resolve: (input) => resolveHandle(input).pipe(Effect.map((handle) => handle.provider)),
       discover: Effect.all(
         discoverySpecs.map((spec) =>
-          probeSourceControlProvider({
+          SourceControlProviderDiscovery.probeSourceControlProvider({
             spec,
             process,
             cwd: config.cwd,

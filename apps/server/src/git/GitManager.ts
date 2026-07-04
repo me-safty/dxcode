@@ -95,6 +95,7 @@ const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
 const STATUS_RESULT_CACHE_TTL = Duration.seconds(1);
 const STATUS_RESULT_CACHE_CAPACITY = 2_048;
+const STATUS_CACHE_KEY_SEPARATOR = "\u0000";
 type StripProgressContext<T> = T extends any ? Omit<T, "actionId" | "cwd" | "action"> : never;
 type GitActionProgressPayload = StripProgressContext<GitActionProgressEvent>;
 type GitActionProgressEmitter = (event: GitActionProgressPayload) => Effect.Effect<void, never>;
@@ -525,7 +526,8 @@ export const make = Effect.gen(function* () {
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const crypto = yield* Crypto.Crypto;
 
-  const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
+  const sourceControlProvider = (input: string | VcsStatusInput) =>
+    sourceControlProviders.resolve(typeof input === "string" ? { cwd: input } : input);
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
   const randomUUIDv4 = (cwd: string) =>
     crypto.randomUUIDv4.pipe(
@@ -569,10 +571,11 @@ export const make = Effect.gen(function* () {
 
   const configurePullRequestHeadUpstreamBase = Effect.fn("configurePullRequestHeadUpstream")(
     function* (
-      cwd: string,
+      target: VcsStatusInput,
       pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
       localBranch = pullRequest.headBranch,
     ) {
+      const { cwd } = target;
       const repositoryNameWithOwner = resolveHeadRepositoryNameWithOwner(pullRequest) ?? "";
       if (repositoryNameWithOwner.length === 0 && pullRequest.isCrossRepository !== true) {
         const remoteName = yield* gitCore.resolvePrimaryRemoteName(cwd);
@@ -594,7 +597,7 @@ export const make = Effect.gen(function* () {
         return;
       }
 
-      const cloneUrls = yield* (yield* sourceControlProvider(cwd)).getRepositoryCloneUrls({
+      const cloneUrls = yield* (yield* sourceControlProvider(target)).getRepositoryCloneUrls({
         cwd,
         repository: repositoryNameWithOwner,
       });
@@ -625,14 +628,14 @@ export const make = Effect.gen(function* () {
   );
 
   const configurePullRequestHeadUpstream = (
-    cwd: string,
+    target: VcsStatusInput,
     pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
     localBranch = pullRequest.headBranch,
   ) =>
-    configurePullRequestHeadUpstreamBase(cwd, pullRequest, localBranch).pipe(
+    configurePullRequestHeadUpstreamBase(target, pullRequest, localBranch).pipe(
       Effect.catch((error) =>
         Effect.logWarning("GitManager.configurePullRequestHeadUpstream failed", {
-          cwd,
+          cwd: target.cwd,
           localBranch,
           headBranch: pullRequest.headBranch,
           cause: error,
@@ -642,10 +645,11 @@ export const make = Effect.gen(function* () {
 
   const materializePullRequestHeadBranchBase = Effect.fn("materializePullRequestHeadBranch")(
     function* (
-      cwd: string,
+      target: VcsStatusInput,
       pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
       localBranch = pullRequest.headBranch,
     ) {
+      const { cwd } = target;
       const repositoryNameWithOwner = resolveHeadRepositoryNameWithOwner(pullRequest) ?? "";
 
       if (repositoryNameWithOwner.length === 0) {
@@ -657,7 +661,7 @@ export const make = Effect.gen(function* () {
         return;
       }
 
-      const cloneUrls = yield* (yield* sourceControlProvider(cwd)).getRepositoryCloneUrls({
+      const cloneUrls = yield* (yield* sourceControlProvider(target)).getRepositoryCloneUrls({
         cwd,
         repository: repositoryNameWithOwner,
       });
@@ -689,15 +693,15 @@ export const make = Effect.gen(function* () {
   );
 
   const materializePullRequestHeadBranch = (
-    cwd: string,
+    target: VcsStatusInput,
     pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
     localBranch = pullRequest.headBranch,
   ) =>
-    materializePullRequestHeadBranchBase(cwd, pullRequest, localBranch).pipe(
+    materializePullRequestHeadBranchBase(target, pullRequest, localBranch).pipe(
       Effect.catch((primaryCause) =>
         gitCore
           .fetchPullRequestBranch({
-            cwd,
+            cwd: target.cwd,
             prNumber: pullRequest.number,
             branch: localBranch,
           })
@@ -705,7 +709,7 @@ export const make = Effect.gen(function* () {
             Effect.mapError(
               (fallbackCause) =>
                 new GitPullRequestMaterializationError({
-                  cwd,
+                  cwd: target.cwd,
                   pullRequestNumber: pullRequest.number,
                   headRepository: resolveHeadRepositoryNameWithOwner(pullRequest),
                   headBranch: pullRequest.headBranch,
@@ -726,7 +730,36 @@ export const make = Effect.gen(function* () {
   const tempDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? "/tmp";
   const canonicalizeExistingPath = (value: string) =>
     fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => value));
-  const normalizeStatusCacheKey = canonicalizeExistingPath;
+  const normalizeStatusCwd = canonicalizeExistingPath;
+  const statusCacheKeyFromParts = (cwd: string, projectId?: VcsStatusInput["projectId"]) =>
+    `${cwd}${STATUS_CACHE_KEY_SEPARATOR}${projectId ?? ""}`;
+  const statusInputFromCacheKey = (key: string): VcsStatusInput => {
+    const separatorIndex = key.lastIndexOf(STATUS_CACHE_KEY_SEPARATOR);
+    const cwd = separatorIndex === -1 ? key : key.slice(0, separatorIndex);
+    const projectId = separatorIndex === -1 ? "" : key.slice(separatorIndex + 1);
+    return projectId ? { cwd, projectId: projectId as VcsStatusInput["projectId"] } : { cwd };
+  };
+  const normalizeStatusCacheKey = (input: VcsStatusInput) =>
+    normalizeStatusCwd(input.cwd).pipe(
+      Effect.map((cwd) => statusCacheKeyFromParts(cwd, input.projectId)),
+    );
+  const invalidateStatusResultCache = <A, E>(cache: Cache.Cache<string, A, E>, cwd: string) =>
+    normalizeStatusCwd(cwd).pipe(
+      Effect.flatMap((normalizedCwd) =>
+        Cache.keys(cache).pipe(
+          Effect.flatMap((keys) =>
+            Effect.forEach(
+              keys,
+              (key) =>
+                key.startsWith(`${normalizedCwd}${STATUS_CACHE_KEY_SEPARATOR}`)
+                  ? Cache.invalidate(cache, key)
+                  : Effect.void,
+              { discard: true },
+            ),
+          ),
+        ),
+      ),
+    );
   const nonRepositoryStatusDetails = {
     isRepo: false,
     hasOriginRemote: false,
@@ -740,14 +773,16 @@ export const make = Effect.gen(function* () {
     behindCount: 0,
     aheadOfDefaultCount: 0,
   } satisfies GitVcsDriver.GitStatusDetails;
-  const readLocalStatus = Effect.fn("readLocalStatus")(function* (cwd: string) {
+  const readLocalStatus = Effect.fn("readLocalStatus")(function* (cacheKey: string) {
+    const input = statusInputFromCacheKey(cacheKey);
+    const cwd = input.cwd;
     const details = yield* gitCore
       .statusDetailsLocal(cwd)
       .pipe(
         Effect.catchIf(isNotGitRepositoryError, () => Effect.succeed(nonRepositoryStatusDetails)),
       );
     const hostingProvider = details.isRepo
-      ? yield* resolveHostingProvider(cwd, details.branch)
+      ? yield* resolveHostingProvider(input, details.branch)
       : null;
 
     return {
@@ -765,13 +800,13 @@ export const make = Effect.gen(function* () {
     timeToLive: (exit) => (Exit.isSuccess(exit) ? STATUS_RESULT_CACHE_TTL : Duration.zero),
   });
   const invalidateLocalStatusResultCache = (cwd: string) =>
-    normalizeStatusCacheKey(cwd).pipe(
-      Effect.flatMap((cacheKey) => Cache.invalidate(localStatusResultCache, cacheKey)),
-    );
+    invalidateStatusResultCache(localStatusResultCache, cwd);
   const readRemoteStatus = Effect.fn("readRemoteStatus")(function* (
-    cwd: string,
+    cacheKey: string,
     options?: GitVcsDriver.GitRemoteStatusOptions,
   ) {
+    const input = statusInputFromCacheKey(cacheKey);
+    const cwd = input.cwd;
     const details = yield* gitCore
       .statusDetailsRemote(cwd, options)
       .pipe(Effect.catchIf(isNotGitRepositoryError, () => Effect.succeed(null)));
@@ -781,7 +816,7 @@ export const make = Effect.gen(function* () {
 
     const pr =
       details.branch !== null
-        ? yield* findLatestPr(cwd, {
+        ? yield* findLatestPr(input, {
             branch: details.branch,
             upstreamRef: details.upstreamRef,
           }).pipe(
@@ -809,17 +844,29 @@ export const make = Effect.gen(function* () {
     timeToLive: (exit) => (Exit.isSuccess(exit) ? STATUS_RESULT_CACHE_TTL : Duration.zero),
   });
   const invalidateRemoteStatusResultCache = (cwd: string) =>
-    normalizeStatusCacheKey(cwd).pipe(
-      Effect.flatMap((cacheKey) => Cache.invalidate(remoteStatusResultCache, cacheKey)),
-    );
+    invalidateStatusResultCache(remoteStatusResultCache, cwd);
 
   const readConfigValueNullable = (cwd: string, key: string) =>
     gitCore.readConfigValue(cwd, key).pipe(Effect.orElseSucceed(() => null));
 
   const resolveHostingProvider = Effect.fn("resolveHostingProvider")(function* (
-    cwd: string,
+    input: VcsStatusInput,
     branch: string | null,
   ) {
+    const cwd = input.cwd;
+    const providerHandle = yield* sourceControlProviders.resolveHandle(input).pipe(
+      Effect.catch(() =>
+        Effect.succeed({
+          provider: null,
+          context: null,
+          contextSource: null,
+        }),
+      ),
+    );
+    if (providerHandle.contextSource === "override" && providerHandle.context) {
+      return providerHandle.context.provider;
+    }
+
     const preferredRemoteName =
       branch === null
         ? "origin"
@@ -828,7 +875,14 @@ export const make = Effect.gen(function* () {
       (yield* readConfigValueNullable(cwd, `remote.${preferredRemoteName}.url`)) ??
       (yield* readConfigValueNullable(cwd, "remote.origin.url"));
 
-    return remoteUrl ? detectSourceControlProviderFromGitRemoteUrl(remoteUrl) : null;
+    const providerFromBranchRemote = remoteUrl
+      ? detectSourceControlProviderFromGitRemoteUrl(remoteUrl)
+      : null;
+    if (providerFromBranchRemote) {
+      return providerFromBranchRemote;
+    }
+
+    return providerHandle.context?.provider ?? null;
   });
 
   const resolveRemoteRepositoryContext = Effect.fn("resolveRemoteRepositoryContext")(function* (
@@ -922,7 +976,7 @@ export const make = Effect.gen(function* () {
   });
 
   const findOpenPr = Effect.fn("findOpenPr")(function* (
-    cwd: string,
+    target: VcsStatusInput,
     headContext: Pick<
       BranchHeadContext,
       | "headBranch"
@@ -932,8 +986,9 @@ export const make = Effect.gen(function* () {
       | "isCrossRepository"
     >,
   ) {
+    const { cwd } = target;
     for (const headSelector of headContext.headSelectors) {
-      const pullRequests = yield* (yield* sourceControlProvider(cwd)).listChangeRequests({
+      const pullRequests = yield* (yield* sourceControlProvider(target)).listChangeRequests({
         cwd,
         headSelector,
         state: "open",
@@ -961,14 +1016,15 @@ export const make = Effect.gen(function* () {
   });
 
   const findLatestPr = Effect.fn("findLatestPr")(function* (
-    cwd: string,
+    input: VcsStatusInput,
     details: { branch: string; upstreamRef: string | null },
   ) {
+    const cwd = input.cwd;
     const headContext = yield* resolveBranchHeadContext(cwd, details);
     const parsedByNumber = new Map<number, PullRequestInfo>();
 
     for (const headSelector of headContext.headSelectors) {
-      const pullRequests = yield* (yield* sourceControlProvider(cwd)).listChangeRequests({
+      const pullRequests = yield* (yield* sourceControlProvider(input)).listChangeRequests({
         cwd,
         headSelector,
         state: "all",
@@ -993,10 +1049,11 @@ export const make = Effect.gen(function* () {
   });
 
   const buildCompletionToast = Effect.fn("buildCompletionToast")(function* (
-    cwd: string,
+    target: VcsStatusInput,
     result: Pick<GitRunStackedActionResult, "action" | "branch" | "commit" | "push" | "pr">,
   ) {
-    const terms = yield* sourceControlProvider(cwd).pipe(
+    const { cwd } = target;
+    const terms = yield* sourceControlProvider(target).pipe(
       Effect.map((provider) => getChangeRequestTerminologyForKind(provider.kind)),
       Effect.orElseSucceed(() => getChangeRequestTerminologyForKind("unknown")),
     );
@@ -1041,7 +1098,7 @@ export const make = Effect.gen(function* () {
         branch: finalBranchContext.branch,
         upstreamRef: finalBranchContext.upstreamRef,
       }).pipe(
-        Effect.flatMap((headContext) => findOpenPr(cwd, headContext)),
+        Effect.flatMap((headContext) => findOpenPr(target, headContext)),
         Effect.orElseSucceed(() => null),
       );
     }
@@ -1087,11 +1144,12 @@ export const make = Effect.gen(function* () {
   });
 
   const resolveBaseBranch = Effect.fn("resolveBaseBranch")(function* (
-    cwd: string,
+    target: VcsStatusInput,
     branch: string,
     upstreamRef: string | null,
     headContext: Pick<BranchHeadContext, "isCrossRepository" | "remoteName">,
   ) {
+    const { cwd } = target;
     const configured = yield* gitCore.readConfigValue(cwd, `branch.${branch}.gh-merge-base`);
     if (configured) return configured;
 
@@ -1104,7 +1162,7 @@ export const make = Effect.gen(function* () {
       }
     }
 
-    const defaultFromProvider = yield* sourceControlProvider(cwd).pipe(
+    const defaultFromProvider = yield* sourceControlProvider(target).pipe(
       Effect.flatMap((provider) => provider.getDefaultBranch({ cwd })),
       Effect.orElseSucceed(() => null),
     );
@@ -1298,11 +1356,12 @@ export const make = Effect.gen(function* () {
 
   const runPrStep = Effect.fn("runPrStep")(function* (
     modelSelection: ModelSelection,
-    cwd: string,
+    target: VcsStatusInput,
     fallbackBranch: string | null,
     emit: GitActionProgressEmitter,
   ) {
-    const provider = yield* sourceControlProvider(cwd);
+    const { cwd } = target;
+    const provider = yield* sourceControlProvider(target);
     const terms = getChangeRequestTerminologyForKind(provider.kind);
     const details = yield* gitCore.statusDetails(cwd);
     const branch = details.branch ?? fallbackBranch;
@@ -1326,7 +1385,7 @@ export const make = Effect.gen(function* () {
       upstreamRef: details.upstreamRef,
     });
 
-    const existing = yield* findOpenPr(cwd, headContext);
+    const existing = yield* findOpenPr(target, headContext);
     if (existing) {
       return {
         status: "opened_existing" as const,
@@ -1338,7 +1397,7 @@ export const make = Effect.gen(function* () {
       };
     }
 
-    const baseBranch = yield* resolveBaseBranch(cwd, branch, details.upstreamRef, headContext);
+    const baseBranch = yield* resolveBaseBranch(target, branch, details.upstreamRef, headContext);
     yield* emit({
       kind: "phase_started",
       phase: "pr",
@@ -1387,7 +1446,7 @@ export const make = Effect.gen(function* () {
       })
       .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))));
 
-    const created = yield* findOpenPr(cwd, headContext);
+    const created = yield* findOpenPr(target, headContext);
     if (!created) {
       return {
         status: "created" as const,
@@ -1409,13 +1468,13 @@ export const make = Effect.gen(function* () {
 
   const localStatus: GitManager["Service"]["localStatus"] = Effect.fn("localStatus")(
     function* (input) {
-      const cacheKey = yield* normalizeStatusCacheKey(input.cwd);
+      const cacheKey = yield* normalizeStatusCacheKey(input);
       return yield* Cache.get(localStatusResultCache, cacheKey);
     },
   );
   const remoteStatus: GitManager["Service"]["remoteStatus"] = Effect.fn("remoteStatus")(
     function* (input, options) {
-      const cacheKey = yield* normalizeStatusCacheKey(input.cwd);
+      const cacheKey = yield* normalizeStatusCacheKey(input);
       if (options?.refreshUpstream === false) {
         return yield* readRemoteStatus(cacheKey, options);
       }
@@ -1448,7 +1507,7 @@ export const make = Effect.gen(function* () {
   const resolvePullRequest: GitManager["Service"]["resolvePullRequest"] = Effect.fn(
     "resolvePullRequest",
   )(function* (input) {
-    const pullRequest = yield* (yield* sourceControlProvider(input.cwd))
+    const pullRequest = yield* (yield* sourceControlProvider(input))
       .getChangeRequest({
         cwd: input.cwd,
         reference: normalizePullRequestReference(input.reference),
@@ -1484,21 +1543,21 @@ export const make = Effect.gen(function* () {
     return yield* Effect.gen(function* () {
       const normalizedReference = normalizePullRequestReference(input.reference);
       const rootWorktreePath = yield* canonicalizeExistingPath(input.cwd);
-      const pullRequestSummary = yield* (yield* sourceControlProvider(input.cwd)).getChangeRequest({
+      const pullRequestSummary = yield* (yield* sourceControlProvider(input)).getChangeRequest({
         cwd: input.cwd,
         reference: normalizedReference,
       });
       const pullRequest = toResolvedPullRequest(pullRequestSummary);
 
       if (input.mode === "local") {
-        yield* (yield* sourceControlProvider(input.cwd)).checkoutChangeRequest({
+        yield* (yield* sourceControlProvider(input)).checkoutChangeRequest({
           cwd: input.cwd,
           reference: normalizedReference,
           force: true,
         });
         const details = yield* gitCore.statusDetails(input.cwd);
         yield* configurePullRequestHeadUpstream(
-          input.cwd,
+          input,
           {
             ...pullRequest,
             ...toPullRequestHeadRemoteInfo(pullRequestSummary),
@@ -1517,7 +1576,7 @@ export const make = Effect.gen(function* () {
       ) {
         const details = yield* gitCore.statusDetails(worktreePath);
         yield* configurePullRequestHeadUpstream(
-          worktreePath,
+          { cwd: worktreePath, projectId: input.projectId },
           {
             ...pullRequest,
             ...toPullRequestHeadRemoteInfo(pullRequestSummary),
@@ -1584,7 +1643,7 @@ export const make = Effect.gen(function* () {
       }
 
       yield* materializePullRequestHeadBranch(
-        input.cwd,
+        input,
         pullRequestWithRemoteInfo,
         localPullRequestBranch,
       );
@@ -1768,7 +1827,7 @@ export const make = Effect.gen(function* () {
         const currentBranch = branchStep.name ?? initialStatus.branch;
         const commitAction = isCommitAction(input.action) ? input.action : null;
         const changeRequestTerms = wantsPr
-          ? yield* sourceControlProvider(input.cwd).pipe(
+          ? yield* sourceControlProvider(input).pipe(
               Effect.map((provider) => getChangeRequestTerminologyForKind(provider.kind)),
               Effect.orElseSucceed(() => getChangeRequestTerminologyForKind("unknown")),
             )
@@ -1815,12 +1874,12 @@ export const make = Effect.gen(function* () {
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
                 Effect.flatMap(() =>
-                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit),
+                  runPrStep(modelSelection, input, currentBranch, progress.emit),
                 ),
               )
           : { status: "skipped_not_requested" as const };
 
-        const toast = yield* buildCompletionToast(input.cwd, {
+        const toast = yield* buildCompletionToast(input, {
           action: input.action,
           branch: branchStep,
           commit,

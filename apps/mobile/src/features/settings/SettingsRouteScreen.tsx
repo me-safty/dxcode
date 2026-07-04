@@ -17,7 +17,10 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { AppText as Text } from "../../components/AppText";
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
-import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
+import {
+  isNotificationPermissionGranted,
+  requestAgentNotificationPermission,
+} from "../agent-awareness/notificationPermissions";
 import { refreshAgentAwarenessRegistration } from "../agent-awareness/remoteRegistration";
 import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
 import { useClerkSettingsSheetDetent } from "../cloud/ClerkSettingsSheetDetent";
@@ -34,6 +37,10 @@ import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
+
+function normalizeClerkToken(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
 
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
@@ -131,7 +138,7 @@ function ConfiguredSettingsRouteScreen() {
       setNotificationStatus("disabled");
       return;
     }
-    setNotificationStatus(result.value.granted ? "enabled" : "disabled");
+    setNotificationStatus(isNotificationPermissionGranted(result.value) ? "enabled" : "disabled");
   }, []);
 
   useEffect(() => {
@@ -240,7 +247,8 @@ function ConfiguredSettingsRouteScreen() {
       );
       return;
     }
-    if (!tokenResult.value) {
+    const clerkToken = normalizeClerkToken(tokenResult.value);
+    if (!clerkToken) {
       promptSignIn();
       setLiveActivityStatus("signed-out");
       return;
@@ -250,7 +258,7 @@ function ConfiguredSettingsRouteScreen() {
       runtime.runPromiseExit(
         setLiveActivityUpdatesEnabled({
           enabled: true,
-          clerkToken: tokenResult.value,
+          clerkToken,
           connections,
         }),
       ),
@@ -312,7 +320,7 @@ function ConfiguredSettingsRouteScreen() {
               });
               return;
             }
-            token = tokenResult.value;
+            token = normalizeClerkToken(tokenResult.value);
           }
 
           const updateResult = await settleAsyncResult(() =>

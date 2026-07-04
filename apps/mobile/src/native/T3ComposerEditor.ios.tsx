@@ -247,7 +247,7 @@ export function ComposerEditor({
       autoCorrect={props.autoCorrect ?? true}
       spellCheck={props.spellCheck ?? true}
       style={style as StyleProp<ViewStyle>}
-      onComposerChange={(event) => {
+      onComposerChange={(event: NativeEditorEvent) => {
         const acknowledgedEventCount = acceptNativeEvent(
           event.nativeEvent.eventCount,
           event.nativeEvent.value,
@@ -259,7 +259,7 @@ export function ComposerEditor({
         setMostRecentEventCount(acknowledgedEventCount);
         setNativeEventSequence((sequence) => sequence + 1);
       }}
-      onComposerSelectionChange={(event) => {
+      onComposerSelectionChange={(event: NativeSelectionEvent) => {
         const acknowledgedEventCount = acceptNativeEvent(
           event.nativeEvent.eventCount,
           event.nativeEvent.value,
@@ -270,7 +270,9 @@ export function ComposerEditor({
         setMostRecentEventCount(acknowledgedEventCount);
         setNativeEventSequence((sequence) => sequence + 1);
       }}
-      onComposerPasteImages={(event) => onPasteImages?.(event.nativeEvent.uris)}
+      onComposerPasteImages={(event: NativePasteImagesEvent) =>
+        onPasteImages?.(event.nativeEvent.uris)
+      }
       onComposerFocus={onFocus}
       onComposerBlur={onBlur}
       onComposerSubmit={onSubmit}

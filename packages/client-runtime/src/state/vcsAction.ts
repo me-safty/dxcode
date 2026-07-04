@@ -6,6 +6,7 @@ import {
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   GitStackedAction,
+  type ProjectId as ProjectIdType,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -71,6 +72,7 @@ export interface BeginVcsActionInput {
 export interface RunVcsStackedActionInput {
   readonly actionId: string;
   readonly action: GitStackedAction;
+  readonly projectId?: ProjectIdType | null;
   readonly commitMessage?: string;
   readonly featureBranch?: boolean;
   readonly filePaths?: ReadonlyArray<string>;
@@ -177,6 +179,9 @@ export function getVcsActionTargetKey(target: VcsActionTarget): string | null {
   if (target.environmentId === null || target.cwd === null) {
     return null;
   }
+  // Keyed by environment + worktree only: all VCS operations against the same
+  // repository must share one serial lock, regardless of which project view
+  // initiated them.
   return JSON.stringify([target.environmentId, target.cwd]);
 }
 
@@ -459,6 +464,10 @@ export function createVcsActionManager<R, E>(
         const rpcInput: GitRunStackedActionInput = {
           actionId: transportActionId,
           cwd: target.cwd,
+          // The command is cached per [environment, cwd], so the project
+          // context must come from each invocation, never from the target
+          // captured when the command was first created.
+          ...(input.projectId ? { projectId: input.projectId } : {}),
           action: input.action,
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),

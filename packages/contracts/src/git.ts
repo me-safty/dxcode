@@ -1,5 +1,11 @@
 import * as Schema from "effect/Schema";
-import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 import { SourceControlProviderError, SourceControlProviderInfo } from "./sourceControl.ts";
 import { VcsDriverKind } from "./vcs.ts";
 
@@ -101,6 +107,7 @@ export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
 
 export const VcsStatusInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
+  projectId: Schema.optional(ProjectId),
 });
 export type VcsStatusInput = typeof VcsStatusInput.Type;
 
@@ -112,6 +119,7 @@ export type VcsPullInput = typeof VcsPullInput.Type;
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
   cwd: TrimmedNonEmptyStringSchema,
+  projectId: Schema.optional(ProjectId),
   action: GitStackedAction,
   commitMessage: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
   featureBranch: Schema.optional(Schema.Boolean),
@@ -144,12 +152,14 @@ export type VcsCreateWorktreeInput = typeof VcsCreateWorktreeInput.Type;
 
 export const GitPullRequestRefInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
+  projectId: Schema.optional(ProjectId),
   reference: GitPullRequestReference,
 });
 export type GitPullRequestRefInput = typeof GitPullRequestRefInput.Type;
 
 export const GitPreparePullRequestThreadInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
+  projectId: Schema.optional(ProjectId),
   reference: GitPullRequestReference,
   mode: GitPreparePullRequestThreadMode,
   threadId: Schema.optional(ThreadId),

@@ -23,10 +23,12 @@ import {
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
+  type ProjectSettingsPatch,
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
   ThreadId,
+  type VcsStatusInput,
   WS_METHODS,
   WsRpcGroup,
   EditorId,
@@ -554,6 +556,13 @@ const buildAppUnderTest = (options?: {
           ready: Effect.void,
           getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
           updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
+          updateProjectSettings: () =>
+            Effect.succeed({
+              remoteOverride: null,
+              automaticGitFetchInterval: null,
+              actionEnvironment: {},
+              disabledProviderInstanceIds: [],
+            }),
           streamChanges: Stream.empty,
           ...options?.layers?.serverSettings,
         }),
@@ -823,12 +832,24 @@ const parseSessionCookieFromWsUrl = (
   };
 };
 
+type NodeWebSocketConstructor = new (
+  socketUrl: string | URL,
+  protocols?: string | ReadonlyArray<string>,
+  options?: { readonly headers?: Record<string, string> },
+) => globalThis.WebSocket;
+
+const nodeWebSocket = (
+  NodeSocket.NodeWS as unknown as {
+    readonly WebSocket: NodeWebSocketConstructor;
+  }
+).WebSocket;
+
 const wsRpcProtocolLayer = (wsUrl: string) => {
   const { cookie, url } = parseSessionCookieFromWsUrl(wsUrl);
   const webSocketConstructorLayer = Layer.succeed(
     Socket.WebSocketConstructor,
     (socketUrl, protocols) =>
-      new NodeSocket.NodeWS.WebSocket(
+      new nodeWebSocket(
         socketUrl,
         protocols,
         cookie ? { headers: { cookie } } : undefined,
@@ -1964,7 +1985,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
         const installEvents = yield* Effect.scoped(
           withWsRpcClient(wsUrl, (client) =>
-            client[WS_METHODS.cloudInstallRelayClient]({}).pipe(Stream.runCollect),
+            client[WS_METHODS.cloudInstallRelayClient]({}).pipe(Stream.take(3), Stream.runCollect),
           ),
         );
 
@@ -4736,6 +4757,484 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect(
+    "routes websocket rpc projects.getDetails with detected and effective remote data",
+    () =>
+      Effect.gen(function* () {
+        const now = "2026-01-01T00:00:00.000Z";
+
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              getProjectShellById: (projectId) =>
+                Effect.succeed(
+                  projectId === defaultProjectId
+                    ? Option.some({
+                        id: defaultProjectId,
+                        title: "Default Project",
+                        workspaceRoot: "/tmp/default-project",
+                        repositoryIdentity: null,
+                        defaultModelSelection,
+                        scripts: [],
+                        createdAt: now,
+                        updatedAt: now,
+                      })
+                    : Option.none(),
+                ),
+            },
+            gitVcsDriver: {
+              execute: (input) =>
+                Effect.succeed({
+                  exitCode: ChildProcessSpawner.ExitCode(0),
+                  stdout:
+                    input.operation === "projects.getDetails.gitRoot"
+                      ? "/tmp/default-project\n"
+                      : input.operation === "projects.getDetails.branch"
+                        ? "main\n"
+                        : "origin\tgit@github.com:acme/widgets.git (fetch)\norigin\tgit@github.com:acme/widgets.git (push)\n",
+                  stderr: "",
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                }),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const details = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.projectsGetDetails]({ projectId: defaultProjectId }),
+          ),
+        );
+
+        assert.equal(details.id, defaultProjectId);
+        assert.equal(details.title, "Default Project");
+        assert.equal(details.workspaceRoot, "/tmp/default-project");
+        assert.deepEqual(details.settings, {
+          remoteOverride: null,
+          automaticGitFetchInterval: null,
+          actionEnvironment: {},
+          disabledProviderInstanceIds: [],
+        });
+        assert.equal(details.detected.gitRoot, "/tmp/default-project");
+        assert.equal(details.detected.branch, "main");
+        assert.equal(details.detected.remotes.length, 1);
+        assert.equal(details.detected.remotes[0]?.name, "origin");
+        assert.equal(details.detected.remotes[0]?.url, "git@github.com:acme/widgets.git");
+        assert.equal(details.detected.remotes[0]?.provider?.kind, "github");
+        assert.equal(details.detected.primaryRemote?.name, "origin");
+        assert.equal(details.effective.title, "Default Project");
+        assert.equal(details.effective.remote?.source, "detected");
+        assert.equal(details.effective.remote?.provider, "github");
+        assert.equal(details.effective.remote?.remoteName, "origin");
+        assert.equal(details.effective.remote?.remoteUrl, "git@github.com:acme/widgets.git");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.getDetails preferring the remote override", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Default Project",
+                  workspaceRoot: "/tmp/default-project",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  scripts: [],
+                  createdAt: now,
+                  updatedAt: now,
+                }),
+              ),
+          },
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              projectSettings: {
+                [defaultProjectId]: {
+                  remoteOverride: {
+                    provider: "gitlab" as const,
+                    remoteUrl: "https://gitlab.com/acme/widgets.git",
+                    webUrl: "https://gitlab.com/acme/widgets",
+                  },
+                  automaticGitFetchInterval: null,
+                  actionEnvironment: {},
+                  disabledProviderInstanceIds: [],
+                },
+              },
+            }),
+          },
+          gitVcsDriver: {
+            execute: () =>
+              Effect.succeed({
+                exitCode: ChildProcessSpawner.ExitCode(0),
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const details = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsGetDetails]({ projectId: defaultProjectId }),
+        ),
+      );
+
+      assert.deepEqual(details.settings.remoteOverride, {
+        provider: "gitlab",
+        remoteUrl: "https://gitlab.com/acme/widgets.git",
+        webUrl: "https://gitlab.com/acme/widgets",
+      });
+      assert.equal(details.detected.gitRoot, null);
+      assert.equal(details.detected.branch, null);
+      assert.deepEqual(details.detected.remotes, []);
+      assert.equal(details.detected.primaryRemote, null);
+      assert.equal(details.effective.remote?.source, "override");
+      assert.equal(details.effective.remote?.provider, "gitlab");
+      assert.equal(details.effective.remote?.remoteName, "origin");
+      assert.equal(details.effective.remote?.remoteUrl, "https://gitlab.com/acme/widgets.git");
+      assert.equal(details.effective.remote?.webUrl, "https://gitlab.com/acme/widgets");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.getDetails errors for an unknown project", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsGetDetails]({
+            projectId: ProjectId.make("project-missing"),
+          }),
+        ).pipe(Effect.result),
+      );
+
+      if (result._tag !== "Failure" || result.failure._tag !== "ProjectDetailsError") {
+        assert.fail("Expected a ProjectDetailsError");
+      }
+      assert.equal(result.failure.message, "Project was not found.");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.updateSettings and persists the patch", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const updateCalls: Array<{
+        readonly projectId: ProjectId;
+        readonly patch: ProjectSettingsPatch;
+      }> = [];
+      const persistedSettings = {
+        remoteOverride: {
+          provider: "github" as const,
+          remoteUrl: "https://github.com/acme/widgets.git",
+        },
+        automaticGitFetchInterval: null,
+        actionEnvironment: { DEPLOY_ENV: "staging" },
+        disabledProviderInstanceIds: [ProviderInstanceId.make("codex")],
+      };
+      const patch = {
+        remoteOverride: {
+          provider: "github" as const,
+          remoteUrl: "https://github.com/acme/widgets.git",
+        },
+        actionEnvironment: { DEPLOY_ENV: "staging" },
+        disabledProviderInstanceIds: [ProviderInstanceId.make("codex")],
+      };
+      const providers = [
+        {
+          instanceId: ProviderInstanceId.make("codex"),
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          installed: true,
+          version: "1.0.0",
+          status: "ready" as const,
+          auth: { status: "authenticated" as const },
+          checkedAt: now,
+          models: [],
+          slashCommands: [],
+          skills: [],
+        },
+        {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          driver: ProviderDriverKind.make("claudeAgent"),
+          enabled: true,
+          installed: true,
+          version: "1.0.0",
+          status: "ready" as const,
+          auth: { status: "authenticated" as const },
+          checkedAt: now,
+          models: [],
+          slashCommands: [],
+          skills: [],
+        },
+      ] as const;
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Default Project",
+                  workspaceRoot: "/tmp/default-project",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  scripts: [],
+                  createdAt: now,
+                  updatedAt: now,
+                }),
+              ),
+          },
+          providerRegistry: {
+            getProviders: Effect.succeed(providers),
+          },
+          serverSettings: {
+            updateProjectSettings: (projectId, settingsPatch) =>
+              Effect.sync(() => {
+                updateCalls.push({ projectId, patch: settingsPatch });
+                return persistedSettings;
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsUpdateSettings]({
+            projectId: defaultProjectId,
+            patch,
+          }),
+        ),
+      );
+
+      assert.deepEqual(response, persistedSettings);
+      assert.equal(updateCalls.length, 1);
+      assert.equal(updateCalls[0]?.projectId, defaultProjectId);
+      assert.deepEqual(updateCalls[0]?.patch, patch);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.updateSettings rejects disabling every provider", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      let updateProjectSettingsCalled = false;
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Default Project",
+                  workspaceRoot: "/tmp/default-project",
+                  repositoryIdentity: null,
+                  defaultModelSelection,
+                  scripts: [],
+                  createdAt: now,
+                  updatedAt: now,
+                }),
+              ),
+          },
+          providerRegistry: {
+            getProviders: Effect.succeed([
+              {
+                instanceId: ProviderInstanceId.make("codex"),
+                driver: ProviderDriverKind.make("codex"),
+                enabled: true,
+                installed: true,
+                version: "1.0.0",
+                status: "ready" as const,
+                auth: { status: "authenticated" as const },
+                checkedAt: now,
+                models: [],
+                slashCommands: [],
+                skills: [],
+              },
+            ]),
+          },
+          serverSettings: {
+            updateProjectSettings: (_projectId, _patch) =>
+              Effect.sync(() => {
+                updateProjectSettingsCalled = true;
+                return {
+                  remoteOverride: null,
+                  automaticGitFetchInterval: null,
+                  actionEnvironment: {},
+                  disabledProviderInstanceIds: [],
+                };
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsUpdateSettings]({
+            projectId: defaultProjectId,
+            patch: {
+              disabledProviderInstanceIds: [ProviderInstanceId.make("codex")],
+            },
+          }),
+        ).pipe(Effect.result),
+      );
+
+      if (result._tag !== "Failure" || result.failure._tag !== "ProjectDetailsError") {
+        assert.fail("Expected a ProjectDetailsError");
+      }
+      assert.equal(
+        result.failure.message,
+        "At least one provider must stay enabled for this project.",
+      );
+      assert.equal(updateProjectSettingsCalled, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "rejects thread.turn.start when the provider instance is disabled for the project",
+    () =>
+      Effect.gen(function* () {
+        const dispatchedCommands: Array<OrchestrationCommand> = [];
+
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              dispatch: (command) =>
+                Effect.sync(() => {
+                  dispatchedCommands.push(command);
+                  return { sequence: dispatchedCommands.length };
+                }),
+            },
+            projectionSnapshotQuery: {
+              getThreadShellById: () =>
+                Effect.succeed(Option.some(makeDefaultOrchestrationThreadShell())),
+            },
+            serverSettings: {
+              getSettings: Effect.succeed({
+                ...DEFAULT_SERVER_SETTINGS,
+                projectSettings: {
+                  [defaultProjectId]: {
+                    remoteOverride: null,
+                    automaticGitFetchInterval: null,
+                    actionEnvironment: {},
+                    disabledProviderInstanceIds: [defaultModelSelection.instanceId],
+                  },
+                },
+              }),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const result = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+              type: "thread.turn.start",
+              commandId: CommandId.make("cmd-turn-start-disabled-provider"),
+              threadId: defaultThreadId,
+              message: {
+                messageId: MessageId.make("msg-disabled-provider"),
+                role: "user",
+                text: "hello",
+                attachments: [],
+              },
+              modelSelection: defaultModelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              createdAt: "2026-01-01T00:00:00.000Z",
+            }),
+          ).pipe(Effect.result),
+        );
+
+        if (
+          result._tag !== "Failure" ||
+          result.failure._tag !== "OrchestrationDispatchCommandError"
+        ) {
+          assert.fail("Expected an OrchestrationDispatchCommandError");
+        }
+        assert.equal(
+          result.failure.message,
+          `Provider instance "${defaultModelSelection.instanceId}" is disabled for this project.`,
+        );
+        assert.deepEqual(dispatchedCommands, []);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("dispatches thread.turn.start when the provider instance stays enabled", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(Option.some(makeDefaultOrchestrationThreadShell())),
+          },
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              projectSettings: {
+                [defaultProjectId]: {
+                  remoteOverride: null,
+                  automaticGitFetchInterval: null,
+                  actionEnvironment: {},
+                  disabledProviderInstanceIds: [ProviderInstanceId.make("claudeAgent")],
+                },
+              },
+            }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-turn-start-enabled-provider"),
+            threadId: defaultThreadId,
+            message: {
+              messageId: MessageId.make("msg-enabled-provider"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          }),
+        ),
+      );
+
+      assert.equal(response.sequence, 1);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.turn.start"],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc shell.openInEditor", () =>
     Effect.gen(function* () {
       let openedInput: { cwd: string; editor: EditorId } | null = null;
@@ -6095,7 +6594,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       Effect.gen(function* () {
         const dispatchedCommands: Array<OrchestrationCommand> = [];
         const bootstrapGitOperations: string[] = [];
-        const refreshStatus = vi.fn((_: string) =>
+        const refreshStatus = vi.fn((_: string | VcsStatusInput) =>
           Effect.succeed({
             isRepo: true,
             hasPrimaryRemote: true,
