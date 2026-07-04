@@ -82,6 +82,7 @@ export interface CodexAdapterLiveOptions {
   >;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly onRateLimit?: () => Effect.Effect<void, never>;
 }
 
 interface CodexAdapterSessionContext {
@@ -1117,7 +1118,11 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "account/rateLimits/updated") {
-    if (!readPayload(EffectCodexSchema.V2AccountRateLimitsUpdatedNotification, event.payload)) {
+    const payload = readPayload(
+      EffectCodexSchema.V2AccountRateLimitsUpdatedNotification,
+      event.payload,
+    );
+    if (!payload) {
       return [];
     }
     return [
@@ -1125,7 +1130,7 @@ function mapToRuntimeEvents(
         type: "account.rate-limits.updated",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          rateLimits: event.payload ?? {},
+          rateLimits: payload.rateLimits,
         },
       },
     ];
@@ -1450,6 +1455,21 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 itemId: event.itemId,
               });
               return;
+            }
+            if (options?.onRateLimit !== undefined) {
+              for (const re of runtimeEvents) {
+                if (re.type === "account.rate-limits.updated") {
+                  const rateLimits = re.payload.rateLimits;
+                  if (
+                    typeof rateLimits === "object" &&
+                    rateLimits !== null &&
+                    "rateLimitReachedType" in rateLimits &&
+                    typeof rateLimits.rateLimitReachedType === "string"
+                  ) {
+                    yield* options.onRateLimit();
+                  }
+                }
+              }
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
           }),

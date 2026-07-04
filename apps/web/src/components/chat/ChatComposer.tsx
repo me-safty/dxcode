@@ -84,6 +84,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { CodexAccountQuotaStatus } from "./CodexAccountQuotaStatus";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
@@ -2491,6 +2492,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }}
                   getModelDisabledReason={getModelDisabledReason}
                   onInstanceModelChange={onProviderModelSelect}
+                />
+
+                <CodexAccountQuotaStatus
+                  compact={isComposerFooterCompact}
+                  environmentId={environmentId}
+                  provider={selectedProviderStatus}
                 />
 
                 {isComposerFooterCompact ? (

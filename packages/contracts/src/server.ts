@@ -18,6 +18,7 @@ import {
 } from "./keybindings.ts";
 import { EditorId } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
+import { CodexUsageSnapshot } from "./providerApi.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerSettings } from "./settings.ts";
 
@@ -171,6 +172,7 @@ export const ServerProvider = Schema.Struct({
   version: Schema.NullOr(TrimmedNonEmptyString),
   status: ServerProviderState,
   auth: ServerProviderAuth,
+  accountUsage: Schema.optionalKey(CodexUsageSnapshot),
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
   // Optional for back-compat: every legacy producer omits this field and

@@ -41,6 +41,7 @@ import type { DriverOption } from "./providerDriverMeta";
 import { ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { CodexRotationManager } from "./providers/CodexRotationManager";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import {
@@ -773,6 +774,15 @@ export function ProviderInstanceCard({
                 onChange={updateConfig}
               />
             ) : null}
+
+            {driverKind === "codex" && (
+              <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                <CodexRotationManager
+                  config={instance.config as Record<string, unknown>}
+                  onChange={updateConfig}
+                />
+              </div>
+            )}
 
             {driverOption !== undefined ? (
               <ProviderModelsSection

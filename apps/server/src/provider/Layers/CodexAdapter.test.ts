@@ -416,6 +416,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
 });
 
 const lifecycleRuntimeFactory = makeRuntimeFactory();
+const onRateLimit = vi.fn(() => Effect.void);
 const lifecycleLayer = it.layer(
   Layer.effect(
     CodexAdapter,
@@ -423,6 +424,7 @@ const lifecycleLayer = it.layer(
       const codexConfig = decodeCodexSettings({});
       return yield* makeCodexAdapter(codexConfig, {
         makeRuntime: lifecycleRuntimeFactory.factory,
+        onRateLimit,
       });
     }),
   ).pipe(
@@ -448,6 +450,39 @@ function startLifecycleRuntime() {
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
+  it.effect("unwraps rate-limit notifications and triggers account rotation", () =>
+    Effect.gen(function* () {
+      onRateLimit.mockClear();
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-rate-limit"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "account/rateLimits/updated",
+        threadId: asThreadId("thread-1"),
+        payload: {
+          rateLimits: {
+            primary: { usedPercent: 100 },
+            rateLimitReachedType: "rate_limit_reached",
+          },
+        },
+      });
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") return;
+      NodeAssert.equal(firstEvent.value.type, "account.rate-limits.updated");
+      NodeAssert.deepStrictEqual(firstEvent.value.payload.rateLimits, {
+        primary: { usedPercent: 100 },
+        rateLimitReachedType: "rate_limit_reached",
+      });
+      NodeAssert.equal(onRateLimit.mock.calls.length, 1);
+    }),
+  );
+
   it.effect("maps completed agent message items to canonical item.completed events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

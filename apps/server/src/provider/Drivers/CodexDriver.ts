@@ -21,12 +21,19 @@
  *
  * @module provider/Drivers/CodexDriver
  */
-import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import {
+  type CodexAccountConfig,
+  CodexSettings,
+  ProviderDriverKind,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -34,6 +41,9 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
+import { resolveCodexBinaryPath } from "../CodexExecutable.ts";
+import { resolveCodexProfileHomePath } from "../CodexAccountProfiles.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
 import { checkCodexProviderStatus, makePendingCodexProvider } from "../Layers/CodexProvider.ts";
@@ -56,6 +66,7 @@ import {
   codexContinuationIdentity,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
+  seedCodexShadowAuth,
 } from "./CodexHomeLayout.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
@@ -66,6 +77,26 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
   npmPackageName: "@openai/codex",
   homebrewFormula: "codex",
   nativeUpdate: null,
+});
+
+function managedImportedAccountHome(accountId: string): string {
+  const safeId = accountId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `~/.t3/codex/accounts/${safeId}`;
+}
+
+const prepareRotationAccount = Effect.fn("CodexDriver.prepareRotationAccount")(function* (
+  account: CodexAccountConfig,
+) {
+  if (account.authSourceHomePath) return account;
+  const path = yield* Path.Path;
+  const configuredHome = path.resolve(expandHomePath(account.shadowHomePath));
+  const profileHome = yield* resolveCodexProfileHomePath(account.shadowHomePath);
+  if (profileHome === null || profileHome === configuredHome) return account;
+  return {
+    ...account,
+    shadowHomePath: managedImportedAccountHome(account.id),
+    authSourceHomePath: profileHome,
+  } satisfies CodexAccountConfig;
 });
 
 /**
@@ -120,7 +151,31 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
-      const homeLayout = yield* resolveCodexHomeLayout(config);
+      const resolvedBinaryPath = yield* resolveCodexBinaryPath(config.binaryPath, processEnv);
+      const preparedSecondaryAccounts = yield* Effect.forEach(
+        config.secondaryAccounts,
+        prepareRotationAccount,
+        { concurrency: 4 },
+      );
+      const preparedActiveAccount = config.shadowHomePath
+        ? yield* prepareRotationAccount({
+            id: config.activeAccountId ?? "active",
+            label: config.activeAccountLabel ?? "Active account",
+            shadowHomePath: config.shadowHomePath,
+            ...(config.authSourceHomePath ? { authSourceHomePath: config.authSourceHomePath } : {}),
+            enabled: true,
+          })
+        : undefined;
+      const runtimeConfig = preparedActiveAccount
+        ? {
+            ...config,
+            shadowHomePath: preparedActiveAccount.shadowHomePath,
+            ...(preparedActiveAccount.authSourceHomePath
+              ? { authSourceHomePath: preparedActiveAccount.authSourceHomePath }
+              : {}),
+          }
+        : config;
+      const homeLayout = yield* resolveCodexHomeLayout(runtimeConfig);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
       const stampIdentity = withInstanceIdentity({
         instanceId,
@@ -128,6 +183,21 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
+      const resolvedAuthSourceHomePath = runtimeConfig.authSourceHomePath
+        ? ((yield* resolveCodexProfileHomePath(runtimeConfig.authSourceHomePath)) ??
+          runtimeConfig.authSourceHomePath)
+        : undefined;
+      yield* seedCodexShadowAuth(homeLayout, resolvedAuthSourceHomePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
           (cause) =>
@@ -140,14 +210,17 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         ),
       );
       const effectiveConfig = {
-        ...config,
+        ...runtimeConfig,
+        binaryPath: resolvedBinaryPath,
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
+        secondaryAccounts: preparedSecondaryAccounts,
       } satisfies CodexSettings;
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });
+      const rotationStarted = yield* Ref.make(false);
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -159,6 +232,76 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        onRateLimit: () =>
+          Effect.gen(function* () {
+            if (yield* Ref.getAndSet(rotationStarted, true)) return;
+            if (
+              !effectiveConfig.enableAutoRotation ||
+              effectiveConfig.secondaryAccounts.length === 0
+            ) {
+              return;
+            }
+            const enabledAccounts = effectiveConfig.secondaryAccounts.filter((a) => a.enabled);
+            if (enabledAccounts.length === 0) {
+              return;
+            }
+            const nextAccount = enabledAccounts[0];
+            if (!nextAccount) {
+              return;
+            }
+            const preparedNextAccount = nextAccount;
+
+            const settings = yield* serverSettings.getSettings;
+            const instances = settings.providerInstances;
+            const currentInstance = instances[instanceId];
+            if (!currentInstance) return;
+
+            const currentConfig = currentInstance.config as CodexSettings;
+
+            // Reconstruct secondary accounts: remove the next account, and append the current active one (if it had a shadowHomePath)
+            const newSecondaryAccounts = currentConfig.secondaryAccounts.filter(
+              (account) => account.id !== nextAccount.id,
+            );
+            if (effectiveConfig.shadowHomePath) {
+              const timestamp = yield* Clock.currentTimeMillis;
+              newSecondaryAccounts.push({
+                id: currentConfig.activeAccountId ?? `rotated_${timestamp.toString()}`,
+                label: currentConfig.activeAccountLabel ?? "Depleted account",
+                shadowHomePath: effectiveConfig.shadowHomePath,
+                ...(effectiveConfig.authSourceHomePath
+                  ? { authSourceHomePath: effectiveConfig.authSourceHomePath }
+                  : {}),
+                enabled: false, // Disable the depleted account by default so it's skipped in future
+              });
+            }
+
+            yield* Effect.logInfo(
+              `Codex rotation: Rate limit reached, swapping to shadow home ${preparedNextAccount.shadowHomePath}`,
+            );
+            const { authSourceHomePath: _previousSource, ...configWithoutPreviousSource } =
+              currentConfig;
+
+            yield* serverSettings.updateSettings({
+              providerInstances: {
+                ...instances,
+                [instanceId]: {
+                  ...currentInstance,
+                  config: {
+                    ...configWithoutPreviousSource,
+                    activeAccountId: preparedNextAccount.id,
+                    activeAccountLabel: preparedNextAccount.label,
+                    shadowHomePath: preparedNextAccount.shadowHomePath,
+                    ...(preparedNextAccount.authSourceHomePath
+                      ? { authSourceHomePath: preparedNextAccount.authSourceHomePath }
+                      : {}),
+                    secondaryAccounts: newSecondaryAccounts,
+                  },
+                },
+              },
+            });
+          }).pipe(
+            Effect.catchCause((cause) => Effect.logError("Failed to rotate Codex account", cause)),
+          ),
       });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
 

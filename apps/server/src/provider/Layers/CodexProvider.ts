@@ -32,6 +32,7 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import { normalizeCodexUsage } from "../CodexUsage.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
@@ -47,6 +48,7 @@ export interface CodexAppServerProviderSnapshot {
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
+  readonly rateLimits?: CodexSchema.V2GetAccountRateLimitsResponse["rateLimits"];
 }
 
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
@@ -355,12 +357,15 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models] = yield* Effect.all(
+  const [skillsResponse, models, rateLimitsResponse] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
+      client
+        .request("account/rateLimits/read", undefined)
+        .pipe(Effect.orElseSucceed(() => undefined)),
     ],
     { concurrency: "unbounded" },
   );
@@ -370,6 +375,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     version,
     models: appendCustomCodexModels(models, input.customModels ?? []),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
+    ...(rateLimitsResponse ? { rateLimits: rateLimitsResponse.rateLimits } : {}),
   } satisfies CodexAppServerProviderSnapshot;
 });
 
@@ -557,6 +563,14 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     checkedAt,
     models: snapshot.models,
     skills: snapshot.skills,
+    ...(snapshot.rateLimits
+      ? {
+          accountUsage: normalizeCodexUsage({
+            account: snapshot.account.account,
+            rateLimits: snapshot.rateLimits,
+          }),
+        }
+      : {}),
     probe: {
       installed: true,
       version: snapshot.version ?? null,

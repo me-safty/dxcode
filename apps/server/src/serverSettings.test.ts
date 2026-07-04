@@ -180,6 +180,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         homePath: "/Users/julius/.codex",
         shadowHomePath: "",
         customModels: [],
+        enableAutoRotation: false,
+        secondaryAccounts: [],
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
@@ -421,6 +423,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         homePath: "",
         shadowHomePath: "",
         customModels: [],
+        enableAutoRotation: false,
+        secondaryAccounts: [],
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,

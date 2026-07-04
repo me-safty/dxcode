@@ -62,6 +62,8 @@ const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
   homePath: "",
   shadowHomePath: "",
   customModels: [],
+  enableAutoRotation: false,
+  secondaryAccounts: [],
   ...overrides,
 });
 
@@ -128,6 +130,8 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
             binaryPath: "/opt/codex-personal/bin/codex",
             homePath: "/home/julius/.codex_personal",
             customModels: ["personal-preview"],
+            enableAutoRotation: false,
+            secondaryAccounts: [],
           }),
         },
         [workId]: {
@@ -138,6 +142,8 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
             binaryPath: "/opt/codex-work/bin/codex",
             homePath: "/home/julius/.codex",
             customModels: ["work-preview"],
+            enableAutoRotation: false,
+            secondaryAccounts: [],
           }),
         },
       };
