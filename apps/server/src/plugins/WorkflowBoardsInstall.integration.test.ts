@@ -521,6 +521,7 @@ layer("workflow-boards fixture plugin", (it) => {
           const handlers = yield* PluginManagementRpcHandlersModule.PluginManagementRpcHandlers;
           const catalog = yield* PluginCatalogModule.PluginCatalog;
           const dispatcher = yield* PluginRpcDispatcherModule.PluginRpcDispatcher;
+          const httpRegistry = yield* PluginHttpRegistry.PluginHttpRegistry;
           const outDir = yield* fs.makeTempDirectoryScoped({
             prefix: "workflow-boards-fixture-",
           });
@@ -547,6 +548,7 @@ layer("workflow-boards fixture plugin", (it) => {
           const expectedCapabilities: PluginCapability[] = [
             "database",
             "filesystem",
+            "http",
             "agents",
             "projections.read",
             "vcs",
@@ -871,6 +873,183 @@ layer("workflow-boards fixture plugin", (it) => {
           )) as BoardSnapshot;
           assert.equal(renamed.board.name, "Renamed Board");
 
+          const disposableDefinition = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getBoardDefinition,
+            { boardId: disposable.boardId },
+            rpcSession,
+          )) as WorkflowGetBoardDefinitionResult;
+          const webhookDefinition = {
+            ...disposableDefinition.definition,
+            lanes: disposableDefinition.definition.lanes.map((lane) =>
+              lane.key === "backlog"
+                ? {
+                    ...lane,
+                    onEvent: [
+                      {
+                        name: "ci.passed",
+                        when: { "==": [{ var: "event.payload.status" }, "green"] },
+                        to: "done",
+                      },
+                    ],
+                  }
+                : lane,
+            ),
+          };
+          const webhookDefinitionSave = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.saveBoardDefinition,
+            {
+              boardId: disposable.boardId,
+              definition: webhookDefinition,
+              expectedVersionHash: disposableDefinition.versionHash,
+              source: "save",
+            },
+            rpcSession,
+          )) as WorkflowSaveBoardDefinitionResult;
+          assert.isTrue(webhookDefinitionSave.ok);
+
+          const webhookTicket = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.createTicket,
+            {
+              boardId: disposable.boardId,
+              title: "Webhook ticket",
+              initialLane: "backlog",
+            },
+            rpcSession,
+          )) as { readonly ticketId: string };
+
+          const webhookConfig = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getWebhookConfig,
+            { boardId: disposable.boardId, rotate: true },
+            rpcSession,
+          )) as {
+            readonly path: string;
+            readonly hasToken: boolean;
+            readonly tokenPrefix?: string;
+            readonly token?: string;
+          };
+          assert.equal(
+            webhookConfig.path,
+            `/hooks/plugins/workflow-boards/webhook/${encodeURIComponent(disposable.boardId)}`,
+          );
+          assert.equal(webhookConfig.hasToken, true);
+          assert.isString(webhookConfig.token);
+          assert.isString(webhookConfig.tokenPrefix);
+          const webhookToken = webhookConfig.token;
+          if (webhookToken === undefined) {
+            return yield* Effect.die("webhook token was not returned on rotate");
+          }
+
+          const readWebhookConfig = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getWebhookConfig,
+            { boardId: disposable.boardId },
+            rpcSession,
+          )) as {
+            readonly path: string;
+            readonly hasToken: boolean;
+            readonly tokenPrefix?: string;
+            readonly token?: string;
+          };
+          assert.equal(readWebhookConfig.hasToken, true);
+          assert.equal(readWebhookConfig.path, webhookConfig.path);
+          assert.equal(readWebhookConfig.token, undefined);
+          assert.equal(readWebhookConfig.tokenPrefix, webhookConfig.tokenPrefix);
+
+          const matchedWebhookRoute = yield* httpRegistry.match({
+            pluginId,
+            method: "POST",
+            path: `/webhook/${encodeURIComponent(disposable.boardId)}`,
+          });
+          assert.isTrue(Option.isSome(matchedWebhookRoute));
+          if (Option.isNone(matchedWebhookRoute)) {
+            return yield* Effect.die("workflow webhook route was not registered");
+          }
+          assert.equal(matchedWebhookRoute.value.descriptor.auth, "public");
+          assert.equal(matchedWebhookRoute.value.descriptor.maxBodyBytes, 64 * 1024);
+
+          const encodeBody = (body: string) => new TextEncoder().encode(body);
+          const noopLogger = {
+            debug: () => Effect.void,
+            info: () => Effect.void,
+            warn: () => Effect.void,
+            error: () => Effect.void,
+          };
+          const postWebhook = (token: string, body: string) =>
+            matchedWebhookRoute.value.descriptor.handler(
+              {
+                method: "POST",
+                params: matchedWebhookRoute.value.params,
+                query: {},
+                headers: { "x-t3-webhook-token": token },
+                body: encodeBody(body),
+              },
+              { pluginId, logger: noopLogger },
+            );
+
+          const acceptedWebhook = yield* postWebhook(
+            webhookToken,
+            `{"name":"ci.passed","ticketId":"${webhookTicket.ticketId}","deliveryId":"delivery-ok","payload":{"status":"green","nested":{"constructor":"drop"}}}`,
+          );
+          assert.equal(acceptedWebhook.status, 202);
+          assert.equal((acceptedWebhook.body as { readonly outcome?: string }).outcome, "moved");
+          assert.equal((acceptedWebhook.body as { readonly toLane?: string }).toLane, "done");
+
+          const webhookDetail = (yield* dispatcher.call(
+            pluginId,
+            WORKFLOW_WS_METHODS.getTicketDetail,
+            { ticketId: webhookTicket.ticketId },
+            rpcSession,
+          )) as WorkflowTicketDetailView;
+          assert.equal(webhookDetail.ticket.currentLaneKey, "done");
+          assert.isTrue(
+            webhookDetail.routeHistory?.some(
+              (entry) => entry.source === "external_event" && entry.eventName === "ci.passed",
+            ) === true,
+          );
+
+          const wrongTokenWebhook = yield* postWebhook(
+            "wrong-token",
+            `{"name":"ci.passed","ticketId":"${webhookTicket.ticketId}","deliveryId":"delivery-wrong-token","payload":{"status":"green"}}`,
+          );
+          assert.equal(wrongTokenWebhook.status, 404);
+
+          const malformedWebhook = yield* postWebhook(webhookToken, "{");
+          assert.equal(malformedWebhook.status, 404);
+
+          // No-oracle: an unknown board is indistinguishable from a wrong token —
+          // same 404 status AND same body, so a webhook URL can't be used to
+          // enumerate which boards exist.
+          const unknownBoardWebhook = yield* matchedWebhookRoute.value.descriptor.handler(
+            {
+              method: "POST",
+              params: { boardId: "workflow-boards-project__does-not-exist" },
+              query: {},
+              headers: { "x-t3-webhook-token": webhookToken },
+              body: encodeBody(
+                `{"name":"ci.passed","ticketId":"${webhookTicket.ticketId}","payload":{}}`,
+              ),
+            },
+            { pluginId, logger: noopLogger },
+          );
+          assert.equal(unknownBoardWebhook.status, 404);
+          assert.deepEqual(unknownBoardWebhook.body, wrongTokenWebhook.body);
+          assert.deepEqual(malformedWebhook.body, wrongTokenWebhook.body);
+
+          const webhookRowsBeforeDelete = yield* sql<{ readonly count: number }>`
+            SELECT count(*) AS "count" FROM p_workflow_boards_board_webhook
+            WHERE board_id = ${disposable.boardId}
+          `;
+          assert.equal(webhookRowsBeforeDelete[0]?.count, 1);
+          const deliveryRowsBeforeDelete = yield* sql<{ readonly count: number }>`
+            SELECT count(*) AS "count" FROM p_workflow_boards_webhook_delivery
+            WHERE board_id = ${disposable.boardId}
+          `;
+          assert.equal(deliveryRowsBeforeDelete[0]?.count, 1);
+
           yield* dispatcher.call(
             pluginId,
             WORKFLOW_WS_METHODS.deleteBoard,
@@ -888,6 +1067,16 @@ layer("workflow-boards fixture plugin", (it) => {
             WHERE board_id = ${disposable.boardId}
           `;
           assert.equal(remainingVersionRows[0]?.count, 0);
+          const remainingWebhookRows = yield* sql<{ readonly count: number }>`
+            SELECT count(*) AS "count" FROM p_workflow_boards_board_webhook
+            WHERE board_id = ${disposable.boardId}
+          `;
+          assert.equal(remainingWebhookRows[0]?.count, 0);
+          const remainingDeliveryRows = yield* sql<{ readonly count: number }>`
+            SELECT count(*) AS "count" FROM p_workflow_boards_webhook_delivery
+            WHERE board_id = ${disposable.boardId}
+          `;
+          assert.equal(remainingDeliveryRows[0]?.count, 0);
           // getBoard on the deleted board now fails (definition unregistered).
           const getDeletedExit = yield* dispatcher
             .call(pluginId, WORKFLOW_WS_METHODS.getBoard, { boardId: disposable.boardId }, rpcSession)
