@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Emit the Tailwind utilities used by the bundled workflow-boards plugin web
+   surface so plugin-unique classes (e.g. the off-screen `-left-[9999px]`
+   measurement clone in BoardHeaderControls) exist in the host stylesheet. The
+   host build only scans host source by default, so without this the plugin's
+   own classes are dropped and its layout breaks. NOTE: this is the in-repo
+   fixture story — real external plugins must ship their own compiled CSS. */
+@source "../../../fixtures/workflow-boards/web";
+
 @custom-variant dark (&:is(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
