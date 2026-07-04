@@ -132,6 +132,14 @@ export type PluginComponent<Props = Record<string, never>> = (props: Props) => u
 export interface PluginRouteComponentProps {
   readonly pluginId: PluginId;
   readonly path: string;
+  // The active environment id from the route (`/<environmentId>/p/<pluginId>/...`),
+  // or null if unavailable. Plugin routes need it to scope host-side references
+  // (e.g. project/ticket cwd) even though `rpc` is already environment-bound.
+  readonly environmentId: string | null;
+  // The route's search params (string values), so a plugin route can read its own
+  // navigation state (e.g. `?boardId=...&ticket=...`) without touching the host
+  // router. Navigate by rendering `<a href>` off the sidebar `routeBasePath`.
+  readonly search: Readonly<Record<string, string>>;
 }
 
 export interface PluginRouteRegistration {

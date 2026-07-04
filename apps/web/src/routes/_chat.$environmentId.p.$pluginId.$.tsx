@@ -30,8 +30,21 @@ function PluginRouteNotFound() {
   );
 }
 
+function normalizeSearch(search: Record<string, unknown>): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(search)) {
+    if (typeof value === "string") {
+      normalized[key] = value;
+    } else if (typeof value === "number" || typeof value === "boolean") {
+      normalized[key] = String(value);
+    }
+  }
+  return normalized;
+}
+
 function PluginRouteView() {
   const params = Route.useParams();
+  const search = Route.useSearch() as Record<string, unknown>;
   const snapshot = useAtomValue(pluginUiRegistryAtom);
   const pluginId = PluginId.make(params.pluginId);
   const route = resolvePluginRouteRegistration(snapshot, pluginId, splatFromParams(params));
@@ -51,6 +64,8 @@ function PluginRouteView() {
         {createElement(route.component as FunctionComponent<PluginRouteComponentProps>, {
           pluginId: route.pluginId,
           path: route.path,
+          environmentId: typeof params.environmentId === "string" ? params.environmentId : null,
+          search: normalizeSearch(search),
         })}
       </PluginSurfaceErrorBoundary>
     </SidebarInset>
