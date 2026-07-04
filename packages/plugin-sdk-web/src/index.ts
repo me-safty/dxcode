@@ -65,6 +65,38 @@ export {
 export { useAtomCommand } from "../../../apps/web/src/state/use-atom-command.ts";
 export { useAtomQueryRunner } from "../../../apps/web/src/state/use-atom-query-runner.ts";
 
+// Host surface consumed by the workflow-boards board UI (and available to any
+// plugin). These are re-exports of live host modules — a separately-built plugin
+// externalises `@t3tools/plugin-sdk-web`, so at runtime it shares the host's
+// singleton instances (React, atoms, settings, provider state) through the import
+// map rather than bundling its own copies.
+export { cn, randomUUID } from "../../../apps/web/src/lib/utils.ts";
+export { useTheme } from "../../../apps/web/src/hooks/useTheme.ts";
+export { usePrimarySettings } from "../../../apps/web/src/hooks/useSettings.ts";
+export { formatDuration } from "../../../apps/web/src/session-logic.ts";
+export { primaryServerProvidersAtom } from "../../../apps/web/src/state/server.ts";
+export {
+  deriveProviderInstanceEntries,
+  sortProviderInstanceEntries,
+} from "../../../apps/web/src/providerInstances.ts";
+export {
+  getAppModelOptionsForInstance,
+  type AppModelOption,
+} from "../../../apps/web/src/modelSelection.ts";
+// Diff-rendering stack (ticket diffs). `FileDiff` comes from `@pierre/diffs/react`
+// (the host already depends on it for chat diffs) and relies on the host's
+// worker-pool context provider being mounted around the app.
+export { DiffStatLabel } from "../../../apps/web/src/components/chat/DiffStatLabel.tsx";
+export {
+  buildFileDiffRenderKey,
+  getRenderablePatch,
+  resolveDiffThemeName,
+  resolveFileDiffPath,
+  type RenderablePatch,
+  type DiffThemeName,
+} from "../../../apps/web/src/lib/diffRendering.ts";
+export { FileDiff } from "@pierre/diffs/react";
+
 export const hostCompat = {
   hostApiVersion: HOST_API_VERSION,
   importMapExternals: pluginSdkWebExternalDependencies,

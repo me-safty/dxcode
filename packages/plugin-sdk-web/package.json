@@ -14,6 +14,7 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@pierre/diffs": "catalog:",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*"
