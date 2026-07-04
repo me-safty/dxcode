@@ -1587,11 +1587,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               : { scrollIndicatorInsets: { top: topContentInset, bottom: 0 } })}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             itemLayoutAnimation={FEED_ITEM_LAYOUT_TRANSITION}
-            // The anchored end space is realized as a bottom contentInset, and
-            // RN's scroll content view doesn't extend into the inset region —
-            // without this, touches on the blank area below the last message
-            // fall through and don't scroll the list.
-            applyWorkaroundForContentInsetHitTestBug
             // Patched LegendList prop (patches/@legendapp__list@3.2.0.patch):
             // lets its scroll math clamp programmatic scrolls to -headerInset
             // instead of 0, so initialScrollAtEnd/maintainScrollAtEnd on short
@@ -1604,6 +1599,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             // ThreadDetailScreen); this tells LegendList's scroll math about the
             // extra so programmatic end scrolls land at the true resting offset.
             contentInsetEndStaticAdjustment={usesNativeAutomaticInsets ? insets.bottom : 0}
+            // The keyboard integration's offset math (end pinning, max scroll)
+            // must add the same UIKit-added extra, or its keyboard-open end
+            // targets land one safe-area short of the true resting offset.
+            adjustedInsetCompensation={usesNativeAutomaticInsets ? insets.bottom : 0}
             freeze={props.freeze}
             // Animated: on send, the optimistic message's dataChange fires
             // maintainScrollAtEnd before any render-cycle suppression could
