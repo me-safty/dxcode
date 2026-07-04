@@ -21,6 +21,7 @@
     "environments.read"
   ],
   "entries": {
-    "server": "server/index.js"
+    "server": "server/index.js",
+    "web": "web/index.js"
   }
 }

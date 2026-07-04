@@ -98,6 +98,7 @@ function tar(entries) {
 
 NodeFS.rmSync(outDir, { recursive: true, force: true });
 NodeFS.mkdirSync(NodePath.join(packageDir, "server"), { recursive: true });
+NodeFS.mkdirSync(NodePath.join(packageDir, "web"), { recursive: true });
 
 NodeFS.writeFileSync(
   NodePath.join(packageDir, "manifest.json"),
@@ -111,6 +112,25 @@ bundle(
   ["@t3tools/plugin-sdk", "effect", "effect/*"],
 );
 
+// Web bundle: the host provides react, react-dom, effect, the atom runtime, and
+// the web SDK via an import map at load time — leave them external so the plugin
+// shares the host's singletons (same externals as fixtures/hello-board).
+bundle(
+  NodePath.join(fixtureRoot, "web/index.tsx"),
+  NodePath.join(packageDir, "web/index.js"),
+  "browser",
+  [
+    "@effect/atom-react",
+    "@t3tools/plugin-sdk-web",
+    "effect",
+    "effect/*",
+    "react",
+    "react/*",
+    "react-dom",
+    "react-dom/*",
+  ],
+);
+
 const archive = NodeZlib.gzipSync(
   tar([
     {
@@ -120,6 +140,10 @@ const archive = NodeZlib.gzipSync(
     {
       name: "server/index.js",
       body: NodeFS.readFileSync(NodePath.join(packageDir, "server/index.js")),
+    },
+    {
+      name: "web/index.js",
+      body: NodeFS.readFileSync(NodePath.join(packageDir, "web/index.js")),
     },
   ]),
   { mtime: 0 },

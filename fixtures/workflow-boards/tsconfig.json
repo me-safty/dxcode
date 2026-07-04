@@ -4,8 +4,26 @@
     "module": "Preserve",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "jsx": "react-jsx",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["node"],
+    // The web bundle imports @t3tools/plugin-sdk-web, whose source re-exports host
+    // components from apps/web/src (via `~/` paths). Those host files require DOM
+    // libs, the `~/` path map, the host ambient .d.ts, and the relaxed module flags
+    // apps/web is authored under — mirror fixtures/hello-board so importing the web
+    // SDK typechecks cleanly. Only the web bundle needs these; server code is
+    // unaffected (both relaxations are strictly more permissive).
+    "erasableSyntaxOnly": false,
+    "verbatimModuleSyntax": false,
+    "paths": {
+      "~/*": ["../../apps/web/src/*"]
+    },
     "plugins": [{ "name": "@effect/language-service" }]
   },
-  "include": ["server/**/*.ts", "contracts/**/*.ts"]
+  "include": [
+    "server/**/*.ts",
+    "contracts/**/*.ts",
+    "web/**/*.tsx",
+    "../../apps/web/src/*.d.ts"
+  ]
 }
