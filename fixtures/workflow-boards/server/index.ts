@@ -78,13 +78,31 @@ import { ProjectScriptTrust } from "./workflow/Services/ProjectScriptTrust.ts";
 import { WorkflowFileLoader } from "./workflow/Services/WorkflowFileLoader.ts";
 import { WorkflowGitHubPoller } from "./workflow/Services/WorkflowGitHubPoller.ts";
 import { WorkflowRecovery } from "./workflow/Services/WorkflowRecovery.ts";
+import {
+  WorkflowSourceCommitter,
+  type SourceDelta,
+} from "./workflow/Services/WorkflowSourceCommitter.ts";
+import { WorkflowSourceSyncer } from "./workflow/Services/WorkflowSourceSyncer.ts";
 import { WorkflowThreadJanitor } from "./workflow/Services/WorkflowThreadJanitor.ts";
 import { WorkflowWebhook } from "./workflow/Services/WorkflowWebhook.ts";
 import { WorkflowWorktreeJanitor } from "./workflow/Services/WorkflowWorktreeJanitor.ts";
 import { WorkSourceConnectionStore } from "./workflow/Services/WorkSourceConnectionStore.ts";
+import { WorkSourceProviderRegistry } from "./workflow/Services/WorkSourceProvider.ts";
 import { makeWorkflowRuntimeLive } from "./workflow/WorkflowRuntimeLive.ts";
 import { makeWorkflowWebhookHttpDescriptor } from "./workflow/webhookRoute.ts";
-import { WorkSourceConnectionView, WorkSourceProviderName } from "../contracts/workSource.ts";
+import {
+  WorkSourceConnectionView,
+  WorkSourceProviderName,
+  type ImportWorkItemsResult,
+  type ListImportableWorkItemsResult,
+} from "../contracts/workSource.ts";
+import {
+  chunkArray,
+  describeWorkSourceProviderError,
+  MAX_DELTAS_PER_RECONCILE_CHUNK,
+  scanSource,
+} from "./workflow/scanSource.ts";
+import { buildNewSourceDelta } from "./workflow/sourceReconcileDiff.ts";
 
 const toPluginError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
@@ -105,6 +123,9 @@ type WorkflowRuntimeContext =
   | WorkflowAgentSessionStore
   | ProjectScriptTrust
   | WorkSourceConnectionStore
+  | WorkSourceProviderRegistry
+  | WorkflowSourceCommitter
+  | WorkflowSourceSyncer
   | SqlClient.SqlClient;
 
 const workflowRpcError = (message: string, cause?: unknown) =>
@@ -373,6 +394,15 @@ const CreateWorkSourceConnectionPayload = Schema.Struct({
 });
 const DeleteWorkSourceConnectionPayload = Schema.Struct({
   connectionRef: TrimmedNonEmptyString,
+});
+const ListImportableWorkItemsPayload = Schema.Struct({
+  boardId: BoardId,
+});
+const ImportWorkItemsPayload = Schema.Struct({
+  boardId: BoardId,
+  sourceId: Schema.String,
+  externalIds: Schema.Array(Schema.String),
+  destinationLane: Schema.optional(LaneKey),
 });
 
 const decodePayload = <A>(
@@ -663,6 +693,222 @@ const deleteBoard = (
       )
       .pipe(Effect.tap(() => saveLocks.evict?.(boardId) ?? Effect.void));
   });
+
+const listImportableWorkItems = (
+  payload: unknown,
+): Effect.Effect<ListImportableWorkItemsResult, Error, WorkflowRuntimeContext> =>
+  decodePayload(
+    ListImportableWorkItemsPayload,
+    payload,
+    "workflow list importable work-items input decode failed",
+  ).pipe(
+    Effect.flatMap(({ boardId }) =>
+      Effect.gen(function* () {
+        const providers = yield* WorkSourceProviderRegistry;
+        const boardRegistry = yield* BoardRegistry;
+        const readModel = yield* WorkflowReadModel;
+        const definition = yield* boardRegistry
+          .getDefinition(boardId)
+          .pipe(Effect.mapError(toWorkflowRpcError("Failed to load workflow board")));
+        if (definition === null) {
+          return yield* workflowRpcError(`Workflow board definition ${boardId} was not found`);
+        }
+
+        const mappingRows = yield* readModel
+          .listWorkSourceMappingsForBoard(boardId)
+          .pipe(Effect.mapError(toWorkflowRpcError("Failed to load work-source mappings")));
+        const mappingIndex = new Map(
+          mappingRows.map(
+            (mapping) =>
+              [
+                `${mapping.provider}:${mapping.sourceId}:${mapping.externalId}`,
+                { ticketId: mapping.ticketId, lane: mapping.currentLaneKey },
+              ] as const,
+          ),
+        );
+
+        const items: Array<ListImportableWorkItemsResult["items"][number]> = [];
+        const sources: Array<ListImportableWorkItemsResult["sources"][number]> = [];
+        const viewer: Record<
+          string,
+          { readonly id: string; readonly aliases: ReadonlyArray<string> } | null
+        > = {};
+        const truncated: Record<string, boolean> = {};
+        const sourceErrors: Record<string, string> = {};
+
+        for (const source of definition.sources ?? []) {
+          const sourceId = String(source.id);
+          const provider = providers.get(source.provider);
+          const scanResult = yield* scanSource(provider, source, undefined).pipe(Effect.result);
+          if (scanResult._tag === "Failure") {
+            sourceErrors[sourceId] = describeWorkSourceProviderError(scanResult.failure);
+            continue;
+          }
+
+          const scan = scanResult.success;
+          truncated[sourceId] = !scan.scanCompleted;
+          const viewerResult = yield* provider
+            .viewer({ connectionRef: source.connectionRef })
+            .pipe(Effect.orElseSucceed(() => null));
+          viewer[sourceId] = viewerResult;
+
+          const firstItem = scan.items[0];
+          if (firstItem !== undefined) {
+            sources.push({
+              sourceId,
+              provider: source.provider,
+              container: provider.toImportableView({
+                selector: source.selector,
+                item: firstItem,
+              }).container,
+              destinationLane: source.destinationLane,
+            });
+          }
+
+          for (const item of scan.items) {
+            const parts = provider.toImportableView({ selector: source.selector, item });
+            const mapping =
+              mappingIndex.get(`${item.provider}:${sourceId}:${item.externalId}`) ?? null;
+            items.push({
+              provider: item.provider,
+              sourceId,
+              externalId: item.externalId,
+              displayRef: parts.displayRef,
+              title: item.fields.title,
+              container: parts.container,
+              url: item.url,
+              assignees: [...(item.fields.assignees ?? [])],
+              lifecycle: item.lifecycle,
+              mappedTicketId: (mapping?.ticketId ?? null) as TicketId | null,
+              mappedLane: (mapping?.lane ?? null) as LaneKey | null,
+            });
+          }
+        }
+
+        return {
+          items,
+          sources,
+          viewer,
+          truncated,
+          sourceErrors,
+        } satisfies ListImportableWorkItemsResult;
+      }),
+    ),
+  );
+
+const importWorkItems = (
+  payload: unknown,
+): Effect.Effect<ImportWorkItemsResult, Error, WorkflowRuntimeContext> =>
+  decodePayload(
+    ImportWorkItemsPayload,
+    payload,
+    "workflow import work-items input decode failed",
+  ).pipe(
+    Effect.flatMap((input) =>
+      Effect.gen(function* () {
+        const providers = yield* WorkSourceProviderRegistry;
+        const committer = yield* WorkflowSourceCommitter;
+        const boardRegistry = yield* BoardRegistry;
+        const readModel = yield* WorkflowReadModel;
+        const definition = yield* boardRegistry
+          .getDefinition(input.boardId)
+          .pipe(Effect.mapError(toWorkflowRpcError("Failed to load workflow board")));
+        if (definition === null) {
+          return yield* workflowRpcError(
+            `Workflow board definition ${input.boardId} was not found`,
+          );
+        }
+
+        const source = (definition.sources ?? []).find(
+          (candidate) => String(candidate.id) === input.sourceId,
+        );
+        if (source === undefined) {
+          return yield* workflowRpcError("source not found on this board");
+        }
+
+        const sourceId = String(source.id);
+        const provider = providers.get(source.provider);
+        const lanes = {
+          destinationLane: input.destinationLane ?? source.destinationLane,
+          closedLane: source.closedLane,
+        };
+
+        const scanResult = yield* scanSource(provider, source, undefined).pipe(Effect.result);
+        if (scanResult._tag === "Failure") {
+          return yield* workflowRpcError(describeWorkSourceProviderError(scanResult.failure));
+        }
+        const inScope = new Map(
+          scanResult.success.items.map((item) => [item.externalId, item] as const),
+        );
+
+        const beforeRows = yield* readModel
+          .listWorkSourceMappingsForBoard(input.boardId)
+          .pipe(Effect.mapError(toWorkflowRpcError("Failed to load work-source mappings")));
+        const beforeKeys = new Set(
+          beforeRows.map(
+            (mapping) => `${mapping.provider}:${mapping.sourceId}:${mapping.externalId}`,
+          ),
+        );
+
+        const skipped: Array<{ externalId: string; reason: string }> = [];
+        const deltas: Array<SourceDelta> = [];
+        const attempted: Array<string> = [];
+        for (const id of new Set(input.externalIds)) {
+          const key = `${source.provider}:${sourceId}:${id}`;
+          if (beforeKeys.has(key)) {
+            skipped.push({ externalId: id, reason: "already on board" });
+            continue;
+          }
+          const item = inScope.get(id);
+          if (item === undefined) {
+            skipped.push({
+              externalId: id,
+              reason: "not in source (out of scope or beyond scan window)",
+            });
+            continue;
+          }
+          attempted.push(id);
+          deltas.push(buildNewSourceDelta(sourceId, item));
+        }
+
+        for (const chunk of chunkArray(deltas, MAX_DELTAS_PER_RECONCILE_CHUNK)) {
+          const chunkResult = yield* committer
+            .reconcileChunk(input.boardId, lanes, chunk)
+            .pipe(Effect.result);
+          if (chunkResult._tag === "Failure") {
+            yield* Effect.logError("workflow.import-work-items.reconcile-chunk-failed", {
+              cause: chunkResult.failure,
+            });
+          }
+        }
+
+        const afterRows = yield* readModel
+          .listWorkSourceMappingsForBoard(input.boardId)
+          .pipe(Effect.mapError(toWorkflowRpcError("Failed to load work-source mappings")));
+        const afterIndex = new Map(
+          afterRows.map(
+            (mapping) =>
+              [
+                `${mapping.provider}:${mapping.sourceId}:${mapping.externalId}`,
+                mapping.ticketId,
+              ] as const,
+          ),
+        );
+
+        const imported: Array<{ externalId: string; ticketId: TicketId }> = [];
+        for (const id of attempted) {
+          const ticketId = afterIndex.get(`${source.provider}:${sourceId}:${id}`);
+          if (ticketId !== undefined) {
+            imported.push({ externalId: id, ticketId: ticketId as TicketId });
+          } else {
+            skipped.push({ externalId: id, reason: "import failed" });
+          }
+        }
+
+        return { imported, skipped } satisfies ImportWorkItemsResult;
+      }),
+    ),
+  );
 
 export default definePlugin({
   register: (hostApi) =>
@@ -1372,6 +1618,18 @@ export default definePlugin({
                 ),
               ),
           },
+          {
+            method: WORKFLOW_WS_METHODS.listImportableWorkItems,
+            scope: "read",
+            readiness: "always",
+            handler: (payload) => runWithRuntime(listImportableWorkItems(payload)),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.importWorkItems,
+            scope: "operate",
+            readiness: "requires-ready",
+            handler: (payload) => runWithRuntime(importWorkItems(payload)),
+          },
         ],
         http: [makeWorkflowWebhookHttpDescriptor((effect) => runWithRuntime(effect))],
         streams: [
@@ -1450,6 +1708,13 @@ export const runWorkflowRuntimeService = <ROut, E>(
         WorkflowGitHubPoller,
       );
       yield* poller
+        .start()
+        .pipe(Effect.provideService(Scope.Scope, scope), Effect.mapError(toPluginError));
+      const sourceSyncer = Context.get(
+        context as Context.Context<ROut | WorkflowSourceSyncer>,
+        WorkflowSourceSyncer,
+      );
+      yield* sourceSyncer
         .start()
         .pipe(Effect.provideService(Scope.Scope, scope), Effect.mapError(toPluginError));
       yield* Deferred.succeed(runtimeReady, context).pipe(Effect.ignore);

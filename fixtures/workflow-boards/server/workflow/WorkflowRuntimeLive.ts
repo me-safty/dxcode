@@ -11,7 +11,10 @@ import * as PlatformError from "effect/PlatformError";
 
 import { WorkflowGitHubPollerLive } from "./Layers/WorkflowGitHubPoller.ts";
 import { GitHubPortLive } from "./Layers/GitHubPort.ts";
+import { AsanaProviderLive } from "./Layers/AsanaProvider.ts";
 import { BoardRegistryLive } from "./Layers/BoardRegistry.ts";
+import { GithubIssuesProviderLive } from "./Layers/GithubIssuesProvider.ts";
+import { JiraProviderLive } from "./Layers/JiraProvider.ts";
 import { ProjectWorkspaceResolverLive } from "./Layers/ProjectWorkspaceResolver.ts";
 import { WorkflowEngineLayer } from "./Layers/WorkflowEngine.ts";
 import { ScriptCommandRunnerLive } from "./Layers/ScriptCommandRunner.ts";
@@ -27,6 +30,8 @@ import {
 import { WorkflowReadModelLive } from "./Layers/WorkflowReadModel.ts";
 import { makeWorkflowWebhookLive, WorkflowWebhookLive } from "./Layers/WorkflowWebhook.ts";
 import { WorkflowWorktreeJanitorLive } from "./Layers/WorkflowWorktreeJanitor.ts";
+import { WorkSourceProviderRegistryLive } from "./Layers/WorkSourceProviderRegistry.ts";
+import { WorkflowSourceSyncerLive } from "./Layers/WorkflowSourceSyncer.ts";
 import { WorkflowFilesystemCapability } from "./Services/WorkflowCapabilities.ts";
 import { WorkflowEngineCoreLive } from "./WorkflowEngineCoreLive.ts";
 
@@ -132,6 +137,16 @@ const WorkflowRuntimePlatformLive = Layer.mergeAll(
 export const WorkflowRuntimeCoreLive = Layer.mergeAll(
   WorkflowTerminalRetentionSweeperLive.pipe(Layer.provideMerge(WorkflowEngineLayer)),
   WorkflowGitHubPollerLive.pipe(Layer.provideMerge(WorkflowEngineLayer)),
+  WorkflowSourceSyncerLive.pipe(
+    Layer.provideMerge(WorkflowEngineLayer),
+    Layer.provideMerge(
+      WorkSourceProviderRegistryLive.pipe(
+        Layer.provide(GithubIssuesProviderLive),
+        Layer.provide(AsanaProviderLive),
+        Layer.provide(JiraProviderLive),
+      ),
+    ),
+  ),
 ).pipe(Layer.provideMerge(WorkflowEngineCoreLive));
 
 export const WorkflowDaemonLive = WorkflowRuntimeCoreLive.pipe(
