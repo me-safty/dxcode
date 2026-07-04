@@ -7,7 +7,16 @@
     "name": "T3 Tools"
   },
   "hostApi": "^1.0.0",
-  "capabilities": ["database", "filesystem"],
+  "capabilities": [
+    "database",
+    "filesystem",
+    "agents",
+    "projections.read",
+    "vcs",
+    "terminals",
+    "sourceControl",
+    "environments.read"
+  ],
   "entries": {
     "server": "server/index.js"
   }
