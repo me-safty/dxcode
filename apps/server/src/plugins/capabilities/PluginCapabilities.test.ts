@@ -306,6 +306,12 @@ it.effect("text generation delegates the existing one-shot operations", () =>
 it.effect("source control exposes provider detection and existing GitHub CLI PR operations", () =>
   Effect.gen(function* () {
     const createInputs: unknown[] = [];
+    const cloneInputs: unknown[] = [];
+    const mergeInputs: unknown[] = [];
+    const detailInputs: unknown[] = [];
+    const checkInputs: unknown[] = [];
+    const reviewInputs: unknown[] = [];
+    const commentInputs: unknown[] = [];
     const capability = makeSourceControlCapability({
       registry: {
         resolveHandle: () =>
@@ -338,9 +344,64 @@ it.effect("source control exposes provider detection and existing GitHub CLI PR 
             baseRefName: "main",
             headRefName: "fix",
           }),
+        getRepositoryCloneUrls: (input: any) =>
+          Effect.sync(() => {
+            cloneInputs.push(input);
+            return {
+              nameWithOwner: "o/r",
+              url: "https://github.com/o/r",
+              sshUrl: "git@github.com:o/r.git",
+            };
+          }),
         createPullRequest: (input: any) =>
           Effect.sync(() => {
             createInputs.push(input);
+          }),
+        mergePullRequest: (input: any) =>
+          Effect.sync(() => {
+            mergeInputs.push(input);
+          }),
+        getPullRequestDetail: (input: any) =>
+          Effect.sync(() => {
+            detailInputs.push(input);
+            return {
+              state: "OPEN",
+              mergedAt: null,
+              reviewDecision: "APPROVED",
+              headRefOid: "abc",
+              url: "https://github.com/o/r/pull/2",
+            };
+          }),
+        listPullRequestChecks: (input: any) =>
+          Effect.sync(() => {
+            checkInputs.push(input);
+            return [{ name: "ci", state: "SUCCESS", bucket: "pass", link: "https://checks" }];
+          }),
+        listPullRequestReviews: (input: any) =>
+          Effect.sync(() => {
+            reviewInputs.push(input);
+            return [
+              {
+                id: "R_1",
+                author: "octocat",
+                state: "APPROVED",
+                body: "ship it",
+                submittedAt: "2026-07-03T00:00:00Z",
+              },
+            ];
+          }),
+        listPullRequestReviewComments: (input: any) =>
+          Effect.sync(() => {
+            commentInputs.push(input);
+            return [
+              {
+                id: 1,
+                user: "octocat",
+                body: "comment",
+                path: "src/file.ts",
+                createdAt: "2026-07-03T00:00:00Z",
+              },
+            ];
           }),
         getDefaultBranch: () => Effect.succeed("main"),
         checkoutPullRequest: () => Effect.void,
@@ -359,14 +420,58 @@ it.effect("source control exposes provider detection and existing GitHub CLI PR 
       1,
     );
     assert.equal((yield* capability.getPullRequest({ cwd: "/repo", reference: "2" })).number, 2);
+    assert.deepEqual(
+      yield* capability.getRepositoryCloneUrls({ cwd: "/repo", repository: "o/r" }),
+      {
+        nameWithOwner: "o/r",
+        url: "https://github.com/o/r",
+        sshUrl: "git@github.com:o/r.git",
+      },
+    );
     yield* capability.createPullRequest({
       cwd: "/repo",
       baseBranch: "main",
       headSelector: "feature",
       title: "PR",
       bodyFile: "/tmp/body.md",
+      draft: true,
     });
     assert.equal(createInputs.length, 1);
+    assert.deepEqual(createInputs[0], {
+      cwd: "/repo",
+      baseBranch: "main",
+      headSelector: "feature",
+      title: "PR",
+      bodyFile: "/tmp/body.md",
+      draft: true,
+    });
+    yield* capability.mergePullRequest({ cwd: "/repo", number: 2, strategy: "squash" });
+    assert.deepEqual(mergeInputs, [{ cwd: "/repo", number: 2, strategy: "squash" }]);
+    assert.equal(
+      (yield* capability.getPullRequestDetail({ cwd: "/repo", number: 2 })).state,
+      "OPEN",
+    );
+    assert.deepEqual(detailInputs, [{ cwd: "/repo", number: 2 }]);
+    assert.equal(
+      (yield* capability.listPullRequestChecks({ cwd: "/repo", number: 2 }))[0]?.name,
+      "ci",
+    );
+    assert.deepEqual(checkInputs, [{ cwd: "/repo", number: 2 }]);
+    assert.equal(
+      (yield* capability.listPullRequestReviews({ cwd: "/repo", number: 2 }))[0]?.author,
+      "octocat",
+    );
+    assert.deepEqual(reviewInputs, [{ cwd: "/repo", number: 2 }]);
+    assert.equal(
+      (yield* capability.listPullRequestReviewComments({
+        cwd: "/repo",
+        repo: "o/r",
+        number: 2,
+      }))[0]?.path,
+      "src/file.ts",
+    );
+    assert.deepEqual(commentInputs, [{ cwd: "/repo", repo: "o/r", number: 2 }]);
+    assert.deepEqual(cloneInputs, [{ cwd: "/repo", repository: "o/r" }]);
     assert.equal(yield* capability.getDefaultBranch({ cwd: "/repo" }), "main");
     yield* capability.checkoutPullRequest({ cwd: "/repo", reference: "2" });
   }),
