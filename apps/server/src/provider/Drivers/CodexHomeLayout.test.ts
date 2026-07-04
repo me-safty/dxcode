@@ -12,6 +12,7 @@ import {
   CodexShadowHomePathConflictError,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
+  seedCodexShadowAuth,
 } from "./CodexHomeLayout.ts";
 const decodeCodexSettingsValue = Schema.decodeSync(CodexSettings);
 
@@ -82,6 +83,27 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
       }),
     );
   });
+
+  it.effect("seeds a managed shadow home from an imported profile", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+      const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+      const sourceHome = yield* makeTempDir("t3code-codex-source-");
+      const shadowHome = path.join(shadowRoot, "shadow");
+      yield* writeTextFile(path.join(sourceHome, "auth.json"), '{"source":true}\n');
+      const layout = yield* resolveCodexHomeLayout(
+        decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+      );
+
+      yield* seedCodexShadowAuth(layout, sourceHome);
+
+      expect(yield* fileSystem.readFileString(path.join(shadowHome, "auth.json"))).toBe(
+        '{"source":true}\n',
+      );
+    }),
+  );
 
   describe("materializeCodexShadowHome", () => {
     it.effect("materializes a shadow home with shared state links and private auth", () =>

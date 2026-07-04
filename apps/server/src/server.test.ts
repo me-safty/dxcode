@@ -49,6 +49,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
+import * as Crypto from "effect/Crypto";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
@@ -803,6 +804,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
+      Layer.provide(NodeServices.layer),
     );
 
     yield* Layer.build(appLayer);

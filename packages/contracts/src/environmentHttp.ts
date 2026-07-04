@@ -25,6 +25,15 @@ import {
   ServerAuthSessionMethod,
 } from "./auth.ts";
 import { AuthSessionId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  ProbeCodexUsageInput,
+  ProbeCodexUsageResult,
+  LoginCodexAccountInput,
+  LoginCodexAccountResult,
+  ScanCodexProfilesInput,
+  ScanCodexProfilesResult,
+} from "./providerApi.ts";
+
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import {
   ClientOrchestrationCommand,
@@ -41,7 +50,7 @@ import {
   RelayLinkProofRequest,
 } from "./relay.ts";
 
-const OptionalBearerHeaders = Schema.Struct({
+export const OptionalBearerHeaders = Schema.Struct({
   authorization: Schema.optionalKey(Schema.String),
   dpop: Schema.optionalKey(Schema.String),
 });
@@ -500,8 +509,40 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   ) {}
 
+export const EnvironmentProviderErrors = [
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
+
+export class EnvironmentProviderHttpApi extends HttpApiGroup.make("provider")
+  .add(
+    HttpApiEndpoint.post("probeCodexUsage", "/api/provider/codex/usage", {
+      headers: OptionalBearerHeaders,
+      payload: ProbeCodexUsageInput,
+      success: ProbeCodexUsageResult,
+      error: EnvironmentProviderErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("loginCodexAccount", "/api/provider/codex/login", {
+      headers: OptionalBearerHeaders,
+      payload: LoginCodexAccountInput,
+      success: LoginCodexAccountResult,
+      error: EnvironmentProviderErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("scanCodexProfiles", "/api/provider/codex/scan-profiles", {
+      headers: OptionalBearerHeaders,
+      payload: ScanCodexProfilesInput,
+      success: ScanCodexProfilesResult,
+      error: EnvironmentProviderErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
-  .add(EnvironmentConnectHttpApi) {}
+  .add(EnvironmentConnectHttpApi)
+  .add(EnvironmentProviderHttpApi) {}

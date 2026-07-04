@@ -72,8 +72,16 @@ export class CodexShadowHomeFileSystemError extends Schema.TaggedErrorClass<Code
   "CodexShadowHomeFileSystemError",
   {
     ...CodexShadowHomeContext,
-    operation: Schema.Literals(["readLink", "makeDirectory", "readDirectory", "remove", "symlink"]),
+    operation: Schema.Literals([
+      "readLink",
+      "makeDirectory",
+      "readDirectory",
+      "remove",
+      "symlink",
+      "copyFile",
+    ]),
     path: Schema.String,
+    sourcePath: Schema.optional(Schema.String),
     targetPath: Schema.optional(Schema.String),
     entryName: Schema.optional(Schema.String),
     cause: Schema.Defect(),
@@ -393,6 +401,48 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
     sharedHomePath: layout.sharedHomePath,
     effectiveHomePath,
   });
+});
+
+/** Seed a managed shadow home from an imported profile without mutating the source profile. */
+export const seedCodexShadowAuth = Effect.fn("seedCodexShadowAuth")(function* (
+  layout: CodexHomeLayout,
+  authSourceHomePath: string | undefined,
+) {
+  if (layout.mode !== "authOverlay" || !layout.effectiveHomePath || !authSourceHomePath) return;
+
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const effectiveHomePath = layout.effectiveHomePath;
+  const sourceAuthPath = path.join(path.resolve(expandHomePath(authSourceHomePath)), "auth.json");
+  const targetAuthPath = path.join(effectiveHomePath, "auth.json");
+  const targetStat = yield* fileSystem.stat(targetAuthPath).pipe(Effect.orElseSucceed(() => null));
+  if (targetStat?.type === "File") return;
+
+  yield* fileSystem.makeDirectory(effectiveHomePath, { recursive: true }).pipe(
+    Effect.catchTags({
+      PlatformError: (cause) =>
+        new CodexShadowHomeFileSystemError({
+          sharedHomePath: layout.sharedHomePath,
+          effectiveHomePath,
+          operation: "makeDirectory",
+          path: effectiveHomePath,
+          cause,
+        }),
+    }),
+  );
+  yield* fileSystem.copyFile(sourceAuthPath, targetAuthPath).pipe(
+    Effect.catchTags({
+      PlatformError: (cause) =>
+        new CodexShadowHomeFileSystemError({
+          sharedHomePath: layout.sharedHomePath,
+          effectiveHomePath,
+          operation: "copyFile",
+          path: targetAuthPath,
+          sourcePath: sourceAuthPath,
+          cause,
+        }),
+    }),
+  );
 });
 
 export function codexContinuationIdentity(layout: CodexHomeLayout) {

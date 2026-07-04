@@ -155,6 +155,15 @@ export function makeProviderSettingsSchema<const Fields extends Schema.Struct.Fi
   );
 }
 
+export const CodexAccountConfig = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  shadowHomePath: TrimmedString,
+  authSourceHomePath: Schema.optionalKey(TrimmedString),
+  enabled: Schema.Boolean,
+});
+export type CodexAccountConfig = typeof CodexAccountConfig.Type;
+
 export const CodexSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
@@ -191,7 +200,28 @@ export const CodexSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    activeAccountId: Schema.optionalKey(TrimmedString).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    activeAccountLabel: Schema.optionalKey(TrimmedString).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    authSourceHomePath: Schema.optionalKey(TrimmedString).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
     customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    enableAutoRotation: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Auto-rotate accounts",
+        description: "Automatically switch to the next account when usage is depleted.",
+        providerSettingsForm: { hidden: true },
+      }),
+    ),
+    secondaryAccounts: Schema.Array(CodexAccountConfig).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
@@ -469,7 +499,12 @@ const CodexSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   homePath: Schema.optionalKey(TrimmedString),
   shadowHomePath: Schema.optionalKey(TrimmedString),
+  activeAccountId: Schema.optionalKey(TrimmedString),
+  activeAccountLabel: Schema.optionalKey(TrimmedString),
+  authSourceHomePath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  enableAutoRotation: Schema.optionalKey(Schema.Boolean),
+  secondaryAccounts: Schema.optionalKey(Schema.Array(CodexAccountConfig)),
 });
 
 const ClaudeSettingsPatch = Schema.Struct({

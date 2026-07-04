@@ -307,6 +307,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
             Effect.succeed(
               makeCodexProbeSnapshot({
+                rateLimits: {
+                  primary: { usedPercent: 5, windowDurationMins: 300 },
+                  secondary: { usedPercent: 11, windowDurationMins: 10_080 },
+                  planType: "pro",
+                },
                 skills: [
                   {
                     name: "github:gh-fix-ci",
@@ -326,6 +331,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.type, "chatgpt");
           assert.strictEqual(status.auth.label, "ChatGPT Pro 20x Subscription");
           assert.strictEqual(status.auth.email, "test@example.com");
+          assert.deepStrictEqual(status.accountUsage, {
+            email: "test@example.com",
+            planType: "pro",
+            primary: { usedPercent: 5, windowDurationMins: 300 },
+            secondary: { usedPercent: 11, windowDurationMins: 10_080 },
+          });
           assert.deepStrictEqual(status.models, [
             {
               slug: "gpt-live-codex",
