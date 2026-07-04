@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -25,6 +26,10 @@ it.effect("workflow runtime service runs recovery once and closes daemon scope o
   Effect.gen(function* () {
     const events: string[] = [];
     const recovered = yield* Deferred.make<void>();
+    const runtimeReady = yield* Deferred.make<
+      Context.Context<WorkflowRecovery | WorkflowGitHubPoller>,
+      Error
+    >();
     const stopped = yield* Deferred.make<void>();
     let recoverCount = 0;
 
@@ -50,8 +55,11 @@ it.effect("workflow runtime service runs recovery once and closes daemon scope o
     );
 
     const appLayerWithPoller = appLayer.pipe(Layer.provideMerge(IdlePollerLayer));
-    const fiber = yield* runWorkflowRuntimeService(appLayerWithPoller).pipe(Effect.forkChild);
+    const fiber = yield* runWorkflowRuntimeService(appLayerWithPoller, runtimeReady).pipe(
+      Effect.forkChild,
+    );
     yield* Deferred.await(recovered);
+    yield* Deferred.await(runtimeReady);
 
     assert.equal(recoverCount, 1);
     assert.deepEqual(events, ["daemon-start", "recover"]);
@@ -67,6 +75,10 @@ it.effect("workflow runtime service starts the GitHub poller only after recovery
   Effect.gen(function* () {
     const events: string[] = [];
     const recovered = yield* Deferred.make<void>();
+    const runtimeReady = yield* Deferred.make<
+      Context.Context<WorkflowRecovery | WorkflowGitHubPoller>,
+      Error
+    >();
 
     const appLayer = Layer.mergeAll(
       Layer.succeed(WorkflowRecovery, {
@@ -102,9 +114,10 @@ it.effect("workflow runtime service starts the GitHub poller only after recovery
     assert.deepEqual(events, []);
     yield* Scope.close(buildScope, Exit.void);
 
-    const fiber = yield* runWorkflowRuntimeService(appLayer).pipe(Effect.forkChild);
+    const fiber = yield* runWorkflowRuntimeService(appLayer, runtimeReady).pipe(Effect.forkChild);
     yield* Effect.gen(function* () {
       yield* Deferred.await(recovered);
+      yield* Deferred.await(runtimeReady);
       yield* Effect.yieldNow;
       assert.deepEqual(events, ["recover", "poller-start"]);
 
@@ -112,4 +125,31 @@ it.effect("workflow runtime service starts the GitHub poller only after recovery
       assert.deepEqual(events, ["recover", "poller-start", "poller-stop"]);
     }).pipe(Effect.ensuring(Fiber.interrupt(fiber)));
   }),
+);
+
+it.effect(
+  "fails runtimeReady instead of hanging when boot dies with a defect during recovery",
+  () =>
+    Effect.gen(function* () {
+      // A defect (not a typed failure) during boot must still complete
+      // `runtimeReady` — otherwise every handler awaiting it hangs forever.
+      // `Effect.retry` does not retry defects, so this resolves immediately.
+      const runtimeReady = yield* Deferred.make<
+        Context.Context<WorkflowRecovery | WorkflowGitHubPoller>,
+        Error
+      >();
+      const appLayer = Layer.mergeAll(
+        Layer.succeed(WorkflowRecovery, {
+          recover: () => Effect.die(new Error("recovery defect")),
+        } satisfies WorkflowRecovery["Service"]),
+        IdlePollerLayer,
+      );
+
+      const fiber = yield* runWorkflowRuntimeService(appLayer, runtimeReady).pipe(
+        Effect.forkChild,
+      );
+      const exit = yield* Deferred.await(runtimeReady).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(exit));
+      yield* Fiber.interrupt(fiber);
+    }),
 );

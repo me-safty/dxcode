@@ -11,12 +11,20 @@ import * as PlatformError from "effect/PlatformError";
 
 import { WorkflowGitHubPollerLive } from "./Layers/WorkflowGitHubPoller.ts";
 import { GitHubPortLive } from "./Layers/GitHubPort.ts";
+import { BoardRegistryLive } from "./Layers/BoardRegistry.ts";
+import { ProjectWorkspaceResolverLive } from "./Layers/ProjectWorkspaceResolver.ts";
 import { WorkflowEngineLayer } from "./Layers/WorkflowEngine.ts";
 import { ScriptCommandRunnerLive } from "./Layers/ScriptCommandRunner.ts";
 import { SetupTerminalPortLive } from "./Layers/SetupRunService.ts";
 import { MergeGitPortLive } from "./Layers/TicketMergeService.ts";
 import { WorkflowTerminalRetentionSweeperLive } from "./Layers/WorkflowTerminalRetentionSweeper.ts";
 import { WorkflowThreadJanitorLive } from "./Layers/WorkflowThreadJanitor.ts";
+import {
+  WorkflowFileLoaderLive,
+  WorkflowFilePortLive,
+  WorkflowProviderInstancePortLive,
+} from "./Layers/WorkflowFileLoader.ts";
+import { WorkflowReadModelLive } from "./Layers/WorkflowReadModel.ts";
 import { WorkflowWorktreeJanitorLive } from "./Layers/WorkflowWorktreeJanitor.ts";
 import { WorkflowFilesystemCapability } from "./Services/WorkflowCapabilities.ts";
 import { WorkflowEngineCoreLive } from "./WorkflowEngineCoreLive.ts";
@@ -132,7 +140,22 @@ export const WorkflowDaemonLive = WorkflowRuntimeCoreLive.pipe(
   Layer.provideMerge(MergeGitPortLive),
 );
 
+const WorkflowRuntimeReadModelLive = WorkflowReadModelLive.pipe(
+  Layer.provideMerge(BoardRegistryLive),
+);
+
+const WorkflowRuntimeFileLoaderLive = WorkflowFileLoaderLive.pipe(
+  Layer.provideMerge(WorkflowFilePortLive),
+  Layer.provideMerge(WorkflowProviderInstancePortLive),
+  Layer.provideMerge(BoardRegistryLive),
+  Layer.provideMerge(WorkflowRuntimeReadModelLive),
+);
+
 export const WorkflowRuntimeLive = WorkflowDaemonLive.pipe(
+  Layer.provideMerge(BoardRegistryLive),
+  Layer.provideMerge(WorkflowRuntimeReadModelLive),
+  Layer.provideMerge(ProjectWorkspaceResolverLive),
+  Layer.provideMerge(WorkflowRuntimeFileLoaderLive),
   Layer.provideMerge(ScriptCommandRunnerLive),
   Layer.provideMerge(SetupTerminalPortLive),
   Layer.provideMerge(WorkflowRuntimePlatformLive),

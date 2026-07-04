@@ -1,14 +1,44 @@
 import { definePlugin, type PluginRegistration } from "@t3tools/plugin-sdk";
+import { NonNegativeInt, ProjectId } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import {
+  BoardId,
+  BoardSnapshot,
+  LaneKey,
+  TicketId,
+  WORKFLOW_WS_METHODS,
+  WorkflowCreateBoardInput,
+  WorkflowDefinition,
+  WorkflowRpcError,
+  type BoardTicketView,
+  type StepRunStatus,
+  type TicketStatus,
+  type WorkflowBoardVersionSource,
+  type WorkflowStepRunView,
+  type WorkflowTicketDetailView,
+} from "../contracts/workflow.ts";
 import { migration001 } from "./migrations/001_WorkflowSchema.ts";
+import { slugifyBoardName, uniqueBoardSlug } from "./workflow/boardSlug.ts";
+import { defaultBoardDefinition } from "./workflow/defaultBoard.ts";
+import { encodeWorkflowDefinitionJson } from "./workflow/workflowFile.ts";
+import { BoardRegistry } from "./workflow/Services/BoardRegistry.ts";
+import { WorkflowBoardEvents } from "./workflow/Services/WorkflowBoardEvents.ts";
+import { WorkflowBoardSaveLocks } from "./workflow/Services/WorkflowBoardSaveLocks.ts";
+import { WorkflowBoardVersionStore } from "./workflow/Services/WorkflowBoardVersionStore.ts";
+import type { StepRunRow, TicketRow } from "./workflow/Services/WorkflowReadModel.ts";
+import { WorkflowReadModel } from "./workflow/Services/WorkflowReadModel.ts";
 import { WorkflowTerminalsCapability } from "./workflow/Services/ScriptCancelRegistry.ts";
 import {
   WorkflowEnvironmentsReadCapability,
@@ -20,12 +50,356 @@ import {
   WorkflowAgentsCapability,
   WorkflowProjectionsReadCapability,
 } from "./workflow/Services/WorkflowAgentPort.ts";
+import { WorkflowEngine } from "./workflow/Services/WorkflowEngine.ts";
+import { ProjectWorkspaceResolver } from "./workflow/Services/ProjectWorkspaceResolver.ts";
+import { WorkflowFileLoader } from "./workflow/Services/WorkflowFileLoader.ts";
 import { WorkflowGitHubPoller } from "./workflow/Services/WorkflowGitHubPoller.ts";
 import { WorkflowRecovery } from "./workflow/Services/WorkflowRecovery.ts";
 import { WorkflowRuntimeLive } from "./workflow/WorkflowRuntimeLive.ts";
 
 const toPluginError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
+
+type WorkflowRuntimeContext =
+  | WorkflowEngine
+  | WorkflowReadModel
+  | BoardRegistry
+  | WorkflowBoardEvents
+  | ProjectWorkspaceResolver
+  | WorkflowFileLoader
+  | WorkflowBoardSaveLocks
+  | WorkflowBoardVersionStore
+  | SqlClient.SqlClient;
+
+const workflowRpcError = (message: string, cause?: unknown) =>
+  new WorkflowRpcError({
+    message,
+    ...(cause === undefined ? {} : { cause }),
+  });
+
+const toWorkflowRpcError = (message: string) => (cause: unknown) =>
+  workflowRpcError(message, cause);
+
+const encodeBoardSnapshot = Schema.encodeSync(BoardSnapshot);
+
+const workflowDefinitionContentJson = (definition: WorkflowDefinition): string =>
+  `${encodeWorkflowDefinitionJson(definition)}\n`;
+
+const NEEDS_ATTENTION_KINDS = new Set(["waiting_for_approval", "waiting_for_input", "blocked"]);
+const validAttentionKind = (raw: string | null | undefined): string | null =>
+  raw != null && NEEDS_ATTENTION_KINDS.has(raw) ? raw : null;
+
+const toBoardTicketView = (ticket: TicketRow): BoardTicketView => ({
+  ticketId: ticket.ticketId as TicketId,
+  boardId: ticket.boardId as BoardId,
+  title: ticket.title,
+  ...(ticket.description === null ? {} : { description: ticket.description }),
+  currentLaneKey: ticket.currentLaneKey as LaneKey,
+  status: ticket.status as TicketStatus,
+  ...(ticket.queuedAt === null ? {} : { queuedAt: ticket.queuedAt }),
+  ...(ticket.dependsOn === undefined || ticket.dependsOn.length === 0
+    ? {}
+    : { dependsOn: ticket.dependsOn as ReadonlyArray<TicketId> }),
+  ...(ticket.unresolvedDependencyCount === undefined || ticket.unresolvedDependencyCount === 0
+    ? {}
+    : { unresolvedDependencyCount: ticket.unresolvedDependencyCount }),
+  ...(typeof ticket.tokenBudget === "number" ? { tokenBudget: ticket.tokenBudget } : {}),
+  ...(ticket.updatedAt === undefined ? {} : { updatedAt: ticket.updatedAt }),
+  ...(typeof ticket.totalTokens === "number" && ticket.totalTokens > 0
+    ? { totalTokens: ticket.totalTokens }
+    : {}),
+  ...(typeof ticket.totalDurationMs === "number" && ticket.totalDurationMs > 0
+    ? { totalDurationMs: ticket.totalDurationMs }
+    : {}),
+  ...(ticket.pr === undefined ? {} : { pr: ticket.pr }),
+  ...(validAttentionKind(ticket.attentionKind) === null
+    ? {}
+    : { attentionKind: validAttentionKind(ticket.attentionKind) as never }),
+  ...(ticket.attentionReason == null ? {} : { attentionReason: ticket.attentionReason }),
+  ...(ticket.currentLane === undefined
+    ? {}
+    : {
+        currentLane: {
+          key: ticket.currentLane.key as LaneKey,
+          name: ticket.currentLane.name,
+          actions: ticket.currentLane.actions.map((action) => ({
+            label: action.label,
+            to: action.to as LaneKey,
+            ...(action.hint === undefined ? {} : { hint: action.hint }),
+          })),
+        },
+      }),
+});
+
+const toStepUsageView = (step: StepRunRow) => {
+  if (
+    step.inputTokens === null &&
+    step.cachedInputTokens === null &&
+    step.outputTokens === null &&
+    step.totalTokens === null
+  ) {
+    return undefined;
+  }
+  return {
+    ...(step.inputTokens === null ? {} : { inputTokens: step.inputTokens }),
+    ...(step.cachedInputTokens === null ? {} : { cachedInputTokens: step.cachedInputTokens }),
+    ...(step.outputTokens === null ? {} : { outputTokens: step.outputTokens }),
+    ...(step.totalTokens === null ? {} : { totalTokens: step.totalTokens }),
+  };
+};
+
+const toStepRunView = (step: StepRunRow): WorkflowStepRunView => ({
+  stepRunId: step.stepRunId as never,
+  stepKey: step.stepKey as never,
+  stepType: step.stepType as never,
+  ...(step.attempt === null || step.attempt === 1 ? {} : { attempt: step.attempt }),
+  status: step.status as StepRunStatus,
+  waitingReason: step.waitingReason,
+  blockedReason: step.blockedReason,
+  providerResponseKind: step.providerResponseKind,
+  scriptThreadId: step.scriptThreadId as never,
+  terminalId: step.terminalId,
+  scriptStatus: step.scriptStatus as never,
+  exitCode: step.exitCode,
+  signal: step.signal,
+  ...(step.output === null ? {} : { output: step.output }),
+  ...(step.startedAt === null ? {} : { startedAt: step.startedAt as never }),
+  ...(step.finishedAt === null ? {} : { finishedAt: step.finishedAt as never }),
+  ...(toStepUsageView(step) === undefined ? {} : { usage: toStepUsageView(step) }),
+  ...(step.providerThreadId === null ? {} : { providerThreadId: step.providerThreadId as never }),
+});
+
+const boardSnapshot = (
+  boardId: BoardId,
+): Effect.Effect<BoardSnapshot, Error, WorkflowRuntimeContext> =>
+  Effect.gen(function* () {
+    const readModel = yield* WorkflowReadModel;
+    const boardRegistry = yield* BoardRegistry;
+    const board = yield* readModel
+      .getBoard(boardId)
+      .pipe(Effect.mapError(toWorkflowRpcError("Failed to load workflow board")));
+    if (!board) {
+      return yield* workflowRpcError(`Workflow board ${boardId} was not found`);
+    }
+
+    const definition = yield* boardRegistry.getDefinition(boardId);
+    if (!definition) {
+      return yield* workflowRpcError(`Workflow board definition ${boardId} was not found`);
+    }
+
+    const tickets = yield* readModel
+      .listTickets(boardId)
+      .pipe(Effect.mapError(toWorkflowRpcError("Failed to load workflow tickets")));
+
+    return {
+      projectId: board.projectId as ProjectId,
+      board: {
+        boardId,
+        name: board.name,
+        lanes: definition.lanes.map((lane) => ({
+          key: lane.key,
+          name: lane.name,
+          entry: lane.entry,
+          pipelineStepCount: lane.pipeline?.length ?? 0,
+          ...(lane.wipLimit === undefined ? {} : { wipLimit: lane.wipLimit }),
+          ...(lane.terminal === undefined ? {} : { terminal: lane.terminal }),
+          ...(lane.actions === undefined || lane.actions.length === 0
+            ? {}
+            : { actions: lane.actions }),
+        })),
+      },
+      tickets: tickets.map(toBoardTicketView),
+    } satisfies BoardSnapshot;
+  });
+
+const ticketDetail = (
+  ticketId: TicketId,
+): Effect.Effect<WorkflowTicketDetailView, Error, WorkflowRuntimeContext> =>
+  Effect.gen(function* () {
+    const readModel = yield* WorkflowReadModel;
+    const detail = yield* readModel
+      .getTicketDetail(ticketId)
+      .pipe(Effect.mapError(toWorkflowRpcError("Failed to load workflow ticket detail")));
+    if (!detail) {
+      return yield* workflowRpcError(`Workflow ticket ${ticketId} was not found`);
+    }
+    const routeDecisions = yield* readModel
+      .listTicketRouteDecisions(ticketId)
+      .pipe(Effect.mapError(toWorkflowRpcError("Failed to load workflow ticket route history")));
+
+    return {
+      routeHistory: routeDecisions.map((decision) => ({
+        occurredAt: decision.occurredAt as never,
+        ...(decision.fromLane === null ? {} : { fromLane: decision.fromLane as never }),
+        toLane: decision.toLane as never,
+        source: decision.source,
+        ...(decision.matchedTransitionIndex === null
+          ? {}
+          : { matchedTransitionIndex: decision.matchedTransitionIndex }),
+        ...(decision.eventName === null ? {} : { eventName: decision.eventName }),
+        ...(decision.pipelineResult === null ? {} : { pipelineResult: decision.pipelineResult }),
+        ...(decision.laneRunCount === null ? {} : { laneRunCount: decision.laneRunCount }),
+        ...(decision.steps === null
+          ? {}
+          : {
+              steps: Object.fromEntries(
+                Object.entries(decision.steps).map(([stepKey, step]) => [
+                  stepKey,
+                  {
+                    status: step.status,
+                    ...(step.exitCode === null ? {} : { exitCode: step.exitCode }),
+                    ...(step.verdict === null ? {} : { verdict: step.verdict }),
+                  },
+                ]),
+              ),
+            }),
+      })),
+      ticket: toBoardTicketView(detail.ticket),
+      steps: detail.steps.map(toStepRunView),
+      messages: detail.messages.map((message) => ({
+        messageId: message.messageId,
+        ticketId: message.ticketId,
+        ...(message.stepRunId === null ? {} : { stepRunId: message.stepRunId }),
+        author: message.author,
+        body: message.body,
+        attachments: [...message.attachments],
+        createdAt: message.createdAt,
+        ...(message.editedAt == null ? {} : { editedAt: message.editedAt }),
+      })),
+      ...(detail.syncedSource !== undefined ? { syncedSource: detail.syncedSource } : {}),
+    } satisfies WorkflowTicketDetailView;
+  });
+
+const slugFromBoardEntry = (entry: { readonly filePath: string }): string | null => {
+  const fileName = entry.filePath.split("/").at(-1);
+  return fileName?.endsWith(".json") ? fileName.slice(0, -".json".length) : null;
+};
+
+const recordBoardVersionBestEffort = (input: {
+  readonly boardId: BoardId;
+  readonly versionHash: string;
+  readonly contentJson: string;
+  readonly source: WorkflowBoardVersionSource;
+}): Effect.Effect<void, never, WorkflowRuntimeContext> =>
+  Effect.gen(function* () {
+    const versionStore = yield* WorkflowBoardVersionStore;
+    yield* versionStore.record(input).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Failed to record workflow board version", {
+          boardId: input.boardId,
+          source: input.source,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+  });
+
+const ListBoardsPayload = Schema.Struct({ projectId: ProjectId });
+const GetBoardPayload = Schema.Struct({ boardId: BoardId });
+const GetTicketDetailPayload = Schema.Struct({ ticketId: TicketId });
+const CreateTicketPayload = Schema.Struct({
+  boardId: BoardId,
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  initialLane: LaneKey,
+  dependsOn: Schema.optional(Schema.Array(TicketId)),
+  tokenBudget: Schema.optional(NonNegativeInt),
+});
+const MoveTicketPayload = Schema.Struct({ ticketId: TicketId, toLane: LaneKey });
+const RunLanePayload = Schema.Struct({ ticketId: TicketId });
+
+const decodePayload = <A>(
+  schema: Schema.Decoder<unknown> & { readonly Type: A },
+  payload: unknown,
+  message: string,
+): Effect.Effect<A, WorkflowRpcError> =>
+  Exit.match(Schema.decodeUnknownExit(schema)(payload), {
+    onFailure: (error) => Effect.fail(toWorkflowRpcError(message)(error)),
+    onSuccess: Effect.succeed,
+  });
+
+const createBoard = (
+  filesystem: WorkflowFilesystemCapability["Service"],
+  payload: unknown,
+): Effect.Effect<
+  { readonly boardId: BoardId; readonly snapshot: BoardSnapshot },
+  Error,
+  WorkflowRuntimeContext
+> =>
+  decodePayload(
+    WorkflowCreateBoardInput,
+    payload,
+    "workflow board create input decode failed",
+  ).pipe(
+    Effect.flatMap((decoded) =>
+      Effect.gen(function* () {
+        const projectWorkspaceResolver = yield* ProjectWorkspaceResolver;
+        const readModel = yield* WorkflowReadModel;
+        const fileLoader = yield* WorkflowFileLoader;
+        const saveLocks = yield* WorkflowBoardSaveLocks;
+        const workspaceRoot = yield* projectWorkspaceResolver
+          .resolve(decoded.projectId)
+          .pipe(Effect.mapError(toWorkflowRpcError("Failed to resolve workflow project root")));
+        const existingEntries = yield* readModel
+          .listBoardsForProject(decoded.projectId)
+          .pipe(Effect.mapError(toWorkflowRpcError("Failed to list workflow boards")));
+        const existingSlugs = new Set(
+          existingEntries.flatMap((entry) => {
+            const slug = slugFromBoardEntry(entry);
+            return slug === null ? [] : [slug];
+          }),
+        );
+        const definition = defaultBoardDefinition({ name: decoded.name, agent: decoded.agent });
+        const slug = uniqueBoardSlug(slugifyBoardName(definition.name), existingSlugs);
+        const boardId = BoardId.make(`${decoded.projectId}__${slug}`);
+        const relativePath = `.t3/boards/${slug}.json`;
+        const contentJson = workflowDefinitionContentJson(definition);
+
+        return yield* saveLocks.withSaveLock(
+          boardId,
+          Effect.gen(function* () {
+            yield* filesystem
+              .createFileExclusive({
+                root: workspaceRoot,
+                relativePath,
+                contents: contentJson,
+              })
+              .pipe(Effect.mapError(toWorkflowRpcError("Failed to create workflow board file")));
+            yield* fileLoader
+              .loadAndRegister({
+                boardId,
+                projectId: decoded.projectId,
+                workspaceRoot,
+                relativePath,
+              })
+              .pipe(
+                Effect.mapError(toWorkflowRpcError("Failed to register created workflow board")),
+                Effect.tapError(() =>
+                  filesystem.remove({ root: workspaceRoot, relativePath }).pipe(Effect.ignore),
+                ),
+              );
+
+            const createdBoard = yield* readModel
+              .getBoard(boardId)
+              .pipe(Effect.mapError(toWorkflowRpcError("Failed to load created workflow board")));
+            if (!createdBoard) {
+              return yield* workflowRpcError(
+                `Workflow board ${boardId} was not found after create`,
+              );
+            }
+            yield* recordBoardVersionBestEffort({
+              boardId,
+              versionHash: createdBoard.workflowVersionHash,
+              contentJson,
+              source: "create",
+            });
+            const snapshot = yield* boardSnapshot(boardId);
+            return { boardId, snapshot };
+          }),
+        );
+      }),
+    ),
+  );
 
 export default definePlugin({
   register: (hostApi) =>
@@ -40,8 +414,9 @@ export default definePlugin({
       const terminals = yield* hostApi.terminals;
       const sourceControl = yield* hostApi.sourceControl;
       const environmentsRead = yield* hostApi.environmentsRead;
+      const runtimeReady = yield* Deferred.make<Context.Context<WorkflowRuntimeContext>, Error>();
       const appLayer = WorkflowRuntimeLive.pipe(
-        Layer.provide(
+        Layer.provideMerge(
           workflowCapabilityLayers({
             agents,
             databaseClient: database.client,
@@ -54,12 +429,202 @@ export default definePlugin({
           }),
         ),
       );
+      const runWithRuntime = <A>(effect: Effect.Effect<A, Error, WorkflowRuntimeContext>) =>
+        Deferred.await(runtimeReady).pipe(
+          Effect.flatMap((ctx) => effect.pipe(Effect.provide(ctx))),
+          Effect.mapError(toPluginError),
+        );
+      const streamWithRuntime = <A>(stream: Stream.Stream<A, Error, WorkflowRuntimeContext>) =>
+        Stream.unwrap(
+          Deferred.await(runtimeReady).pipe(
+            Effect.map((ctx) => stream.pipe(Stream.provideContext(ctx))),
+            Effect.mapError(toPluginError),
+          ),
+        );
       const registration: PluginRegistration = {
         migrations: [migration001],
+        rpc: [
+          {
+            method: WORKFLOW_WS_METHODS.listBoards,
+            scope: "read",
+            readiness: "always",
+            handler: (payload) =>
+              runWithRuntime(
+                Effect.gen(function* () {
+                  const { projectId } = yield* decodePayload(
+                    ListBoardsPayload,
+                    payload,
+                    "workflow list boards input decode failed",
+                  );
+                  const readModel = yield* WorkflowReadModel;
+                  // Divergence from the fork: the plugin slice does not port
+                  // BoardDiscovery. listBoardsForProject is the plugin analogue
+                  // and returns rows without the fork's `error` field.
+                  return yield* readModel
+                    .listBoardsForProject(projectId)
+                    .pipe(Effect.mapError(toWorkflowRpcError("Failed to list workflow boards")));
+                }),
+              ),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.getBoard,
+            scope: "read",
+            readiness: "always",
+            handler: (payload) =>
+              runWithRuntime(
+                decodePayload(
+                  GetBoardPayload,
+                  payload,
+                  "workflow get board input decode failed",
+                ).pipe(
+                  Effect.flatMap(({ boardId }) => boardSnapshot(boardId)),
+                  Effect.map(encodeBoardSnapshot),
+                ),
+              ),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.getTicketDetail,
+            scope: "read",
+            readiness: "always",
+            handler: (payload) =>
+              runWithRuntime(
+                decodePayload(
+                  GetTicketDetailPayload,
+                  payload,
+                  "workflow ticket detail input decode failed",
+                ).pipe(Effect.flatMap(({ ticketId }) => ticketDetail(ticketId))),
+              ),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.createBoard,
+            scope: "operate",
+            readiness: "requires-ready",
+            handler: (payload) =>
+              runWithRuntime(
+                createBoard(filesystem, payload).pipe(
+                  Effect.map(({ boardId, snapshot }) => ({
+                    boardId,
+                    snapshot: encodeBoardSnapshot(snapshot),
+                  })),
+                ),
+              ),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.createTicket,
+            scope: "operate",
+            readiness: "requires-ready",
+            handler: (payload) =>
+              runWithRuntime(
+                decodePayload(
+                  CreateTicketPayload,
+                  payload,
+                  "workflow create ticket input decode failed",
+                ).pipe(
+                  Effect.flatMap((input) =>
+                    Effect.gen(function* () {
+                      const engine = yield* WorkflowEngine;
+                      const ticketId = yield* engine
+                        .createTicket({
+                          boardId: input.boardId,
+                          title: input.title,
+                          initialLane: input.initialLane,
+                          ...(input.description === undefined
+                            ? {}
+                            : { description: input.description }),
+                          ...(input.dependsOn === undefined ? {} : { dependsOn: input.dependsOn }),
+                          ...(input.tokenBudget === undefined
+                            ? {}
+                            : { tokenBudget: input.tokenBudget }),
+                        })
+                        .pipe(
+                          Effect.mapError(toWorkflowRpcError("Failed to create workflow ticket")),
+                        );
+                      return { ticketId };
+                    }),
+                  ),
+                ),
+              ),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.moveTicket,
+            scope: "operate",
+            readiness: "requires-ready",
+            handler: (payload) =>
+              runWithRuntime(
+                decodePayload(
+                  MoveTicketPayload,
+                  payload,
+                  "workflow move ticket input decode failed",
+                ).pipe(
+                  Effect.flatMap(({ ticketId, toLane }) =>
+                    Effect.gen(function* () {
+                      const engine = yield* WorkflowEngine;
+                      yield* engine
+                        .moveTicket(ticketId, toLane)
+                        .pipe(
+                          Effect.mapError(toWorkflowRpcError("Failed to move workflow ticket")),
+                        );
+                    }),
+                  ),
+                ),
+              ),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.runLane,
+            scope: "operate",
+            readiness: "requires-ready",
+            handler: (payload) =>
+              runWithRuntime(
+                decodePayload(
+                  RunLanePayload,
+                  payload,
+                  "workflow run lane input decode failed",
+                ).pipe(
+                  Effect.flatMap(({ ticketId }) =>
+                    Effect.gen(function* () {
+                      const engine = yield* WorkflowEngine;
+                      yield* engine
+                        .runLane(ticketId)
+                        .pipe(Effect.mapError(toWorkflowRpcError("Failed to run workflow lane")));
+                    }),
+                  ),
+                ),
+              ),
+          },
+        ],
+        streams: [
+          {
+            method: WORKFLOW_WS_METHODS.subscribeBoard,
+            scope: "read",
+            readiness: "always",
+            handler: (payload) =>
+              streamWithRuntime(
+                Stream.unwrap(
+                  decodePayload(
+                    GetBoardPayload,
+                    payload,
+                    "workflow subscribe board input decode failed",
+                  ).pipe(
+                    Effect.flatMap(({ boardId }) =>
+                      Effect.gen(function* () {
+                        const boardEvents = yield* WorkflowBoardEvents;
+                        const live = yield* boardEvents.subscribe(boardId);
+                        const snapshot = yield* boardSnapshot(boardId);
+                        return Stream.concat(
+                          Stream.make({ kind: "snapshot" as const, snapshot }),
+                          live.pipe(Stream.map((ticket) => ({ kind: "ticket" as const, ticket }))),
+                        );
+                      }),
+                    ),
+                  ),
+                ),
+              ),
+          },
+        ],
         services: [
           {
             name: "workflow-runtime",
-            run: () => runWorkflowRuntimeService(appLayer),
+            run: () => runWorkflowRuntimeService(appLayer, runtimeReady),
           },
         ],
       };
@@ -69,34 +634,45 @@ export default definePlugin({
 
 export const runWorkflowRuntimeService = <ROut, E>(
   appLayer: Layer.Layer<ROut, E, never>,
+  runtimeReady: Deferred.Deferred<Context.Context<ROut>, Error>,
 ): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
-    return yield* Effect.gen(function* () {
-      const context = yield* Layer.buildWithScope(appLayer, scope);
+    const boot = Effect.gen(function* () {
+      const context = yield* Layer.buildWithScope(appLayer, scope).pipe(
+        Effect.mapError(toPluginError),
+      );
       const recovery = Context.get(
         context as Context.Context<ROut | WorkflowRecovery>,
         WorkflowRecovery,
       );
-      // TODO(A4): switch to the RPC-gated continue-anyway recovery policy once
-      // the workflow plugin has the A4 RPC layer. Until then, keep recovery
-      // fatal after a small bounded retry to avoid flapping on transient DB
-      // hiccups.
       yield* recovery
         .recover()
         .pipe(
           Effect.retry(
             Schedule.recurs(2).pipe(Schedule.addDelay(() => Effect.succeed(Duration.seconds(1)))),
           ),
+          Effect.mapError(toPluginError),
         );
       const poller = Context.get(
         context as Context.Context<ROut | WorkflowGitHubPoller>,
         WorkflowGitHubPoller,
       );
-      yield* poller.start().pipe(Effect.provideService(Scope.Scope, scope));
+      yield* poller
+        .start()
+        .pipe(Effect.provideService(Scope.Scope, scope), Effect.mapError(toPluginError));
+      yield* Deferred.succeed(runtimeReady, context).pipe(Effect.ignore);
       return yield* Effect.never;
-    }).pipe(Effect.ensuring(Scope.close(scope, Exit.void).pipe(Effect.ignore)));
-  }).pipe(Effect.mapError(toPluginError));
+    });
+    return yield* boot.pipe(
+      // Complete `runtimeReady` on EVERY non-success exit — typed failure, defect,
+      // OR interruption-during-boot — so a handler awaiting it (runWithRuntime /
+      // streamWithRuntime) always gets a failure instead of hanging forever.
+      // `tapError` would only fire for typed failures and leak a defect/interrupt.
+      Effect.onError((cause) => Deferred.failCause(runtimeReady, cause).pipe(Effect.ignore)),
+      Effect.ensuring(Scope.close(scope, Exit.void).pipe(Effect.ignore)),
+    );
+  });
 
 type WorkflowCapabilityLayerInput = {
   readonly agents: WorkflowAgentsCapability["Service"];

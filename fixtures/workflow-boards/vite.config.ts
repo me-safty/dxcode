@@ -7,7 +7,7 @@ export default mergeConfig(
   baseConfig,
   defineConfig({
     test: {
-      include: ["server/workflow/**/*.test.ts"],
+      include: ["server/**/*.test.ts"],
       fileParallelism: false,
       hookTimeout: 120_000,
       testTimeout: 120_000,
