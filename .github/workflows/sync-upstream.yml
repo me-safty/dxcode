@@ -1,0 +1,40 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-custom-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream/main into custom/main
+    if: github.repository == 'stitchxdev/t3code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout custom branch
+        uses: actions/checkout@v6
+        with:
+          ref: custom/main
+          fetch-depth: 0
+
+      - name: Configure Git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: git fetch --no-tags https://github.com/pingdotgg/t3code.git main
+
+      - name: Merge upstream
+        run: git merge --no-edit --no-ff FETCH_HEAD
+
+      - name: Push custom branch
+        run: git push origin HEAD:custom/main
