@@ -1,8 +1,10 @@
-import * as NodeModule from "node:module";
-
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+// Static import (not a runtime createRequire) so esbuild BUNDLES json-logic-js
+// into the plugin's server bundle — the installed plugin ships no node_modules,
+// so a runtime require would fail to load.
+import jsonLogic from "json-logic-js";
 
 import {
   PredicateEvaluationError,
@@ -10,14 +12,6 @@ import {
   type PredicateEvaluatorShape,
 } from "../Services/PredicateEvaluator.ts";
 import { inspectJsonLogicRule } from "../jsonLogicRule.ts";
-
-interface JsonLogicModule {
-  readonly apply: (rule: unknown, data?: unknown) => unknown;
-  readonly truthy: (value: unknown) => boolean;
-}
-
-const require = NodeModule.createRequire(import.meta.url);
-const jsonLogic = require("json-logic-js") as JsonLogicModule;
 const isPredicateEvaluationError = Schema.is(PredicateEvaluationError);
 
 const makePredicateError = (message: string, cause?: unknown) =>
