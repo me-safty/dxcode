@@ -25,6 +25,7 @@ import {
   WorkflowProviderInstancePortLive,
 } from "./Layers/WorkflowFileLoader.ts";
 import { WorkflowReadModelLive } from "./Layers/WorkflowReadModel.ts";
+import { makeWorkflowWebhookLive, WorkflowWebhookLive } from "./Layers/WorkflowWebhook.ts";
 import { WorkflowWorktreeJanitorLive } from "./Layers/WorkflowWorktreeJanitor.ts";
 import { WorkflowFilesystemCapability } from "./Services/WorkflowCapabilities.ts";
 import { WorkflowEngineCoreLive } from "./WorkflowEngineCoreLive.ts";
@@ -151,12 +152,26 @@ const WorkflowRuntimeFileLoaderLive = WorkflowFileLoaderLive.pipe(
   Layer.provideMerge(WorkflowRuntimeReadModelLive),
 );
 
-export const WorkflowRuntimeLive = WorkflowDaemonLive.pipe(
-  Layer.provideMerge(BoardRegistryLive),
-  Layer.provideMerge(WorkflowRuntimeReadModelLive),
-  Layer.provideMerge(ProjectWorkspaceResolverLive),
-  Layer.provideMerge(WorkflowRuntimeFileLoaderLive),
-  Layer.provideMerge(ScriptCommandRunnerLive),
-  Layer.provideMerge(SetupTerminalPortLive),
-  Layer.provideMerge(WorkflowRuntimePlatformLive),
-);
+export interface WorkflowRuntimeLiveOptions {
+  readonly webhookBasePath?: string;
+}
+
+export const makeWorkflowRuntimeLive = (options?: WorkflowRuntimeLiveOptions) => {
+  const webhookLayer =
+    options?.webhookBasePath === undefined
+      ? WorkflowWebhookLive
+      : makeWorkflowWebhookLive({ basePath: options.webhookBasePath });
+
+  return WorkflowDaemonLive.pipe(
+    Layer.provideMerge(BoardRegistryLive),
+    Layer.provideMerge(WorkflowRuntimeReadModelLive),
+    Layer.provideMerge(ProjectWorkspaceResolverLive),
+    Layer.provideMerge(WorkflowRuntimeFileLoaderLive),
+    Layer.provideMerge(ScriptCommandRunnerLive),
+    Layer.provideMerge(SetupTerminalPortLive),
+    Layer.provideMerge(webhookLayer),
+    Layer.provideMerge(WorkflowRuntimePlatformLive),
+  );
+};
+
+export const WorkflowRuntimeLive = makeWorkflowRuntimeLive();

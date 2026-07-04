@@ -10,6 +10,7 @@
   "capabilities": [
     "database",
     "filesystem",
+    "http",
     "agents",
     "projections.read",
     "vcs",

@@ -77,8 +77,10 @@ import { WorkflowFileLoader } from "./workflow/Services/WorkflowFileLoader.ts";
 import { WorkflowGitHubPoller } from "./workflow/Services/WorkflowGitHubPoller.ts";
 import { WorkflowRecovery } from "./workflow/Services/WorkflowRecovery.ts";
 import { WorkflowThreadJanitor } from "./workflow/Services/WorkflowThreadJanitor.ts";
+import { WorkflowWebhook } from "./workflow/Services/WorkflowWebhook.ts";
 import { WorkflowWorktreeJanitor } from "./workflow/Services/WorkflowWorktreeJanitor.ts";
-import { WorkflowRuntimeLive } from "./workflow/WorkflowRuntimeLive.ts";
+import { makeWorkflowRuntimeLive } from "./workflow/WorkflowRuntimeLive.ts";
+import { makeWorkflowWebhookHttpDescriptor } from "./workflow/webhookRoute.ts";
 
 const toPluginError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
@@ -93,6 +95,7 @@ type WorkflowRuntimeContext =
   | WorkflowBoardSaveLocks
   | WorkflowBoardVersionStore
   | WorkflowEventStore
+  | WorkflowWebhook
   | WorkflowWorktreeJanitor
   | WorkflowThreadJanitor
   | WorkflowAgentSessionStore
@@ -351,6 +354,10 @@ const GetBoardMetricsPayload = Schema.Struct({
   boardId: BoardId,
   windowDays: Schema.optional(Schema.Number),
 });
+const GetWebhookConfigPayload = Schema.Struct({
+  boardId: BoardId,
+  rotate: Schema.optional(Schema.Boolean),
+});
 
 const decodePayload = <A>(
   schema: Schema.Decoder<unknown> & { readonly Type: A },
@@ -586,6 +593,7 @@ const deleteBoard = (
     const boardRegistry = yield* BoardRegistry;
     const engine = yield* WorkflowEngine;
     const eventStore = yield* WorkflowEventStore;
+    const webhook = yield* WorkflowWebhook;
     const versionStore = yield* WorkflowBoardVersionStore;
     const projectWorkspaceResolver = yield* ProjectWorkspaceResolver;
     const worktreeJanitor = yield* WorkflowWorktreeJanitor;
@@ -626,6 +634,7 @@ const deleteBoard = (
               boardRegistry,
               engine,
               eventStore,
+              webhook,
               readModel,
               versionStore,
               worktreeJanitor,
@@ -646,6 +655,7 @@ export default definePlugin({
       // manifest ever drops a declaration recovery/runtime code relies on.
       const database = yield* hostApi.database;
       const filesystem = yield* hostApi.filesystem;
+      const http = yield* hostApi.http;
       const agents = yield* hostApi.agents;
       const projectionsRead = yield* hostApi.projectionsRead;
       const vcs = yield* hostApi.vcs;
@@ -653,7 +663,7 @@ export default definePlugin({
       const sourceControl = yield* hostApi.sourceControl;
       const environmentsRead = yield* hostApi.environmentsRead;
       const runtimeReady = yield* Deferred.make<Context.Context<WorkflowRuntimeContext>, Error>();
-      const appLayer = WorkflowRuntimeLive.pipe(
+      const appLayer = makeWorkflowRuntimeLive({ webhookBasePath: http.basePath }).pipe(
         Layer.provideMerge(
           workflowCapabilityLayers({
             agents,
@@ -752,6 +762,46 @@ export default definePlugin({
                       return {
                         definition: encodeWorkflowDefinition(definition),
                         versionHash: board.workflowVersionHash,
+                      };
+                    }),
+                  ),
+                ),
+              ),
+          },
+          {
+            method: WORKFLOW_WS_METHODS.getWebhookConfig,
+            scope: "operate",
+            readiness: "requires-ready",
+            handler: (payload) =>
+              runWithRuntime(
+                decodePayload(
+                  GetWebhookConfigPayload,
+                  payload,
+                  "workflow webhook config input decode failed",
+                ).pipe(
+                  Effect.flatMap(({ boardId, rotate }) =>
+                    Effect.gen(function* () {
+                      const readModel = yield* WorkflowReadModel;
+                      const board = yield* readModel
+                        .getBoard(boardId)
+                        .pipe(Effect.mapError(toWorkflowRpcError("Failed to load workflow board")));
+                      if (!board) {
+                        return yield* workflowRpcError(`Workflow board ${boardId} was not found`);
+                      }
+
+                      const webhook = yield* WorkflowWebhook;
+                      const config = yield* webhook
+                        .getConfig(boardId, rotate === true)
+                        .pipe(
+                          Effect.mapError(toWorkflowRpcError("Failed to load webhook config")),
+                        );
+                      return {
+                        path: config.path,
+                        hasToken: config.hasToken,
+                        ...(config.tokenPrefix === undefined
+                          ? {}
+                          : { tokenPrefix: config.tokenPrefix }),
+                        ...(config.token === undefined ? {} : { token: config.token }),
                       };
                     }),
                   ),
@@ -1220,6 +1270,7 @@ export default definePlugin({
               ),
           },
         ],
+        http: [makeWorkflowWebhookHttpDescriptor((effect) => runWithRuntime(effect))],
         streams: [
           {
             method: WORKFLOW_WS_METHODS.subscribeBoard,
@@ -1282,6 +1333,15 @@ export const runWorkflowRuntimeService = <ROut, E>(
           ),
           Effect.mapError(toPluginError),
         );
+      const webhook = Context.getOption(
+        context as Context.Context<ROut | WorkflowWebhook>,
+        WorkflowWebhook,
+      );
+      if (webhook._tag === "Some") {
+        yield* webhook.value
+          .start()
+          .pipe(Effect.provideService(Scope.Scope, scope), Effect.mapError(toPluginError));
+      }
       const poller = Context.get(
         context as Context.Context<ROut | WorkflowGitHubPoller>,
         WorkflowGitHubPoller,
