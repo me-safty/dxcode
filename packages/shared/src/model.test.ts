@@ -10,6 +10,8 @@ import {
   getProviderOptionDescriptors,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
+  parseProviderModelSlug,
+  titleCaseSlug,
 } from "./model.ts";
 
 const codexCaps: ModelCapabilities = createModelCapabilities({
@@ -30,6 +32,28 @@ const codexCaps: ModelCapabilities = createModelCapabilities({
       type: "boolean",
     },
   ],
+});
+
+describe("model slug helpers", () => {
+  it("splits provider/model slugs on the first slash", () => {
+    expect(parseProviderModelSlug("anthropic/claude-sonnet-5")).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-5",
+    });
+    expect(parseProviderModelSlug("openrouter/qwen/qwen3-coder")).toEqual({
+      provider: "openrouter",
+      modelId: "qwen/qwen3-coder",
+    });
+    expect(parseProviderModelSlug("claude-sonnet-5")).toBeNull();
+    expect(parseProviderModelSlug("/model")).toBeNull();
+    expect(parseProviderModelSlug("provider/")).toBeNull();
+    expect(parseProviderModelSlug(undefined)).toBeNull();
+  });
+
+  it("title-cases provider slugs", () => {
+    expect(titleCaseSlug("openai-codex")).toBe("Openai Codex");
+    expect(titleCaseSlug("qwen/qwen3-coder")).toBe("Qwen Qwen3 Coder");
+  });
 });
 
 const claudeCaps: ModelCapabilities = createModelCapabilities({

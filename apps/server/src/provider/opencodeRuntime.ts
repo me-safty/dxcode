@@ -102,11 +102,6 @@ export interface OpenCodeInventory {
   readonly agents: ReadonlyArray<Agent>;
 }
 
-export interface ParsedOpenCodeModelSlug {
-  readonly providerID: string;
-  readonly modelID: string;
-}
-
 export interface OpenCodeRuntimeShape {
   /**
    * Spawns a local OpenCode server process. Its lifetime is bound to the caller's
@@ -158,25 +153,6 @@ function parseServerUrlFromOutput(output: string): string | null {
     return match?.[1] ?? null;
   }
   return null;
-}
-
-export function parseOpenCodeModelSlug(
-  slug: string | null | undefined,
-): ParsedOpenCodeModelSlug | null {
-  if (typeof slug !== "string") {
-    return null;
-  }
-
-  const trimmed = slug.trim();
-  const separator = trimmed.indexOf("/");
-  if (separator <= 0 || separator === trimmed.length - 1) {
-    return null;
-  }
-
-  return {
-    providerID: trimmed.slice(0, separator),
-    modelID: trimmed.slice(separator + 1),
-  };
 }
 
 export function openCodeQuestionId(

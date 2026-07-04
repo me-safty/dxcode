@@ -21,7 +21,7 @@ import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { getModelSelectionStringOptionValue, parseProviderModelSlug } from "@t3tools/shared/model";
 import { toToolLifecycleItemType } from "@t3tools/shared/toolLifecycle";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -42,7 +42,6 @@ import {
   OpenCodeRuntimeError,
   openCodeQuestionId,
   openCodeRuntimeErrorDetail,
-  parseOpenCodeModelSlug,
   runOpenCodeSdk,
   toOpenCodeFileParts,
   toOpenCodePermissionReply,
@@ -1153,7 +1152,7 @@ export function makeOpenCodeAdapter(
           issue: `OpenCode model selection is bound to instance '${modelSelection?.instanceId}', expected '${boundInstanceId}'.`,
         });
       }
-      const parsedModel = parseOpenCodeModelSlug(modelSelection?.model);
+      const parsedModel = parseProviderModelSlug(modelSelection?.model);
       if (!parsedModel) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
@@ -1209,7 +1208,7 @@ export function makeOpenCodeAdapter(
       yield* runOpenCodeSdk("session.promptAsync", () =>
         context.client.session.promptAsync({
           sessionID: context.openCodeSessionId,
-          model: parsedModel,
+          model: { providerID: parsedModel.provider, modelID: parsedModel.modelId },
           ...(context.activeAgent ? { agent: context.activeAgent } : {}),
           ...(context.activeVariant ? { variant: context.activeVariant } : {}),
           parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],

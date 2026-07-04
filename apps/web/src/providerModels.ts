@@ -1,7 +1,6 @@
 import {
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
-  PROVIDERS_WITHOUT_FALLBACK_MODEL,
   defaultInstanceIdForDriver,
   ProviderDriverKind,
   type ModelCapabilities,
@@ -15,6 +14,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+const PI_DRIVER_KIND = ProviderDriverKind.make("pi");
 
 export function formatProviderDriverKindLabel(provider: ProviderDriverKind): string {
   return provider
@@ -87,18 +87,17 @@ export function getProviderModelCapabilities(
   return models.find((candidate) => candidate.slug === slug)?.capabilities ?? EMPTY_CAPABILITIES;
 }
 
+export function getFallbackServerModel(provider: ProviderDriverKind): string {
+  return provider === PI_DRIVER_KIND ? "" : (DEFAULT_MODEL_BY_PROVIDER[provider] ?? DEFAULT_MODEL);
+}
+
 export function getDefaultServerModel(
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderDriverKind,
 ): string {
   const models = getProviderModels(providers, provider);
-  if (PROVIDERS_WITHOUT_FALLBACK_MODEL.has(provider)) {
-    return models.find((model) => !model.isCustom)?.slug ?? "";
-  }
-  return (
-    models.find((model) => !model.isCustom)?.slug ??
-    models[0]?.slug ??
-    DEFAULT_MODEL_BY_PROVIDER[provider] ??
-    DEFAULT_MODEL
-  );
+  const firstRealModel = models.find((model) => !model.isCustom)?.slug;
+  if (firstRealModel) return firstRealModel;
+  if (provider === PI_DRIVER_KIND) return "";
+  return models[0]?.slug ?? getFallbackServerModel(provider);
 }
