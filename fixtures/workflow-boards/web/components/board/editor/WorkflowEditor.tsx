@@ -12,8 +12,7 @@ import {
   WorkflowDefinition
 } from "../../../../contracts/workflow.ts";
 import { formatSchemaError } from "@t3tools/shared/schemaJson";
-import * as Exit from "effect/Exit";
-import * as Schema from "effect/Schema";
+import { Exit, Schema } from "effect";
 import {
   DatabaseIcon,
   DownloadIcon,

@@ -1,5 +1,5 @@
 import { TrimmedNonEmptyString } from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
+import { Schema } from "effect";
 
 import { OutboundTrigger } from "./workflow.ts";
 

@@ -9,8 +9,7 @@ import type {
   WorkflowLaneTransition,
   WorkflowLintError
 } from "../../contracts/workflow.ts";
-import * as Exit from "effect/Exit";
-import * as Schema from "effect/Schema";
+import { Exit, Schema } from "effect";
 
 type WorkflowLaneEncoded = WorkflowDefinitionEncoded["lanes"][number];
 type WorkflowStepEncoded = NonNullable<WorkflowLaneEncoded["pipeline"]>[number];

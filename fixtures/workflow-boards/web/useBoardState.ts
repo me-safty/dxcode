@@ -14,7 +14,7 @@ import {
   type PluginWebRpc,
   useAtomValue,
 } from "@t3tools/plugin-sdk-web";
-import * as Stream from "effect/Stream";
+import { Stream } from "effect";
 import { useMemo } from "react";
 
 import { WORKFLOW_WS_METHODS } from "../contracts/workflow.ts";
