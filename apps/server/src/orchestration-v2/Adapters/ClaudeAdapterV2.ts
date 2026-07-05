@@ -1810,6 +1810,9 @@ interface ClaudeLiveQueryContext {
   readonly queryPolicyKey: string;
   readonly selectionKey: string;
   readonly closed: Deferred.Deferred<void, never>;
+  readonly openedWithResumeSessionAt: boolean;
+  /** True once any SDK message arrived on this query. */
+  receivedSdkMessage: boolean;
 }
 
 interface ActiveClaudeToolCall {
@@ -1876,6 +1879,14 @@ export function makeClaudeAdapterV2(
         const pendingAsyncTaskContexts = yield* Ref.make(
           new Map<string, ActiveClaudeTurnContext>(),
         );
+        /**
+         * Native threads whose next open must skip the resumeSessionAt pin.
+         * A dirty shutdown can record a conversation head that the killed
+         * claude process never flushed to its transcript; resuming at that
+         * head fails the first query. Entries are one-shot: consumed by the
+         * next openQuery and re-added if the unpinned open fails again.
+         */
+        const suppressResumeSessionAt = yield* Ref.make(new Set<string>());
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
@@ -2759,6 +2770,24 @@ export function makeClaudeAdapterV2(
         const finalizeActiveTurnAfterQueryExit = Effect.fnUntraced(function* (
           cause?: Cause.Cause<ClaudeAgentSdkQueryRunnerError>,
         ) {
+          if (cause !== undefined) {
+            const failedQuery = yield* Ref.get(queryContext);
+            if (
+              failedQuery !== null &&
+              failedQuery.openedWithResumeSessionAt &&
+              !failedQuery.receivedSdkMessage
+            ) {
+              yield* Ref.update(suppressResumeSessionAt, (current) => {
+                const updated = new Set(current);
+                updated.add(failedQuery.nativeThreadId);
+                return updated;
+              });
+              yield* Effect.logWarning("orchestration-v2.claude-resume-pin-suppressed", {
+                providerSessionId: input.providerSessionId,
+                nativeThreadId: failedQuery.nativeThreadId,
+              });
+            }
+          }
           const context = yield* Ref.get(activeTurn);
           if (context === null) {
             return;
@@ -2804,6 +2833,7 @@ export function makeClaudeAdapterV2(
           if (liveQuery?.query !== input.query) {
             return;
           }
+          liveQuery.receivedSdkMessage = true;
 
           const message = input.message;
           if (message.type === "system" && message.subtype === "task_notification") {
@@ -3226,7 +3256,17 @@ export function makeClaudeAdapterV2(
             updated.add(nativeThreadId);
             return [false, updated];
           });
-          const shouldResume = resumeSessionAt !== undefined || openedWithResume;
+          const pinSuppressed = yield* Ref.modify(suppressResumeSessionAt, (current) => {
+            if (!current.has(nativeThreadId)) {
+              return [false, current] as const;
+            }
+            const updated = new Set(current);
+            updated.delete(nativeThreadId);
+            return [true, updated] as const;
+          });
+          const effectiveResumeSessionAt = pinSuppressed ? undefined : resumeSessionAt;
+          const shouldResume =
+            effectiveResumeSessionAt !== undefined || openedWithResume || pinSuppressed;
           const querySession = yield* queryRunner.open({
             threadId: turnInput.threadId,
             providerSessionId: input.providerSessionId,
@@ -3234,7 +3274,9 @@ export function makeClaudeAdapterV2(
               modelSelection: turnInput.modelSelection,
               nativeThreadId,
               resume: shouldResume,
-              ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
+              ...(effectiveResumeSessionAt === undefined
+                ? {}
+                : { resumeSessionAt: effectiveResumeSessionAt }),
               cwd: turnInput.runtimePolicy.cwd,
               settings: adapterOptions.settings,
               environment: adapterOptions.environment,
@@ -3254,6 +3296,8 @@ export function makeClaudeAdapterV2(
             queryPolicyKey,
             selectionKey: compiledSelection.queryIdentity,
             closed,
+            openedWithResumeSessionAt: effectiveResumeSessionAt !== undefined,
+            receivedSdkMessage: false,
           };
           yield* Ref.set(queryContext, context);
           yield* querySession.messages.pipe(
