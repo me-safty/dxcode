@@ -245,6 +245,7 @@ export function LinearBrowser() {
         ids: [...selected],
         mode: perIssue ? "perIssue" : "combine",
       });
+      const failedIds = result.failedIds ?? [];
       if (result.ok) {
         toastManager.add(
           result.warning
@@ -257,14 +258,21 @@ export function LinearBrowser() {
                   : "Review the pre-filled composer and send.",
               },
         );
-        setSelected(new Set());
-        void navigate({ to: "/" });
+        if (failedIds.length > 0) {
+          // Keep only the failed issues selected so a retry re-imports just
+          // those; stay on the browser rather than navigating away.
+          setSelected(new Set(failedIds));
+        } else {
+          setSelected(new Set());
+          void navigate({ to: "/" });
+        }
       } else {
         toastManager.add({
           type: "error",
           title: "Linear import failed",
           description: result.error ?? "The issues could not be imported.",
         });
+        if (failedIds.length > 0) setSelected(new Set(failedIds));
       }
     } finally {
       setImporting(false);

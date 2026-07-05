@@ -430,7 +430,7 @@ export const WsLinearSetTokenRpc = Rpc.make(WS_METHODS.linearSetToken, {
 export const WsLinearClearTokenRpc = Rpc.make(WS_METHODS.linearClearToken, {
   payload: Schema.Struct({}),
   success: LinearAuthStatus,
-  error: Schema.Union([LinearTokenStoreError, EnvironmentAuthorizationError]),
+  error: Schema.Union([LinearRequestError, LinearTokenStoreError, EnvironmentAuthorizationError]),
 });
 
 const LinearReadError = Schema.Union([

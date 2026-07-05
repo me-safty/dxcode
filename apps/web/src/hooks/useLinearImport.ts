@@ -41,6 +41,8 @@ export interface LinearImportResult {
   readonly error?: string;
   /** Soft/partial detail (shown as a non-blocking notice) when `ok` is true. */
   readonly warning?: string;
+  /** Issue ids that failed to import or load, so the UI can keep them selected. */
+  readonly failedIds?: ReadonlyArray<string>;
 }
 
 function issueTitle(issue: LinearIssueDetail): string {
@@ -109,6 +111,7 @@ export function useLinearImport() {
         // Attempt every issue; report a summary rather than bailing mid-loop and
         // leaving the caller unsure which threads were actually created.
         const failed: string[] = [];
+        const failedIds: string[] = [];
         for (const issue of issues) {
           const createdAt = new Date().toISOString();
           const title = issueTitle(issue);
@@ -144,24 +147,30 @@ export function useLinearImport() {
           });
           if (startResult._tag !== "Success") {
             failed.push(issue.identifier);
+            failedIds.push(issue.id);
           }
         }
+        // Selected ids Linear never returned (couldn't be loaded).
+        const returnedIds = new Set(issues.map((issue) => issue.id));
+        const missingIds = input.ids.filter((id) => !returnedIds.has(id));
         const createdCount = issues.length - failed.length;
         if (createdCount === 0) {
-          return { ok: false, error: "Failed to create any threads from Linear." };
-        }
-        // Partial success still created threads: succeed, but surface a notice.
-        if (failed.length > 0) {
           return {
-            ok: true,
-            warning: `Created ${createdCount} of ${issues.length} threads; failed: ${failed.join(", ")}.`,
+            ok: false,
+            error: "Failed to create any threads from Linear.",
+            failedIds: [...failedIds, ...missingIds],
           };
         }
-        const missing = input.ids.length - issues.length;
-        if (missing > 0) {
+        const problems: string[] = [];
+        if (failed.length > 0) problems.push(`failed: ${failed.join(", ")}`);
+        if (missingIds.length > 0) problems.push(`${missingIds.length} couldn't be loaded`);
+        // Partial success still created threads: succeed, but surface a notice
+        // and hand back the failed ids so the UI keeps them selected for retry.
+        if (problems.length > 0) {
           return {
             ok: true,
-            warning: `Imported ${issues.length}; ${missing} selected issue(s) could not be loaded.`,
+            warning: `Created ${createdCount} of ${input.ids.length} threads (${problems.join("; ")}).`,
+            failedIds: [...failedIds, ...missingIds],
           };
         }
         return { ok: true };

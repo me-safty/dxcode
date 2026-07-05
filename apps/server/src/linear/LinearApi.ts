@@ -536,7 +536,7 @@ function isAuthMessage(message: string | undefined): boolean {
 export class LinearApi extends Context.Service<
   LinearApi,
   {
-    readonly probeAuth: Effect.Effect<LinearAuthStatus, LinearTokenStoreError>;
+    readonly probeAuth: Effect.Effect<LinearAuthStatus, LinearTokenStoreError | LinearRequestError>;
     readonly searchIssues: (input: {
       readonly query: string;
       readonly limit: number;
@@ -603,8 +603,13 @@ export class LinearApi extends Context.Service<
       LinearMutationResult,
       LinearAuthError | LinearRequestError | LinearTokenStoreError
     >;
-    readonly setToken: (token: string) => Effect.Effect<LinearAuthStatus, LinearTokenStoreError>;
-    readonly clearToken: Effect.Effect<LinearAuthStatus, LinearTokenStoreError>;
+    readonly setToken: (
+      token: string,
+    ) => Effect.Effect<LinearAuthStatus, LinearTokenStoreError | LinearRequestError>;
+    readonly clearToken: Effect.Effect<
+      LinearAuthStatus,
+      LinearTokenStoreError | LinearRequestError
+    >;
   }
 >()("t3/linear/LinearApi") {}
 
@@ -749,11 +754,16 @@ export const make = Effect.gen(function* () {
                 },
               };
             }),
-            Effect.orElseSucceed(
-              (): LinearAuthStatus => ({
-                status: "unauthenticated",
-                detail: "The stored Linear token was rejected.",
-              }),
+            // A rejected token → "unauthenticated"; genuine connectivity/API
+            // errors propagate so a transient outage isn't shown as "not
+            // connected" (which would tempt users to replace a valid token).
+            Effect.catch((error) =>
+              error._tag === "LinearAuthError"
+                ? Effect.succeed<LinearAuthStatus>({
+                    status: "unauthenticated",
+                    detail: "The stored Linear token was rejected.",
+                  })
+                : Effect.fail(error),
             ),
           ),
       }),

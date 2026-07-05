@@ -129,6 +129,7 @@ export function LinearBrowsePopover({
         ids: [...selected],
         mode: combine ? "combine" : "perIssue",
       });
+      const failedIds = result.failedIds ?? [];
       if (result.ok) {
         if (result.warning) {
           toastManager.add({
@@ -137,13 +138,19 @@ export function LinearBrowsePopover({
             description: result.warning,
           });
         }
-        handleOpenChange(false);
+        if (failedIds.length > 0) {
+          // Keep the failed issues selected so the user can retry them.
+          setSelected(new Set(failedIds));
+        } else {
+          handleOpenChange(false);
+        }
       } else {
         toastManager.add({
           type: "error",
           title: "Linear import failed",
           description: result.error ?? "The issues could not be imported.",
         });
+        if (failedIds.length > 0) setSelected(new Set(failedIds));
       }
     } finally {
       setImporting(false);
