@@ -51,9 +51,14 @@ const RelativeEntryPath = TrimmedNonEmptyString.check(
 const ManifestEntries = Schema.Struct({
   server: Schema.optionalKey(RelativeEntryPath),
   web: Schema.optionalKey(RelativeEntryPath),
+  // Optional compiled stylesheet shipped alongside the web bundle. The host
+  // injects it (as a <link>) when the plugin's web surface loads, so a plugin can
+  // ship its own CSS instead of relying on the host build to emit its classes.
+  styles: Schema.optionalKey(RelativeEntryPath),
 }).check(
-  Schema.makeFilter<{ readonly server?: string; readonly web?: string }>((entries) =>
-    entries.server || entries.web ? true : "manifest entries must include server or web",
+  Schema.makeFilter<{ readonly server?: string; readonly web?: string; readonly styles?: string }>(
+    (entries) =>
+      entries.server || entries.web ? true : "manifest entries must include server or web",
   ),
 );
 export type PluginManifestEntries = typeof ManifestEntries.Type;
@@ -137,6 +142,9 @@ export const PluginInfo = Schema.Struct({
   state: PluginState,
   capabilities: Schema.Array(PluginCapability),
   hasWeb: Schema.Boolean,
+  // Whether the plugin ships a compiled stylesheet (manifest entries.styles) the
+  // host should inject when the web surface loads.
+  hasStyles: Schema.Boolean,
   lastError: Schema.NullOr(Schema.String),
 });
 export type PluginInfo = typeof PluginInfo.Type;

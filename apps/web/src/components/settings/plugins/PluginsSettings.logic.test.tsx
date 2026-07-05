@@ -31,6 +31,7 @@ const plugin = (overrides: Partial<PluginInfo> = {}): PluginInfo => ({
   state: "active",
   capabilities: ["database"],
   hasWeb: true,
+  hasStyles: false,
   lastError: null,
   ...overrides,
 });

@@ -292,6 +292,7 @@ catalogTest("PluginCatalog", (it) => {
           id: plugin.id,
           state: plugin.state,
           hasWeb: plugin.hasWeb,
+          hasStyles: plugin.hasStyles,
           lastError: plugin.lastError,
         })),
         [
@@ -299,12 +300,14 @@ catalogTest("PluginCatalog", (it) => {
             id: failedPluginId,
             state: "failed",
             hasWeb: true,
+            hasStyles: false,
             lastError: "activation failed",
           },
           {
             id: pluginId,
             state: "active",
             hasWeb: true,
+            hasStyles: false,
             lastError: null,
           },
         ],

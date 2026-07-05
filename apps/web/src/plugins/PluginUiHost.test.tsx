@@ -22,6 +22,7 @@ function pluginInfo(overrides: Partial<PluginInfo> = {}): PluginInfo {
     state: "active",
     capabilities: [],
     hasWeb: true,
+    hasStyles: false,
     lastError: null,
     ...overrides,
   };

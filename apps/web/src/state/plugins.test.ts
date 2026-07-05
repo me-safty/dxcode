@@ -49,6 +49,7 @@ describe("web plugin state", () => {
               state: "active" as const,
               capabilities: [],
               hasWeb: true,
+              hasStyles: false,
               lastError: null,
             },
           ];
@@ -70,6 +71,7 @@ describe("web plugin state", () => {
         state: "active",
         capabilities: [],
         hasWeb: true,
+        hasStyles: false,
         lastError: null,
       };
       const pluginB: PluginInfo = { ...pluginA, name: "B", version: "2.0.0" };
@@ -111,6 +113,7 @@ describe("web plugin state", () => {
       state: "active",
       capabilities: [],
       hasWeb: true,
+      hasStyles: false,
       lastError: null,
     };
     const listA: ReadonlyArray<PluginInfo> = [pluginA];

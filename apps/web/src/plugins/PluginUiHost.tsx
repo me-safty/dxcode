@@ -116,6 +116,56 @@ export function getPluginWebEntryUrl(plugin: Pick<PluginInfo, "id" | "version">)
   return `/plugins/${encodeURIComponent(plugin.id)}/${encodeURIComponent(plugin.version)}/web/index.js`;
 }
 
+export function getPluginStylesUrl(
+  plugin: Pick<PluginInfo, "id" | "version" | "hasStyles">,
+): string | null {
+  // A plugin that declares `entries.styles` ships a compiled stylesheet next to
+  // its web bundle. The host build only scans host source, so a plugin must ship
+  // its own CSS for any classes it uses that the host doesn't.
+  return plugin.hasStyles
+    ? `/plugins/${encodeURIComponent(plugin.id)}/${encodeURIComponent(plugin.version)}/web/index.css`
+    : null;
+}
+
+const PLUGIN_STYLE_LINK_ATTR = "data-t3-plugin-styles";
+
+/**
+ * Reconcile the `<link rel="stylesheet">` elements for active web plugins that
+ * ship styles: inject one per plugin (keyed by id), drop links for plugins that
+ * are no longer active or whose version (href) changed. Idempotent.
+ */
+function reconcilePluginStyleLinks(activeWebPlugins: ReadonlyArray<PluginInfo>): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const desired = new Map<string, string>();
+  for (const plugin of activeWebPlugins) {
+    const url = getPluginStylesUrl(plugin);
+    if (url !== null) {
+      desired.set(plugin.id, url);
+    }
+  }
+  for (const element of Array.from(
+    document.head.querySelectorAll(`link[${PLUGIN_STYLE_LINK_ATTR}]`),
+  )) {
+    const id = element.getAttribute(PLUGIN_STYLE_LINK_ATTR);
+    if (id === null || desired.get(id) !== element.getAttribute("href")) {
+      element.remove();
+    }
+  }
+  for (const [id, url] of desired) {
+    if (
+      document.head.querySelector(`link[${PLUGIN_STYLE_LINK_ATTR}="${CSS.escape(id)}"]`) === null
+    ) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.setAttribute("href", url);
+      link.setAttribute(PLUGIN_STYLE_LINK_ATTR, id);
+      document.head.appendChild(link);
+    }
+  }
+}
+
 function makePluginLogger(pluginId: PluginId): PluginUiContext["logger"] {
   const prefix = `[plugin:${pluginId}]`;
   return {
@@ -163,6 +213,9 @@ export async function syncPluginUiHostRegistrations({
 }: SyncPluginUiHostRegistrationsInput): Promise<PluginUiRegistrySnapshot> {
   const activeWebPlugins = plugins.filter((plugin) => plugin.state === "active" && plugin.hasWeb);
   const activeKeys = new Set(activeWebPlugins.map((plugin) => `${plugin.id}@${plugin.version}`));
+
+  // Inject/remove each active web plugin's stylesheet <link> alongside its JS.
+  reconcilePluginStyleLinks(activeWebPlugins);
 
   for (const [pluginId, loaded] of state.loaded.entries()) {
     if (!activeKeys.has(`${pluginId}@${loaded.version}`)) {

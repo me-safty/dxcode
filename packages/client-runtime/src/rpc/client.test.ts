@@ -189,6 +189,7 @@ describe("environment RPC", () => {
               state: "active",
               capabilities: [],
               hasWeb: true,
+              hasStyles: false,
               lastError: null,
             },
           });
@@ -233,6 +234,7 @@ describe("environment RPC", () => {
           state: "active",
           capabilities: [],
           hasWeb: true,
+          hasStyles: false,
           lastError: null,
         },
       });

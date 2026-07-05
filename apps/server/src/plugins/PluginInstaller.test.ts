@@ -188,6 +188,7 @@ function installerLayer(input: {
           state: "active" as const,
           capabilities: ["agents" as const],
           hasWeb: false,
+          hasStyles: false,
           lastError: null,
         },
       ]),
