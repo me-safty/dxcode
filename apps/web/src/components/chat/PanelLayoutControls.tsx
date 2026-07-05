@@ -1,6 +1,7 @@
 import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
 import { memo } from "react";
 
+import { PROJECT_HOST_TERMINAL_UNAVAILABLE_REASON } from "~/projectHostControls";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -49,7 +50,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         <TooltipPopup side="bottom">
           {terminalAvailable
             ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-            : "Terminal drawer is unavailable"}
+            : PROJECT_HOST_TERMINAL_UNAVAILABLE_REASON}
         </TooltipPopup>
       </Tooltip>
       <Tooltip>

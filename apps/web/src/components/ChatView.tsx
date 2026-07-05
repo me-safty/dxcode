@@ -146,6 +146,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
+import { deriveProjectHostControlAvailability } from "~/projectHostControls";
 import {
   type ProjectActionTerminalReservations,
   releaseProjectActionTerminalReservationsSeenRunning,
@@ -1452,12 +1453,21 @@ function ChatViewContent(props: ChatViewProps) {
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
-  const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
+  const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? null;
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
   const activeEnvironmentUnavailableLabel = activeEnvironment?.label ?? null;
-  const terminalUiAvailable =
-    activeProject !== null && activeEnvironmentConnectionPhase === "connected";
+  const hasActiveProject = activeProject !== null;
+  const projectHostControls = useMemo(
+    () =>
+      deriveProjectHostControlAvailability({
+        hasActiveProject,
+        environmentConnectionPhase: activeEnvironmentConnectionPhase,
+        terminalDrawerOpen: terminalUiState.terminalOpen,
+      }),
+    [activeEnvironmentConnectionPhase, hasActiveProject, terminalUiState.terminalOpen],
+  );
+  const terminalUiAvailable = projectHostControls.terminalControlsAvailable;
   const activeEnvironmentUnavailableState = useMemo<EnvironmentUnavailableState | null>(() => {
     if (!activeEnvironmentUnavailable || !activeEnvironmentUnavailableLabel || !activeEnvironment) {
       return null;
@@ -4946,10 +4956,10 @@ function ChatViewContent(props: ChatViewProps) {
 
   const panelToggleControls = (
     <PanelLayoutControls
-      terminalAvailable={terminalUiAvailable || terminalUiState.terminalOpen}
+      terminalAvailable={projectHostControls.terminalDrawerToggleAvailable}
       terminalOpen={terminalUiState.terminalOpen}
       terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
-      rightPanelAvailable={activeProject !== null}
+      rightPanelAvailable={hasActiveProject}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
       onToggleTerminal={toggleTerminalVisibility}
@@ -5072,7 +5082,7 @@ function ChatViewContent(props: ChatViewProps) {
             activeProjectName={activeProject?.title}
             openInCwd={gitCwd}
             activeProjectScripts={activeProject?.scripts}
-            projectScriptsRunAvailable={terminalUiAvailable}
+            projectScriptsRunAvailable={projectHostControls.projectActionsRunAvailable}
             preferredScriptId={
               activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
             }
@@ -5346,9 +5356,9 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
-          terminalAvailable={terminalUiAvailable}
+          terminalAvailable={projectHostControls.terminalControlsAvailable}
           diffAvailable={isServerThread && isGitRepo}
-          filesAvailable={activeProject !== null}
+          filesAvailable={hasActiveProject}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -5374,9 +5384,9 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
-            terminalAvailable={terminalUiAvailable}
+            terminalAvailable={projectHostControls.terminalControlsAvailable}
             diffAvailable={isServerThread && isGitRepo}
-            filesAvailable={activeProject !== null}
+            filesAvailable={hasActiveProject}
           >
             {rightPanelContent}
           </RightPanelTabs>

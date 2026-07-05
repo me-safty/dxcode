@@ -32,6 +32,7 @@ import {
   primaryProjectScript,
 } from "~/projectScripts";
 import { shortcutLabelForCommand } from "~/keybindings";
+import { PROJECT_HOST_ACTION_UNAVAILABLE_REASON } from "~/projectHostControls";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -271,9 +272,7 @@ export default function ProjectScriptsControl({
               </span>
             </TooltipTrigger>
             <TooltipPopup side="top">
-              {runAvailable
-                ? `Run ${primaryScript.name}`
-                : "Connect the project host to run actions"}
+              {runAvailable ? `Run ${primaryScript.name}` : PROJECT_HOST_ACTION_UNAVAILABLE_REASON}
             </TooltipPopup>
           </Tooltip>
           <GroupSeparator className="hidden @3xl/header-actions:block" />
