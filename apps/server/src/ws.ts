@@ -1114,6 +1114,41 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
+              const isThisThreadDetailEvent = (event: OrchestrationEvent) =>
+                event.aggregateKind === "thread" &&
+                event.aggregateId === input.threadId &&
+                isThreadDetailEvent(event);
+
+              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+                Stream.filter(isThisThreadDetailEvent),
+                Stream.map((event) => ({
+                  kind: "event" as const,
+                  event,
+                })),
+              );
+
+              // When the client already loaded the snapshot over HTTP it passes
+              // that snapshot's sequence, and we resume the live subscription by
+              // replaying persisted events after it instead of re-sending the
+              // (potentially multi-KB) snapshot frame over the socket. The
+              // catch-up replay + live stream carry the same ordering guarantees
+              // as the snapshot-then-live path below; overlapping events are
+              // deduped by sequence on the client.
+              if (input.afterSequence !== undefined) {
+                const catchUpStream = orchestrationEngine.readEvents(input.afterSequence).pipe(
+                  Stream.filter(isThisThreadDetailEvent),
+                  Stream.map((event) => ({ kind: "event" as const, event })),
+                  Stream.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to replay thread ${input.threadId} events`,
+                        cause,
+                      }),
+                  ),
+                );
+                return Stream.concat(catchUpStream, liveStream);
+              }
+
               const [threadDetail, snapshotSequence] = yield* Effect.all([
                 projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
                   Effect.mapError(
@@ -1142,19 +1177,6 @@ const makeWsRpcLayer = (
                   cause: input.threadId,
                 });
               }
-
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.aggregateKind === "thread" &&
-                    event.aggregateId === input.threadId &&
-                    isThreadDetailEvent(event),
-                ),
-                Stream.map((event) => ({
-                  kind: "event" as const,
-                  event,
-                })),
-              );
 
               return Stream.concat(
                 Stream.make({

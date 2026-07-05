@@ -2,6 +2,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type EnvironmentId as EnvironmentIdType,
   type OrchestrationThread,
+  type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
@@ -18,6 +19,7 @@ import { connectionProjectionPhase } from "../connection/model.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import { EnvironmentCacheStore } from "../platform/persistence.ts";
 import { subscribe } from "../rpc/client.ts";
+import { ThreadSnapshotLoader } from "./threadSnapshotHttp.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyThreadDetailEvent } from "./threadReducer.ts";
 import { THREAD_STATE_IDLE_TTL_MS } from "./threadRetention.ts";
@@ -44,6 +46,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 ) {
   const supervisor = yield* EnvironmentSupervisor;
   const cache = yield* EnvironmentCacheStore;
+  const snapshotLoader = yield* ThreadSnapshotLoader;
   const environmentId = supervisor.target.environmentId;
   const cached = yield* cache.loadThread(environmentId, threadId).pipe(
     Effect.catch((error) =>
@@ -187,14 +190,42 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   );
 
   yield* setSynchronizing;
-  yield* subscribe(
-    ORCHESTRATION_WS_METHODS.subscribeThread,
-    { threadId },
-    {
-      onExpectedFailure: setStreamError,
-      retryExpectedFailureAfter: "250 millis",
-    },
-  ).pipe(Stream.runForEach(applyItem), Effect.forkScoped);
+  yield* Effect.forkScoped(
+    Effect.gen(function* () {
+      // Load the initial snapshot over HTTP (gzip-compressible, and off the
+      // socket) rather than as a multi-KB first WebSocket frame, then subscribe
+      // to live events resuming after the snapshot's sequence. If the snapshot
+      // cannot be loaded over HTTP we fall back to the socket-embedded snapshot
+      // so the thread still synchronizes. Overlapping events are deduped by
+      // sequence in applyItem.
+      //
+      // Wait for a prepared connection so we can authenticate the HTTP request;
+      // this mirrors the socket path, which likewise waits for a live session.
+      const prepared = yield* SubscriptionRef.changes(supervisor.prepared).pipe(
+        Stream.filter(Option.isSome),
+        Stream.map((current) => current.value),
+        Stream.runHead,
+      );
+
+      const httpSnapshot = Option.isSome(prepared)
+        ? yield* snapshotLoader.load(prepared.value, threadId)
+        : Option.none<OrchestrationThreadDetailSnapshot>();
+
+      if (Option.isSome(httpSnapshot)) {
+        yield* applyItem({ kind: "snapshot", snapshot: httpSnapshot.value });
+      }
+
+      const subscribeInput = Option.match(httpSnapshot, {
+        onNone: () => ({ threadId }),
+        onSome: (snapshot) => ({ threadId, afterSequence: snapshot.snapshotSequence }),
+      });
+
+      yield* subscribe(ORCHESTRATION_WS_METHODS.subscribeThread, subscribeInput, {
+        onExpectedFailure: setStreamError,
+        retryExpectedFailureAfter: "250 millis",
+      }).pipe(Stream.runForEach(applyItem));
+    }),
+  );
 
   yield* Effect.addFinalizer(() =>
     SubscriptionRef.get(state).pipe(
@@ -218,7 +249,10 @@ export function threadStateChanges(environmentId: EnvironmentIdType, threadId: T
 }
 
 export function createEnvironmentThreadStateAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | EnvironmentCacheStore | R, E>,
+  runtime: Atom.AtomRuntime<
+    EnvironmentRegistry | EnvironmentCacheStore | ThreadSnapshotLoader | R,
+    E
+  >,
 ) {
   const family = Atom.family((key: string) => {
     const { environmentId, threadId } = parseThreadKey(key);
@@ -240,6 +274,7 @@ export function createEnvironmentThreadStateAtoms<R, E>(
 
 export * from "./archivedThreads.ts";
 export * from "./checkpointDiff.ts";
+export * from "./threadSnapshotHttp.ts";
 export * from "./composerPathSearch.ts";
 export * from "./threadCommands.ts";
 export * from "./threadDetail.ts";

@@ -6,6 +6,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationThread,
+  type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -30,6 +31,7 @@ import * as RpcSession from "../rpc/session.ts";
 import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   makeEnvironmentThreadState,
+  ThreadSnapshotLoader,
   type EnvironmentThreadState,
 } from "./threads.ts";
 
@@ -40,6 +42,14 @@ const TARGET = new PrimaryConnectionTarget({
   wsBaseUrl: "wss://environment.example.test",
 });
 const THREAD_ID = ThreadId.make("thread-1");
+const PREPARED: PreparedConnection = {
+  environmentId: TARGET.environmentId,
+  label: TARGET.label,
+  httpBaseUrl: TARGET.httpBaseUrl,
+  socketUrl: TARGET.wsBaseUrl,
+  httpAuthorization: null,
+  target: TARGET,
+};
 const BASE_THREAD: OrchestrationThread = {
   id: THREAD_ID,
   projectId: ProjectId.make("project-1"),
@@ -89,6 +99,7 @@ function awaitThreadState(
 
 const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (options?: {
   readonly cached?: OrchestrationThread;
+  readonly httpSnapshot?: Option.Option<OrchestrationThreadDetailSnapshot>;
 }) {
   const inputs = yield* Queue.unbounded<TestThreadInput>();
   const observed = yield* Queue.unbounded<EnvironmentThreadState>();
@@ -117,7 +128,17 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const supervisorSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
     Option.some(testSession(client)),
   );
-  const prepared = yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(Option.none());
+  const prepared = yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(
+    Option.some(PREPARED),
+  );
+  const snapshotLoader = ThreadSnapshotLoader.of({
+    load: (_prepared, threadId) =>
+      Effect.succeed(
+        threadId === THREAD_ID
+          ? (options?.httpSnapshot ?? Option.none<OrchestrationThreadDetailSnapshot>())
+          : Option.none<OrchestrationThreadDetailSnapshot>(),
+      ),
+  });
   const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
     target: TARGET,
     state: supervisorState,
@@ -145,6 +166,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const threadState = yield* makeEnvironmentThreadState(THREAD_ID).pipe(
     Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
     Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+    Effect.provideService(ThreadSnapshotLoader, snapshotLoader),
   );
   yield* SubscriptionRef.changes(threadState).pipe(
     Stream.runForEach((state) =>
@@ -248,6 +270,28 @@ describe("EnvironmentThreads", () => {
 
       expect(Option.getOrThrow(state.data).title).toBe("Live title");
       expect((yield* Ref.get(harness.savedThreads)).at(-1)?.title).toBe("Live title");
+    }),
+  );
+
+  it.effect("seeds the thread from the HTTP snapshot and resumes live events", () =>
+    Effect.gen(function* () {
+      const httpThread: OrchestrationThread = { ...BASE_THREAD, title: "HTTP title" };
+      const harness = yield* makeHarness({
+        httpSnapshot: Option.some({ snapshotSequence: 1, thread: httpThread }),
+      });
+      // No socket snapshot is pushed; only a live event arrives over the socket.
+      // It can only be applied if the HTTP snapshot already seeded the thread.
+      yield* Queue.offer(harness.inputs, titleUpdated("Live title", 2));
+
+      const state = yield* awaitThreadState(
+        harness.observed,
+        (value) =>
+          value.status === "live" &&
+          Option.isSome(value.data) &&
+          value.data.value.title === "Live title",
+      );
+
+      expect(Option.getOrThrow(state.data).title).toBe("Live title");
     }),
   );
 
