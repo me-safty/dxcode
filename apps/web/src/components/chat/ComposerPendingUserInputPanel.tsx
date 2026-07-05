@@ -81,7 +81,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       return;
     }
     if (
-      progress.customAnswer.trim().length === 0 &&
+      !progress.usingCustomAnswer &&
       progress.selectedOptionLabels.includes(optimisticSingleSelect.optionLabel)
     ) {
       setOptimisticSingleSelect(null);
@@ -89,7 +89,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }, [
     activeQuestion,
     optimisticSingleSelect,
-    progress.customAnswer,
+    progress.usingCustomAnswer,
     progress.selectedOptionLabels,
   ]);
 
@@ -143,7 +143,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     return null;
   }
 
-  const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const customAnswerActive = progress.usingCustomAnswer;
 
   return (
     <div className="px-4 py-3 sm:px-5">
@@ -201,19 +201,17 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
             </>
           );
           return (
-            <div
+            <button
               key={`${activeQuestion.id}:${option.label}`}
-              role="button"
-              tabIndex={isResponding ? -1 : 0}
-              aria-disabled={isResponding}
+              type="button"
+              disabled={isResponding}
               onClick={() => {
-                if (isResponding) return;
                 handleOptionSelection(activeQuestion.id, option.label);
               }}
               className={className}
             >
               {content}
-            </div>
+            </button>
           );
         })}
       </div>

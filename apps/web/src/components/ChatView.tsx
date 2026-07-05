@@ -36,12 +36,23 @@ import {
   createModelSelection,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
+import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -74,8 +85,10 @@ import {
   isLatestTurnSettled,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
+import { getAnchoredTurnMetrics, type TimelineScrollMode } from "./chat/timelineScrollAnchoring";
 import {
   buildPendingUserInputAnswers,
+  findFirstUnansweredPendingUserInputQuestionIndex,
   derivePendingUserInputProgress,
   setPendingUserInputCustomAnswer,
   setPendingUserInputSelectedOption,
@@ -124,7 +137,6 @@ import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
-import { PreviewAutomationOwner } from "./preview/PreviewAutomationOwner";
 import { RightPanelTabs } from "./RightPanelTabs";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
@@ -133,6 +145,7 @@ import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomHex } from "~/lib/utils";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
@@ -209,6 +222,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
+  buildThreadTurnInterruptInput,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -1094,7 +1108,7 @@ function ChatViewContent(props: ChatViewProps) {
   const clearInactivePendingUserInputDraftRequests = usePendingUserInputDraftStore(
     (store) => store.clearInactiveRequests,
   );
-  const promptRef = useRef(prompt);
+  const promptRef = useRef("");
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
@@ -1120,6 +1134,7 @@ function ChatViewContent(props: ChatViewProps) {
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
   >([]);
+  const respondingUserInputRequestIdSetRef = useRef(new Set<ApprovalRequestId>());
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -1147,11 +1162,32 @@ function ChatViewContent(props: ChatViewProps) {
     LastInvokedScriptByProjectSchema,
   );
   const legendListRef = useRef<LegendListRef | null>(null);
+  const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
+  const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
   const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
+
+  useLayoutEffect(() => {
+    if (!composerOverlayElement) return;
+
+    const updateHeight = () => {
+      const nextHeight = Math.ceil(composerOverlayElement.getBoundingClientRect().height);
+      if (nextHeight <= 0) return;
+      setComposerOverlayHeight((currentHeight) =>
+        currentHeight === nextHeight ? currentHeight : nextHeight,
+      );
+    };
+
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(composerOverlayElement);
+    return () => observer.disconnect();
+  }, [composerOverlayElement]);
 
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef),
@@ -1264,6 +1300,14 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const [timelineAnchor, setTimelineAnchor] = useState<{
+    readonly threadKey: string | null;
+    readonly messageId: MessageId | null;
+  }>({ threadKey: activeThreadKey, messageId: null });
+  if (timelineAnchor.threadKey !== activeThreadKey) {
+    setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
+  }
+  const timelineAnchorMessageId = timelineAnchor.messageId;
   const activeRightPanelKind = useRightPanelStore((state) =>
     selectActiveRightPanel(state.byThreadKey, activeThreadRef),
   );
@@ -1795,9 +1839,6 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThread) {
       return;
     }
-    // ponytail: skip pruning until the thread's activities have hydrated, otherwise
-    // a brief empty-activities window on thread switch would delete restored drafts
-    // (activePendingUserInputRequestIds is derived from threadActivities).
     if (threadActivities === EMPTY_ACTIVITIES && activePendingUserInputRequestIds.length === 0) {
       return;
     }
@@ -1824,10 +1865,12 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const suppressedPendingCustomRestoreRef = useRef<{
     requestId: string | null;
+    questionId: string | null;
     value: string | null;
     expiresAtMs: number;
   }>({
     requestId: null,
+    questionId: null,
     value: null,
     expiresAtMs: 0,
   });
@@ -1842,6 +1885,7 @@ function ChatViewContent(props: ChatViewProps) {
       };
       suppressedPendingCustomRestoreRef.current = {
         requestId: null,
+        questionId: null,
         value: null,
         expiresAtMs: 0,
       };
@@ -1872,17 +1916,24 @@ function ChatViewContent(props: ChatViewProps) {
     if (!questionChanged && !textChangedExternally) {
       return;
     }
+    if (
+      !questionChanged &&
+      nextCustomAnswer.length === 0 &&
+      promptRef.current.length > 0 &&
+      promptRef.current.trim().length === 0
+    ) {
+      return;
+    }
 
     promptRef.current = nextCustomAnswer;
-    const nextCursor = collapseExpandedComposerCursor(nextCustomAnswer, nextCustomAnswer.length);
-    setComposerCursor(nextCursor);
-    setComposerTrigger(
-      detectComposerTrigger(
-        nextCustomAnswer,
-        expandCollapsedComposerCursor(nextCustomAnswer, nextCursor),
-      ),
-    );
-    setComposerHighlightedItemId(null);
+    const nextCursor = questionChanged
+      ? collapseExpandedComposerCursor(nextCustomAnswer, nextCustomAnswer.length)
+      : (composerRef.current?.readSnapshot().cursor ?? nextCustomAnswer.length);
+    composerRef.current?.resetCursorState({
+      cursor: nextCursor,
+      prompt: nextCustomAnswer,
+      detectTrigger: true,
+    });
   }, [
     activePendingProgress?.activeDraft?.answerSource,
     activePendingProgress?.customAnswer,
@@ -2085,7 +2136,6 @@ function ChatViewContent(props: ChatViewProps) {
         : // Spread only fires for the few messages that actually changed;
           // unchanged ones early-return their original reference.
           // In-place mutation would break React's immutable state contract.
-          // oxlint-disable-next-line no-map-spread
           messages.map((message) => {
             if (
               message.role !== "user" ||
@@ -3221,31 +3271,328 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
-  // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
-  const scrollToEnd = useCallback((animated = false) => {
-    legendListRef.current?.scrollToEnd?.({ animated });
-  }, []);
-
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
-  // thread switches.  LegendList fires scroll events with isAtEnd=false while
+  // thread switches. LegendList fires scroll events with isAtEnd=false while
   // initialScrollAtEnd is settling; hiding is always immediate.
   const showScrollDebouncer = useRef(
     new Debouncer(() => setShowScrollToBottom(true), { wait: 150 }),
   );
+  const timelineScrollModeRef = useRef<TimelineScrollMode>("following-end");
+  const pendingTimelineAnchorRef = useRef<MessageId | null>(null);
+  const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
+  const settledTimelineAnchorRef = useRef<MessageId | null>(null);
+  const activeTimelineAnchorIndexRef = useRef<number | null>(null);
+  const anchorUserScrollGenerationRef = useRef(0);
+  const liveFollowUserScrollGenerationRef = useRef<number | null>(0);
+  const pendingAnchorScrollRestoreRef = useRef<{
+    readonly messageId: MessageId;
+    readonly offset: number;
+    readonly userScrollGeneration: number;
+  } | null>(null);
+  const anchorScrollRestoreFrameRef = useRef<number | null>(null);
+  const cancelTimelineLiveFollowForUserNavigation = useCallback(() => {
+    anchorUserScrollGenerationRef.current += 1;
+    timelineScrollModeRef.current = "free-scrolling";
+    liveFollowUserScrollGenerationRef.current = null;
+    pendingTimelineAnchorRef.current = null;
+    positionedTimelineAnchorRef.current = null;
+    settledTimelineAnchorRef.current = null;
+    activeTimelineAnchorIndexRef.current = null;
+    pendingAnchorScrollRestoreRef.current = null;
+    if (anchorScrollRestoreFrameRef.current !== null) {
+      cancelAnimationFrame(anchorScrollRestoreFrameRef.current);
+      anchorScrollRestoreFrameRef.current = null;
+    }
+  }, []);
+  const cancelTimelineLiveFollowForUserNavigationRef = useRef(
+    cancelTimelineLiveFollowForUserNavigation,
+  );
+  useEffect(() => {
+    cancelTimelineLiveFollowForUserNavigationRef.current =
+      cancelTimelineLiveFollowForUserNavigation;
+  }, [cancelTimelineLiveFollowForUserNavigation]);
+  const getActiveTimelineTurnMetrics = useCallback(
+    (list?: LegendListRef | null) => {
+      const resolvedList = list ?? legendListRef.current;
+      const anchorIndex = activeTimelineAnchorIndexRef.current;
+      const state = resolvedList?.getState();
+      if (!resolvedList || !state || anchorIndex === null) {
+        return null;
+      }
+
+      return getAnchoredTurnMetrics({
+        state,
+        anchorIndex,
+        composerOverlayHeight,
+        anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
+      });
+    },
+    [composerOverlayHeight],
+  );
+  const timelineRealContentOverflowsViewport = useCallback(
+    (list?: LegendListRef | null) => {
+      const resolvedList = list ?? legendListRef.current;
+      const state = resolvedList?.getState();
+      if (!resolvedList || !state || state.data.length === 0) {
+        return false;
+      }
+
+      const lastRowIndex = state.data.length - 1;
+      const lastRowTop = state.positionAtIndex(lastRowIndex);
+      const lastRowHeight = state.sizeAtIndex(lastRowIndex);
+      if (
+        typeof lastRowTop !== "number" ||
+        typeof lastRowHeight !== "number" ||
+        !Number.isFinite(lastRowTop) ||
+        !Number.isFinite(lastRowHeight)
+      ) {
+        return false;
+      }
+
+      const realContentBottom = lastRowTop + Math.max(1, lastRowHeight);
+      const visibleScrollLength = Math.max(
+        0,
+        (state.scrollLength ?? 0) - composerOverlayHeight - CHAT_LIST_ANCHOR_OFFSET,
+      );
+      return realContentBottom > visibleScrollLength;
+    },
+    [composerOverlayHeight],
+  );
+
+  // Live-follow stays active after send/thread-open until an actual list scroll
+  // gesture opts out.
+  const scrollToEnd = useCallback((animated = false) => {
+    isAtEndRef.current = true;
+    timelineScrollModeRef.current = "following-end";
+    liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+    pendingTimelineAnchorRef.current = null;
+    activeTimelineAnchorIndexRef.current = null;
+    showScrollDebouncer.current.cancel();
+    setShowScrollToBottom(false);
+    void legendListRef.current?.scrollToEnd?.({ animated });
+  }, []);
+  useEffect(() => {
+    let removeListeners: (() => void) | null = null;
+    const frame = requestAnimationFrame(() => {
+      const scrollNode = legendListRef.current?.getScrollableNode();
+      if (!scrollNode) {
+        return;
+      }
+      const handleManualNavigation = () => {
+        cancelTimelineLiveFollowForUserNavigationRef.current();
+      };
+      scrollNode.addEventListener("wheel", handleManualNavigation, {
+        passive: true,
+      });
+      scrollNode.addEventListener("touchmove", handleManualNavigation, {
+        passive: true,
+      });
+      scrollNode.addEventListener("pointerdown", handleManualNavigation, {
+        passive: true,
+      });
+      removeListeners = () => {
+        scrollNode.removeEventListener("wheel", handleManualNavigation);
+        scrollNode.removeEventListener("touchmove", handleManualNavigation);
+        scrollNode.removeEventListener("pointerdown", handleManualNavigation);
+      };
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      removeListeners?.();
+    };
+  }, [activeThread?.id]);
+
+  const onTimelineAnchorReady = useCallback((messageId: MessageId, anchorIndex: number) => {
+    if (pendingTimelineAnchorRef.current === messageId) {
+      pendingTimelineAnchorRef.current = null;
+    }
+    activeTimelineAnchorIndexRef.current = anchorIndex;
+    if (positionedTimelineAnchorRef.current === messageId) {
+      return;
+    }
+    positionedTimelineAnchorRef.current = messageId;
+    settledTimelineAnchorRef.current = null;
+    const positionAnchor = (remainingAttempts: number) => {
+      requestAnimationFrame(() => {
+        if (positionedTimelineAnchorRef.current !== messageId) {
+          return;
+        }
+        const list = legendListRef.current;
+        if (!list) {
+          if (remainingAttempts > 0) {
+            positionAnchor(remainingAttempts - 1);
+          }
+          return;
+        }
+        const scrollNode = list.getScrollableNode();
+        let finished = false;
+        const finishAnimatedPositioning = () => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          window.clearTimeout(fallbackTimer);
+          scrollNode.removeEventListener("scrollend", finishAnimatedPositioning);
+          if (positionedTimelineAnchorRef.current !== messageId) {
+            return;
+          }
+          const scrollOffset = list.getState().scroll;
+          void list.scrollToOffset({ offset: scrollOffset, animated: false });
+          settledTimelineAnchorRef.current = messageId;
+        };
+        const fallbackTimer = window.setTimeout(finishAnimatedPositioning, 750);
+        scrollNode.addEventListener("scrollend", finishAnimatedPositioning, { once: true });
+        void list.scrollToIndex({
+          index: anchorIndex,
+          animated: true,
+          viewPosition: 0,
+          viewOffset: CHAT_LIST_ANCHOR_OFFSET,
+        });
+      });
+    };
+    requestAnimationFrame(() => positionAnchor(12));
+  }, []);
+  const onTimelineAnchorSizeChanged = useCallback((messageId: MessageId) => {
+    if (settledTimelineAnchorRef.current !== messageId) {
+      return;
+    }
+    if (liveFollowUserScrollGenerationRef.current === anchorUserScrollGenerationRef.current) {
+      return;
+    }
+    const scrollOffset = legendListRef.current?.getState().scroll;
+    if (scrollOffset === undefined) {
+      return;
+    }
+    if (pendingAnchorScrollRestoreRef.current === null) {
+      pendingAnchorScrollRestoreRef.current = {
+        messageId,
+        offset: scrollOffset,
+        userScrollGeneration: anchorUserScrollGenerationRef.current,
+      };
+    }
+    if (anchorScrollRestoreFrameRef.current !== null) {
+      return;
+    }
+    anchorScrollRestoreFrameRef.current = requestAnimationFrame(() => {
+      anchorScrollRestoreFrameRef.current = null;
+      const pending = pendingAnchorScrollRestoreRef.current;
+      pendingAnchorScrollRestoreRef.current = null;
+      if (
+        pending &&
+        settledTimelineAnchorRef.current === pending.messageId &&
+        pending.userScrollGeneration === anchorUserScrollGenerationRef.current
+      ) {
+        const list = legendListRef.current;
+        const currentScrollOffset = list?.getState().scroll;
+        if (
+          typeof currentScrollOffset === "number" &&
+          Math.abs(currentScrollOffset - pending.offset) <= 2
+        ) {
+          void list?.scrollToOffset({ offset: pending.offset, animated: false });
+        }
+      }
+    });
+  }, []);
+
   const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
+    if (
+      !isAtEnd &&
+      liveFollowUserScrollGenerationRef.current === anchorUserScrollGenerationRef.current
+    ) {
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
+      return;
+    }
     if (isAtEndRef.current === isAtEnd) return;
     isAtEndRef.current = isAtEnd;
     if (isAtEnd) {
+      timelineScrollModeRef.current = "following-end";
+      liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
     } else {
+      timelineScrollModeRef.current = "free-scrolling";
+      liveFollowUserScrollGenerationRef.current = null;
       showScrollDebouncer.current.maybeExecute();
     }
   }, []);
 
   useEffect(() => {
+    if (!activeThread?.id) {
+      return;
+    }
+    if (liveFollowUserScrollGenerationRef.current !== anchorUserScrollGenerationRef.current) {
+      return;
+    }
+
+    let secondFrame: number | null = null;
+    const frame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (liveFollowUserScrollGenerationRef.current !== anchorUserScrollGenerationRef.current) {
+          return;
+        }
+        if (pendingTimelineAnchorRef.current !== null) {
+          return;
+        }
+        if (
+          positionedTimelineAnchorRef.current !== null &&
+          settledTimelineAnchorRef.current !== positionedTimelineAnchorRef.current
+        ) {
+          return;
+        }
+        const list = legendListRef.current;
+        if (!list) {
+          return;
+        }
+
+        if (timelineScrollModeRef.current === "anchoring-new-turn") {
+          const metrics = getActiveTimelineTurnMetrics(list);
+          if (!metrics) {
+            return;
+          }
+          if (metrics.scrollDeltaToRevealEnd <= 1) {
+            return;
+          }
+
+          const nextOffset = list.getState().scroll + metrics.scrollDeltaToRevealEnd;
+          void list.scrollToOffset({ offset: nextOffset, animated: false });
+          return;
+        }
+
+        if (timelineScrollModeRef.current !== "following-end") {
+          return;
+        }
+        if (!timelineRealContentOverflowsViewport(list)) {
+          return;
+        }
+
+        void list.scrollToEnd?.({ animated: false });
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      if (secondFrame !== null) {
+        cancelAnimationFrame(secondFrame);
+      }
+    };
+  }, [
+    activeThread?.id,
+    timelineEntries,
+    getActiveTimelineTurnMetrics,
+    timelineRealContentOverflowsViewport,
+  ]);
+
+  useEffect(() => {
     setPullRequestDialogState(null);
     isAtEndRef.current = true;
+    timelineScrollModeRef.current = "following-end";
+    liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+    pendingTimelineAnchorRef.current = null;
+    positionedTimelineAnchorRef.current = null;
+    settledTimelineAnchorRef.current = null;
+    activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
     if (planSidebarOpenOnNextThreadRef.current) {
@@ -3256,7 +3603,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
     planSidebarDismissedForTurnRef.current = null;
     // activeThreadRef resets transitively with the active thread.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeThread?.id]);
 
   // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
@@ -3322,14 +3668,6 @@ function ChatViewContent(props: ChatViewProps) {
       window.clearTimeout(timer);
     };
   }, [activeThread?.id, activeThread?.messages, handoffAttachmentPreviews, optimisticUserMessages]);
-
-  useEffect(() => {
-    if (activePendingProgress?.activeQuestion) {
-      return;
-    }
-    promptRef.current = prompt;
-    setComposerCursor((existing) => clampCollapsedComposerCursor(prompt, existing));
-  }, [activePendingProgress?.activeQuestion, prompt]);
 
   useEffect(() => {
     setOptimisticUserMessages((existing) => {
@@ -3810,14 +4148,20 @@ function ChatViewContent(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
-    // Scroll to the current end *before* adding the optimistic message.
-    // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
-    // automatically pins to the new item when the data changes.
+    // Sending always returns to the live edge. The new row becomes the
+    // anchored end-space target so it lands near the top while the response
+    // streams into the reserved space below it.
     isAtEndRef.current = true;
+    timelineScrollModeRef.current = "anchoring-new-turn";
+    liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+    pendingTimelineAnchorRef.current = messageIdForSend;
+    activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    await legendListRef.current?.scrollToEnd?.({ animated: false });
-
+    setTimelineAnchor({
+      threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+      messageId: messageIdForSend,
+    });
     setOptimisticUserMessages((existing) => [
       ...existing,
       {
@@ -3831,7 +4175,6 @@ function ChatViewContent(props: ChatViewProps) {
         streaming: false,
       },
     ]);
-
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
@@ -4021,9 +4364,7 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThread) return;
     const result = await interruptThreadTurn({
       environmentId,
-      input: {
-        threadId: activeThread.id,
-      },
+      input: buildThreadTurnInterruptInput(activeThread),
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
@@ -4064,28 +4405,33 @@ function ChatViewContent(props: ChatViewProps) {
 
   const onRespondToUserInput = useCallback(
     async (requestId: ApprovalRequestId, answers: Record<string, unknown>) => {
-      if (!activeThreadId) return;
+      if (!activeThreadId || respondingUserInputRequestIdSetRef.current.has(requestId)) return;
 
+      respondingUserInputRequestIdSetRef.current.add(requestId);
       setRespondingUserInputRequestIds((existing) =>
         existing.includes(requestId) ? existing : [...existing, requestId],
       );
-      const result = await respondToThreadUserInput({
-        environmentId,
-        input: {
-          threadId: activeThreadId,
-          requestId,
-          answers,
-        },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : "Failed to submit user input.",
-        );
+      try {
+        const result = await respondToThreadUserInput({
+          environmentId,
+          input: {
+            threadId: activeThreadId,
+            requestId,
+            answers,
+          },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to submit user input.",
+          );
+        }
+        return result;
+      } finally {
+        respondingUserInputRequestIdSetRef.current.delete(requestId);
+        setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
       }
-      setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
-      return result;
     },
     [activeThreadId, environmentId, respondToThreadUserInput, setThreadError],
   );
@@ -4113,7 +4459,7 @@ function ChatViewContent(props: ChatViewProps) {
         submitIfComplete?: boolean;
       },
     ) => {
-      if (!activePendingUserInput) {
+      if (!activePendingUserInput || activePendingIsResponding) {
         return;
       }
       const question =
@@ -4135,16 +4481,15 @@ function ChatViewContent(props: ChatViewProps) {
         questionId,
         source: "option",
       };
-      if (!isMultiSelect) {
-        suppressedPendingCustomRestoreRef.current = {
-          requestId: activePendingUserInput.requestId,
-          value:
-            typeof previousDraft?.customAnswer === "string" && previousDraft.customAnswer.length > 0
-              ? previousDraft.customAnswer
-              : null,
-          expiresAtMs: performance.now() + PENDING_CUSTOM_RESTORE_SUPPRESSION_MS,
-        };
-      }
+      suppressedPendingCustomRestoreRef.current = {
+        requestId: activePendingUserInput.requestId,
+        questionId,
+        value:
+          typeof previousDraft?.customAnswer === "string" && previousDraft.customAnswer.length > 0
+            ? previousDraft.customAnswer
+            : null,
+        expiresAtMs: performance.now() + PENDING_CUSTOM_RESTORE_SUPPRESSION_MS,
+      };
       setPendingUserInputDraftAnswer(
         threadId,
         activePendingUserInput.requestId,
@@ -4152,9 +4497,7 @@ function ChatViewContent(props: ChatViewProps) {
         nextDraftAnswer,
       );
       promptRef.current = "";
-      setComposerCursor(0);
-      setComposerTrigger(null);
-      setComposerHighlightedItemId(null);
+      composerRef.current?.resetCursorState({ cursor: 0, prompt: "" });
       // Multi-select toggles in place; single-select advances or submits.
       if (isMultiSelect) {
         return;
@@ -4166,7 +4509,16 @@ function ChatViewContent(props: ChatViewProps) {
         });
         if (nextResolvedAnswers) {
           void onRespondToUserInput(activePendingUserInput.requestId, nextResolvedAnswers);
+          return;
         }
+        setPendingUserInputDraftQuestionIndex(
+          threadId,
+          activePendingUserInput.requestId,
+          findFirstUnansweredPendingUserInputQuestionIndex(activePendingUserInput.questions, {
+            ...activePendingDraftAnswers,
+            [questionId]: nextDraftAnswer,
+          }),
+        );
         return;
       }
       if (
@@ -4185,6 +4537,7 @@ function ChatViewContent(props: ChatViewProps) {
       activePendingDraftAnswers,
       activePendingProgress,
       activePendingUserInput,
+      activePendingIsResponding,
       onRespondToUserInput,
       setPendingUserInputDraftAnswer,
       setPendingUserInputDraftQuestionIndex,
@@ -4196,23 +4549,26 @@ function ChatViewContent(props: ChatViewProps) {
     (
       questionId: string,
       value: string,
-      nextCursor: number,
-      expandedCursor: number,
-      cursorAdjacentToMention: boolean,
+      _nextCursor: number,
+      _expandedCursor: number,
+      _cursorAdjacentToMention: boolean,
     ) => {
       if (!activePendingUserInput) {
         return;
       }
+      const suppressedRestore = suppressedPendingCustomRestoreRef.current;
       if (
-        suppressedPendingCustomRestoreRef.current.requestId === activePendingUserInput.requestId &&
-        suppressedPendingCustomRestoreRef.current.value !== null &&
-        suppressedPendingCustomRestoreRef.current.value === value &&
-        suppressedPendingCustomRestoreRef.current.expiresAtMs >= performance.now()
+        suppressedRestore.requestId === activePendingUserInput.requestId &&
+        suppressedRestore.questionId === questionId &&
+        suppressedRestore.value !== null &&
+        suppressedRestore.value === value &&
+        suppressedRestore.expiresAtMs >= performance.now()
       ) {
         return;
       }
       suppressedPendingCustomRestoreRef.current = {
         requestId: null,
+        questionId: null,
         value: null,
         expiresAtMs: 0,
       };
@@ -4239,10 +4595,6 @@ function ChatViewContent(props: ChatViewProps) {
         questionId,
         setPendingUserInputCustomAnswer(activePendingDraftAnswers[questionId], value),
       );
-      setComposerCursor(nextCursor);
-      setComposerTrigger(
-        cursorAdjacentToMention ? null : detectComposerTrigger(value, expandedCursor),
-      );
     },
     [activePendingDraftAnswers, activePendingUserInput, setPendingUserInputDraftAnswer, threadId],
   );
@@ -4252,13 +4604,25 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (activePendingProgress.isLastQuestion) {
+      if (activePendingIsResponding) {
+        return;
+      }
       if (activePendingResolvedAnswers) {
         void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
+        return;
       }
+      setActivePendingUserInputQuestionIndex(
+        findFirstUnansweredPendingUserInputQuestionIndex(
+          activePendingUserInput.questions,
+          activePendingDraftAnswers,
+        ),
+      );
       return;
     }
     setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
   }, [
+    activePendingDraftAnswers,
+    activePendingIsResponding,
     activePendingProgress,
     activePendingResolvedAnswers,
     activePendingUserInput,
@@ -4323,11 +4687,18 @@ function ChatViewContent(props: ChatViewProps) {
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(threadIdForSend, null);
 
-      // Scroll to the current end *before* adding the optimistic message.
+      // Position this sent row once LegendList has measured the anchored tail.
       isAtEndRef.current = true;
+      timelineScrollModeRef.current = "anchoring-new-turn";
+      liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+      pendingTimelineAnchorRef.current = messageIdForSend;
+      activeTimelineAnchorIndexRef.current = null;
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
-      await legendListRef.current?.scrollToEnd?.({ animated: false });
+      setTimelineAnchor({
+        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+        messageId: messageIdForSend,
+      });
 
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -4860,9 +5231,6 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {isElectron && activeThreadRef ? (
-        <PreviewAutomationOwner threadRef={activeThreadRef} visible={previewPanelOpen} />
-      ) : null}
       {rightPanelOpen && !shouldUsePlanSidebarSheet ? panelLayoutControls : null}
       <div
         className={cn(
@@ -4875,7 +5243,7 @@ function ChatViewContent(props: ChatViewProps) {
         <header
           data-chat-header
           className={cn(
-            "border-b border-border",
+            "border-b border-border transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none",
             isElectron
               ? cn(
                   "workspace-topbar drag-region relative px-3 sm:px-5",
@@ -4884,6 +5252,7 @@ function ChatViewContent(props: ChatViewProps) {
                     "wco:pr-[var(--workspace-native-controls-inset)]",
                 )
               : "workspace-topbar pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
           {!rightPanelOpen ? panelLayoutControls : null}
@@ -4918,7 +5287,7 @@ function ChatViewContent(props: ChatViewProps) {
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
@@ -4930,6 +5299,11 @@ function ChatViewContent(props: ChatViewProps) {
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
                 latestTurn={activeLatestTurn}
+                runningTurnId={
+                  activeThread.session?.status === "running"
+                    ? activeThread.session.activeTurnId
+                    : null
+                }
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
@@ -4943,19 +5317,29 @@ function ChatViewContent(props: ChatViewProps) {
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
+                anchorMessageId={timelineAnchorMessageId}
+                onAnchorReady={onTimelineAnchorReady}
+                onAnchorSizeChanged={onTimelineAnchorSizeChanged}
+                contentInsetEndAdjustment={composerOverlayHeight}
                 onIsAtEndChange={onIsAtEndChange}
+                onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
               />
 
-              {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
+              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
               {showScrollToBottom && (
-                <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+                <div
+                  className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
+                  style={{ bottom: composerOverlayHeight + 4 }}
+                >
                   <button
                     type="button"
+                    aria-label="Scroll to end"
+                    title="Scroll to end"
                     onClick={() => scrollToEnd(true)}
                     className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    Scroll to bottom
+                    Scroll to end
                   </button>
                 </div>
               )}
@@ -4963,114 +5347,132 @@ function ChatViewContent(props: ChatViewProps) {
 
             {/* Input bar */}
             <div
-              className={cn(
-                "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
-                isGitRepo
-                  ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
-                  : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
-              )}
+              ref={setComposerOverlayElement}
+              data-chat-composer-overlay="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
             >
-              <div className="relative isolate">
-                <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
-                <div className="relative z-10">
-                  <ChatComposer
-                    composerRef={composerRef}
-                    composerDraftTarget={composerDraftTarget}
-                    environmentId={environmentId}
-                    routeKind={routeKind}
-                    routeThreadRef={routeThreadRef}
-                    draftId={draftId}
-                    activeThreadId={activeThreadId}
-                    activeThreadEnvironmentId={activeThread?.environmentId}
-                    activeThread={activeThread}
-                    isServerThread={isServerThread}
-                    isLocalDraftThread={isLocalDraftThread}
-                    phase={phase}
-                    isConnecting={isConnecting}
-                    isSendBusy={isSendBusy}
-                    isPreparingWorktree={isPreparingWorktree}
-                    environmentUnavailable={activeEnvironmentUnavailableState}
-                    activePendingApproval={activePendingApproval}
-                    pendingApprovals={pendingApprovals}
-                    pendingUserInputs={pendingUserInputs}
-                    activePendingProgress={activePendingProgress}
-                    activePendingResolvedAnswers={activePendingResolvedAnswers}
-                    activePendingIsResponding={activePendingIsResponding}
-                    activePendingDraftAnswers={activePendingDraftAnswers}
-                    activePendingQuestionIndex={activePendingQuestionIndex}
-                    respondingRequestIds={respondingRequestIds}
-                    showPlanFollowUpPrompt={showPlanFollowUpPrompt}
-                    activeProposedPlan={activeProposedPlan}
-                    activePlan={activePlan as { turnId?: TurnId } | null}
-                    sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
-                    planSidebarLabel={planSidebarLabel}
-                    planSidebarOpen={planSidebarOpen}
-                    runtimeMode={runtimeMode}
-                    interactionMode={interactionMode}
-                    lockedProvider={lockedProvider}
-                    providerStatuses={providerStatuses as ServerProvider[]}
-                    activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
-                    activeThreadModelSelection={activeThread?.modelSelection}
-                    activeThreadActivities={activeThread?.activities}
-                    resolvedTheme={resolvedTheme}
-                    settings={settings}
-                    keybindings={keybindings}
-                    terminalOpen={Boolean(terminalUiState.terminalOpen)}
-                    gitCwd={gitCwd}
-                    promptRef={promptRef}
-                    composerImagesRef={composerImagesRef}
-                    composerTerminalContextsRef={composerTerminalContextsRef}
-                    composerElementContextsRef={composerElementContextsRef}
-                    shouldAutoScrollRef={isAtEndRef}
-                    scheduleStickToBottom={scrollToEnd}
-                    onSend={onSend}
-                    onInterrupt={onInterrupt}
-                    onImplementPlanInNewThread={onImplementPlanInNewThread}
-                    onRespondToApproval={onRespondToApproval}
-                    onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
-                    onPreviousActivePendingUserInputQuestion={
-                      onPreviousActivePendingUserInputQuestion
-                    }
-                    onChangeActivePendingUserInputCustomAnswer={
-                      onChangeActivePendingUserInputCustomAnswer
-                    }
-                    onProviderModelSelect={onProviderModelSelect}
-                    getModelDisabledReason={getModelDisabledReason}
-                    toggleInteractionMode={toggleInteractionMode}
-                    handleRuntimeModeChange={handleRuntimeModeChange}
-                    handleInteractionModeChange={handleInteractionModeChange}
-                    togglePlanSidebar={togglePlanSidebar}
-                    focusComposer={focusComposer}
-                    scheduleComposerFocus={scheduleComposerFocus}
-                    setThreadError={setThreadError}
-                    onExpandImage={onExpandTimelineImage}
-                  />
+              <div
+                aria-hidden="true"
+                className="chat-composer-horizontal-inset pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 sm:top-2"
+              >
+                <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
+                  <div className="chat-composer-shared-blur absolute -inset-8" />
                 </div>
               </div>
-              {isGitRepo && (
-                <BranchToolbar
-                  environmentId={activeThread.environmentId}
-                  threadId={activeThread.id}
-                  {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                  onEnvModeChange={onEnvModeChange}
-                  startFromOrigin={startFromOrigin}
-                  onStartFromOriginChange={onStartFromOriginChange}
-                  {...(canOverrideServerThreadEnvMode ? { effectiveEnvModeOverride: envMode } : {})}
-                  {...(canOverrideServerThreadEnvMode
-                    ? {
-                        activeThreadBranchOverride: activeThreadBranch,
-                        onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+              <div className="chat-composer-horizontal-inset">
+                <div className="pointer-events-auto relative z-10 isolate">
+                  <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                  <div className="relative z-10">
+                    <ChatComposer
+                      composerRef={composerRef}
+                      composerDraftTarget={composerDraftTarget}
+                      environmentId={environmentId}
+                      routeKind={routeKind}
+                      routeThreadRef={routeThreadRef}
+                      draftId={draftId}
+                      activeThreadId={activeThreadId}
+                      activeThreadEnvironmentId={activeThread?.environmentId}
+                      activeThread={activeThread}
+                      isServerThread={isServerThread}
+                      isLocalDraftThread={isLocalDraftThread}
+                      phase={phase}
+                      isConnecting={isConnecting}
+                      isSendBusy={isSendBusy}
+                      isPreparingWorktree={isPreparingWorktree}
+                      environmentUnavailable={activeEnvironmentUnavailableState}
+                      activePendingApproval={activePendingApproval}
+                      pendingApprovals={pendingApprovals}
+                      pendingUserInputs={pendingUserInputs}
+                      activePendingProgress={activePendingProgress}
+                      activePendingResolvedAnswers={activePendingResolvedAnswers}
+                      activePendingIsResponding={activePendingIsResponding}
+                      activePendingDraftAnswers={activePendingDraftAnswers}
+                      activePendingQuestionIndex={activePendingQuestionIndex}
+                      respondingRequestIds={respondingRequestIds}
+                      showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+                      activeProposedPlan={activeProposedPlan}
+                      activePlan={activePlan as { turnId?: TurnId } | null}
+                      sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
+                      planSidebarLabel={planSidebarLabel}
+                      planSidebarOpen={planSidebarOpen}
+                      runtimeMode={runtimeMode}
+                      interactionMode={interactionMode}
+                      lockedProvider={lockedProvider}
+                      providerStatuses={providerStatuses as ServerProvider[]}
+                      activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
+                      activeThreadModelSelection={activeThread?.modelSelection}
+                      activeThreadActivities={activeThread?.activities}
+                      resolvedTheme={resolvedTheme}
+                      settings={settings}
+                      keybindings={keybindings}
+                      terminalOpen={Boolean(terminalUiState.terminalOpen)}
+                      gitCwd={gitCwd}
+                      promptRef={promptRef}
+                      composerImagesRef={composerImagesRef}
+                      composerTerminalContextsRef={composerTerminalContextsRef}
+                      composerElementContextsRef={composerElementContextsRef}
+                      onSend={onSend}
+                      onInterrupt={onInterrupt}
+                      onImplementPlanInNewThread={onImplementPlanInNewThread}
+                      onRespondToApproval={onRespondToApproval}
+                      onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
+                      onPreviousActivePendingUserInputQuestion={
+                        onPreviousActivePendingUserInputQuestion
                       }
-                    : {})}
-                  envLocked={envLocked}
-                  onComposerFocusRequest={scheduleComposerFocus}
-                  {...(canCheckoutPullRequestIntoThread
-                    ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                    : {})}
-                  {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                  availableEnvironments={logicalProjectEnvironments}
-                />
-              )}
+                      onChangeActivePendingUserInputCustomAnswer={
+                        onChangeActivePendingUserInputCustomAnswer
+                      }
+                      onProviderModelSelect={onProviderModelSelect}
+                      getModelDisabledReason={getModelDisabledReason}
+                      toggleInteractionMode={toggleInteractionMode}
+                      handleRuntimeModeChange={handleRuntimeModeChange}
+                      handleInteractionModeChange={handleInteractionModeChange}
+                      togglePlanSidebar={togglePlanSidebar}
+                      focusComposer={focusComposer}
+                      scheduleComposerFocus={scheduleComposerFocus}
+                      setThreadError={setThreadError}
+                      onExpandImage={onExpandTimelineImage}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div
+                className={cn(
+                  "chat-composer-horizontal-inset chat-composer-lower-chrome relative z-10",
+                  isGitRepo
+                    ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
+                    : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+                )}
+              >
+                {isGitRepo && (
+                  <div className="pointer-events-auto">
+                    <BranchToolbar
+                      environmentId={activeThread.environmentId}
+                      threadId={activeThread.id}
+                      {...(routeKind === "draft" && draftId ? { draftId } : {})}
+                      onEnvModeChange={onEnvModeChange}
+                      startFromOrigin={startFromOrigin}
+                      onStartFromOriginChange={onStartFromOriginChange}
+                      {...(canOverrideServerThreadEnvMode
+                        ? { effectiveEnvModeOverride: envMode }
+                        : {})}
+                      {...(canOverrideServerThreadEnvMode
+                        ? {
+                            activeThreadBranchOverride: activeThreadBranch,
+                            onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                          }
+                        : {})}
+                      envLocked={envLocked}
+                      onComposerFocusRequest={scheduleComposerFocus}
+                      {...(canCheckoutPullRequestIntoThread
+                        ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+                        : {})}
+                      {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                      availableEnvironments={logicalProjectEnvironments}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {pullRequestDialogState ? (

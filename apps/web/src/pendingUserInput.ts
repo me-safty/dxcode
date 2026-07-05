@@ -89,7 +89,7 @@ export function setPendingUserInputCustomAnswer(
   // whitespace custom text that resolves to no answer but clutters the store.
   const storedCustomAnswer = normalizedCustomAnswer ? customAnswer : "";
   const selectedOptionLabels = normalizedCustomAnswer
-    ? undefined
+    ? []
     : normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
   const answerSource: PendingUserInputAnswerSource | undefined = normalizedCustomAnswer
     ? "custom"
@@ -100,7 +100,7 @@ export function setPendingUserInputCustomAnswer(
   return {
     ...(answerSource ? { answerSource } : {}),
     customAnswer: storedCustomAnswer,
-    ...(selectedOptionLabels && selectedOptionLabels.length > 0 ? { selectedOptionLabels } : {}),
+    ...(selectedOptionLabels.length > 0 ? { selectedOptionLabels } : {}),
   };
 }
 
@@ -116,11 +116,10 @@ export function togglePendingUserInputOptionSelection(
       : [...selectedOptionLabels, optionLabel];
 
     return {
-      answerSource: nextSelectedOptionLabels.length > 0 ? "option" : undefined,
-      customAnswer: "",
       ...(nextSelectedOptionLabels.length > 0
-        ? { selectedOptionLabels: nextSelectedOptionLabels }
+        ? { answerSource: "option" as const, selectedOptionLabels: nextSelectedOptionLabels }
         : {}),
+      customAnswer: "",
     };
   }
 
