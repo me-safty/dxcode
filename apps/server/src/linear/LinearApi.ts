@@ -13,9 +13,18 @@ import {
   type LinearAuthStatus,
   type LinearComment,
   type LinearIssueDetail,
+  type LinearIssueFilter,
   type LinearIssueSummary,
+  type LinearLabel,
   type LinearLinkedPullRequest,
+  type LinearListIssuesResult,
+  type LinearMutationResult,
+  type LinearProject,
   type LinearSubIssue,
+  type LinearTeam,
+  type LinearUser,
+  type LinearWorkflowState,
+  type LinearWorkflowStateType,
 } from "@t3tools/contracts";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
@@ -44,7 +53,18 @@ const GraphQlErrorEntry = Schema.Struct({
 
 const NamedNode = Schema.Struct({ name: Schema.optional(Schema.String) });
 
+const StateNode = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
+});
+
+const TeamRef = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  key: Schema.optional(Schema.String),
+});
+
 const RawViewer = Schema.Struct({
+  id: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
   email: Schema.optional(Schema.String),
 });
@@ -55,9 +75,9 @@ const RawIssueSummary = Schema.Struct({
   title: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),
   priorityLabel: Schema.optional(Schema.String),
-  state: Schema.optional(Schema.NullOr(NamedNode)),
+  state: Schema.optional(Schema.NullOr(StateNode)),
   assignee: Schema.optional(Schema.NullOr(NamedNode)),
-  team: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.optional(Schema.String) }))),
+  team: Schema.optional(Schema.NullOr(TeamRef)),
 });
 
 const RawIssueConnection = Schema.Struct({
@@ -71,9 +91,9 @@ const RawIssueDetail = Schema.Struct({
   url: Schema.optional(Schema.String),
   description: Schema.optional(Schema.NullOr(Schema.String)),
   priorityLabel: Schema.optional(Schema.String),
-  state: Schema.optional(Schema.NullOr(NamedNode)),
+  state: Schema.optional(Schema.NullOr(StateNode)),
   assignee: Schema.optional(Schema.NullOr(NamedNode)),
-  team: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.optional(Schema.String) }))),
+  team: Schema.optional(Schema.NullOr(TeamRef)),
   labels: Schema.optional(Schema.NullOr(Schema.Struct({ nodes: Schema.Array(NamedNode) }))),
   children: Schema.optional(
     Schema.NullOr(
@@ -142,9 +162,134 @@ const issueEnvelope = Schema.Struct({
   errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
 });
 
+const RawPageInfo = Schema.Struct({
+  hasNextPage: Schema.optional(Schema.Boolean),
+  endCursor: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const RawIssuePage = Schema.Struct({
+  nodes: Schema.Array(RawIssueSummary),
+  pageInfo: Schema.optional(RawPageInfo),
+});
+
+const listEnvelope = Schema.Struct({
+  data: Schema.optional(
+    Schema.NullOr(Schema.Struct({ issues: Schema.optional(Schema.NullOr(RawIssuePage)) })),
+  ),
+  errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
+});
+
+const RawTeam = Schema.Struct({
+  id: Schema.String,
+  key: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+});
+const teamsEnvelope = Schema.Struct({
+  data: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        teams: Schema.optional(Schema.NullOr(Schema.Struct({ nodes: Schema.Array(RawTeam) }))),
+      }),
+    ),
+  ),
+  errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
+});
+
+const RawState = Schema.Struct({
+  id: Schema.String,
+  name: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
+  position: Schema.optional(Schema.Number),
+  color: Schema.optional(Schema.NullOr(Schema.String)),
+});
+const statesEnvelope = Schema.Struct({
+  data: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        team: Schema.optional(
+          Schema.NullOr(
+            Schema.Struct({
+              states: Schema.optional(
+                Schema.NullOr(Schema.Struct({ nodes: Schema.Array(RawState) })),
+              ),
+            }),
+          ),
+        ),
+      }),
+    ),
+  ),
+  errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
+});
+
+const RawProject = Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.String) });
+const projectsEnvelope = Schema.Struct({
+  data: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        projects: Schema.optional(
+          Schema.NullOr(Schema.Struct({ nodes: Schema.Array(RawProject) })),
+        ),
+      }),
+    ),
+  ),
+  errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
+});
+
+const RawLabel = Schema.Struct({
+  id: Schema.String,
+  name: Schema.optional(Schema.String),
+  color: Schema.optional(Schema.NullOr(Schema.String)),
+});
+const labelsEnvelope = Schema.Struct({
+  data: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        issueLabels: Schema.optional(
+          Schema.NullOr(Schema.Struct({ nodes: Schema.Array(RawLabel) })),
+        ),
+      }),
+    ),
+  ),
+  errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
+});
+
+const RawUser = Schema.Struct({
+  id: Schema.String,
+  name: Schema.optional(Schema.String),
+  displayName: Schema.optional(Schema.String),
+  email: Schema.optional(Schema.String),
+});
+const usersEnvelope = Schema.Struct({
+  data: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        users: Schema.optional(Schema.NullOr(Schema.Struct({ nodes: Schema.Array(RawUser) }))),
+        viewer: Schema.optional(
+          Schema.NullOr(Schema.Struct({ id: Schema.optional(Schema.String) })),
+        ),
+      }),
+    ),
+  ),
+  errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
+});
+
+const SuccessNode = Schema.Struct({ success: Schema.optional(Schema.Boolean) });
+const mutationEnvelope = Schema.Struct({
+  data: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        issueUpdate: Schema.optional(Schema.NullOr(SuccessNode)),
+        commentCreate: Schema.optional(Schema.NullOr(SuccessNode)),
+        attachmentCreate: Schema.optional(Schema.NullOr(SuccessNode)),
+      }),
+    ),
+  ),
+  errors: Schema.optional(Schema.Array(GraphQlErrorEntry)),
+});
+
 // ── GraphQL documents ────────────────────────────────────────────────
 
-const SUMMARY_FIELDS = `id identifier title url priorityLabel state { name } assignee { name } team { key }`;
+const SUMMARY_FIELDS = `id identifier title url priorityLabel state { name type } assignee { name } team { id key }`;
 
 const SEARCH_DOCUMENT = `query T3CodeLinearSearch($term: String!, $first: Int!) {
   searchIssues(term: $term, first: $first) { nodes { ${SUMMARY_FIELDS} } }
@@ -154,12 +299,31 @@ const RECENT_DOCUMENT = `query T3CodeLinearRecent($first: Int!) {
   issues(first: $first, orderBy: updatedAt) { nodes { ${SUMMARY_FIELDS} } }
 }`;
 
+const LIST_ISSUES_DOCUMENT = `query T3CodeLinearList($filter: IssueFilter, $first: Int!, $after: String) {
+  issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
+    nodes { ${SUMMARY_FIELDS} }
+    pageInfo { hasNextPage endCursor }
+  }
+}`;
+
+const TEAMS_DOCUMENT = `query T3CodeLinearTeams { teams(first: 250) { nodes { id key name } } }`;
+
+const STATES_DOCUMENT = `query T3CodeLinearStates($teamId: String!) {
+  team(id: $teamId) { states { nodes { id name type position color } } }
+}`;
+
+const PROJECTS_DOCUMENT = `query T3CodeLinearProjects { projects(first: 250) { nodes { id name } } }`;
+
+const LABELS_DOCUMENT = `query T3CodeLinearLabels { issueLabels(first: 250) { nodes { id name color } } }`;
+
+const USERS_DOCUMENT = `query T3CodeLinearUsers { users(first: 250) { nodes { id name displayName email } } viewer { id } }`;
+
 const ISSUE_DOCUMENT = `query T3CodeLinearIssue($id: String!, $relations: Int!) {
   issue(id: $id) {
     id identifier title url description priorityLabel
-    state { name }
+    state { name type }
     assignee { name }
-    team { key }
+    team { id key }
     labels(first: $relations) { nodes { name } }
     children(first: $relations) { nodes { identifier title state { name } } }
     attachments(first: $relations) { nodes { title url sourceType } }
@@ -167,13 +331,40 @@ const ISSUE_DOCUMENT = `query T3CodeLinearIssue($id: String!, $relations: Int!) 
   }
 }`;
 
-const VIEWER_DOCUMENT = `query T3CodeLinearViewer { viewer { name email } }`;
+const VIEWER_DOCUMENT = `query T3CodeLinearViewer { viewer { id name email } }`;
+
+const UPDATE_ISSUE_STATE_DOCUMENT = `mutation T3CodeLinearUpdateState($id: String!, $stateId: String!) {
+  issueUpdate(id: $id, input: { stateId: $stateId }) { success }
+}`;
+
+const CREATE_COMMENT_DOCUMENT = `mutation T3CodeLinearComment($issueId: String!, $body: String!) {
+  commentCreate(input: { issueId: $issueId, body: $body }) { success }
+}`;
+
+const CREATE_ATTACHMENT_DOCUMENT = `mutation T3CodeLinearAttachment($input: AttachmentCreateInput!) {
+  attachmentCreate(input: $input) { success }
+}`;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function clean(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
+}
+
+const WORKFLOW_STATE_TYPES: ReadonlyArray<LinearWorkflowStateType> = [
+  "backlog",
+  "unstarted",
+  "started",
+  "completed",
+  "canceled",
+  "triage",
+];
+
+function coerceStateType(value: string | null | undefined): LinearWorkflowStateType | undefined {
+  return value != null && (WORKFLOW_STATE_TYPES as ReadonlyArray<string>).includes(value)
+    ? (value as LinearWorkflowStateType)
+    : undefined;
 }
 
 function bytesToString(value: Uint8Array): string {
@@ -201,9 +392,11 @@ function toSummary(raw: typeof RawIssueSummary.Type): LinearIssueSummary {
     title: clean(raw.title) ?? raw.identifier,
     url: raw.url ?? "",
     stateName: clean(raw.state?.name),
+    stateType: coerceStateType(raw.state?.type),
     priorityLabel: clean(raw.priorityLabel),
     assigneeName: clean(raw.assignee?.name),
     teamKey: clean(raw.team?.key),
+    teamId: clean(raw.team?.id),
   };
 }
 
@@ -246,9 +439,11 @@ function toDetail(raw: typeof RawIssueDetail.Type): LinearIssueDetail {
     title: clean(raw.title) ?? raw.identifier,
     url: raw.url ?? "",
     stateName: clean(raw.state?.name),
+    stateType: coerceStateType(raw.state?.type),
     priorityLabel: clean(raw.priorityLabel),
     assigneeName: clean(raw.assignee?.name),
     teamKey: clean(raw.team?.key),
+    teamId: clean(raw.team?.id),
     description: raw.description ?? "",
     labels,
     subIssues,
@@ -256,6 +451,62 @@ function toDetail(raw: typeof RawIssueDetail.Type): LinearIssueDetail {
     attachments,
     comments,
   };
+}
+
+function toTeam(raw: typeof RawTeam.Type): LinearTeam {
+  return { id: raw.id, key: clean(raw.key) ?? raw.id, name: clean(raw.name) ?? raw.id };
+}
+
+function toWorkflowState(raw: typeof RawState.Type, teamId: string): LinearWorkflowState {
+  return {
+    id: raw.id,
+    name: clean(raw.name) ?? raw.id,
+    type: coerceStateType(raw.type) ?? "unstarted",
+    position: raw.position ?? 0,
+    color: clean(raw.color),
+    teamId,
+  };
+}
+
+function toProject(raw: typeof RawProject.Type): LinearProject {
+  return { id: raw.id, name: clean(raw.name) ?? raw.id };
+}
+
+function toLabel(raw: typeof RawLabel.Type): LinearLabel {
+  return { id: raw.id, name: clean(raw.name) ?? raw.id, color: clean(raw.color) };
+}
+
+function toUser(raw: typeof RawUser.Type, viewerId: string | undefined): LinearUser {
+  return {
+    id: raw.id,
+    name: clean(raw.name) ?? clean(raw.displayName) ?? raw.id,
+    displayName: clean(raw.displayName),
+    email: clean(raw.email),
+    ...(viewerId !== undefined && raw.id === viewerId ? { isMe: true } : {}),
+  };
+}
+
+/** Build a Linear `IssueFilter` object from our filter contract. */
+function buildIssueFilter(
+  filter: LinearIssueFilter | undefined,
+): Record<string, unknown> | undefined {
+  if (filter === undefined) return undefined;
+  const out: Record<string, unknown> = {};
+  if (filter.teamId) out.team = { id: { eq: filter.teamId } };
+  if (filter.assigneeId) out.assignee = { id: { eq: filter.assigneeId } };
+  if (filter.stateId) out.state = { id: { eq: filter.stateId } };
+  else if (filter.stateType) out.state = { type: { eq: filter.stateType } };
+  if (filter.projectId) out.project = { id: { eq: filter.projectId } };
+  if (filter.labelId) out.labels = { some: { id: { eq: filter.labelId } } };
+  if (typeof filter.priority === "number") out.priority = { eq: filter.priority };
+  const query = filter.query?.trim();
+  if (query !== undefined && query.length > 0) {
+    out.or = [
+      { title: { containsIgnoreCase: query } },
+      { description: { containsIgnoreCase: query } },
+    ];
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function firstGraphQlErrorMessage(
@@ -297,6 +548,59 @@ export class LinearApi extends Context.Service<
       readonly ids: ReadonlyArray<string>;
     }) => Effect.Effect<
       ReadonlyArray<LinearIssueDetail>,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly listIssues: (input: {
+      readonly filter?: LinearIssueFilter | undefined;
+      readonly first: number;
+      readonly after?: string | undefined;
+    }) => Effect.Effect<
+      LinearListIssuesResult,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly listTeams: Effect.Effect<
+      ReadonlyArray<LinearTeam>,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly listWorkflowStates: (input: {
+      readonly teamId: string;
+    }) => Effect.Effect<
+      ReadonlyArray<LinearWorkflowState>,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly listProjects: Effect.Effect<
+      ReadonlyArray<LinearProject>,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly listLabels: Effect.Effect<
+      ReadonlyArray<LinearLabel>,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly listUsers: Effect.Effect<
+      ReadonlyArray<LinearUser>,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly updateIssueState: (input: {
+      readonly issueId: string;
+      readonly stateId: string;
+    }) => Effect.Effect<
+      LinearMutationResult,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly createComment: (input: {
+      readonly issueId: string;
+      readonly body: string;
+    }) => Effect.Effect<
+      LinearMutationResult,
+      LinearAuthError | LinearRequestError | LinearTokenStoreError
+    >;
+    readonly createAttachment: (input: {
+      readonly issueId: string;
+      readonly url: string;
+      readonly title?: string | undefined;
+      readonly subtitle?: string | undefined;
+    }) => Effect.Effect<
+      LinearMutationResult,
       LinearAuthError | LinearRequestError | LinearTokenStoreError
     >;
     readonly setToken: (token: string) => Effect.Effect<LinearAuthStatus, LinearTokenStoreError>;
@@ -520,6 +824,135 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  // Run a read query: resolve token → POST → fail on GraphQL errors → envelope.
+  const runReadQuery = <S extends Schema.Top>(
+    operation: LinearApiOperation,
+    document: string,
+    variables: Record<string, unknown>,
+    envelope: S,
+  ): Effect.Effect<
+    S["Type"],
+    LinearAuthError | LinearRequestError | LinearTokenStoreError,
+    S["DecodingServices"]
+  > =>
+    requireToken(operation).pipe(
+      Effect.flatMap((token) => runGraphql(operation, token, document, variables, envelope)),
+      Effect.flatMap((env) => {
+        const errs = (env as { errors?: ReadonlyArray<typeof GraphQlErrorEntry.Type> }).errors;
+        return errs !== undefined && errs.length > 0
+          ? failFromGraphQlErrors(operation, errs)
+          : Effect.succeed(env);
+      }),
+    );
+
+  const listIssues: LinearApi["Service"]["listIssues"] = (input) =>
+    runReadQuery(
+      "listIssues",
+      LIST_ISSUES_DOCUMENT,
+      {
+        filter: buildIssueFilter(input.filter) ?? null,
+        first: input.first,
+        after: input.after ?? null,
+      },
+      listEnvelope,
+    ).pipe(
+      Effect.map((envelope) => {
+        const page = envelope.data?.issues ?? null;
+        const nodes = page?.nodes ?? [];
+        return {
+          issues: nodes.map(toSummary),
+          pageInfo: {
+            hasNextPage: page?.pageInfo?.hasNextPage ?? false,
+            ...(clean(page?.pageInfo?.endCursor)
+              ? { endCursor: clean(page?.pageInfo?.endCursor)! }
+              : {}),
+          },
+        };
+      }),
+    );
+
+  const listTeams: LinearApi["Service"]["listTeams"] = runReadQuery(
+    "listTeams",
+    TEAMS_DOCUMENT,
+    {},
+    teamsEnvelope,
+  ).pipe(Effect.map((envelope) => (envelope.data?.teams?.nodes ?? []).map(toTeam)));
+
+  const listWorkflowStates: LinearApi["Service"]["listWorkflowStates"] = (input) =>
+    runReadQuery(
+      "listWorkflowStates",
+      STATES_DOCUMENT,
+      { teamId: input.teamId },
+      statesEnvelope,
+    ).pipe(
+      Effect.map((envelope) =>
+        (envelope.data?.team?.states?.nodes ?? [])
+          .map((state) => toWorkflowState(state, input.teamId))
+          .sort((a, b) => a.position - b.position),
+      ),
+    );
+
+  const listProjects: LinearApi["Service"]["listProjects"] = runReadQuery(
+    "listProjects",
+    PROJECTS_DOCUMENT,
+    {},
+    projectsEnvelope,
+  ).pipe(Effect.map((envelope) => (envelope.data?.projects?.nodes ?? []).map(toProject)));
+
+  const listLabels: LinearApi["Service"]["listLabels"] = runReadQuery(
+    "listLabels",
+    LABELS_DOCUMENT,
+    {},
+    labelsEnvelope,
+  ).pipe(Effect.map((envelope) => (envelope.data?.issueLabels?.nodes ?? []).map(toLabel)));
+
+  const listUsers: LinearApi["Service"]["listUsers"] = runReadQuery(
+    "listUsers",
+    USERS_DOCUMENT,
+    {},
+    usersEnvelope,
+  ).pipe(
+    Effect.map((envelope) => {
+      const viewerId = clean(envelope.data?.viewer?.id);
+      return (envelope.data?.users?.nodes ?? []).map((user) => toUser(user, viewerId));
+    }),
+  );
+
+  const mutationSucceeded = (
+    node: { readonly success?: boolean | undefined } | null | undefined,
+  ): LinearMutationResult => ({ success: node?.success ?? false });
+
+  const updateIssueState: LinearApi["Service"]["updateIssueState"] = (input) =>
+    runReadQuery(
+      "updateIssueState",
+      UPDATE_ISSUE_STATE_DOCUMENT,
+      { id: input.issueId, stateId: input.stateId },
+      mutationEnvelope,
+    ).pipe(Effect.map((envelope) => mutationSucceeded(envelope.data?.issueUpdate)));
+
+  const createComment: LinearApi["Service"]["createComment"] = (input) =>
+    runReadQuery(
+      "createComment",
+      CREATE_COMMENT_DOCUMENT,
+      { issueId: input.issueId, body: input.body },
+      mutationEnvelope,
+    ).pipe(Effect.map((envelope) => mutationSucceeded(envelope.data?.commentCreate)));
+
+  const createAttachment: LinearApi["Service"]["createAttachment"] = (input) =>
+    runReadQuery(
+      "createAttachment",
+      CREATE_ATTACHMENT_DOCUMENT,
+      {
+        input: {
+          issueId: input.issueId,
+          url: input.url,
+          title: input.title ?? "T3 Code",
+          ...(input.subtitle !== undefined ? { subtitle: input.subtitle } : {}),
+        },
+      },
+      mutationEnvelope,
+    ).pipe(Effect.map((envelope) => mutationSucceeded(envelope.data?.attachmentCreate)));
+
   const persistToken = (
     operation: LinearApiOperation,
     token: string,
@@ -556,6 +989,15 @@ export const make = Effect.gen(function* () {
     probeAuth,
     searchIssues,
     fetchIssues,
+    listIssues,
+    listTeams,
+    listWorkflowStates,
+    listProjects,
+    listLabels,
+    listUsers,
+    updateIssueState,
+    createComment,
+    createAttachment,
     setToken,
     clearToken,
   });

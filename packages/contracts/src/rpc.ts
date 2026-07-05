@@ -146,13 +146,25 @@ import { VcsError } from "./vcs.ts";
 import {
   LinearAuthError,
   LinearAuthStatus,
+  LinearCreateAttachmentInput,
+  LinearCreateCommentInput,
   LinearFetchIssuesInput,
   LinearFetchIssuesResult,
+  LinearListIssuesInput,
+  LinearListIssuesResult,
+  LinearListLabelsResult,
+  LinearListProjectsResult,
+  LinearListTeamsResult,
+  LinearListUsersResult,
+  LinearListWorkflowStatesInput,
+  LinearListWorkflowStatesResult,
+  LinearMutationResult,
   LinearRequestError,
   LinearSearchIssuesInput,
   LinearSearchIssuesResult,
   LinearSetTokenInput,
   LinearTokenStoreError,
+  LinearUpdateIssueStateInput,
 } from "./linear.ts";
 
 export const WS_METHODS = {
@@ -238,6 +250,15 @@ export const WS_METHODS = {
   linearAuthStatus: "linear.authStatus",
   linearSearchIssues: "linear.searchIssues",
   linearFetchIssues: "linear.fetchIssues",
+  linearListIssues: "linear.listIssues",
+  linearListTeams: "linear.listTeams",
+  linearListWorkflowStates: "linear.listWorkflowStates",
+  linearListProjects: "linear.listProjects",
+  linearListLabels: "linear.listLabels",
+  linearListUsers: "linear.listUsers",
+  linearUpdateIssueState: "linear.updateIssueState",
+  linearCreateComment: "linear.createComment",
+  linearCreateAttachment: "linear.createAttachment",
   linearSetToken: "linear.setToken",
   linearClearToken: "linear.clearToken",
 
@@ -410,6 +431,67 @@ export const WsLinearClearTokenRpc = Rpc.make(WS_METHODS.linearClearToken, {
   payload: Schema.Struct({}),
   success: LinearAuthStatus,
   error: Schema.Union([LinearTokenStoreError, EnvironmentAuthorizationError]),
+});
+
+const LinearReadError = Schema.Union([
+  LinearAuthError,
+  LinearRequestError,
+  LinearTokenStoreError,
+  EnvironmentAuthorizationError,
+]);
+
+export const WsLinearListIssuesRpc = Rpc.make(WS_METHODS.linearListIssues, {
+  payload: LinearListIssuesInput,
+  success: LinearListIssuesResult,
+  error: LinearReadError,
+});
+
+export const WsLinearListTeamsRpc = Rpc.make(WS_METHODS.linearListTeams, {
+  payload: Schema.Struct({}),
+  success: LinearListTeamsResult,
+  error: LinearReadError,
+});
+
+export const WsLinearListWorkflowStatesRpc = Rpc.make(WS_METHODS.linearListWorkflowStates, {
+  payload: LinearListWorkflowStatesInput,
+  success: LinearListWorkflowStatesResult,
+  error: LinearReadError,
+});
+
+export const WsLinearListProjectsRpc = Rpc.make(WS_METHODS.linearListProjects, {
+  payload: Schema.Struct({}),
+  success: LinearListProjectsResult,
+  error: LinearReadError,
+});
+
+export const WsLinearListLabelsRpc = Rpc.make(WS_METHODS.linearListLabels, {
+  payload: Schema.Struct({}),
+  success: LinearListLabelsResult,
+  error: LinearReadError,
+});
+
+export const WsLinearListUsersRpc = Rpc.make(WS_METHODS.linearListUsers, {
+  payload: Schema.Struct({}),
+  success: LinearListUsersResult,
+  error: LinearReadError,
+});
+
+export const WsLinearUpdateIssueStateRpc = Rpc.make(WS_METHODS.linearUpdateIssueState, {
+  payload: LinearUpdateIssueStateInput,
+  success: LinearMutationResult,
+  error: LinearReadError,
+});
+
+export const WsLinearCreateCommentRpc = Rpc.make(WS_METHODS.linearCreateComment, {
+  payload: LinearCreateCommentInput,
+  success: LinearMutationResult,
+  error: LinearReadError,
+});
+
+export const WsLinearCreateAttachmentRpc = Rpc.make(WS_METHODS.linearCreateAttachment, {
+  payload: LinearCreateAttachmentInput,
+  success: LinearMutationResult,
+  error: LinearReadError,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
@@ -760,6 +842,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsLinearAuthStatusRpc,
   WsLinearSearchIssuesRpc,
   WsLinearFetchIssuesRpc,
+  WsLinearListIssuesRpc,
+  WsLinearListTeamsRpc,
+  WsLinearListWorkflowStatesRpc,
+  WsLinearListProjectsRpc,
+  WsLinearListLabelsRpc,
+  WsLinearListUsersRpc,
+  WsLinearUpdateIssueStateRpc,
+  WsLinearCreateCommentRpc,
+  WsLinearCreateAttachmentRpc,
   WsLinearSetTokenRpc,
   WsLinearClearTokenRpc,
   WsProjectsListEntriesRpc,

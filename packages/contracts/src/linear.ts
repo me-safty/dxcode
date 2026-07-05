@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { PositiveInt, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 
 const LINEAR_SEARCH_MAX_LIMIT = 50;
+const LINEAR_LIST_MAX_LIMIT = 100;
 const LINEAR_SEARCH_QUERY_MAX_LENGTH = 256;
 const LINEAR_TOKEN_MAX_LENGTH = 512;
 
@@ -23,6 +24,19 @@ export const LinearAuthStatus = Schema.Struct({
 });
 export type LinearAuthStatus = typeof LinearAuthStatus.Type;
 
+// ── Workflow states ──────────────────────────────────────────────────
+
+/** Linear workflow-state category. Stable across teams that rename states. */
+export const LinearWorkflowStateType = Schema.Literals([
+  "backlog",
+  "unstarted",
+  "started",
+  "completed",
+  "canceled",
+  "triage",
+]);
+export type LinearWorkflowStateType = typeof LinearWorkflowStateType.Type;
+
 // ── Issue shapes ─────────────────────────────────────────────────────
 
 export const LinearIssueSummary = Schema.Struct({
@@ -31,9 +45,11 @@ export const LinearIssueSummary = Schema.Struct({
   title: TrimmedNonEmptyString,
   url: Schema.String,
   stateName: Schema.optional(TrimmedNonEmptyString),
+  stateType: Schema.optional(LinearWorkflowStateType),
   priorityLabel: Schema.optional(TrimmedNonEmptyString),
   assigneeName: Schema.optional(TrimmedNonEmptyString),
   teamKey: Schema.optional(TrimmedNonEmptyString),
+  teamId: Schema.optional(TrimmedNonEmptyString),
 });
 export type LinearIssueSummary = typeof LinearIssueSummary.Type;
 
@@ -69,9 +85,11 @@ export const LinearIssueDetail = Schema.Struct({
   title: TrimmedNonEmptyString,
   url: Schema.String,
   stateName: Schema.optional(TrimmedNonEmptyString),
+  stateType: Schema.optional(LinearWorkflowStateType),
   priorityLabel: Schema.optional(TrimmedNonEmptyString),
   assigneeName: Schema.optional(TrimmedNonEmptyString),
   teamKey: Schema.optional(TrimmedNonEmptyString),
+  teamId: Schema.optional(TrimmedNonEmptyString),
   description: Schema.String,
   labels: Schema.Array(TrimmedNonEmptyString),
   subIssues: Schema.Array(LinearSubIssue),
@@ -81,7 +99,138 @@ export const LinearIssueDetail = Schema.Struct({
 });
 export type LinearIssueDetail = typeof LinearIssueDetail.Type;
 
+// ── Filter metadata (teams / states / projects / labels / users) ─────
+
+export const LinearTeam = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  key: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+});
+export type LinearTeam = typeof LinearTeam.Type;
+
+export const LinearWorkflowState = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  type: LinearWorkflowStateType,
+  position: Schema.Number,
+  color: Schema.optional(TrimmedNonEmptyString),
+  teamId: Schema.optional(TrimmedNonEmptyString),
+});
+export type LinearWorkflowState = typeof LinearWorkflowState.Type;
+
+export const LinearProject = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+});
+export type LinearProject = typeof LinearProject.Type;
+
+export const LinearLabel = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  color: Schema.optional(TrimmedNonEmptyString),
+});
+export type LinearLabel = typeof LinearLabel.Type;
+
+export const LinearUser = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  displayName: Schema.optional(TrimmedNonEmptyString),
+  email: Schema.optional(TrimmedNonEmptyString),
+  isMe: Schema.optional(Schema.Boolean),
+});
+export type LinearUser = typeof LinearUser.Type;
+
+/** Persisted link from a T3 Code thread back to the Linear issue it came from. */
+export const LinearIssueLink = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  identifier: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  url: Schema.String,
+  teamId: Schema.optional(TrimmedNonEmptyString),
+  stateType: Schema.optional(LinearWorkflowStateType),
+  stateName: Schema.optional(TrimmedNonEmptyString),
+});
+export type LinearIssueLink = typeof LinearIssueLink.Type;
+
+// ── Filter + pagination ──────────────────────────────────────────────
+
+export const LinearIssueFilter = Schema.Struct({
+  teamId: Schema.optional(TrimmedNonEmptyString),
+  assigneeId: Schema.optional(TrimmedNonEmptyString),
+  stateType: Schema.optional(LinearWorkflowStateType),
+  stateId: Schema.optional(TrimmedNonEmptyString),
+  projectId: Schema.optional(TrimmedNonEmptyString),
+  labelId: Schema.optional(TrimmedNonEmptyString),
+  priority: Schema.optional(Schema.Int),
+  query: Schema.optional(TrimmedString.check(Schema.isMaxLength(LINEAR_SEARCH_QUERY_MAX_LENGTH))),
+});
+export type LinearIssueFilter = typeof LinearIssueFilter.Type;
+
+export const LinearPageInfo = Schema.Struct({
+  hasNextPage: Schema.Boolean,
+  endCursor: Schema.optional(TrimmedNonEmptyString),
+});
+export type LinearPageInfo = typeof LinearPageInfo.Type;
+
 // ── RPC inputs / results ─────────────────────────────────────────────
+
+export const LinearListIssuesInput = Schema.Struct({
+  filter: Schema.optional(LinearIssueFilter),
+  first: PositiveInt.check(Schema.isLessThanOrEqualTo(LINEAR_LIST_MAX_LIMIT)),
+  after: Schema.optional(TrimmedNonEmptyString),
+});
+export type LinearListIssuesInput = typeof LinearListIssuesInput.Type;
+
+export const LinearListIssuesResult = Schema.Struct({
+  issues: Schema.Array(LinearIssueSummary),
+  pageInfo: LinearPageInfo,
+});
+export type LinearListIssuesResult = typeof LinearListIssuesResult.Type;
+
+export const LinearListTeamsResult = Schema.Struct({ teams: Schema.Array(LinearTeam) });
+export type LinearListTeamsResult = typeof LinearListTeamsResult.Type;
+
+export const LinearListWorkflowStatesInput = Schema.Struct({ teamId: TrimmedNonEmptyString });
+export type LinearListWorkflowStatesInput = typeof LinearListWorkflowStatesInput.Type;
+
+export const LinearListWorkflowStatesResult = Schema.Struct({
+  states: Schema.Array(LinearWorkflowState),
+});
+export type LinearListWorkflowStatesResult = typeof LinearListWorkflowStatesResult.Type;
+
+export const LinearListProjectsResult = Schema.Struct({ projects: Schema.Array(LinearProject) });
+export type LinearListProjectsResult = typeof LinearListProjectsResult.Type;
+
+export const LinearListLabelsResult = Schema.Struct({ labels: Schema.Array(LinearLabel) });
+export type LinearListLabelsResult = typeof LinearListLabelsResult.Type;
+
+export const LinearListUsersResult = Schema.Struct({ users: Schema.Array(LinearUser) });
+export type LinearListUsersResult = typeof LinearListUsersResult.Type;
+
+// ── Write mutations (Phase 3) ────────────────────────────────────────
+
+export const LinearUpdateIssueStateInput = Schema.Struct({
+  issueId: TrimmedNonEmptyString,
+  stateId: TrimmedNonEmptyString,
+});
+export type LinearUpdateIssueStateInput = typeof LinearUpdateIssueStateInput.Type;
+
+export const LinearCreateCommentInput = Schema.Struct({
+  issueId: TrimmedNonEmptyString,
+  body: Schema.String,
+});
+export type LinearCreateCommentInput = typeof LinearCreateCommentInput.Type;
+
+export const LinearCreateAttachmentInput = Schema.Struct({
+  issueId: TrimmedNonEmptyString,
+  url: Schema.String,
+  title: Schema.optional(TrimmedNonEmptyString),
+  subtitle: Schema.optional(TrimmedNonEmptyString),
+});
+export type LinearCreateAttachmentInput = typeof LinearCreateAttachmentInput.Type;
+
+export const LinearMutationResult = Schema.Struct({ success: Schema.Boolean });
+export type LinearMutationResult = typeof LinearMutationResult.Type;
 
 export const LinearSearchIssuesInput = Schema.Struct({
   query: TrimmedString.check(Schema.isMaxLength(LINEAR_SEARCH_QUERY_MAX_LENGTH)),
@@ -116,6 +265,15 @@ export const LinearApiOperation = Schema.Literals([
   "probeAuth",
   "searchIssues",
   "fetchIssues",
+  "listIssues",
+  "listTeams",
+  "listWorkflowStates",
+  "listProjects",
+  "listLabels",
+  "listUsers",
+  "updateIssueState",
+  "createComment",
+  "createAttachment",
   "setToken",
   "clearToken",
 ]);

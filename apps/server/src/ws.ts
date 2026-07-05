@@ -303,6 +303,15 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.linearAuthStatus, AuthOrchestrationReadScope],
   [WS_METHODS.linearSearchIssues, AuthOrchestrationReadScope],
   [WS_METHODS.linearFetchIssues, AuthOrchestrationReadScope],
+  [WS_METHODS.linearListIssues, AuthOrchestrationReadScope],
+  [WS_METHODS.linearListTeams, AuthOrchestrationReadScope],
+  [WS_METHODS.linearListWorkflowStates, AuthOrchestrationReadScope],
+  [WS_METHODS.linearListProjects, AuthOrchestrationReadScope],
+  [WS_METHODS.linearListLabels, AuthOrchestrationReadScope],
+  [WS_METHODS.linearListUsers, AuthOrchestrationReadScope],
+  [WS_METHODS.linearUpdateIssueState, AuthOrchestrationOperateScope],
+  [WS_METHODS.linearCreateComment, AuthOrchestrationOperateScope],
+  [WS_METHODS.linearCreateAttachment, AuthOrchestrationOperateScope],
   [WS_METHODS.linearSetToken, AuthOrchestrationOperateScope],
   [WS_METHODS.linearClearToken, AuthOrchestrationOperateScope],
   [WS_METHODS.projectsListEntries, AuthOrchestrationReadScope],
@@ -1343,6 +1352,52 @@ const makeWsRpcLayer = (
             linear.fetchIssues(input).pipe(Effect.map((issues) => ({ issues }))),
             { "rpc.aggregate": "linear" },
           ),
+        [WS_METHODS.linearListIssues]: (input) =>
+          observeRpcEffect(WS_METHODS.linearListIssues, linear.listIssues(input), {
+            "rpc.aggregate": "linear",
+          }),
+        [WS_METHODS.linearListTeams]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.linearListTeams,
+            linear.listTeams.pipe(Effect.map((teams) => ({ teams }))),
+            { "rpc.aggregate": "linear" },
+          ),
+        [WS_METHODS.linearListWorkflowStates]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.linearListWorkflowStates,
+            linear.listWorkflowStates(input).pipe(Effect.map((states) => ({ states }))),
+            { "rpc.aggregate": "linear" },
+          ),
+        [WS_METHODS.linearListProjects]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.linearListProjects,
+            linear.listProjects.pipe(Effect.map((projects) => ({ projects }))),
+            { "rpc.aggregate": "linear" },
+          ),
+        [WS_METHODS.linearListLabels]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.linearListLabels,
+            linear.listLabels.pipe(Effect.map((labels) => ({ labels }))),
+            { "rpc.aggregate": "linear" },
+          ),
+        [WS_METHODS.linearListUsers]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.linearListUsers,
+            linear.listUsers.pipe(Effect.map((users) => ({ users }))),
+            { "rpc.aggregate": "linear" },
+          ),
+        [WS_METHODS.linearUpdateIssueState]: (input) =>
+          observeRpcEffect(WS_METHODS.linearUpdateIssueState, linear.updateIssueState(input), {
+            "rpc.aggregate": "linear",
+          }),
+        [WS_METHODS.linearCreateComment]: (input) =>
+          observeRpcEffect(WS_METHODS.linearCreateComment, linear.createComment(input), {
+            "rpc.aggregate": "linear",
+          }),
+        [WS_METHODS.linearCreateAttachment]: (input) =>
+          observeRpcEffect(WS_METHODS.linearCreateAttachment, linear.createAttachment(input), {
+            "rpc.aggregate": "linear",
+          }),
         [WS_METHODS.linearSetToken]: (input) =>
           observeRpcEffect(WS_METHODS.linearSetToken, linear.setToken(input.token), {
             "rpc.aggregate": "linear",

@@ -21,9 +21,48 @@ export function createLinearEnvironmentAtoms<R, E>(
       label: "environment-data:linear:search-issues",
       tag: WS_METHODS.linearSearchIssues,
     }),
+    listIssues: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:linear:list-issues",
+      tag: WS_METHODS.linearListIssues,
+    }),
+    teams: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:linear:teams",
+      tag: WS_METHODS.linearListTeams,
+    }),
+    workflowStates: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:linear:workflow-states",
+      tag: WS_METHODS.linearListWorkflowStates,
+    }),
+    projects: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:linear:projects",
+      tag: WS_METHODS.linearListProjects,
+    }),
+    labels: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:linear:labels",
+      tag: WS_METHODS.linearListLabels,
+    }),
+    users: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:linear:users",
+      tag: WS_METHODS.linearListUsers,
+    }),
     fetchIssues: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:linear:fetch-issues",
       tag: WS_METHODS.linearFetchIssues,
+      scheduler: commandScheduler,
+    }),
+    updateIssueState: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:linear:update-issue-state",
+      tag: WS_METHODS.linearUpdateIssueState,
+      scheduler: commandScheduler,
+    }),
+    createComment: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:linear:create-comment",
+      tag: WS_METHODS.linearCreateComment,
+      scheduler: commandScheduler,
+    }),
+    createAttachment: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:linear:create-attachment",
+      tag: WS_METHODS.linearCreateAttachment,
       scheduler: commandScheduler,
     }),
     setToken: createEnvironmentRpcCommand(runtime, {
