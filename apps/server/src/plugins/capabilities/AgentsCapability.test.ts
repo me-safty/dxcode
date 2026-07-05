@@ -370,6 +370,101 @@ agentsIt("AgentsCapability", (it) => {
     }),
   );
 
+  it.effect(
+    "startTurn derives stable turnId/messageId from a repeated commandId and random ids without one",
+    () =>
+      Effect.gen(function* () {
+        const dispatched: OrchestrationCommand[] = [];
+        const turnAliases = new Map<
+          string,
+          { readonly threadId: ThreadId; readonly messageId: MessageId }
+        >();
+        const agents = makeAgentsCapability(
+          {
+            pluginId,
+            engine: {
+              readEvents: () => Stream.empty,
+              dispatch: (command: OrchestrationCommand) =>
+                Effect.sync(() => {
+                  dispatched.push(command);
+                  return { sequence: dispatched.length };
+                }),
+              streamDomainEvents: Stream.empty,
+            } as unknown as OrchestrationEngineService["Service"],
+            snapshots: {
+              getThreadOwnerById: () => Effect.succeed(Option.some("plugin:agent-plugin" as any)),
+              getThreadDetailById: () => Effect.succeed(Option.none()),
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+            } as any,
+            turns: {} as any,
+            messages: {} as any,
+            providerInstances: makeProviderRegistry(),
+          },
+          turnAliases,
+        );
+        const threadId = ThreadId.make("thread-idempotent-ids");
+        const commandId = CommandId.make("cmd-idempotent-turn-start");
+
+        // Same commandId, NO messageId: both turnId and messageId must be derived
+        // deterministically from the commandId, so a retry (which the engine
+        // receipt-dedups back to the first turn) returns the SAME identifiers the
+        // first dispatch persisted instead of a fresh, never-persisted pair.
+        const first = yield* agents.startTurn({ threadId, text: "first", commandId });
+        const second = yield* agents.startTurn({ threadId, text: "second", commandId });
+        expect(second.turnId).toBe(first.turnId);
+        expect(second.messageId).toBe(first.messageId);
+
+        // The alias registered under that stable turnId points at the same
+        // messageId the turn.start actually dispatched, so a later readTerminalTurn
+        // correlates (turnId -> alias.messageId -> pendingMessageId) rather than
+        // dangling.
+        expect(turnAliases.get(String(first.turnId))?.messageId).toBe(first.messageId);
+        const firstTurnStart = dispatched.find((command) => command.type === "thread.turn.start");
+        expect(
+          firstTurnStart?.type === "thread.turn.start" ? firstTurnStart.message.messageId : null,
+        ).toBe(first.messageId);
+
+        // No commandId: ids are freshly minted, so two calls differ.
+        const withoutA = yield* agents.startTurn({ threadId, text: "a" });
+        const withoutB = yield* agents.startTurn({ threadId, text: "b" });
+        expect(withoutB.turnId).not.toBe(withoutA.turnId);
+        expect(withoutB.messageId).not.toBe(withoutA.messageId);
+      }),
+  );
+
+  it.effect(
+    "a retried startTurn keeps one persisted turn whose pendingMessageId matches the returned ids",
+    () =>
+      Effect.gen(function* () {
+        const { agents, engine, turns } = yield* makeCapability;
+        yield* createProject(engine);
+        const { threadId } = yield* agents.createThread({
+          projectId: ProjectId.make("project-agents"),
+          title: "Idempotent",
+          modelSelection,
+        });
+        const commandId = CommandId.make("cmd-idempotent-await-turn-start");
+
+        // Retry with the same caller commandId and no messageId: stable ids across
+        // the receipt-deduped retry.
+        const first = yield* agents.startTurn({ threadId, text: "first", commandId });
+        const second = yield* agents.startTurn({ threadId, text: "second", commandId });
+        expect(second.turnId).toBe(first.turnId);
+        expect(second.messageId).toBe(first.messageId);
+
+        // The engine deduped the retry, so exactly one turn is persisted, and its
+        // pendingMessageId equals the returned (derived) messageId. That equality
+        // is precisely what readTerminalTurn correlates on (turnId -> alias
+        // messageId -> pendingMessageId), so the retry's alias resolves rather than
+        // dangling. With random ids the retry would have returned a fresh messageId
+        // absent from this row, leaving awaitTurn to time out.
+        const persisted = (yield* turns.listByThreadId({ threadId })).filter(
+          (row) => row.pendingMessageId === first.messageId,
+        );
+        expect(persisted).toHaveLength(1);
+      }),
+  );
+
   it.effect("observeThread emits the owned snapshot followed by newer thread-detail events", () =>
     Effect.gen(function* () {
       const { agents, engine } = yield* makeCapability;

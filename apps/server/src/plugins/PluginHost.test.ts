@@ -1,4 +1,4 @@
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   PluginId,
@@ -6,6 +6,7 @@ import {
   type PluginCapability,
   type PluginLockfilePlugin,
 } from "@t3tools/contracts/plugin";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
@@ -1111,4 +1112,58 @@ layer("PluginHost", (it) => {
       );
     }),
   );
+});
+
+describe("PluginHost cause predicates", () => {
+  const sentinel = (reason: string) =>
+    new PluginHostModule.PluginActivationCanceled({ pluginId: "p", reason });
+
+  it("causeIsActivationCanceledOnly is true ONLY when every reason is the cancel sentinel", () => {
+    // A single sentinel fail, and several sentinel fails, are pure cancels.
+    assert.isTrue(PluginHostModule.causeIsActivationCanceledOnly(Cause.fail(sentinel("disabled"))));
+    assert.isTrue(
+      PluginHostModule.causeIsActivationCanceledOnly(
+        Cause.combine(Cause.fail(sentinel("a")), Cause.fail(sentinel("b"))),
+      ),
+    );
+
+    // A MIXED cause (sentinel + teardown defect, or sentinel + interrupt) must
+    // NOT count as a clean cancel — otherwise a real teardown failure would be
+    // silently dropped and a shutdown interrupt swallowed.
+    assert.isFalse(
+      PluginHostModule.causeIsActivationCanceledOnly(
+        Cause.combine(Cause.fail(sentinel("x")), Cause.die(new Error("teardown"))),
+      ),
+    );
+    assert.isFalse(
+      PluginHostModule.causeIsActivationCanceledOnly(
+        Cause.combine(Cause.fail(sentinel("x")), Cause.interrupt()),
+      ),
+    );
+
+    // A pure interrupt and a pure non-sentinel error are not cancels; neither is
+    // the empty cause (no reasons).
+    assert.isFalse(PluginHostModule.causeIsActivationCanceledOnly(Cause.interrupt()));
+    assert.isFalse(PluginHostModule.causeIsActivationCanceledOnly(Cause.fail(new Error("boom"))));
+    assert.isFalse(PluginHostModule.causeIsActivationCanceledOnly(Cause.empty));
+  });
+
+  it("causeContainsInterrupt is true whenever the cause carries ANY interrupt reason", () => {
+    // A pure interrupt and a sentinel+interrupt mix both contain an interrupt.
+    assert.isTrue(PluginHostModule.causeContainsInterrupt(Cause.interrupt()));
+    assert.isTrue(
+      PluginHostModule.causeContainsInterrupt(
+        Cause.combine(Cause.fail(sentinel("x")), Cause.interrupt()),
+      ),
+    );
+
+    // A pure sentinel, a pure error, and sentinel+defect carry no interrupt.
+    assert.isFalse(PluginHostModule.causeContainsInterrupt(Cause.fail(sentinel("x"))));
+    assert.isFalse(PluginHostModule.causeContainsInterrupt(Cause.fail(new Error("boom"))));
+    assert.isFalse(
+      PluginHostModule.causeContainsInterrupt(
+        Cause.combine(Cause.fail(sentinel("x")), Cause.die(new Error("teardown"))),
+      ),
+    );
+  });
 });

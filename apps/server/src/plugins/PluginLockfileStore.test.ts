@@ -64,6 +64,11 @@ layer("PluginLockfileStore", (it) => {
       assert.isTrue(Result.isFailure(result));
       if (Result.isFailure(result)) {
         assert.instanceOf(result.failure, PluginLockfileCorruptError);
+        // The wrapper message derives from the stable path only — it must name
+        // the path and must NOT echo the raw decode error (which could leak
+        // corrupt lockfile contents such as this "{not-json" input).
+        assert.include(result.failure.message, store.lockfilePath);
+        assert.notInclude(result.failure.message, "not-json");
       }
       yield* fs.remove(store.lockfilePath, { force: true });
     }),

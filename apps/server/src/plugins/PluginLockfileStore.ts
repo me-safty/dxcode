@@ -36,10 +36,13 @@ export class PluginLockfileReadError extends Schema.TaggedErrorClass<PluginLockf
 
 export class PluginLockfileCorruptError extends Schema.TaggedErrorClass<PluginLockfileCorruptError>()(
   "PluginLockfileCorruptError",
-  { path: Schema.String, detail: Schema.String, cause: Schema.Defect() },
+  { path: Schema.String, cause: Schema.Defect() },
 ) {
+  // Derive the message from the stable `path` only — never from the stringified
+  // decode error — so the wrapper cannot leak corrupt lockfile contents. The
+  // underlying failure is preserved on `cause` (Schema.Defect) for diagnostics.
   override get message(): string {
-    return `Plugin lockfile at ${this.path} is corrupt: ${this.detail}`;
+    return `Plugin lockfile at ${this.path} is corrupt.`;
   }
 }
 
@@ -143,7 +146,6 @@ const readLockfileFromPath = (lockfilePath: string) =>
         (cause) =>
           new PluginLockfileCorruptError({
             path: lockfilePath,
-            detail: String(cause),
             cause,
           }),
       ),

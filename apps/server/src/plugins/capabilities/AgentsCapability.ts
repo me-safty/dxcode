@@ -77,6 +77,21 @@ const nextThreadId = () => ThreadId.make(NodeCrypto.randomUUID());
 const nextMessageId = () => MessageId.make(`plugin-message:${NodeCrypto.randomUUID()}`);
 const nextTurnId = () => TurnId.make(`plugin-turn:${NodeCrypto.randomUUID()}`);
 
+// Deterministic id derivations keyed on the caller-supplied commandId. The engine
+// dedups dispatch by commandId, so a retry with the same commandId does NOT
+// persist a new turn — the original one stays. The ids startTurn returns (and
+// registers in turnAliases) must therefore be STABLE across retries of the same
+// commandId; otherwise a retry would hand back a fresh messageId that was never
+// persisted and a later awaitTurn(turnId) — which correlates via the alias's
+// messageId — could never match and would time out. Hashing keeps the derived id
+// opaque and bounded rather than echoing the raw commandId.
+const stableIdSuffix = (commandId: CommandId) =>
+  NodeCrypto.createHash("sha256").update(String(commandId)).digest("hex").slice(0, 32);
+const messageIdForCommand = (commandId: CommandId) =>
+  MessageId.make(`plugin-message:${stableIdSuffix(commandId)}`);
+const turnIdForCommand = (commandId: CommandId) =>
+  TurnId.make(`plugin-turn:${stableIdSuffix(commandId)}`);
+
 function isThreadDetailEvent(event: OrchestrationEvent): boolean {
   return (
     event.type === "thread.message-sent" ||
@@ -368,8 +383,18 @@ export function makeAgentsCapability(
             createdAt: bootstrap.createThread.createdAt ?? nowIso(),
           });
         }
-        const messageId = request.messageId ?? nextMessageId();
-        const turnId = nextTurnId();
+        // A caller-supplied commandId makes the turn idempotent (the engine dedups
+        // dispatch by commandId), so the returned turnId/messageId must be stable
+        // across retries — derive them deterministically from the commandId so a
+        // retry resolves the same alias the first call persisted. Without a
+        // commandId, mint fresh random ids as before.
+        const messageId =
+          request.messageId ??
+          (request.commandId !== undefined
+            ? messageIdForCommand(request.commandId)
+            : nextMessageId());
+        const turnId =
+          request.commandId !== undefined ? turnIdForCommand(request.commandId) : nextTurnId();
         rememberTurnAlias(turnId, { threadId: request.threadId, messageId });
         // When we created the thread ourselves, forward the rest of the bootstrap
         // (prepareWorktree / runSetupScript) with ONLY createThread stripped — the
