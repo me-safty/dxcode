@@ -13,6 +13,13 @@ sidebar, select one or more, and a new thread opens with its full context alread
   into the composer as markdown. Review and edit before you send.
 - **Combine or split** – When you select more than one issue, choose whether to **combine** them into
   one task or treat them as **related subtasks**.
+- **Browse in bulk** – Open the full Linear browser to filter by team, status, and assignee, page
+  through large backlogs, and multi-select issues to import as one thread per issue or a single
+  combined thread.
+- **Status write-back** – As work progresses, T3 Code moves the linked issue through your workflow:
+  **In Progress** when the agent starts, **In Review** when a pull request opens, and **Done** when
+  it merges. States are mapped per team by their category (so renamed states still work). Toggle
+  each transition (and optional progress comments) in **Settings → Linear → Status write-back**.
 
 ## Getting Started
 
