@@ -72,7 +72,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
         const isSettingsRoute = /^\/settings(\/|$)/.test(pathnameRef.current);
-        void navigate({ to: "/settings", replace: isSettingsRoute });
+        if (!isSettingsRoute) {
+          void navigate({ to: "/settings" });
+        }
       }
     });
 
