@@ -245,7 +245,10 @@ export function LinearBrowser() {
         ids: [...selected],
         mode: perIssue ? "perIssue" : "combine",
       });
-      const failedIds = result.failedIds ?? [];
+      // Keep only failed issues still visible in the loaded rows selected, so a
+      // retry re-imports just those without stranding off-screen selections.
+      const visibleIds = new Set(rows.map((issue) => issue.id));
+      const retryable = (result.failedIds ?? []).filter((id) => visibleIds.has(id));
       if (result.ok) {
         toastManager.add(
           result.warning
@@ -258,10 +261,9 @@ export function LinearBrowser() {
                   : "Review the pre-filled composer and send.",
               },
         );
-        if (failedIds.length > 0) {
-          // Keep only the failed issues selected so a retry re-imports just
-          // those; stay on the browser rather than navigating away.
-          setSelected(new Set(failedIds));
+        if (retryable.length > 0) {
+          // Stay on the browser with the failed rows selected for retry.
+          setSelected(new Set(retryable));
         } else {
           setSelected(new Set());
           void navigate({ to: "/" });
@@ -272,12 +274,12 @@ export function LinearBrowser() {
           title: "Linear import failed",
           description: result.error ?? "The issues could not be imported.",
         });
-        if (failedIds.length > 0) setSelected(new Set(failedIds));
+        setSelected(new Set(retryable));
       }
     } finally {
       setImporting(false);
     }
-  }, [environmentId, importing, navigate, perIssue, runImport, selected, targetProject]);
+  }, [environmentId, importing, navigate, perIssue, rows, runImport, selected, targetProject]);
 
   let body: ReactNode;
   if (!environmentId || (authQuery.isPending && authQuery.data === null)) {

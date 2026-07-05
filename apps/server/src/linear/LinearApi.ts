@@ -732,34 +732,43 @@ export const make = Effect.gen(function* () {
           }),
         onSome: (token) =>
           runGraphql("probeAuth", token, VIEWER_DOCUMENT, {}, viewerEnvelope).pipe(
-            Effect.map((envelope): LinearAuthStatus => {
+            Effect.flatMap((envelope): Effect.Effect<LinearAuthStatus, LinearRequestError> => {
               if (envelope.errors !== undefined && envelope.errors.length > 0) {
-                return {
-                  status: "unauthenticated",
-                  detail: "The stored Linear token was rejected.",
-                };
+                const message = firstGraphQlErrorMessage(envelope.errors);
+                // Only auth-related GraphQL errors mean a rejected token;
+                // other errors are real API/outage failures and propagate.
+                return isAuthMessage(message)
+                  ? Effect.succeed<LinearAuthStatus>({
+                      status: "unauthenticated",
+                      detail: "The stored Linear token was rejected.",
+                    })
+                  : Effect.fail(
+                      new LinearRequestError({
+                        operation: "probeAuth",
+                        detail: message ?? "Linear reported an error for the request.",
+                      }),
+                    );
               }
               const viewer = envelope.data?.viewer ?? undefined;
               const name = clean(viewer?.name);
-              return {
+              return Effect.succeed<LinearAuthStatus>({
                 status: "authenticated",
                 account: {
                   name: name ?? "Linear account",
                   ...(clean(viewer?.email) ? { email: clean(viewer?.email) } : {}),
                 },
-              };
+              });
             }),
             // A rejected token → "unauthenticated"; genuine connectivity/API
-            // errors propagate so a transient outage isn't shown as "not
-            // connected" (which would tempt users to replace a valid token).
-            Effect.catch((error) =>
-              error._tag === "LinearAuthError"
-                ? Effect.succeed<LinearAuthStatus>({
-                    status: "unauthenticated",
-                    detail: "The stored Linear token was rejected.",
-                  })
-                : Effect.fail(error),
-            ),
+            // errors (LinearRequestError) stay in the channel so a transient
+            // outage isn't shown as "not connected".
+            Effect.catchTags({
+              LinearAuthError: () =>
+                Effect.succeed<LinearAuthStatus>({
+                  status: "unauthenticated",
+                  detail: "The stored Linear token was rejected.",
+                }),
+            }),
           ),
       }),
     ),
@@ -977,14 +986,13 @@ export const make = Effect.gen(function* () {
   // can't reach Linear (outage) must not turn the write itself into a failure —
   // the standalone `probeAuth` RPC still reports connectivity errors.
   const probeAuthLenient: Effect.Effect<LinearAuthStatus, LinearTokenStoreError> = probeAuth.pipe(
-    Effect.catch((error) =>
-      error._tag === "LinearRequestError"
-        ? Effect.succeed<LinearAuthStatus>({
-            status: "unauthenticated",
-            detail: "Saved, but couldn't reach Linear to verify the token.",
-          })
-        : Effect.fail(error),
-    ),
+    Effect.catchTags({
+      LinearRequestError: () =>
+        Effect.succeed<LinearAuthStatus>({
+          status: "unauthenticated",
+          detail: "Saved, but couldn't reach Linear to verify the token.",
+        }),
+    }),
   );
 
   const setToken: LinearApi["Service"]["setToken"] = (token) =>

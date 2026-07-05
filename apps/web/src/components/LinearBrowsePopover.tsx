@@ -142,7 +142,10 @@ export function LinearBrowsePopover({
         ids: [...selected],
         mode: combine ? "combine" : "perIssue",
       });
-      const failedIds = result.failedIds ?? [];
+      // Only keep failed issues that are still visible in the current results,
+      // so we never leave an un-clearable selection of off-screen rows.
+      const visibleIds = new Set(issues.map((issue) => issue.id));
+      const retryable = (result.failedIds ?? []).filter((id) => visibleIds.has(id));
       if (result.ok) {
         if (result.warning) {
           toastManager.add({
@@ -151,9 +154,8 @@ export function LinearBrowsePopover({
             description: result.warning,
           });
         }
-        if (failedIds.length > 0) {
-          // Keep the failed issues selected so the user can retry them.
-          setSelected(new Set(failedIds));
+        if (retryable.length > 0) {
+          setSelected(new Set(retryable));
         } else {
           handleOpenChange(false);
         }
@@ -163,7 +165,7 @@ export function LinearBrowsePopover({
           title: "Linear import failed",
           description: result.error ?? "The issues could not be imported.",
         });
-        if (failedIds.length > 0) setSelected(new Set(failedIds));
+        setSelected(new Set(retryable));
       }
     } finally {
       setImporting(false);
@@ -173,6 +175,7 @@ export function LinearBrowsePopover({
     environmentId,
     handleOpenChange,
     importing,
+    issues,
     projectId,
     runImport,
     selected,

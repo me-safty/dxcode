@@ -58,9 +58,19 @@ export function LinearSettingsPanel() {
     setBusy(true);
     try {
       const result = await setToken({ environmentId, input: { token: trimmed } });
-      if (result._tag === "Success" && result.value.status === "authenticated") {
-        setTokenValue("");
-        authQuery.refresh();
+      if (result._tag !== "Success") {
+        toastManager.add({
+          type: "error",
+          title: "Could not save token",
+          description: "The token could not be saved.",
+        });
+        return;
+      }
+      // The token was stored. Verification is a separate concern — a transient
+      // outage shouldn't read as "connect failed".
+      setTokenValue("");
+      authQuery.refresh();
+      if (result.value.status === "authenticated") {
         toastManager.add({
           type: "success",
           title: "Linear connected",
@@ -69,11 +79,11 @@ export function LinearSettingsPanel() {
             : "Linear is now connected.",
         });
       } else {
-        const detail =
-          result._tag === "Success"
-            ? (result.value.detail ?? "Linear rejected the token.")
-            : "The token could not be saved.";
-        toastManager.add({ type: "error", title: "Could not connect Linear", description: detail });
+        toastManager.add({
+          type: "warning",
+          title: "Token saved",
+          description: result.value.detail ?? "Saved, but Linear couldn’t verify it right now.",
+        });
       }
     } finally {
       setBusy(false);
