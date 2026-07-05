@@ -165,8 +165,30 @@ export function makeAgentsCapability(
     string,
     { readonly threadId: ThreadId; readonly messageId: MessageId }
   > = new Map(),
+  // Upper bound on live aliases. Injectable (defaulting generously) so tests can
+  // drive a small value; see rememberTurnAlias for the eviction policy.
+  maxTurnAliases: number = 4096,
 ): AgentsCapability {
   const owner = `plugin:${input.pluginId}` as `plugin:${string}`;
+
+  // Record a pending turn alias with a generous FIFO cap. Normal turns are
+  // pruned on their terminal read (readTerminalTurn) well before the cap, so
+  // eviction only ever affects long-abandoned turns that were started but never
+  // awaited — bounding what was previously unbounded growth for the plugin
+  // process lifetime. An evicted alias makes a later awaitTurn for that turn
+  // fall through to the not-found path (degraded, not a crash), which is only
+  // reachable under pathological (> cap) concurrent un-awaited turns.
+  const rememberTurnAlias = (
+    turnId: TurnId,
+    entry: { readonly threadId: ThreadId; readonly messageId: MessageId },
+  ) => {
+    const key = String(turnId);
+    if (!turnAliases.has(key) && turnAliases.size >= maxTurnAliases) {
+      const oldest = turnAliases.keys().next().value;
+      if (oldest !== undefined) turnAliases.delete(oldest);
+    }
+    turnAliases.set(key, entry);
+  };
 
   const requireOwnedThread = (threadId: ThreadId) =>
     input.snapshots.getThreadOwnerById(threadId).pipe(
@@ -348,7 +370,7 @@ export function makeAgentsCapability(
         }
         const messageId = request.messageId ?? nextMessageId();
         const turnId = nextTurnId();
-        turnAliases.set(String(turnId), { threadId: request.threadId, messageId });
+        rememberTurnAlias(turnId, { threadId: request.threadId, messageId });
         // When we created the thread ourselves, forward the rest of the bootstrap
         // (prepareWorktree / runSetupScript) with ONLY createThread stripped — the
         // thread now exists and the decider would ignore createThread — so the

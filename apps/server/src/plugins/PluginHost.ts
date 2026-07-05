@@ -104,6 +104,29 @@ export class PluginRegistrationError extends Schema.TaggedErrorClass<PluginRegis
   }
 }
 
+// Internal control-flow sentinel: raised when an activation is intentionally
+// cancelled by a concurrent lifecycle change (see the pre-put state re-check in
+// loadPlugin). It is deliberately NOT part of the plugin SDK/contract surface —
+// it only travels inside the host's failure channel so a self-cancel can be
+// told apart from a genuine fiber interruption (host shutdown) and from a real
+// activation error.
+export class PluginActivationCanceled extends Schema.TaggedErrorClass<PluginActivationCanceled>()(
+  "PluginActivationCanceled",
+  { pluginId: Schema.String, reason: Schema.String },
+) {
+  override get message(): string {
+    return `Plugin ${this.pluginId} activation was canceled: ${this.reason}`;
+  }
+}
+
+// True when a cause carries the activation-cancel sentinel as a typed failure.
+// Iterating cause.reasons and narrowing with isFailReason is the idiomatic
+// effect-4 way to inspect a cause for a specific tagged error; Schema.is is the
+// schema-aware runtime check for the tagged-error value.
+const isActivationCanceled = Schema.is(PluginActivationCanceled);
+const causeHasActivationCanceled = (cause: Cause.Cause<unknown>): boolean =>
+  cause.reasons.some((reason) => Cause.isFailReason(reason) && isActivationCanceled(reason.error));
+
 export class PluginCapabilityUnavailable extends Schema.TaggedErrorClass<PluginCapabilityUnavailable>()(
   "PluginCapabilityUnavailable",
   { capability: Schema.String },
@@ -426,11 +449,30 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       }),
     );
 
+  // Clear ONLY the in-flight activation marker, preserving state/crashCount/
+  // lastError. Used after a clean interrupt/cancel teardown so reconcile on the
+  // next start does not mistake the intentional cancellation for a crash (a
+  // lingering activatingSince bumps crashCount and eventually forces "failed").
+  const clearActivatingMarker = (pluginId: PluginId) =>
+    store
+      .updatePlugin(pluginId, ({ current }) =>
+        Effect.succeed(
+          current
+            ? { ...current, activation: { ...current.activation, activatingSince: null } }
+            : undefined,
+        ),
+      )
+      .pipe(Effect.ignore);
+
   // Outer handler for a loadPlugin failure that escaped the activation-exit
-  // block (setup errors, or the re-failed interrupt from that block). Persist
-  // "failed" for a genuine error, but on an interrupt-only cause (clean
-  // shutdown / concurrent lifecycle change) propagate instead so state is left
-  // intact — mirrors the activation-exit branch inside loadPlugin.
+  // block (setup errors, or a re-raised interrupt/cancel from that block).
+  // Three dispositions:
+  //   - interrupt-only (clean shutdown / scope close): re-raise so it keeps
+  //     propagating and the host stops promptly.
+  //   - activation-cancel sentinel (concurrent disable/uninstall aborted the
+  //     activation): benign — the teardown already ran and the marker was
+  //     cleared, so just log and swallow, leaving the persisted state intact.
+  //   - anything else (genuine error): persist "failed" and log.
   const handleLoadFailureCause = (
     pluginId: PluginId,
     logMessage: string,
@@ -438,10 +480,15 @@ export const make = Effect.fn("PluginHost.make")(function* () {
   ) =>
     Cause.hasInterruptsOnly(cause)
       ? Effect.failCause(cause as Cause.Cause<never>)
-      : markFailure(pluginId, Cause.pretty(cause)).pipe(
-          Effect.andThen(Effect.logWarning(logMessage, { pluginId, cause: Cause.pretty(cause) })),
-          Effect.ignore,
-        );
+      : causeHasActivationCanceled(cause)
+        ? Effect.logWarning("Plugin activation canceled", {
+            pluginId,
+            cause: Cause.pretty(cause),
+          }).pipe(Effect.ignore)
+        : markFailure(pluginId, Cause.pretty(cause)).pipe(
+            Effect.andThen(Effect.logWarning(logMessage, { pluginId, cause: Cause.pretty(cause) })),
+            Effect.ignore,
+          );
 
   const readManifest = (pluginDir: string) =>
     fs
@@ -559,15 +606,20 @@ export const make = Effect.fn("PluginHost.make")(function* () {
         // deactivatePlugin, which finds no runtime yet (we have not put it) and
         // returns early. Without this guard activation would finish and the
         // now-disabled/pending-remove plugin's runtime + services + HTTP routes
-        // would go live anyway. Abort via interrupt so the failure branch closes
-        // the scope (removing any partial HTTP registration), skips the
-        // registry.put + "active" publish, and leaves the persisted state intact.
+        // would go live anyway. Abort via the typed cancel sentinel (NOT a fiber
+        // interrupt) so the failure branch closes the scope (removing any partial
+        // HTTP registration), skips the registry.put + "active" publish, clears
+        // the activating marker, and leaves the persisted state intact — while
+        // staying distinguishable from a genuine host-shutdown interruption.
         const stateBeforePut = yield* store.readLockfile.pipe(
           Effect.map((current) => getLockfilePlugin(current, pluginId)?.state),
           Effect.orElseSucceed(() => undefined as PluginState | undefined),
         );
         if (stateBeforePut !== "active") {
-          return yield* Effect.interrupt;
+          return yield* new PluginActivationCanceled({
+            pluginId,
+            reason: `lifecycle state changed to ${stateBeforePut ?? "missing"} during activation`,
+          });
         }
         yield* registry.put(pluginId, { manifest, registration, readiness, scope });
         for (const service of registration.services ?? []) {
@@ -624,11 +676,23 @@ export const make = Effect.fn("PluginHost.make")(function* () {
         // scope and an unresolved readiness Deferred.
         yield* registry.remove(pluginId).pipe(Effect.ignore);
         if (Cause.hasInterruptsOnly(exit.cause)) {
-          // Interrupt-only teardown: a clean host shutdown (scope close / stop)
-          // or a concurrent disable/uninstall aborting activation (see the
-          // pre-put state re-check). Do the cleanup above but do NOT persist a
-          // spurious "failed"/lastError — propagate the interruption so the
-          // persisted lifecycle state stays intact.
+          // Genuine interruption: a clean host shutdown (scope close / stop). The
+          // teardown above already ran, so this is NOT a crash — clear the
+          // activating marker so reconcile on the next start does not miscount
+          // it, then propagate the interruption so the persisted lifecycle state
+          // stays intact and the host stops promptly.
+          yield* clearActivatingMarker(pluginId);
+          return yield* Effect.failCause(exit.cause as Cause.Cause<never>);
+        }
+        if (causeHasActivationCanceled(exit.cause)) {
+          // A concurrent disable/uninstall cancelled this activation via the
+          // pre-put re-check. The teardown above already ran (not a crash) —
+          // clear the activating marker and re-raise the typed sentinel so
+          // callers can tell it apart from a genuine error (do NOT mark
+          // "failed") and from a shutdown interrupt (hasInterruptsOnly is false
+          // for the sentinel, so downstream detects it via
+          // causeHasActivationCanceled).
+          yield* clearActivatingMarker(pluginId);
           return yield* Effect.failCause(exit.cause as Cause.Cause<never>);
         }
         const message = Cause.pretty(exit.cause);
@@ -795,15 +859,16 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       if (!currentEntry?.enabled || currentEntry.state !== "active") continue;
       yield* loadPlugin(pluginId, currentEntry).pipe(
         Effect.catchCause((cause) =>
-          // In THIS start loop an interrupt-only cause is per-plugin (e.g. the
-          // pre-put state re-check firing Effect.interrupt for one plugin), so
-          // log and CONTINUE rather than re-raising — re-raising would abort the
-          // whole loop and skip every remaining plugin. A genuine host shutdown
-          // that interrupts the whole start fiber still terminates the loop: the
-          // next interruptible yield re-observes it and the trailing
-          // Effect.ignoreCause swallows it.
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.logWarning("Plugin activation interrupted; skipping", {
+          // A per-plugin self-cancel (the pre-put state re-check firing the typed
+          // PluginActivationCanceled sentinel for ONE plugin) is benign: log and
+          // CONTINUE so the remaining plugins still activate. Everything else goes
+          // through handleLoadFailureCause, which RE-RAISES a genuine interrupt-
+          // only cause (host shutdown) — that propagates out of this loop so the
+          // trailing Effect.ignoreCause ends start promptly instead of plodding
+          // through the rest of the plugins during shutdown — and marks a real
+          // error as "failed".
+          causeHasActivationCanceled(cause)
+            ? Effect.logWarning("Plugin activation canceled during start; skipping", {
                 pluginId,
                 cause: Cause.pretty(cause),
               })

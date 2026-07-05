@@ -773,4 +773,50 @@ agentsIt("AgentsCapability", (it) => {
       expect(turnAliases.size).toBe(0);
     }),
   );
+
+  it.effect("startTurn evicts the oldest alias when turnAliases reaches its cap", () =>
+    Effect.gen(function* () {
+      const turnAliases = new Map<
+        string,
+        { readonly threadId: ThreadId; readonly messageId: MessageId }
+      >();
+      const agents = makeAgentsCapability(
+        {
+          pluginId,
+          engine: {
+            readEvents: () => Stream.empty,
+            // Every start succeeds, so the alias is kept (not rolled back), and
+            // three un-awaited turns accumulate against the cap of 2.
+            dispatch: () => Effect.succeed({ sequence: 1 }),
+            streamDomainEvents: Stream.empty,
+          } as unknown as OrchestrationEngineService["Service"],
+          snapshots: {
+            // Existing, owned thread -> startTurn dispatches turn.start directly.
+            getThreadOwnerById: () => Effect.succeed(Option.some("plugin:agent-plugin" as any)),
+            getThreadDetailById: () => Effect.succeed(Option.none()),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+          } as any,
+          turns: {} as any,
+          messages: {} as any,
+          providerInstances: makeProviderRegistry(),
+        },
+        turnAliases,
+        2,
+      );
+      const threadId = ThreadId.make("thread-cap");
+
+      // Three un-awaited starts; none is pruned by a terminal read, so the FIFO
+      // cap is what bounds the map.
+      const first = yield* agents.startTurn({ threadId, text: "one" });
+      const second = yield* agents.startTurn({ threadId, text: "two" });
+      const third = yield* agents.startTurn({ threadId, text: "three" });
+
+      // The map is bounded at the cap; the oldest alias was evicted and the two
+      // most-recent turns are retained.
+      expect(turnAliases.size).toBeLessThanOrEqual(2);
+      expect(turnAliases.has(String(first.turnId))).toBe(false);
+      expect(turnAliases.has(String(second.turnId))).toBe(true);
+      expect(turnAliases.has(String(third.turnId))).toBe(true);
+    }),
+  );
 });
