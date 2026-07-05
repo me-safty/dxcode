@@ -3,6 +3,7 @@ import {
   getPluginHostShimSource,
   pluginHostModuleFromPath,
   PLUGIN_WEB_BUNDLE_CACHE_CONTROL,
+  PLUGIN_WEB_DEV_CACHE_CONTROL,
   PLUGIN_WEB_SHIM_CACHE_CONTROL,
 } from "@t3tools/shared/pluginHostWeb";
 import * as Effect from "effect/Effect";
@@ -19,6 +20,16 @@ import { pluginVersionDir } from "./PluginPaths.ts";
 const PLUGIN_WEB_ROUTE_PREFIX = "/plugins/";
 const PLUGIN_HOST_ROUTE_PREFIX = "/plugin-host/";
 const PLUGIN_ID_PATTERN = new RegExp(`^${PLUGIN_ID_PATTERN_SOURCE}$`, "u");
+
+// In plugin dev mode, bundles/shims are rebuilt in place at the same version, so
+// serve them uncacheable; otherwise use the long-lived immutable/short caches.
+const pluginDevMode = process.env.T3_PLUGIN_DEV === "1";
+const pluginBundleCacheControl = pluginDevMode
+  ? PLUGIN_WEB_DEV_CACHE_CONTROL
+  : PLUGIN_WEB_BUNDLE_CACHE_CONTROL;
+const pluginShimCacheControl = pluginDevMode
+  ? PLUGIN_WEB_DEV_CACHE_CONTROL
+  : PLUGIN_WEB_SHIM_CACHE_CONTROL;
 
 const notFound = () => HttpServerResponse.text("Not Found", { status: 404 });
 
@@ -184,7 +195,7 @@ const pluginBundleRouteLayer = HttpRouter.add(
       status: 200,
       contentType: contentTypeFor(candidateRealPath, path.extname),
       headers: {
-        "Cache-Control": PLUGIN_WEB_BUNDLE_CACHE_CONTROL,
+        "Cache-Control": pluginBundleCacheControl,
         "X-Content-Type-Options": "nosniff",
       },
     });
@@ -214,7 +225,7 @@ const pluginHostShimRouteLayer = HttpRouter.add(
       status: 200,
       contentType: "text/javascript; charset=utf-8",
       headers: {
-        "Cache-Control": PLUGIN_WEB_SHIM_CACHE_CONTROL,
+        "Cache-Control": pluginShimCacheControl,
         "X-Content-Type-Options": "nosniff",
       },
     });

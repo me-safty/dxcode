@@ -3,6 +3,10 @@ export const PLUGIN_HOST_BOOTSTRAP_MARKER = "data-t3-plugin-host-bootstrap";
 export const PLUGIN_HOST_LAYER_MARKER = "data-t3-plugin-host-layer";
 export const PLUGIN_WEB_BUNDLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 export const PLUGIN_WEB_SHIM_CACHE_CONTROL = "public, max-age=60";
+// In plugin dev (T3_PLUGIN_DEV=1) plugin bundles are rebuilt in place at the SAME
+// version, so the immutable cache would keep serving stale assets. Serve them
+// uncacheable in dev so every reload picks up the latest build.
+export const PLUGIN_WEB_DEV_CACHE_CONTROL = "no-store";
 
 /**
  * The runtime import map handed to plugin web bundles. It maps ONLY the bare
