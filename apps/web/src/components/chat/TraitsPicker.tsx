@@ -76,6 +76,31 @@ function getDescriptorStringValue(
   return typeof value === "string" ? value : null;
 }
 
+function isSpeedDescriptor(descriptor: ProviderOptionDescriptor): boolean {
+  return (
+    descriptor.id === "fastMode" ||
+    descriptor.id === "serviceTier" ||
+    /(?:speed|service)\s*tier/i.test(descriptor.label)
+  );
+}
+
+function isFastDescriptorValue(
+  descriptor: ProviderOptionDescriptor,
+  value: string | boolean | null | undefined,
+): boolean {
+  if (value === true) {
+    return true;
+  }
+  if (typeof value !== "string") {
+    return false;
+  }
+  const optionLabel =
+    descriptor.type === "select"
+      ? descriptor.options.find((option) => option.id === value)?.label
+      : undefined;
+  return value.toLowerCase() === "fast" || optionLabel?.toLowerCase() === "fast";
+}
+
 function getSelectedTraits(
   provider: ProviderDriverKind,
   models: ReadonlyArray<ServerProviderModel>,
@@ -384,8 +409,15 @@ export const TraitsPicker = memo(function TraitsPicker({
   const triggerLabels: Array<string> = [];
   let isFastModeEnabled = false;
   for (const descriptor of descriptors) {
-    if (descriptor.type === "boolean" && descriptor.id === "fastMode") {
-      isFastModeEnabled = descriptor.currentValue === true;
+    if (isSpeedDescriptor(descriptor)) {
+      isFastModeEnabled =
+        isFastModeEnabled ||
+        isFastDescriptorValue(
+          descriptor,
+          descriptor.type === "select"
+            ? getDescriptorStringValue(descriptor)
+            : descriptor.currentValue,
+        );
       continue;
     }
     const label =

@@ -21,9 +21,11 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   CloudIcon,
+  FileDiffIcon,
   FileIcon,
   FileTextIcon,
   FolderIcon,
+  Globe2Icon,
   ListChecksIcon,
   MailIcon,
   MessageCircleIcon,
@@ -35,6 +37,7 @@ import {
   SparklesIcon,
   TableIcon,
   TargetIcon,
+  TerminalSquareIcon,
   XIcon,
   ZapIcon,
 } from "lucide-react";
@@ -153,6 +156,12 @@ const pendingComposerAddItems = [
         title: "Plan mode",
         description: "Turn plan mode on",
         icon: ListChecksIcon,
+        muted: true,
+      },
+      {
+        title: "Conversation mode",
+        description: "Talk only, no code changes",
+        icon: MessageCircleIcon,
         muted: true,
       },
     ],
@@ -779,28 +788,127 @@ function PendingComposerWorkspaceControls() {
   );
 }
 
-function NoActiveThreadPanelControls() {
+function NoActiveThreadPanelControls({
+  terminalOpen,
+  rightPanelOpen,
+  onToggleTerminal,
+  onToggleRightPanel,
+}: {
+  terminalOpen: boolean;
+  rightPanelOpen: boolean;
+  onToggleTerminal: () => void;
+  onToggleRightPanel: () => void;
+}) {
   return (
     <div className="workspace-titlebar-controls z-50 gap-1 [-webkit-app-region:no-drag]">
       <PanelLayoutControls
-        terminalAvailable={false}
-        terminalOpen={false}
+        terminalAvailable
+        terminalOpen={terminalOpen}
         terminalShortcutLabel={null}
-        rightPanelAvailable={false}
-        rightPanelOpen={false}
+        rightPanelAvailable
+        rightPanelOpen={rightPanelOpen}
         rightPanelShortcutLabel={null}
-        onToggleTerminal={() => {}}
-        onToggleRightPanel={() => {}}
+        onToggleTerminal={onToggleTerminal}
+        onToggleRightPanel={onToggleRightPanel}
       />
     </div>
   );
 }
 
+function PendingTerminalDrawer() {
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-40 h-64 border-t border-border bg-background/95 shadow-[0_-12px_28px_rgba(15,23,42,0.08)] backdrop-blur">
+      <div className="flex h-10 items-center gap-2 border-b border-border/80 px-4 text-sm">
+        <TerminalSquareIcon className="size-4 text-muted-foreground" />
+        <span className="font-medium text-foreground">Terminal</span>
+        <span className="rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
+          Pending chat
+        </span>
+      </div>
+      <div className="flex h-[calc(100%-2.5rem)] items-center justify-center px-6 text-center">
+        <div>
+          <p className="text-sm font-medium text-foreground">No terminal session yet</p>
+          <p className="mt-1 max-w-sm text-muted-foreground text-xs">
+            Terminals will appear here once this chat starts with a project.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PendingRightToolsPanel() {
+  const tools = [
+    {
+      title: "Browser",
+      description: "Open previews and local URLs.",
+      icon: Globe2Icon,
+    },
+    {
+      title: "Terminal",
+      description: "Run shell sessions for the workspace.",
+      icon: TerminalSquareIcon,
+    },
+    {
+      title: "Files",
+      description: "Browse and inspect project files.",
+      icon: FileIcon,
+    },
+    {
+      title: "Diff",
+      description: "Review code changes.",
+      icon: FileDiffIcon,
+    },
+    {
+      title: "Plan",
+      description: "View tasks and proposed work.",
+      icon: ListChecksIcon,
+    },
+  ] as const;
+
+  return (
+    <aside className="absolute top-0 right-0 bottom-0 z-30 w-80 border-l border-border bg-background/95 shadow-[-12px_0_28px_rgba(15,23,42,0.08)] backdrop-blur">
+      <div className="flex h-12 items-center border-b border-border/80 px-4">
+        <span className="font-medium text-foreground text-sm">Tools</span>
+      </div>
+      <div className="space-y-2 p-3">
+        {tools.map((tool) => {
+          const Icon = tool.icon;
+          return (
+            <button
+              key={tool.title}
+              type="button"
+              className="flex w-full cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0">
+                <span className="block font-medium text-sm">{tool.title}</span>
+                <span className="mt-0.5 block text-muted-foreground text-xs leading-4">
+                  {tool.description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
 export function NoActiveThreadState() {
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-        <NoActiveThreadPanelControls />
+        <NoActiveThreadPanelControls
+          terminalOpen={terminalOpen}
+          rightPanelOpen={rightPanelOpen}
+          onToggleTerminal={() => setTerminalOpen((open) => !open)}
+          onToggleRightPanel={() => setRightPanelOpen((open) => !open)}
+        />
+        {rightPanelOpen ? <PendingRightToolsPanel /> : null}
         <Empty className="flex-1 px-6">
           <div className="w-full max-w-[46rem]">
             <EmptyHeader className="max-w-none">
@@ -812,7 +920,7 @@ export function NoActiveThreadState() {
               </EmptyDescription>
             </EmptyHeader>
 
-            <div className="mt-11 rounded-[22px] bg-muted/58 pb-4 shadow-[0_18px_45px_hsl(var(--foreground)/0.08)]">
+            <div className="mt-11 rounded-[22px] bg-muted/58 pb-2 shadow-[0_18px_45px_hsl(var(--foreground)/0.08)]">
               <div className="rounded-[18px] border border-border/70 bg-background shadow-[0_12px_32px_hsl(var(--foreground)/0.12)]">
                 <div className="min-h-18 rounded-t-[18px] px-4 pt-4 text-left text-sm text-muted-foreground/42">
                   Do anything
@@ -877,6 +985,7 @@ export function NoActiveThreadState() {
             </div>
           </div>
         </Empty>
+        {terminalOpen ? <PendingTerminalDrawer /> : null}
       </div>
     </SidebarInset>
   );
