@@ -362,6 +362,13 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateBoardProposal: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateBoardProposal",
+          detail: "generateBoardProposal not configured for git tests",
+        }),
+      ),
   };
 }
 

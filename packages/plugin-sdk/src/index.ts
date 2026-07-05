@@ -249,6 +249,17 @@ export interface VcsCapability {
   readonly diffRefs: (input: VcsDiffRefsInput) => Effect.Effect<VcsDiffResult, Error>;
 
   /**
+   * Read the patch between an arbitrary base ref and the current working tree
+   * (tracked, uncommitted), optionally including untracked files as add-diffs.
+   * Unlike `diffRefs` (ref..ref) and `workingTreeDiff` (against HEAD), this
+   * diffs a caller-supplied base commit against the live working tree — needed
+   * when the base is an out-of-band ref that never moved HEAD.
+   */
+  readonly diffRefToWorkingTree: (
+    input: VcsDiffRefToWorkingTreeInput,
+  ) => Effect.Effect<VcsDiffRefToWorkingTreeResult, Error>;
+
+  /**
    * Capture a filesystem checkpoint at a caller-provided Git ref.
    */
   readonly createCheckpoint: (input: VcsCheckpointInput) => Effect.Effect<void, Error>;
@@ -741,6 +752,18 @@ export interface TextGenerationCapability {
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, Error>;
+
+  /**
+   * Generate a structured workflow-board proposal from an assembled prompt.
+   *
+   * The host runs this NO-TOOL / read-only so the model can only reason and
+   * emit a proposal — it physically cannot write a board definition. Providers
+   * that cannot be proven no-tool fail rather than shipping a tool-enabled
+   * meta-agent.
+   */
+  readonly generateBoardProposal: (
+    input: BoardProposalGenerationInput,
+  ) => Effect.Effect<BoardProposalGenerationResult, Error>;
 }
 
 export interface TerminalSessionHandle {
@@ -985,8 +1008,25 @@ export interface VcsDiffRefsInput extends VcsWorktreeInput {
   readonly ignoreWhitespace?: boolean | undefined;
 }
 
+export interface VcsDiffRefToWorkingTreeInput extends VcsWorktreeInput {
+  /** Base ref/commit to diff FROM; resolved as `${baseRef}^{commit}`. */
+  readonly baseRef: string;
+  /**
+   * Include untracked files as `/dev/null` → path add-diffs. Defaults to true
+   * (matches the workflow ticket-diff semantics).
+   */
+  readonly includeUntracked?: boolean | undefined;
+  readonly ignoreWhitespace?: boolean | undefined;
+}
+
 export interface VcsDiffResult {
   readonly diff: string;
+}
+
+export interface VcsDiffRefToWorkingTreeResult {
+  readonly diff: string;
+  /** True when any diff segment was truncated at the output-size cap. */
+  readonly truncated: boolean;
 }
 
 export interface VcsCheckpointInput extends VcsWorktreeInput {
@@ -1112,6 +1152,23 @@ export interface ThreadTitleGenerationInput {
 
 export interface ThreadTitleGenerationResult {
   readonly title: string;
+}
+
+export interface BoardProposalGenerationInput {
+  /**
+   * Fully assembled prompt (metrics + current board definition + instructions).
+   * The caller builds this; the provider does NOT read any files — the
+   * underlying model invocation is no-tool / read-only.
+   */
+  readonly prompt: string;
+  readonly modelSelection: ModelSelection;
+}
+
+export interface BoardProposalGenerationResult {
+  /** The proposed workflow/board definition, decoded from the model's output. */
+  readonly proposedDefinition: unknown;
+  /** Human-readable explanation of why this proposal was made. */
+  readonly rationale: string;
 }
 
 export interface PluginHostApi {

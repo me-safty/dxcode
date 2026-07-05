@@ -118,6 +118,7 @@ export interface PluginUiContext {
   readonly registerSidebarSection: (registration: PluginSidebarSectionRegistration) => void;
   readonly registerSettingsPage: (registration: PluginSettingsPageRegistration) => void;
   readonly registerCommand: (registration: PluginCommandRegistration) => void;
+  readonly registerProjectAction: (registration: PluginProjectActionRegistration) => void;
 }
 
 export interface PluginWebLogger {
@@ -167,6 +168,25 @@ export interface PluginSidebarSectionRegistration {
   readonly render: (props: PluginSidebarSectionRenderProps) => unknown;
 }
 
+export interface PluginProjectActionRenderProps {
+  readonly pluginId: PluginId;
+  readonly environmentId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  // The plugin's route base for this environment (`/<env>/p/<pluginId>`), for
+  // navigating to plugin routes after the action runs.
+  readonly routeBasePath: string | null;
+}
+
+// A per-project action the host renders inline in each project row (alongside the
+// built-in "New thread" button). The plugin's `render` returns its own trigger
+// (e.g. an icon button) and may manage its own dialog; the host provides project
+// context. Return null to render nothing for a given project.
+export interface PluginProjectActionRegistration {
+  readonly id: string;
+  readonly render: (props: PluginProjectActionRenderProps) => unknown;
+}
+
 export interface PluginSettingsComponentProps {
   readonly pluginId: PluginId;
   readonly pageId: string;
@@ -205,5 +225,6 @@ export interface PluginWebRegistration {
   readonly sidebarSections?: ReadonlyArray<PluginSidebarSectionRegistration>;
   readonly settingsPages?: ReadonlyArray<PluginSettingsPageRegistration>;
   readonly commands?: ReadonlyArray<PluginCommandRegistration>;
+  readonly projectActions?: ReadonlyArray<PluginProjectActionRegistration>;
   readonly providers?: (context: PluginUiContext) => unknown;
 }

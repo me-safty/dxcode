@@ -402,6 +402,87 @@ export function makeVcsCapability(input: {
         ],
       }),
 
+    // Diff a caller-supplied base ref against the live working tree (tracked
+    // uncommitted state) plus, by default, untracked files as `/dev/null` add
+    // diffs. Mirrors the fork's WorktreeDiffPort.diffRefToWorktree: three bounded
+    // git invocations (tracked diff, untracked list, per-untracked add-diff),
+    // concatenated, with `truncated` OR'd across all segments.
+    diffRefToWorkingTree: (request) =>
+      requireAbsolute("worktreePath", request.worktreePath).pipe(
+        Effect.flatMap((cwd) =>
+          Effect.gen(function* () {
+            const wsArgs = request.ignoreWhitespace ? ["--ignore-all-space"] : [];
+            const tracked = yield* input.git.execute({
+              operation: "PluginVcsCapability.diffRefToWorkingTree.tracked",
+              cwd,
+              args: [
+                "diff",
+                "--no-ext-diff",
+                "--patch",
+                "--minimal",
+                ...wsArgs,
+                `${request.baseRef}^{commit}`,
+                "--",
+              ],
+              maxOutputBytes: 120_000,
+              appendTruncationMarker: true,
+            });
+
+            const includeUntracked = request.includeUntracked !== false;
+            const untrackedList = includeUntracked
+              ? yield* input.git
+                  .execute({
+                    operation: "PluginVcsCapability.diffRefToWorkingTree.untracked.list",
+                    cwd,
+                    args: ["ls-files", "--others", "--exclude-standard", "-z"],
+                    maxOutputBytes: 120_000,
+                    appendTruncationMarker: true,
+                  })
+                  .pipe(Effect.orElseSucceed(() => ({ stdout: "", stdoutTruncated: false })))
+              : { stdout: "", stdoutTruncated: false };
+            const untrackedPaths = untrackedList.stdout
+              .split("\0")
+              .filter((path) => path.length > 0);
+            const untrackedDiffs = yield* Effect.forEach(
+              untrackedPaths,
+              (path) =>
+                input.git.execute({
+                  operation: "PluginVcsCapability.diffRefToWorkingTree.untracked.diff",
+                  cwd,
+                  args: [
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-index",
+                    "--patch",
+                    "--minimal",
+                    ...wsArgs,
+                    "--",
+                    "/dev/null",
+                    path,
+                  ],
+                  allowNonZeroExit: true,
+                  maxOutputBytes: 120_000,
+                  appendTruncationMarker: true,
+                }),
+              { concurrency: 4 },
+            );
+
+            return {
+              diff: [
+                tracked.stdout.trimEnd(),
+                ...untrackedDiffs.map((result) => result.stdout.trimEnd()),
+              ]
+                .filter((part) => part.length > 0)
+                .join("\n"),
+              truncated:
+                tracked.stdoutTruncated ||
+                untrackedList.stdoutTruncated ||
+                untrackedDiffs.some((result) => result.stdoutTruncated),
+            };
+          }),
+        ),
+      ),
+
     createCheckpoint: (request) =>
       requireAbsolute("worktreePath", request.worktreePath).pipe(
         Effect.flatMap((cwd) =>

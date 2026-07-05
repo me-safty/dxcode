@@ -64,6 +64,10 @@ describe("PluginUiHost", () => {
                 title: "Refresh",
                 run: () => undefined,
               });
+              ctx.registerProjectAction({
+                id: "new-board",
+                render: () => null,
+              });
               void ctx.rpc.call("ping");
             },
           }),
@@ -86,6 +90,9 @@ describe("PluginUiHost", () => {
     expect(snapshot.commands).toHaveLength(1);
     expect(snapshot.commands[0]?.pluginId).toBe(fixturePluginId);
     expect(snapshot.commands[0]?.context.pluginId).toBe(fixturePluginId);
+    expect(snapshot.projectActions).toHaveLength(1);
+    expect(snapshot.projectActions[0]?.pluginId).toBe(fixturePluginId);
+    expect(snapshot.projectActions[0]?.id).toBe("new-board");
     expect(snapshot.failures).toEqual({});
   });
 

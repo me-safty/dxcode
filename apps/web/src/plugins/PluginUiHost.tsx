@@ -2,6 +2,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type {
   PluginCommandRegistration,
   PluginComponent,
+  PluginProjectActionRenderProps,
   PluginRouteComponentProps,
   PluginSettingsComponentProps,
   PluginSidebarSectionRenderProps,
@@ -36,6 +37,12 @@ export interface RegisteredPluginSettingsPage {
   readonly component: PluginComponent<PluginSettingsComponentProps>;
 }
 
+export interface RegisteredPluginProjectAction {
+  readonly pluginId: PluginId;
+  readonly id: string;
+  readonly render: (props: PluginProjectActionRenderProps) => unknown;
+}
+
 export interface RegisteredPluginCommand extends PluginCommandRegistration {
   readonly pluginId: PluginId;
   readonly context: PluginUiContext;
@@ -46,6 +53,7 @@ export interface PluginUiRegistrySnapshot {
   readonly sidebarSections: ReadonlyArray<RegisteredPluginSidebarSection>;
   readonly settingsPages: ReadonlyArray<RegisteredPluginSettingsPage>;
   readonly commands: ReadonlyArray<RegisteredPluginCommand>;
+  readonly projectActions: ReadonlyArray<RegisteredPluginProjectAction>;
   readonly failures: Readonly<Record<string, string>>;
 }
 
@@ -56,6 +64,7 @@ interface LoadedPlugin {
   readonly sidebarSections: ReadonlyArray<RegisteredPluginSidebarSection>;
   readonly settingsPages: ReadonlyArray<RegisteredPluginSettingsPage>;
   readonly commands: ReadonlyArray<RegisteredPluginCommand>;
+  readonly projectActions: ReadonlyArray<RegisteredPluginProjectAction>;
   readonly failure: string | null;
 }
 
@@ -68,6 +77,7 @@ export const EMPTY_PLUGIN_UI_REGISTRY_SNAPSHOT: PluginUiRegistrySnapshot = Objec
   sidebarSections: Object.freeze([]),
   settingsPages: Object.freeze([]),
   commands: Object.freeze([]),
+  projectActions: Object.freeze([]),
   failures: Object.freeze({}),
 });
 
@@ -95,6 +105,7 @@ function snapshotFromState(state: PluginUiHostState): PluginUiRegistrySnapshot {
   const sidebarSections: Array<RegisteredPluginSidebarSection> = [];
   const settingsPages: Array<RegisteredPluginSettingsPage> = [];
   const commands: Array<RegisteredPluginCommand> = [];
+  const projectActions: Array<RegisteredPluginProjectAction> = [];
   const failures: Record<string, string> = {};
 
   for (const loaded of state.loaded.values()) {
@@ -106,9 +117,10 @@ function snapshotFromState(state: PluginUiHostState): PluginUiRegistrySnapshot {
     sidebarSections.push(...loaded.sidebarSections);
     settingsPages.push(...loaded.settingsPages);
     commands.push(...loaded.commands);
+    projectActions.push(...loaded.projectActions);
   }
 
-  return { routes, sidebarSections, settingsPages, commands, failures };
+  return { routes, sidebarSections, settingsPages, commands, projectActions, failures };
 }
 
 export function getPluginWebEntryUrl(plugin: Pick<PluginInfo, "id" | "version">): string {
@@ -233,6 +245,7 @@ export async function syncPluginUiHostRegistrations({
     const sidebarSections: Array<RegisteredPluginSidebarSection> = [];
     const settingsPages: Array<RegisteredPluginSettingsPage> = [];
     const commands: Array<RegisteredPluginCommand> = [];
+    const projectActions: Array<RegisteredPluginProjectAction> = [];
 
     try {
       const module = await importWebPlugin(getPluginWebEntryUrl(plugin));
@@ -257,6 +270,9 @@ export async function syncPluginUiHostRegistrations({
         registerCommand: (registration) => {
           commands.push({ ...registration, pluginId: plugin.id, context: ctx });
         },
+        registerProjectAction: (registration) => {
+          projectActions.push({ ...registration, pluginId: plugin.id });
+        },
       };
       await maybeAwait(definition.register(ctx));
       state.loaded.set(plugin.id, {
@@ -266,6 +282,7 @@ export async function syncPluginUiHostRegistrations({
         sidebarSections,
         settingsPages,
         commands,
+        projectActions,
         failure: null,
       });
     } catch (error) {
@@ -278,6 +295,7 @@ export async function syncPluginUiHostRegistrations({
         sidebarSections: [],
         settingsPages: [],
         commands: [],
+        projectActions: [],
         failure: message,
       });
     }

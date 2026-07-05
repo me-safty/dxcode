@@ -263,6 +263,8 @@ it.effect("text generation delegates the existing one-shot operations", () =>
         Effect.succeed({ title: input.headBranch, body: input.diffSummary }),
       generateBranchName: (input) => Effect.succeed({ branch: `feature/${input.message}` }),
       generateThreadTitle: (input) => Effect.succeed({ title: input.message.slice(0, 10) }),
+      generateBoardProposal: (input) =>
+        Effect.succeed({ proposedDefinition: { fromPrompt: input.prompt }, rationale: "test" }),
     });
     const modelSelection = { instanceId: "codex", model: "gpt-test" } as any;
 
