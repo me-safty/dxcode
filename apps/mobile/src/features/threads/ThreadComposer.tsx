@@ -37,7 +37,6 @@ import {
   type ComposerEditorSelection,
 } from "../../components/ComposerEditor";
 import {
-  COMPOSER_TOOLBAR_CONTROL_HEIGHT,
   ComposerToolbarButton,
   ComposerToolbarRow,
   ComposerToolbarScroller,
@@ -768,7 +767,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       paddingVertical: 4,
                     }
                   : {
-                      height: Platform.OS === "android" ? COMPOSER_TOOLBAR_CONTROL_HEIGHT : 36,
+                      height: 36,
                     }
               }
               textStyle={{
