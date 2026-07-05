@@ -744,7 +744,6 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         {
           type: "session.updated",
           properties: {
-            sessionID: "http://127.0.0.1:9999/session",
             info: {
               id: "http://127.0.0.1:9999/session",
               title: "Investigate OpenCode title sync",
