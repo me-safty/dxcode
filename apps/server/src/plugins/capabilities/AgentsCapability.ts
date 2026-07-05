@@ -22,6 +22,7 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
@@ -374,9 +375,32 @@ export function makeAgentsCapability(input: {
       }),
 
     observeThread: (threadId) =>
-      Stream.fromEffect(
+      Stream.unwrap(
         Effect.gen(function* () {
           yield* requireOwnedThread(threadId);
+          // Subscribe to live thread-detail events into a bounded, back-pressured
+          // queue BEFORE reading the snapshot. The previous Stream.concat only
+          // subscribed AFTER the snapshot was emitted, so any event committed in
+          // that window was dropped. The engine commits the projection update
+          // before publishing to the domain-event PubSub, so once we are
+          // subscribed here: an event already reflected in the snapshot has
+          // sequence <= snapshotSequence and is filtered out below (no dup),
+          // while every newer event is captured in the buffer (no gap). See the
+          // report note: a hard, scheduler-independent guarantee would require a
+          // subscription-readiness signal from streamDomainEvents (an engine-level
+          // change); ws.ts carries the same residual assumption.
+          const buffer = yield* Queue.bounded<OrchestrationEvent>(256);
+          yield* input.engine.streamDomainEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.aggregateKind === "thread" &&
+                event.aggregateId === threadId &&
+                isThreadDetailEvent(event),
+            ),
+            Stream.runForEach((event) => Queue.offer(buffer, event)),
+            Effect.forkScoped,
+          );
+
           const [threadDetail, snapshotSequence] = yield* Effect.all([
             input.snapshots.getThreadDetailById(threadId),
             input.snapshots
@@ -386,24 +410,20 @@ export function makeAgentsCapability(input: {
           if (Option.isNone(threadDetail)) {
             return yield* new AgentsThreadNotFoundError({ threadId });
           }
-          return {
-            snapshotSequence,
-            thread: threadDetail.value,
-          };
-        }),
-      ).pipe(
-        Stream.map((snapshot) => ({ kind: "snapshot" as const, snapshot })),
-        Stream.concat(
-          input.engine.streamDomainEvents.pipe(
-            Stream.filter(
-              (event) =>
-                event.aggregateKind === "thread" &&
-                event.aggregateId === threadId &&
-                isThreadDetailEvent(event),
+
+          return Stream.concat(
+            Stream.make({
+              kind: "snapshot" as const,
+              snapshot: { snapshotSequence, thread: threadDetail.value },
+            }),
+            Stream.fromQueue(buffer).pipe(
+              // Skip events already reflected in the snapshot to avoid emitting a
+              // duplicate of an event the snapshot already contains.
+              Stream.filter((event) => event.sequence > snapshotSequence),
+              Stream.map((event) => ({ kind: "event" as const, event })),
             ),
-            Stream.map((event) => ({ kind: "event" as const, event })),
-          ),
-        ),
+          );
+        }),
       ),
 
     awaitTurn: (request) =>

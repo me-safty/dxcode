@@ -22,6 +22,7 @@ import {
   AuthTerminalOperateScope,
   type AuthClientSession,
   type AuthEnvironmentScope,
+  type AuthScope,
   type AuthPairingLink,
   type AdvertisedEndpoint,
   type DesktopDiscoveredSshHost,
@@ -220,7 +221,10 @@ function AccessScopeSummary({
   scopes,
   label,
 }: {
-  readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
+  // Accepts full AuthScopes so plugin scopes on a pairing link (e.g.
+  // `plugin:<id>:read`) render alongside environment scopes. Each scope
+  // is shown verbatim as a monospace code line in the popover.
+  readonly scopes: ReadonlyArray<AuthScope>;
   readonly label: string;
 }) {
   const scopeCountLabel = `${scopes.length} ${scopes.length === 1 ? "scope" : "scopes"}`;

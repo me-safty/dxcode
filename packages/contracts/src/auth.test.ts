@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
 import {
   AuthAccessWriteScope,
   AuthOrchestrationReadScope,
+  AuthPairingLink,
   AuthPluginsManageScope,
   AuthRelayReadScope,
   AuthStandardClientMarkerScopes,
@@ -40,6 +42,26 @@ describe("PluginScope", () => {
   it("builds validated read and operate scope strings", () => {
     expect(pluginReadScope("test-plugin")).toBe("plugin:test-plugin:read");
     expect(pluginOperateScope("test-plugin")).toBe("plugin:test-plugin:operate");
+  });
+});
+
+describe("AuthPairingLink", () => {
+  const decode = Schema.decodeUnknownSync(AuthPairingLink);
+  const encode = Schema.encodeSync(AuthPairingLink);
+
+  it("carries plugin scopes alongside environment scopes", () => {
+    const link = decode({
+      id: "link-1",
+      credential: "TOKEN12345AB",
+      scopes: [AuthOrchestrationReadScope, pluginReadScope("acme-notes")],
+      subject: "one-time-token",
+      createdAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+      expiresAt: DateTime.makeUnsafe("2026-01-01T01:00:00.000Z"),
+    });
+
+    expect(link.scopes).toEqual([AuthOrchestrationReadScope, "plugin:acme-notes:read"]);
+    // Round-trips through encode without dropping the plugin scope.
+    expect(encode(link).scopes).toEqual([AuthOrchestrationReadScope, "plugin:acme-notes:read"]);
   });
 });
 

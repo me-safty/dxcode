@@ -97,6 +97,13 @@ managementTest("PluginManagementRpcHandlers", (it) => {
         listed.sources.filter((entry) => entry.url.includes("legacy-marketplace.json")).length,
         1,
       );
+      // The stored (previously credentialed) URL is rewritten to its
+      // credential-stripped canonical form so it stops leaking via listSources,
+      // while the opaque legacy sourceId is preserved.
+      assert.equal(added.source.url, "https://example.test/legacy-marketplace.json");
+      const legacyEntry = listed.sources.find((entry) => entry.id === "src-legacy");
+      assert.equal(legacyEntry?.url, "https://example.test/legacy-marketplace.json");
+      assert.isFalse(legacyEntry?.url.includes("secret"));
     }),
   );
 

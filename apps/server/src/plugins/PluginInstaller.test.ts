@@ -591,3 +591,71 @@ it.effect("PluginInstaller stages upgrades and uninstall marks pending remove", 
     }).pipe(Effect.provide(installerLayer({ tarball: tarballForManifest(), deactivated }))),
   );
 });
+
+it.effect("PluginInstaller rejects upgrading to the already-installed version", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const installer = yield* PluginInstaller;
+      const store = yield* PluginLockfileStore;
+      yield* seedSource;
+      yield* store.updatePlugin(pluginId, () =>
+        Effect.succeed({
+          version: "1.0.0",
+          sha256: "existing",
+          sourceId,
+          enabled: true,
+          state: "active",
+          activation: { activatingSince: null, crashCount: 0 },
+          installedAt: "2026-07-03T00:00:00.000Z",
+          lastError: null,
+        }),
+      );
+
+      // A same-version upgrade must be rejected in beginUpgrade, before any
+      // staging, so moveStagingToVersionDir can never remove the live version
+      // dir out from under the running plugin.
+      const result = yield* Effect.result(installer.beginUpgrade({ pluginId, version: "1.0.0" }));
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) assert.equal(result.failure.code, "manifest-invalid");
+    }).pipe(Effect.provide(installerLayer({ tarball: tarballForManifest() }))),
+  ),
+);
+
+it.effect("PluginInstaller cleans staging when decompression fails", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const installer = yield* PluginInstaller;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* seedSource;
+
+      const result = yield* Effect.result(
+        installer.beginInstall({ sourceId, pluginId, version: "1.0.0" }),
+      );
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) assert.equal(result.failure.code, "extract-failed");
+
+      // The staging dir is created before decompression; a decompress failure
+      // (gzip-bomb cap) must clean it up rather than orphan it under .staging.
+      const stagingRoot = path.join(config.pluginsDir, ".staging");
+      const exists = yield* fs.exists(stagingRoot).pipe(Effect.orElseSucceed(() => false));
+      const entries = exists ? yield* fs.readDirectory(stagingRoot) : [];
+      assert.deepEqual(entries, []);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          installerLayer({
+            tarball: NodeZlib.gzipSync(
+              tarballForManifestJson(encodeManifestJson(manifest()), [
+                { name: "assets/repeated.bin", body: new Uint8Array(1024 * 1024) },
+              ]),
+            ),
+          }),
+          NodeServices.layer,
+        ),
+      ),
+    ),
+  ),
+);

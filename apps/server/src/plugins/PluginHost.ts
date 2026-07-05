@@ -84,6 +84,17 @@ const healthyActivationDelay = () => {
     : Duration.seconds(30);
 };
 
+// Bound plugin-controlled register()/recover() so an unresponsive plugin fails
+// activation via the normal failure path instead of stalling the host: a hung
+// register()/recover() would otherwise block server startup or an
+// install/enable request indefinitely.
+const registrationTimeout = () => {
+  const overrideMs = Number.parseInt(process.env.T3_PLUGIN_HOST_REGISTER_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(overrideMs) && overrideMs > 0
+    ? Duration.millis(overrideMs)
+    : Duration.seconds(30);
+};
+
 export class PluginRegistrationError extends Schema.TaggedErrorClass<PluginRegistrationError>()(
   "PluginRegistrationError",
   { pluginId: Schema.String, detail: Schema.String },
@@ -163,7 +174,9 @@ function validateRegistration(
 }
 
 const unavailable = (capability: string) =>
-  Effect.die(new PluginCapabilityUnavailable({ capability }));
+  // Typed failure (not a defect) so a plugin that calls an undeclared capability
+  // can catch/degrade gracefully instead of crashing the call as a defect.
+  Effect.fail(new PluginCapabilityUnavailable({ capability }));
 
 const makeHostApi = (input: {
   readonly pluginId: PluginId;
@@ -413,6 +426,23 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       }),
     );
 
+  // Outer handler for a loadPlugin failure that escaped the activation-exit
+  // block (setup errors, or the re-failed interrupt from that block). Persist
+  // "failed" for a genuine error, but on an interrupt-only cause (clean
+  // shutdown / concurrent lifecycle change) propagate instead so state is left
+  // intact — mirrors the activation-exit branch inside loadPlugin.
+  const handleLoadFailureCause = (
+    pluginId: PluginId,
+    logMessage: string,
+    cause: Cause.Cause<unknown>,
+  ) =>
+    Cause.hasInterruptsOnly(cause)
+      ? Effect.failCause(cause as Cause.Cause<never>)
+      : markFailure(pluginId, Cause.pretty(cause)).pipe(
+          Effect.andThen(Effect.logWarning(logMessage, { pluginId, cause: Cause.pretty(cause) })),
+          Effect.ignore,
+        );
+
   const readManifest = (pluginDir: string) =>
     fs
       .readFileString(pluginManifestPath(pluginDir, path.join))
@@ -512,15 +542,32 @@ export const make = Effect.fn("PluginHost.make")(function* () {
         }
         yield* fs.makeDirectory(dataDir, { recursive: true });
         const definition = yield* loader.loadServerEntry(pluginDir, serverEntry);
-        const registration = yield* resolveRegistration(pluginId, definition, hostApi);
+        const registration = yield* resolveRegistration(pluginId, definition, hostApi).pipe(
+          Effect.timeout(registrationTimeout()),
+        );
         yield* validateRegistration(pluginId, registration);
         yield* migrator.run(pluginId, registration.migrations ?? []);
         if (registration.recover) {
-          yield* registration.recover();
+          yield* registration.recover().pipe(Effect.timeout(registrationTimeout()));
         }
         if (manifest.capabilities.includes("http") && (registration.http?.length ?? 0) > 0) {
           yield* httpRegistry.put(pluginId, registration.http ?? []);
           yield* Scope.addFinalizer(scope, httpRegistry.remove(pluginId));
+        }
+        // Re-check lifecycle state right before publishing the runtime. A
+        // concurrent disable/uninstall flips the lockfile and runs
+        // deactivatePlugin, which finds no runtime yet (we have not put it) and
+        // returns early. Without this guard activation would finish and the
+        // now-disabled/pending-remove plugin's runtime + services + HTTP routes
+        // would go live anyway. Abort via interrupt so the failure branch closes
+        // the scope (removing any partial HTTP registration), skips the
+        // registry.put + "active" publish, and leaves the persisted state intact.
+        const stateBeforePut = yield* store.readLockfile.pipe(
+          Effect.map((current) => getLockfilePlugin(current, pluginId)?.state),
+          Effect.orElseSucceed(() => undefined as PluginState | undefined),
+        );
+        if (stateBeforePut !== "active") {
+          return yield* Effect.interrupt;
         }
         yield* registry.put(pluginId, { manifest, registration, readiness, scope });
         for (const service of registration.services ?? []) {
@@ -576,6 +623,14 @@ export const make = Effect.fn("PluginHost.make")(function* () {
         // and registry.list keep reporting the plugin as active with a dead
         // scope and an unresolved readiness Deferred.
         yield* registry.remove(pluginId).pipe(Effect.ignore);
+        if (Cause.hasInterruptsOnly(exit.cause)) {
+          // Interrupt-only teardown: a clean host shutdown (scope close / stop)
+          // or a concurrent disable/uninstall aborting activation (see the
+          // pre-put state re-check). Do the cleanup above but do NOT persist a
+          // spurious "failed"/lastError — propagate the interruption so the
+          // persisted lifecycle state stays intact.
+          return yield* Effect.failCause(exit.cause as Cause.Cause<never>);
+        }
         const message = Cause.pretty(exit.cause);
         yield* markFailure(pluginId, message);
         yield* Effect.logWarning("Plugin activation failed", { pluginId, cause: message });
@@ -605,15 +660,7 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       yield* loader.ensureHostSingletonResolution;
       yield* loadPlugin(pluginId, entry).pipe(
         Effect.catchCause((cause) =>
-          markFailure(pluginId, Cause.pretty(cause)).pipe(
-            Effect.andThen(
-              Effect.logWarning("Plugin hot activation failed", {
-                pluginId,
-                cause: Cause.pretty(cause),
-              }),
-            ),
-            Effect.ignore,
-          ),
+          handleLoadFailureCause(pluginId, "Plugin hot activation failed", cause),
         ),
       );
     });
@@ -625,7 +672,14 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       yield* Scope.close(runtime.value.scope, Exit.void).pipe(Effect.ignore);
       yield* registry.remove(pluginId);
       yield* httpRegistry.remove(pluginId).pipe(Effect.ignore);
-      yield* publishPluginStateChanged(pluginId, "disabled");
+      // Announce the state that is actually persisted rather than a hardcoded
+      // "disabled": uninstall sets "pending-remove" then calls this, and
+      // publishing "disabled" would contradict the lockfile + list APIs.
+      const persistedState = yield* store.readLockfile.pipe(
+        Effect.map((lockfile) => getLockfilePlugin(lockfile, pluginId)?.state ?? "disabled"),
+        Effect.orElseSucceed(() => "disabled" as PluginState),
+      );
+      yield* publishPluginStateChanged(pluginId, persistedState);
     });
 
   const reconcilePendingState = (pluginId: PluginId, entry: PluginLockfilePlugin) =>
@@ -733,14 +787,10 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       if (!currentEntry?.enabled || currentEntry.state !== "active") continue;
       yield* loadPlugin(pluginId, currentEntry).pipe(
         Effect.catchCause((cause) =>
-          markFailure(pluginId, Cause.pretty(cause)).pipe(
-            Effect.andThen(
-              Effect.logWarning("Plugin activation failed before scope acquisition", {
-                pluginId,
-                cause: Cause.pretty(cause),
-              }),
-            ),
-            Effect.ignore,
+          handleLoadFailureCause(
+            pluginId,
+            "Plugin activation failed before scope acquisition",
+            cause,
           ),
         ),
       );

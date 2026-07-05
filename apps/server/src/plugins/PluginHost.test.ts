@@ -260,6 +260,9 @@ const decodeNewCapabilityMarker = Schema.decodeEffect(
     }),
   ),
 );
+const decodeCaughtMarker = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Struct({ caught: Schema.String })),
+);
 
 const makeLockEntry = (overrides: Partial<PluginLockfilePlugin> = {}): PluginLockfilePlugin => ({
   version: "1.0.0",
@@ -400,6 +403,30 @@ export default {
       };
       NodeFs.mkdirSync(hostApi.config.dataDir, { recursive: true });
       NodeFs.writeFileSync(hostApi.config.dataDir + "/new-capabilities.json", JSON.stringify(marker));
+      return {};
+    });
+  },
+};
+`;
+
+const catchUnavailableEntrySource = () => `
+import { createRequire } from "node:module";
+const require = createRequire(${JSON.stringify(NodeURL.pathToFileURL(import.meta.url).href)});
+const Effect = require("effect/Effect");
+const NodeFs = require("node:fs");
+
+export default {
+  register(hostApi) {
+    return Effect.gen(function* () {
+      // hostApi.agents is undeclared for this plugin. A typed Effect.fail is
+      // recoverable via Effect.catch; a defect (Effect.die) would NOT be caught
+      // and would crash register instead of degrading gracefully.
+      const caught = yield* hostApi.agents.pipe(
+        Effect.as("unexpected-success"),
+        Effect.catch((error) => Effect.succeed(error && error._tag ? error._tag : "unknown")),
+      );
+      NodeFs.mkdirSync(hostApi.config.dataDir, { recursive: true });
+      NodeFs.writeFileSync(hostApi.config.dataDir + "/caught.json", JSON.stringify({ caught }));
       return {};
     });
   },
@@ -802,6 +829,102 @@ layer("PluginHost", (it) => {
       assert.equal(entry?.state, "active");
       assert.equal(entry?.activation.crashCount, 0);
       assert.equal(entry?.lastError, null);
+    }),
+  );
+
+  it.effect("deactivatePlugin publishes the persisted state, not a hardcoded disabled", () =>
+    Effect.gen(function* () {
+      const pluginId = PluginId.make("deactivate-state-plugin");
+      const host = yield* PluginHostModule.PluginHost;
+      const store = yield* PluginLockfileStoreLayer.PluginLockfileStore;
+      const registry = yield* PluginRuntimeRegistryLayer.PluginRuntimeRegistry;
+      const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
+      const previousHealthyDelay = process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+
+      // Subscribe before start (like the lifecycle test above) to deterministically
+      // observe both the activation "active" publish and the later deactivation
+      // publish.
+      const eventFiber = yield* lifecycleEvents.stream.pipe(
+        Stream.filter((event) => event.type === "plugins" && event.payload.pluginId === pluginId),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      // A migration-free entry so activation succeeds regardless of sibling tests
+      // (still enters the runtime registry, so deactivate finds a live runtime).
+      yield* installPlugin({
+        pluginId,
+        entrySource: "export default { register() { return {}; } };",
+      });
+
+      process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = "0";
+      try {
+        yield* host.start;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          if ((yield* registry.list).some((runtime) => runtime.manifest.id === pluginId)) break;
+          yield* Effect.yieldNow;
+        }
+      } finally {
+        if (previousHealthyDelay === undefined) {
+          delete process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+        } else {
+          process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = previousHealthyDelay;
+        }
+      }
+
+      // Persist "pending-remove" (as uninstall does) before tearing down.
+      yield* store.updatePlugin(pluginId, ({ current }) =>
+        Effect.succeed(
+          current ? { ...current, state: "pending-remove", enabled: false } : undefined,
+        ),
+      );
+      yield* host.deactivatePlugin(pluginId);
+
+      const events = Array.from(yield* Fiber.join(eventFiber));
+      assert.deepEqual(events[0]?.payload, {
+        kind: "plugin-state-changed",
+        pluginId,
+        state: "active",
+      });
+      // The deactivation publish reflects the ACTUAL persisted state
+      // ("pending-remove"), not a hardcoded "disabled".
+      assert.deepEqual(events[1]?.payload, {
+        kind: "plugin-state-changed",
+        pluginId,
+        state: "pending-remove",
+      });
+    }),
+  );
+
+  it.effect("an undeclared capability fails with a catchable typed error, not a defect", () =>
+    Effect.gen(function* () {
+      const pluginId = PluginId.make("catch-capability");
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const host = yield* PluginHostModule.PluginHost;
+      const registry = yield* PluginRuntimeRegistryLayer.PluginRuntimeRegistry;
+
+      yield* installPlugin({
+        pluginId,
+        capabilities: [],
+        entrySource: catchUnavailableEntrySource(),
+      });
+
+      yield* host.start;
+      yield* Effect.yieldNow;
+
+      // register completed (a defect would have crashed it) and the plugin is
+      // active, having recovered from the undeclared-capability failure.
+      const runtimes = yield* registry.list;
+      assert.isTrue(runtimes.some((runtime) => runtime.manifest.id === pluginId));
+
+      const dataDir = pluginDataDir(config.pluginsDir, pluginId, path.join);
+      const caughtFile = yield* fs.readFileString(path.join(dataDir, "caught.json"));
+      assert.deepEqual(yield* decodeCaughtMarker(caughtFile), {
+        caught: "PluginCapabilityUnavailable",
+      });
     }),
   );
 });

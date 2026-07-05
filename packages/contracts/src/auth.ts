@@ -270,7 +270,11 @@ export type AuthPairingCredentialResult = typeof AuthPairingCredentialResult.Typ
 export const AuthPairingLink = Schema.Struct({
   id: TrimmedNonEmptyString,
   credential: TrimmedNonEmptyString,
-  scopes: AuthEnvironmentScopes,
+  // Full AuthScopes (not just environment scopes) so that plugin scopes
+  // granted on a pairing link surface in the active-link list and the
+  // `pairingLinkUpserted` change event (whose payload is this struct).
+  // The persisted store row already holds full AuthScopes.
+  scopes: AuthScopes,
   subject: TrimmedNonEmptyString,
   label: Schema.optionalKey(TrimmedNonEmptyString),
   createdAt: Schema.DateTimeUtc,

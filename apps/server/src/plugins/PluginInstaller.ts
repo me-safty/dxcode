@@ -621,7 +621,12 @@ export const make = Effect.fn("PluginInstaller.make")(function* () {
         ),
       );
 
-      const tarBytes = yield* decompressTarball(downloaded);
+      const tarBytes = yield* decompressTarball(downloaded).pipe(
+        // Clean up the just-created staging dir if decompression fails (corrupt
+        // archive / gzip-bomb cap). Without this the dir orphans on disk with no
+        // StageRecord, so cleanupExpired can never reap it.
+        Effect.catch((error) => removePath(stagingDir).pipe(Effect.andThen(Effect.fail(error)))),
+      );
       yield* extractTar({ fs, path, tarBytes, outputDir: stagingDir }).pipe(
         Effect.catch((error) => removePath(stagingDir).pipe(Effect.andThen(Effect.fail(error)))),
       );
@@ -851,6 +856,17 @@ export const make = Effect.fn("PluginInstaller.make")(function* () {
     Effect.gen(function* () {
       const lockfile = yield* store.readLockfile.pipe(Effect.mapError(lockfileError));
       const current = installedEntry(lockfile.plugins[input.pluginId]);
+      // Reject upgrading to the already-installed version. Staging + confirming a
+      // same-version upgrade would move the new files onto the LIVE version dir
+      // (moveStagingToVersionDir removes the destination first), destroying the
+      // running plugin's files with no safe rollback. Reject before any staging.
+      if (input.version === current.version) {
+        return yield* managementError(
+          "manifest-invalid",
+          "Plugin is already installed at this version.",
+          { pluginId: input.pluginId, version: input.version },
+        );
+      }
       const source = lockfile.sources.find((candidate) => candidate.id === current.sourceId);
       if (!source) {
         return yield* managementError(

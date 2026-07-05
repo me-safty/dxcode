@@ -130,6 +130,32 @@ layer("PluginLockfileStore", (it) => {
     }),
   );
 
+  it.effect("advisory lock finalizer only removes a lock it still owns", () =>
+    Effect.gen(function* () {
+      const store = yield* PluginLockfileStoreModule.PluginLockfileStore;
+      const fs = yield* FileSystem.FileSystem;
+
+      // While we hold the lock, simulate another process reclaiming it by
+      // overwriting the lock file with a different owner token.
+      yield* store.updatePlugin(pluginId, () =>
+        Effect.gen(function* () {
+          yield* fs
+            .writeFileString(store.advisoryLockPath, "9999:foreign-owner-token\n")
+            .pipe(Effect.orDie);
+          return makePlugin();
+        }),
+      );
+
+      // Our finalizer must NOT delete the foreign-owned lock; doing so would
+      // break single-writer for the process that now holds it.
+      assert.isTrue(yield* fs.exists(store.advisoryLockPath));
+      const content = yield* fs.readFileString(store.advisoryLockPath);
+      assert.isTrue(content.includes("foreign-owner-token"));
+
+      yield* fs.remove(store.advisoryLockPath, { force: true });
+    }),
+  );
+
   it.effect("rejects invalid state transitions", () =>
     Effect.gen(function* () {
       const store = yield* PluginLockfileStoreModule.PluginLockfileStore;

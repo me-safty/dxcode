@@ -101,7 +101,18 @@ export const make = Effect.fn("PluginManagementRpcHandlers.make")(function* () {
           const existing = sources.find((candidate) =>
             isSameMarketplaceSource(candidate.url, normalized),
           );
-          if (existing) return Effect.succeed(sources);
+          if (existing) {
+            // Rewrite a legacy credentialed (or otherwise non-canonical) URL to
+            // its credential-stripped canonical form so it stops leaking via
+            // listSources / error payloads. Keep the existing (opaque) sourceId
+            // so installed plugins that reference it are unaffected.
+            if (existing.url === normalized) return Effect.succeed(sources);
+            return Effect.succeed(
+              sources.map((candidate) =>
+                candidate === existing ? { ...candidate, url: normalized } : candidate,
+              ),
+            );
+          }
           return Effect.succeed([...sources, { id, url: normalized, addedAt: now }]);
         })
         .pipe(Effect.mapError(toManagementError));

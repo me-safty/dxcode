@@ -369,7 +369,7 @@ agentsIt("AgentsCapability", (it) => {
     }),
   );
 
-  it.effect("observeThread emits the owned snapshot followed by thread-detail events", () =>
+  it.effect("observeThread emits the owned snapshot followed by newer thread-detail events", () =>
     Effect.gen(function* () {
       const { agents, engine } = yield* makeCapability;
       yield* createProject(engine);
@@ -379,12 +379,19 @@ agentsIt("AgentsCapability", (it) => {
         modelSelection,
       });
 
-      const collected = yield* Effect.scoped(
+      const [snapshotItem, eventItem] = yield* Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* agents
-            .observeThread(threadId)
-            .pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped);
-          yield* Effect.yieldNow;
+          const items = yield* Queue.unbounded<any>();
+          yield* agents.observeThread(threadId).pipe(
+            Stream.runForEach((item) => Queue.offer(items, item)),
+            Effect.forkScoped,
+          );
+          // The snapshot is emitted first. observeThread subscribes to the live
+          // stream BEFORE reading the snapshot, so an activity dispatched only
+          // AFTER we have received the snapshot is guaranteed to be strictly
+          // newer than snapshotSequence and delivered (not filtered as a
+          // snapshot-duplicate).
+          const snapshot = yield* Queue.take(items);
           yield* engine.dispatch({
             type: "thread.activity.append",
             commandId: CommandId.make("cmd-plugin-observe-activity"),
@@ -400,15 +407,85 @@ agentsIt("AgentsCapability", (it) => {
             },
             createdAt,
           });
-          return yield* Fiber.join(fiber);
+          const event = yield* Queue.take(items);
+          return [snapshot, event] as const;
         }),
       );
 
-      expect(collected[0]?.kind).toBe("snapshot");
-      expect(collected[1]?.kind).toBe("event");
-      expect(collected[1]?.kind === "event" ? collected[1].event.type : null).toBe(
+      expect(snapshotItem?.kind).toBe("snapshot");
+      expect(eventItem?.kind).toBe("event");
+      expect(eventItem?.kind === "event" ? eventItem.event.type : null).toBe(
         "thread.activity-appended",
       );
+    }),
+  );
+
+  it.effect("observeThread does not re-emit events already contained in the snapshot", () =>
+    Effect.gen(function* () {
+      const { agents, engine } = yield* makeCapability;
+      yield* createProject(engine);
+      const { threadId } = yield* agents.createThread({
+        projectId: ProjectId.make("project-agents"),
+        title: "Observed",
+        modelSelection,
+      });
+      // Append an activity and let it project BEFORE observing, so the snapshot
+      // already contains it. It must NOT be re-emitted as a live event.
+      yield* engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-plugin-observe-preexisting"),
+        threadId,
+        activity: {
+          id: "event-plugin-observe-preexisting" as any,
+          tone: "info",
+          kind: "note",
+          summary: "Already in snapshot",
+          payload: {},
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      });
+
+      const [first, second] = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const items = yield* Queue.unbounded<any>();
+          yield* agents.observeThread(threadId).pipe(
+            Stream.runForEach((item) => Queue.offer(items, item)),
+            Effect.forkScoped,
+          );
+          const snapshot = yield* Queue.take(items);
+          // Dispatch a strictly-newer activity; the observed live element must be
+          // this one, proving the pre-existing (snapshot) activity was deduped.
+          yield* engine.dispatch({
+            type: "thread.activity.append",
+            commandId: CommandId.make("cmd-plugin-observe-newer"),
+            threadId,
+            activity: {
+              id: "event-plugin-observe-newer" as any,
+              tone: "info",
+              kind: "note",
+              summary: "Newer",
+              payload: {},
+              turnId: null,
+              createdAt,
+            },
+            createdAt,
+          });
+          const live = yield* Queue.take(items);
+          return [snapshot, live] as const;
+        }),
+      );
+
+      expect(first?.kind).toBe("snapshot");
+      // The only live event delivered is the newer one; the pre-existing
+      // activity (sequence <= snapshotSequence) was filtered out as a duplicate.
+      expect(second?.kind).toBe("event");
+      const liveActivityId =
+        second?.kind === "event" && second.event.type === "thread.activity-appended"
+          ? second.event.payload.activity.id
+          : null;
+      expect(liveActivityId).toBe("event-plugin-observe-newer");
     }),
   );
 

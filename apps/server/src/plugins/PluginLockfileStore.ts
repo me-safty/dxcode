@@ -15,6 +15,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as NodeCrypto from "node:crypto";
 
 import * as ServerConfig from "../config.ts";
 import { pluginAdvisoryLockPath, pluginLockfilePath } from "./PluginPaths.ts";
@@ -187,6 +188,11 @@ const acquireAdvisoryLock = (input: {
   Effect.acquireRelease(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
+      // Owner token written into the lock file on acquire and re-checked in the
+      // finalizer: a random nonce makes it unique to THIS holder even across
+      // stale-lock reclamation, so a slow/paused prior holder's finalizer cannot
+      // delete a different process's now-valid lock and break single-writer.
+      const ownerToken = `${process.pid}:${NodeCrypto.randomUUID()}`;
       yield* fs
         .makeDirectory(input.pluginsDir, { recursive: true })
         .pipe(
@@ -198,15 +204,13 @@ const acquireAdvisoryLock = (input: {
       const openLock = Effect.scoped(
         Effect.gen(function* () {
           const file = yield* fs.open(input.advisoryLockPath, { flag: "wx", mode: 0o600 });
-          yield* file.writeAll(
-            new TextEncoder().encode(`${process.pid}:${yield* Clock.currentTimeMillis}\n`),
-          );
+          yield* file.writeAll(new TextEncoder().encode(`${ownerToken}\n`));
           yield* file.sync;
         }),
       );
 
       const opened = yield* openLock.pipe(Effect.result);
-      if (Result.isSuccess(opened)) return input.advisoryLockPath;
+      if (Result.isSuccess(opened)) return { path: input.advisoryLockPath, token: ownerToken };
 
       const statOption = yield* fs.stat(input.advisoryLockPath).pipe(
         Effect.map((info) => Option.some(info)),
@@ -224,7 +228,7 @@ const acquireAdvisoryLock = (input: {
             (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
           ),
         );
-        return input.advisoryLockPath;
+        return { path: input.advisoryLockPath, token: ownerToken };
       }
       const stat = statOption.value;
       const mtime = Option.getOrUndefined(stat.mtime);
@@ -281,11 +285,22 @@ const acquireAdvisoryLock = (input: {
           (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
         ),
       );
-      return input.advisoryLockPath;
+      return { path: input.advisoryLockPath, token: ownerToken };
     }),
-    (lockPath) =>
+    ({ path: lockPath, token }) =>
       FileSystem.FileSystem.pipe(
-        Effect.flatMap((fs) => fs.remove(lockPath, { force: true })),
+        Effect.flatMap((fs) =>
+          // Only remove the lock if it still carries OUR token. If a stale-lock
+          // reclaimer overwrote it with its own token, leave that valid lock in
+          // place instead of clobbering it.
+          fs
+            .readFileString(lockPath)
+            .pipe(
+              Effect.flatMap((content) =>
+                content.trim() === token ? fs.remove(lockPath, { force: true }) : Effect.void,
+              ),
+            ),
+        ),
         Effect.ignore,
       ),
   );

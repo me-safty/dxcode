@@ -1,7 +1,6 @@
 import {
   AuthAdministrativeScopes,
   AuthStandardClientScopes,
-  authEnvironmentScopes,
   type AuthScope,
   type AuthPairingLink,
   type ServerAuthBootstrapMethod,
@@ -328,7 +327,9 @@ export const make = Effect.gen(function* () {
           ? ({
               id: row.id,
               credential: row.credential,
-              scopes: authEnvironmentScopes(row.scopes),
+              // Full persisted scopes (including plugin scopes) so granted
+              // capabilities are visible in the active-link list.
+              scopes: row.scopes,
               subject: row.subject,
               label: row.label,
               createdAt: row.createdAt,
@@ -337,7 +338,7 @@ export const make = Effect.gen(function* () {
           : ({
               id: row.id,
               credential: row.credential,
-              scopes: authEnvironmentScopes(row.scopes),
+              scopes: row.scopes,
               subject: row.subject,
               createdAt: row.createdAt,
               expiresAt: row.expiresAt,
@@ -409,7 +410,9 @@ export const make = Effect.gen(function* () {
     yield* emitUpsert({
       id,
       credential,
-      scopes: authEnvironmentScopes(input?.scopes ?? AuthStandardClientScopes),
+      // Emit the full granted scope set (including plugin scopes) on the
+      // `pairingLinkUpserted` change event.
+      scopes: input?.scopes ?? AuthStandardClientScopes,
       subject: input?.subject ?? "one-time-token",
       ...(input?.label ? { label: input.label } : {}),
       createdAt: now,
