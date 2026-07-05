@@ -155,6 +155,51 @@ marketplaceTest("PluginMarketplace", (it) => {
     ),
   );
 
+  it.effect("surfaces a non-HTTPS tarball as a typed failure, not a defect", () =>
+    withPluginDev(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const marketplace = yield* PluginMarketplace;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-marketplace-" });
+        const filePath = path.join(dir, "marketplace.json");
+        yield* fs.writeFileString(
+          filePath,
+          encodeMarketplaceJson({
+            plugins: [
+              {
+                ...validMarketplace.plugins[0]!,
+                versions: [
+                  {
+                    ...validMarketplace.plugins[0]!.versions[0]!,
+                    tarball: "http://insecure.test/test-plugin-1.0.0.tgz",
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+        const url = NodeURL.pathToFileURL(filePath).toString();
+        const source: PluginSource = {
+          id: sourceIdForUrl(url),
+          url,
+          addedAt: "2026-07-03T00:00:00.000Z",
+        };
+
+        const result = yield* Effect.result(
+          marketplace.findVersion({
+            source,
+            pluginId: PluginId.make("test-plugin"),
+            version: "1.0.0",
+          }),
+        );
+
+        assert.isTrue(Result.isFailure(result));
+        if (Result.isFailure(result)) assert.equal(result.failure.code, "invalid-source");
+      }),
+    ),
+  );
+
   it.effect("rejects marketplace responses over the byte cap", () =>
     withPluginDev(
       Effect.gen(function* () {

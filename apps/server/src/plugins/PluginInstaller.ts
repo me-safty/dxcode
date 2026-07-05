@@ -733,33 +733,61 @@ export const make = Effect.fn("PluginInstaller.make")(function* () {
 
   const confirmInstall: PluginInstaller["Service"]["confirmInstall"] = (stageToken) =>
     Effect.gen(function* () {
-      const stage = yield* getStage(stageToken, "install");
-      yield* moveStagingToVersionDir(stage);
-      const installedAt = DateTime.formatIso(yield* DateTime.now);
-      yield* store
-        .updatePlugin(stage.pluginId, () =>
-          Effect.succeed({
-            version: stage.version,
-            sha256: stage.sha256,
-            sourceId: stage.sourceId,
-            enabled: true,
-            state: "active",
-            activation: { activatingSince: null, crashCount: 0 },
-            installedAt,
-            lastError: null,
-          }),
-        )
-        .pipe(Effect.mapError(lockfileError));
-      yield* dropStage(stageToken);
-      yield* host
-        .activatePlugin(stage.pluginId)
-        .pipe(
-          Effect.mapError((cause) =>
-            managementError("activation-failed", "Plugin activation failed.", { cause }),
-          ),
+      // Armed only for the window between "files moved into the version dir" and
+      // "lockfile entry written". If the commit fails there, the moved files
+      // would otherwise orphan on disk with no lockfile entry. Once the entry is
+      // written it owns the files, so we disarm (a later activation failure must
+      // NOT delete files a committed entry points at). Never remove a dir that
+      // pre-existed the move.
+      let orphanedVersionDir: string | null = null;
+      return yield* Effect.gen(function* () {
+        const stage = yield* getStage(stageToken, "install");
+        const destination = pluginVersionDir(
+          config.pluginsDir,
+          stage.pluginId,
+          stage.version,
+          path.join,
         );
-      return { plugin: yield* pluginInfo(stage.pluginId) };
-    }).pipe(Effect.tapError(() => cleanupStage(stageToken)));
+        const preexisted = yield* fs.exists(destination).pipe(Effect.orElseSucceed(() => false));
+        yield* moveStagingToVersionDir(stage);
+        if (!preexisted) orphanedVersionDir = destination;
+        const installedAt = DateTime.formatIso(yield* DateTime.now);
+        yield* store
+          .updatePlugin(stage.pluginId, () =>
+            Effect.succeed({
+              version: stage.version,
+              sha256: stage.sha256,
+              sourceId: stage.sourceId,
+              enabled: true,
+              state: "active",
+              activation: { activatingSince: null, crashCount: 0 },
+              installedAt,
+              lastError: null,
+            }),
+          )
+          .pipe(Effect.mapError(lockfileError));
+        orphanedVersionDir = null;
+        yield* dropStage(stageToken);
+        yield* host
+          .activatePlugin(stage.pluginId)
+          .pipe(
+            Effect.mapError((cause) =>
+              managementError("activation-failed", "Plugin activation failed.", { cause }),
+            ),
+          );
+        return { plugin: yield* pluginInfo(stage.pluginId) };
+      }).pipe(
+        Effect.tapError(() =>
+          cleanupStage(stageToken).pipe(
+            Effect.andThen(
+              orphanedVersionDir === null
+                ? Effect.void
+                : removePath(orphanedVersionDir).pipe(Effect.ignore),
+            ),
+          ),
+        ),
+      );
+    });
 
   const abortInstall: PluginInstaller["Service"]["abortInstall"] = (stageToken) =>
     Effect.gen(function* () {
@@ -814,6 +842,9 @@ export const make = Effect.fn("PluginInstaller.make")(function* () {
           }),
         )
         .pipe(Effect.mapError(lockfileError));
+      // Tear down the live runtime (scope, HTTP routes) now instead of leaving it
+      // running until the next server restart applies pending-remove.
+      yield* host.deactivatePlugin(input.pluginId);
     });
 
   const beginUpgrade: PluginInstaller["Service"]["beginUpgrade"] = (input) =>
@@ -847,25 +878,50 @@ export const make = Effect.fn("PluginInstaller.make")(function* () {
 
   const confirmUpgrade: PluginInstaller["Service"]["confirmUpgrade"] = (stageToken) =>
     Effect.gen(function* () {
-      const stage = yield* getStage(stageToken, "upgrade");
-      yield* moveStagingToVersionDir(stage);
-      const stagedAt = DateTime.formatIso(yield* DateTime.now);
-      yield* store
-        .updatePlugin(stage.pluginId, ({ current }) =>
-          Effect.succeed({
-            ...installedEntry(current),
-            state: "pending-upgrade",
-            staged: {
-              version: stage.version,
-              sha256: stage.sha256,
-              stagedAt,
-            },
-          }),
-        )
-        .pipe(Effect.mapError(lockfileError));
-      yield* dropStage(stageToken);
-      return { plugin: yield* pluginInfo(stage.pluginId) };
-    }).pipe(Effect.tapError(() => cleanupStage(stageToken)));
+      // See confirmInstall: only the moved-but-not-yet-recorded window can orphan
+      // the new version dir. The staged version dir is distinct from the running
+      // version, so removing it on failure never touches the live plugin.
+      let orphanedVersionDir: string | null = null;
+      return yield* Effect.gen(function* () {
+        const stage = yield* getStage(stageToken, "upgrade");
+        const destination = pluginVersionDir(
+          config.pluginsDir,
+          stage.pluginId,
+          stage.version,
+          path.join,
+        );
+        const preexisted = yield* fs.exists(destination).pipe(Effect.orElseSucceed(() => false));
+        yield* moveStagingToVersionDir(stage);
+        if (!preexisted) orphanedVersionDir = destination;
+        const stagedAt = DateTime.formatIso(yield* DateTime.now);
+        yield* store
+          .updatePlugin(stage.pluginId, ({ current }) =>
+            Effect.succeed({
+              ...installedEntry(current),
+              state: "pending-upgrade",
+              staged: {
+                version: stage.version,
+                sha256: stage.sha256,
+                stagedAt,
+              },
+            }),
+          )
+          .pipe(Effect.mapError(lockfileError));
+        orphanedVersionDir = null;
+        yield* dropStage(stageToken);
+        return { plugin: yield* pluginInfo(stage.pluginId) };
+      }).pipe(
+        Effect.tapError(() =>
+          cleanupStage(stageToken).pipe(
+            Effect.andThen(
+              orphanedVersionDir === null
+                ? Effect.void
+                : removePath(orphanedVersionDir).pipe(Effect.ignore),
+            ),
+          ),
+        ),
+      );
+    });
 
   const checkUpdates = Effect.gen(function* () {
     const lockfile = yield* store.readLockfile.pipe(Effect.mapError(lockfileError));

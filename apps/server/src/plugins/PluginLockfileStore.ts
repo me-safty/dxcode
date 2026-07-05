@@ -208,13 +208,25 @@ const acquireAdvisoryLock = (input: {
       const opened = yield* openLock.pipe(Effect.result);
       if (Result.isSuccess(opened)) return input.advisoryLockPath;
 
-      const stat = yield* fs
-        .stat(input.advisoryLockPath)
-        .pipe(
+      const statOption = yield* fs.stat(input.advisoryLockPath).pipe(
+        Effect.map((info) => Option.some(info)),
+        // The lock was released between openLock failing and this stat — it is
+        // free now, so retry acquisition instead of reporting spurious
+        // contention as a lock error.
+        Effect.catchIf(isNotFound, () => Effect.succeed(Option.none())),
+        Effect.mapError(
+          (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
+        ),
+      );
+      if (Option.isNone(statOption)) {
+        yield* openLock.pipe(
           Effect.mapError(
             (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
           ),
         );
+        return input.advisoryLockPath;
+      }
+      const stat = statOption.value;
       const mtime = Option.getOrUndefined(stat.mtime);
       const ageMs = mtime ? (yield* Clock.currentTimeMillis) - mtime.getTime() : 0;
       if (ageMs <= STALE_LOCK_MS) {

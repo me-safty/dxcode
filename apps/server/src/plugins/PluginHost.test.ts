@@ -752,4 +752,56 @@ layer("PluginHost", (it) => {
       assert.isFalse(yield* fs.exists(pluginDir));
     }),
   );
+
+  it.effect("resets crash health when promoting a staged upgrade", () =>
+    Effect.gen(function* () {
+      const pluginId = PluginId.make("upgrade-plugin");
+      const host = yield* PluginHostModule.PluginHost;
+      const store = yield* PluginLockfileStoreLayer.PluginLockfileStore;
+      const registry = yield* PluginRuntimeRegistryLayer.PluginRuntimeRegistry;
+      const previousHealthyDelay = process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+      const emptyEntry = "export default { register() { return {}; } };";
+
+      yield* runMigrations({ toMigrationInclusive: 34 });
+      // Both the current (1.0.0) and staged (2.0.0) version dirs must exist so
+      // the post-promotion load of 2.0.0 succeeds.
+      yield* installPlugin({ pluginId, entrySource: emptyEntry, lockEntry: { version: "1.0.0" } });
+      yield* installPlugin({ pluginId, entrySource: emptyEntry, lockEntry: { version: "2.0.0" } });
+      // Stage a pending upgrade carrying a prior crashCount + error that must NOT
+      // carry over to the new build.
+      yield* store.updatePlugin(pluginId, () =>
+        Effect.succeed(
+          makeLockEntry({
+            version: "1.0.0",
+            state: "pending-upgrade",
+            staged: { version: "2.0.0", sha256: "sha2", stagedAt: now },
+            activation: { activatingSince: null, crashCount: 1 },
+            lastError: "old failure",
+          }),
+        ),
+      );
+
+      process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = "0";
+      try {
+        yield* host.start;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          if ((yield* registry.list).some((runtime) => runtime.manifest.id === pluginId)) break;
+          yield* Effect.yieldNow;
+        }
+      } finally {
+        if (previousHealthyDelay === undefined) {
+          delete process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+        } else {
+          process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = previousHealthyDelay;
+        }
+      }
+
+      const lockfile = yield* store.readLockfile;
+      const entry = lockfile.plugins[pluginId];
+      assert.equal(entry?.version, "2.0.0");
+      assert.equal(entry?.state, "active");
+      assert.equal(entry?.activation.crashCount, 0);
+      assert.equal(entry?.lastError, null);
+    }),
+  );
 });

@@ -69,6 +69,37 @@ managementTest("PluginManagementRpcHandlers", (it) => {
     }),
   );
 
+  it.effect("dedupes a re-added source against a stored credentialed row", () =>
+    Effect.gen(function* () {
+      const handlers = yield* PluginManagementRpcHandlers;
+      const store = yield* PluginLockfileStore;
+      // Simulate a source persisted before credentials were stripped from the
+      // stored URL. Re-adding the same marketplace (now credential-stripped)
+      // must reuse this row rather than register a second source.
+      yield* store.updateSources((sources) =>
+        Effect.succeed([
+          ...sources,
+          {
+            id: "src-legacy",
+            url: "https://user:secret@example.test/legacy-marketplace.json",
+            addedAt: "2026-07-03T00:00:00.000Z",
+          },
+        ]),
+      );
+
+      const added = yield* handlers.addSource({
+        url: "https://user:secret@example.test/legacy-marketplace.json",
+      });
+      const listed = yield* handlers.listSources;
+
+      assert.equal(added.source.id, "src-legacy");
+      assert.equal(
+        listed.sources.filter((entry) => entry.url.includes("legacy-marketplace.json")).length,
+        1,
+      );
+    }),
+  );
+
   it.effect("rejects non-HTTPS sources", () =>
     Effect.gen(function* () {
       const handlers = yield* PluginManagementRpcHandlers;

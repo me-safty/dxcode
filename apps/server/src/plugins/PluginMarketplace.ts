@@ -60,6 +60,20 @@ function canonicalHttpsUrl(input: string): string | null {
   }
 }
 
+/**
+ * True when a stored source URL refers to the same marketplace as
+ * `canonicalUrl` (an already-normalized value from {@link resolveMarketplaceUrl}).
+ * Stored URLs are normally already canonical, but a row persisted before
+ * credentials were stripped may still embed them; compare on the canonical
+ * (credential-stripped) form so such a row still dedupes against a freshly
+ * normalized add instead of registering the same marketplace twice.
+ */
+export function isSameMarketplaceSource(storedUrl: string, canonicalUrl: string): boolean {
+  if (storedUrl === canonicalUrl) return true;
+  const canonicalStored = canonicalHttpsUrl(storedUrl);
+  return canonicalStored !== null && canonicalStored === canonicalUrl;
+}
+
 export function resolveMarketplaceUrl(input: string): string {
   const trimmed = input.trim();
   if (OWNER_REPO_PATTERN.test(trimmed)) {
@@ -291,11 +305,21 @@ export const make = Effect.fn("PluginMarketplace.make")(function* () {
           sourceId: input.source.id,
         });
       }
+      // resolveTarballUrl throws synchronously (PluginManagementError for a
+      // non-HTTPS URL, or a TypeError for a malformed one). Wrap it so a bad
+      // marketplace entry surfaces as a typed failure instead of a defect.
+      const tarballUrl = yield* Effect.try({
+        try: () => resolveTarballUrl({ tarball: version.tarball, marketplaceUrl }),
+        catch: (cause) =>
+          isPluginManagementError(cause)
+            ? cause
+            : managementError("invalid-source", "Plugin tarball URL is invalid.", { cause }),
+      });
       return {
         entry,
         version,
         marketplaceUrl,
-        tarballUrl: resolveTarballUrl({ tarball: version.tarball, marketplaceUrl }),
+        tarballUrl,
       };
     });
 

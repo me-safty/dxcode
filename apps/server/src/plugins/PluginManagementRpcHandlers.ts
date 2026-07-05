@@ -23,7 +23,7 @@ import * as Schema from "effect/Schema";
 
 import { PluginInstaller } from "./PluginInstaller.ts";
 import { PluginLockfileStore } from "./PluginLockfileStore.ts";
-import { PluginMarketplace, sourceIdForUrl } from "./PluginMarketplace.ts";
+import { isSameMarketplaceSource, PluginMarketplace, sourceIdForUrl } from "./PluginMarketplace.ts";
 
 const managementError = (code: PluginManagementError["code"], message: string, data?: unknown) =>
   new PluginManagementError({
@@ -95,12 +95,19 @@ export const make = Effect.fn("PluginManagementRpcHandlers.make")(function* () {
       const now = DateTime.formatIso(yield* DateTime.now);
       const source = yield* store
         .updateSources((sources) => {
-          const existing = sources.find((candidate) => candidate.url === normalized);
+          // Dedupe on the canonical form so a source persisted before credential
+          // stripping (or otherwise differing only by strippable parts) is not
+          // registered a second time under a different sourceId.
+          const existing = sources.find((candidate) =>
+            isSameMarketplaceSource(candidate.url, normalized),
+          );
           if (existing) return Effect.succeed(sources);
           return Effect.succeed([...sources, { id, url: normalized, addedAt: now }]);
         })
         .pipe(Effect.mapError(toManagementError));
-      const entry = source.sources.find((candidate) => candidate.url === normalized);
+      const entry = source.sources.find((candidate) =>
+        isSameMarketplaceSource(candidate.url, normalized),
+      );
       if (!entry) {
         return yield* managementError("invalid-source", "Failed to add plugin source.", {
           url: normalized,

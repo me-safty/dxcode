@@ -127,12 +127,17 @@ const resolveRegistration = (
     return Effect.succeed(value);
   }).pipe(
     Effect.catchCause((cause) =>
-      Effect.fail(
-        new PluginRegistrationError({
-          pluginId,
-          detail: Cause.pretty(cause),
-        }),
-      ),
+      // A clean host shutdown interrupts the activation fiber mid-register();
+      // let that interruption propagate instead of persisting a spurious
+      // "failed" registration error.
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause as Cause.Cause<never>)
+        : Effect.fail(
+            new PluginRegistrationError({
+              pluginId,
+              detail: Cause.pretty(cause),
+            }),
+          ),
     ),
   );
 
@@ -297,9 +302,14 @@ const upgradeLockfileEntry = (
   sourceId: entry.sourceId,
   enabled: entry.enabled,
   state: "active",
-  activation: entry.activation,
+  // Reset activation health for the new build. Carrying over the old version's
+  // crashCount could immediately trip the repeated-crash safe mode on the first
+  // startup of the upgrade, and its lastError would surface a stale failure the
+  // new version never produced. activatingSince starts null; loadPlugin sets it
+  // when the fresh activation begins.
+  activation: { activatingSince: null, crashCount: 0 },
   installedAt: entry.installedAt,
-  lastError: entry.lastError,
+  lastError: null,
 });
 
 const getLockfilePlugin = (lockfile: PluginLockfile, pluginId: PluginId) =>
@@ -315,7 +325,11 @@ const updateFailure = (
       current
         ? {
             ...current,
-            state: "failed",
+            // Only an in-flight activation ("active") should flip to "failed".
+            // If the user concurrently disabled/uninstalled/upgraded the plugin
+            // while it was activating, preserve that requested lifecycle state
+            // rather than clobbering it with "failed".
+            state: current.state === "active" ? "failed" : current.state,
             lastError: message,
             activation: {
               ...current.activation,
@@ -389,7 +403,14 @@ export const make = Effect.fn("PluginHost.make")(function* () {
 
   const markFailure = (pluginId: PluginId, message: string) =>
     updateFailure(store, pluginId, message).pipe(
-      Effect.tap(() => publishPluginStateChanged(pluginId, "failed")),
+      // Publish the state that was actually persisted: updateFailure preserves a
+      // concurrently-requested lifecycle state (disabled/pending-remove/...)
+      // instead of forcing "failed", so announce that rather than a stale
+      // "failed".
+      Effect.flatMap((lockfile) => {
+        const state = getLockfilePlugin(lockfile, pluginId)?.state;
+        return state === undefined ? Effect.void : publishPluginStateChanged(pluginId, state);
+      }),
     );
 
   const readManifest = (pluginDir: string) =>
@@ -549,6 +570,12 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       const exit = yield* activation.pipe(Scope.provide(scope), Effect.exit);
       if (Exit.isFailure(exit)) {
         yield* Scope.close(scope, exit);
+        // Activation may have already inserted the runtime into the registry
+        // (registry.put runs mid-activation, before later steps). On failure the
+        // scope is now closed, so drop the stale entry — otherwise registry.get
+        // and registry.list keep reporting the plugin as active with a dead
+        // scope and an unresolved readiness Deferred.
+        yield* registry.remove(pluginId).pipe(Effect.ignore);
         const message = Cause.pretty(exit.cause);
         yield* markFailure(pluginId, message);
         yield* Effect.logWarning("Plugin activation failed", { pluginId, cause: message });

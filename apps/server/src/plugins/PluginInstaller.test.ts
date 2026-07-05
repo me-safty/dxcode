@@ -141,6 +141,7 @@ function installerLayer(input: {
   readonly tarball: Uint8Array;
   readonly marketplaceSha?: string;
   readonly activated?: Array<string>;
+  readonly deactivated?: Array<string>;
 }) {
   const platform = NodeServices.layer;
   const config = ServerConfig.layerTest(process.cwd(), { prefix: "t3-installer-" }).pipe(
@@ -174,7 +175,10 @@ function installerLayer(input: {
         Effect.sync(() => {
           input.activated?.push(id);
         }),
-      deactivatePlugin: () => Effect.void,
+      deactivatePlugin: (id) =>
+        Effect.sync(() => {
+          input.deactivated?.push(id);
+        }),
     }),
   );
   const catalog = Layer.succeed(
@@ -552,8 +556,9 @@ it.effect("PluginInstaller abort and expired tokens clean staging", () =>
   ),
 );
 
-it.effect("PluginInstaller stages upgrades and uninstall marks pending remove", () =>
-  Effect.scoped(
+it.effect("PluginInstaller stages upgrades and uninstall marks pending remove", () => {
+  const deactivated: Array<string> = [];
+  return Effect.scoped(
     Effect.gen(function* () {
       const installer = yield* PluginInstaller;
       const store = yield* PluginLockfileStore;
@@ -580,6 +585,9 @@ it.effect("PluginInstaller stages upgrades and uninstall marks pending remove", 
       yield* installer.uninstall({ pluginId, removeData: false });
       lockfile = yield* store.readLockfile;
       assert.equal(lockfile.plugins[pluginId]?.state, "pending-remove");
-    }).pipe(Effect.provide(installerLayer({ tarball: tarballForManifest() }))),
-  ),
-);
+      // uninstall must tear down the live runtime immediately, not wait for a
+      // server restart to apply pending-remove.
+      assert.deepEqual(deactivated, [pluginId]);
+    }).pipe(Effect.provide(installerLayer({ tarball: tarballForManifest(), deactivated }))),
+  );
+});
