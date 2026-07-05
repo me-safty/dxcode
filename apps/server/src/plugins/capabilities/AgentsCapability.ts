@@ -26,6 +26,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import type { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import type { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type * as ProjectionThreadMessages from "../../persistence/Services/ProjectionThreadMessages.ts";
@@ -33,6 +34,12 @@ import type * as ProjectionTurns from "../../persistence/Services/ProjectionTurn
 import type { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
 
 const DEFAULT_AWAIT_TURN_TIMEOUT = Duration.minutes(30);
+// Re-poll cadence for the awaitTerminalTurn fallback below. streamDomainEvents has
+// no subscription-readiness signal, so a turn that reaches terminal in the gap
+// between the post-subscribe read and the watcher going live may emit no later
+// event to wake the deferred; the poll re-reads the projection to guarantee
+// progress. awaitTurn already bounds the total wait via Effect.timeoutOption.
+const TERMINAL_POLL_INTERVAL = Duration.millis(250);
 
 export class AgentsThreadOwnershipError extends Schema.TaggedErrorClass<AgentsThreadOwnershipError>()(
   "AgentsThreadOwnershipError",
@@ -299,7 +306,25 @@ export function makeAgentsCapability(
           yield* waitForEvent.pipe(Effect.forkScoped);
           const afterSubscribe = yield* readTerminalTurn(threadId, turnId);
           if (afterSubscribe) return afterSubscribe;
-          return yield* Deferred.await(terminalDeferred);
+          // Race the event-driven wake against a bounded re-poll. forkScoped returns
+          // before the watcher has actually subscribed, so a turn that goes terminal
+          // in that gap may produce no later event to wake terminalDeferred; the poll
+          // guarantees progress by re-reading the projection. The event path keeps the
+          // common case low-latency, and awaitTurn's outer Effect.timeoutOption bounds
+          // the total wait so the poll needs no independent cap.
+          const pollForTerminal: Effect.Effect<TerminalProjectionTurn, ProjectionRepositoryError> =
+            Effect.suspend(() =>
+              readTerminalTurn(threadId, turnId).pipe(
+                Effect.flatMap((row) =>
+                  row
+                    ? Effect.succeed(row)
+                    : Effect.sleep(TERMINAL_POLL_INTERVAL).pipe(
+                        Effect.flatMap(() => pollForTerminal),
+                      ),
+                ),
+              ),
+            );
+          return yield* Effect.race(Deferred.await(terminalDeferred), pollForTerminal);
         }),
       );
     });
@@ -388,13 +413,22 @@ export function makeAgentsCapability(
         // across retries — derive them deterministically from the commandId so a
         // retry resolves the same alias the first call persisted. Without a
         // commandId, mint fresh random ids as before.
+        const turnId =
+          request.commandId !== undefined ? turnIdForCommand(request.commandId) : nextTurnId();
+        // Idempotent retry: same commandId → same derived turnId, so an existing
+        // alias holds the messageId the first call actually persisted
+        // (pendingMessageId). Reuse it so a retry that omits messageId — or supplies
+        // a different one — doesn't overwrite the alias with a fresh derived id the
+        // engine never persisted, which would leave awaitTurn(turnId) correlating on
+        // the wrong messageId and timing out.
+        const existingAlias =
+          request.commandId !== undefined ? turnAliases.get(String(turnId)) : undefined;
         const messageId =
+          existingAlias?.messageId ??
           request.messageId ??
           (request.commandId !== undefined
             ? messageIdForCommand(request.commandId)
             : nextMessageId());
-        const turnId =
-          request.commandId !== undefined ? turnIdForCommand(request.commandId) : nextTurnId();
         rememberTurnAlias(turnId, { threadId: request.threadId, messageId });
         // When we created the thread ourselves, forward the rest of the bootstrap
         // (prepareWorktree / runSetupScript) with ONLY createThread stripped — the

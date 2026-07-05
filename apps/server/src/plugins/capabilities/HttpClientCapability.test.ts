@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import * as NodeNet from "node:net";
 
 import {
   HttpClientError,
@@ -184,6 +185,50 @@ describe("HttpClientCapability", () => {
       assert.include(tooLarge.message, "example.test");
       assert.instanceOf(timeout, HttpClientError);
     }),
+  );
+
+  it.effect(
+    "transport failures surface a stable reason that does not echo the underlying cause text",
+    () =>
+      Effect.gen(function* () {
+        // Bind then immediately release a loopback port so a connect attempt is
+        // deterministically refused, driving the real transport's catch branch.
+        const port = yield* Effect.promise(
+          () =>
+            new Promise<number>((resolve) => {
+              const server = NodeNet.createServer();
+              server.listen(0, "127.0.0.1", () => {
+                const address = server.address();
+                const assigned = typeof address === "object" && address !== null ? address.port : 0;
+                server.close(() => resolve(assigned));
+              });
+            }),
+        );
+        const previous = process.env.T3_PLUGIN_DEV;
+        process.env.T3_PLUGIN_DEV = "1";
+        try {
+          // Call makeHttpClientCapability directly with NO transport so the real
+          // nodePinnedTransport runs and its catch maps the connection failure into
+          // an HttpClientError (makeClient injects a stub transport instead).
+          const client = makeHttpClientCapability({ lookup: () => Effect.succeed(["127.0.0.1"]) });
+          const error = yield* client
+            .request({ method: "GET", url: `http://127.0.0.1:${port}/`, timeoutMs: 2000 })
+            .pipe(Effect.flip);
+
+          assert.instanceOf(error, HttpClientError);
+          // The wrapper reason/message derive only from stable structural attributes;
+          // they must NOT echo the underlying transport error text (e.g. ECONNREFUSED).
+          assert.equal(error.reason, "transport request failed");
+          assert.notInclude(error.message, "ECONNREFUSED");
+          assert.notInclude(error.message, "connect");
+        } finally {
+          if (previous === undefined) {
+            delete process.env.T3_PLUGIN_DEV;
+          } else {
+            process.env.T3_PLUGIN_DEV = previous;
+          }
+        }
+      }),
   );
 
   it.effect("allows http loopback only under T3_PLUGIN_DEV", () =>

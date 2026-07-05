@@ -176,9 +176,14 @@ const nodePinnedTransport: PluginHttpClientTransport = (input) =>
         request.end();
       }),
     catch: (cause) =>
+      // Derive the wrapper message from a stable structural reason only; the real
+      // transport error is preserved in `data.cause`. Echoing cause.message would
+      // leak underlying (possibly attacker-influenced) transport text into the
+      // wrapper message, unlike the other HttpClientError sites in this file which
+      // already use stable reasons.
       new HttpClientError({
         host: input.url.hostname,
-        reason: cause instanceof Error && cause.message ? cause.message : "transport failed",
+        reason: "transport request failed",
         data: { cause },
       }),
   });

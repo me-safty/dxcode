@@ -914,4 +914,125 @@ agentsIt("AgentsCapability", (it) => {
       expect(turnAliases.has(String(third.turnId))).toBe(true);
     }),
   );
+
+  it.effect(
+    "startTurn retry with the same commandId but no messageId reuses the first call's messageId",
+    () =>
+      Effect.gen(function* () {
+        const dispatched: OrchestrationCommand[] = [];
+        const turnAliases = new Map<
+          string,
+          { readonly threadId: ThreadId; readonly messageId: MessageId }
+        >();
+        const agents = makeAgentsCapability(
+          {
+            pluginId,
+            engine: {
+              readEvents: () => Stream.empty,
+              dispatch: (command: OrchestrationCommand) =>
+                Effect.sync(() => {
+                  dispatched.push(command);
+                  return { sequence: dispatched.length };
+                }),
+              streamDomainEvents: Stream.empty,
+            } as unknown as OrchestrationEngineService["Service"],
+            snapshots: {
+              getThreadOwnerById: () => Effect.succeed(Option.some("plugin:agent-plugin" as any)),
+              getThreadDetailById: () => Effect.succeed(Option.none()),
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+            } as any,
+            turns: {} as any,
+            messages: {} as any,
+            providerInstances: makeProviderRegistry(),
+          },
+          turnAliases,
+        );
+        const threadId = ThreadId.make("thread-retry-explicit-message");
+        const commandId = CommandId.make("cmd-retry-explicit-turn-start");
+        const explicitMessageId = MessageId.make("message-retry-explicit");
+
+        // First call establishes the alias with the EXPLICIT messageId M1 — the id
+        // the engine persists as pendingMessageId for the (derived) turnId.
+        const first = yield* agents.startTurn({
+          threadId,
+          text: "first",
+          messageId: explicitMessageId,
+          commandId,
+        });
+        expect(first.messageId).toBe(explicitMessageId);
+
+        // Retry: SAME commandId, NO messageId. The engine receipt-dedups this back
+        // to the first turn (pendingMessageId still M1). A retry that derived
+        // messageId=hash(commandId) here would overwrite the alias with an id the
+        // engine never persisted, so awaitTurn(turnId) would correlate on the wrong
+        // messageId and time out. The fix reuses the first call's messageId.
+        const second = yield* agents.startTurn({ threadId, text: "second", commandId });
+        expect(second.turnId).toBe(first.turnId);
+        expect(second.messageId).toBe(explicitMessageId);
+        // The alias for that turnId still maps to M1, so readTerminalTurn/awaitTurn
+        // correlates (turnId -> alias.messageId -> pendingMessageId).
+        expect(turnAliases.get(String(second.turnId))?.messageId).toBe(explicitMessageId);
+      }),
+  );
+
+  it.effect("awaitTerminalTurn resolves via the re-poll when no waking event is delivered", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-poll-fallback");
+      const turnId = TurnId.make("turn-poll-fallback");
+      // The turn becomes terminal AFTER awaitTurn has subscribed and parked, and
+      // NO domain event is emitted to wake the deferred (streamDomainEvents is
+      // empty). Only the bounded re-poll can make progress; the OLD event-only
+      // path would hang until the outer timeout.
+      let terminal = false;
+      const terminalRow = {
+        threadId,
+        turnId,
+        pendingMessageId: null,
+        state: "completed",
+        assistantMessageId: null,
+      } as any;
+      const agents = makeAgentsCapability({
+        pluginId,
+        engine: {
+          readEvents: () => Stream.empty,
+          dispatch: () => Effect.succeed({ sequence: 1 }),
+          streamDomainEvents: Stream.empty,
+        } as unknown as OrchestrationEngineService["Service"],
+        snapshots: {
+          getThreadOwnerById: () => Effect.succeed(Option.some("plugin:agent-plugin" as any)),
+          getThreadDetailById: () => Effect.succeed(Option.none()),
+          getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+        } as any,
+        turns: {
+          getByTurnId: () =>
+            Effect.sync(() => (terminal ? Option.some(terminalRow) : Option.none())),
+          listByThreadId: () => Effect.succeed([]),
+        } as any,
+        messages: {
+          getByMessageId: () => Effect.succeed(Option.none()),
+        } as any,
+        providerInstances: makeProviderRegistry(),
+      });
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* agents
+            .awaitTurn({ threadId, turnId, timeout: 60_000 })
+            .pipe(Effect.forkScoped);
+          // Let the fiber subscribe and park on the race; its first poll read sees
+          // no terminal row.
+          yield* Effect.yieldNow;
+          yield* Effect.yieldNow;
+          terminal = true;
+          // Advance past the poll interval. The deferred never fires (empty
+          // stream), so resolution can only come from the re-poll re-reading the
+          // projection.
+          yield* TestClock.adjust("300 millis");
+          return yield* Fiber.join(fiber);
+        }),
+      );
+
+      expect(result).toEqual({ state: "completed", assistantText: null });
+    }),
+  );
 });

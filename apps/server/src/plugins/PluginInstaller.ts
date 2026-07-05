@@ -867,7 +867,13 @@ export const make = Effect.fn("PluginInstaller.make")(function* () {
         )
         .pipe(Effect.mapError(lockfileError));
       if (input.enabled) {
-        yield* host.activatePlugin(input.pluginId);
+        yield* host
+          .activatePlugin(input.pluginId)
+          .pipe(
+            Effect.mapError((cause) =>
+              managementError("activation-failed", "Plugin activation failed.", { cause }),
+            ),
+          );
       } else {
         yield* host.deactivatePlugin(input.pluginId);
       }

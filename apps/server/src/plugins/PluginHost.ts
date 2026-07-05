@@ -23,12 +23,15 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as HashMap from "effect/HashMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import packageJson from "../../package.json" with { type: "json" };
@@ -64,7 +67,11 @@ import { makeTerminalsCapability } from "./capabilities/TerminalsCapability.ts";
 import { makeTextGenerationCapability } from "./capabilities/TextGenerationCapability.ts";
 import { makeVcsCapability } from "./capabilities/VcsCapability.ts";
 import { OutboundUrlLookup } from "./OutboundUrlValidator.ts";
-import { PluginLockfileStore } from "./PluginLockfileStore.ts";
+import {
+  PluginLockfileStore,
+  type PluginLockfileCorruptError,
+  type PluginLockfileReadError,
+} from "./PluginLockfileStore.ts";
 import { PluginHttpRegistry } from "./PluginHttpRegistry.ts";
 import { PluginMigrator } from "./PluginMigrator.ts";
 import { PluginModuleLoader } from "./PluginModuleLoader.ts";
@@ -156,7 +163,11 @@ export class PluginHost extends Context.Service<
   PluginHost,
   {
     readonly start: Effect.Effect<void>;
-    readonly activatePlugin: (pluginId: PluginId) => Effect.Effect<void>;
+    // A lockfile read/parse failure now propagates (previously swallowed into a
+    // silent no-op); callers treat it as an activation failure.
+    readonly activatePlugin: (
+      pluginId: PluginId,
+    ) => Effect.Effect<void, PluginLockfileReadError | PluginLockfileCorruptError>;
     readonly deactivatePlugin: (pluginId: PluginId) => Effect.Effect<void>;
   }
 >()("t3/plugins/PluginHost") {}
@@ -439,6 +450,33 @@ export const make = Effect.fn("PluginHost.make")(function* () {
   const outboundLookup = yield* OutboundUrlLookup;
   const httpClientTransport = yield* PluginHttpClientTransportService;
   const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
+
+  // Per-pluginId single-flight for activation/deactivation. Two concurrent
+  // activatePlugin(pluginId) calls would otherwise both observe an empty registry
+  // and both run loadPlugin; the second registry.put overwrites the first runtime's
+  // entry, orphaning its scope — the first runtime's forked services,
+  // terminal-cleanup finalizers, and HTTP routes stay live but unreachable, and a
+  // later deactivatePlugin only tears down the second. A per-plugin single-permit
+  // semaphore, get-or-created atomically under a synchronized ref, serializes them
+  // so the second caller's registry.get double-check short-circuits instead of
+  // loading a second runtime.
+  const activationLocks = yield* SynchronizedRef.make(
+    HashMap.empty<PluginId, Semaphore.Semaphore>(),
+  );
+  const withPluginActivationLock = <A, E, R>(
+    pluginId: PluginId,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> =>
+    SynchronizedRef.modifyEffect(activationLocks, (locks) => {
+      const existing = HashMap.get(locks, pluginId);
+      return Option.isSome(existing)
+        ? Effect.succeed([existing.value, locks] as const)
+        : Semaphore.make(1).pipe(
+            Effect.map(
+              (semaphore) => [semaphore, HashMap.set(locks, pluginId, semaphore)] as const,
+            ),
+          );
+    }).pipe(Effect.flatMap((semaphore) => semaphore.withPermits(1)(effect)));
 
   const publishPluginStateChanged = (pluginId: PluginId, state: PluginState) =>
     lifecycleEvents
@@ -736,42 +774,58 @@ export const make = Effect.fn("PluginHost.make")(function* () {
         yield* Effect.logInfo("Plugin host disabled by T3_NO_PLUGINS", { pluginId });
         return;
       }
-      const active = yield* registry.get(pluginId);
-      if (Option.isSome(active)) return;
-      const lockfile = yield* store.readLockfile.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Plugin hot activation could not read lockfile", {
-            pluginId,
-            cause: Cause.pretty(cause),
-          }).pipe(Effect.as({ plugins: {}, sources: [] })),
-        ),
-      );
-      const entry = getLockfilePlugin(lockfile, pluginId);
-      if (!entry?.enabled || entry.state !== "active") return;
-      yield* loader.ensureHostSingletonResolution;
-      yield* loadPlugin(pluginId, entry).pipe(
-        Effect.catchCause((cause) =>
-          handleLoadFailureCause(pluginId, "Plugin hot activation failed", cause),
-        ),
+      // Single-flight per pluginId (see activationLocks): a second concurrent
+      // activatePlugin waits for the first to finish, then its registry.get
+      // double-check returns Some and short-circuits — no second loadPlugin, no
+      // leaked runtime. The registry.get early-return stays INSIDE the lock.
+      yield* withPluginActivationLock(
+        pluginId,
+        Effect.gen(function* () {
+          const active = yield* registry.get(pluginId);
+          if (Option.isSome(active)) return;
+          // Propagate a lockfile read/parse failure instead of substituting an empty
+          // lockfile: an empty lockfile makes getLockfilePlugin return undefined and
+          // the guard below no-op, so activatePlugin would SUCCEED without loading
+          // anything and callers (PluginInstaller) would treat a failed
+          // install/enable as done. A genuinely MISSING lockfile is already handled
+          // inside readLockfile (it returns EMPTY_PLUGIN_LOCKFILE for a null read),
+          // so this only surfaces real read/parse errors.
+          const lockfile = yield* store.readLockfile;
+          const entry = getLockfilePlugin(lockfile, pluginId);
+          if (!entry?.enabled || entry.state !== "active") return;
+          yield* loader.ensureHostSingletonResolution;
+          yield* loadPlugin(pluginId, entry).pipe(
+            Effect.catchCause((cause) =>
+              handleLoadFailureCause(pluginId, "Plugin hot activation failed", cause),
+            ),
+          );
+        }),
       );
     });
 
   const deactivatePlugin: PluginHost["Service"]["deactivatePlugin"] = (pluginId) =>
-    Effect.gen(function* () {
-      const runtime = yield* registry.get(pluginId);
-      if (Option.isNone(runtime)) return;
-      yield* Scope.close(runtime.value.scope, Exit.void).pipe(Effect.ignore);
-      yield* registry.remove(pluginId);
-      yield* httpRegistry.remove(pluginId).pipe(Effect.ignore);
-      // Announce the state that is actually persisted rather than a hardcoded
-      // "disabled": uninstall sets "pending-remove" then calls this, and
-      // publishing "disabled" would contradict the lockfile + list APIs.
-      const persistedState = yield* store.readLockfile.pipe(
-        Effect.map((lockfile) => getLockfilePlugin(lockfile, pluginId)?.state ?? "disabled"),
-        Effect.orElseSucceed(() => "disabled" as PluginState),
-      );
-      yield* publishPluginStateChanged(pluginId, persistedState);
-    });
+    // Share the per-plugin activation lock so an activate/deactivate pair for one
+    // plugin can't interleave (the round-4/5 pre-put re-check + persisted-state
+    // publish remain as defense-in-depth). Neither path calls the other while
+    // holding the lock, so this cannot deadlock.
+    withPluginActivationLock(
+      pluginId,
+      Effect.gen(function* () {
+        const runtime = yield* registry.get(pluginId);
+        if (Option.isNone(runtime)) return;
+        yield* Scope.close(runtime.value.scope, Exit.void).pipe(Effect.ignore);
+        yield* registry.remove(pluginId);
+        yield* httpRegistry.remove(pluginId).pipe(Effect.ignore);
+        // Announce the state that is actually persisted rather than a hardcoded
+        // "disabled": uninstall sets "pending-remove" then calls this, and
+        // publishing "disabled" would contradict the lockfile + list APIs.
+        const persistedState = yield* store.readLockfile.pipe(
+          Effect.map((lockfile) => getLockfilePlugin(lockfile, pluginId)?.state ?? "disabled"),
+          Effect.orElseSucceed(() => "disabled" as PluginState),
+        );
+        yield* publishPluginStateChanged(pluginId, persistedState);
+      }),
+    );
 
   const reconcilePendingState = (pluginId: PluginId, entry: PluginLockfilePlugin) =>
     Effect.gen(function* () {

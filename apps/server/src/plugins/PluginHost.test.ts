@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts/plugin";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -445,6 +446,22 @@ export default {
     const lockfile = JSON.parse(NodeFs.readFileSync(lockfilePath, "utf8"));
     lockfile.plugins[pluginId].state = "disabled";
     NodeFs.writeFileSync(lockfilePath, JSON.stringify(lockfile));
+    return {};
+  },
+};
+`;
+
+const registerCountEntrySource = () => `
+import { createRequire } from "node:module";
+const require = createRequire(${JSON.stringify(NodeURL.pathToFileURL(import.meta.url).href)});
+const NodeFs = require("node:fs");
+
+export default {
+  register(hostApi) {
+    // Append one marker per register() call so the test can assert loadPlugin ran
+    // exactly once under concurrent activation.
+    NodeFs.mkdirSync(hostApi.config.dataDir, { recursive: true });
+    NodeFs.appendFileSync(hostApi.config.dataDir + "/register-count", "x");
     return {};
   },
 };
@@ -1111,6 +1128,75 @@ layer("PluginHost", (it) => {
         Effect.succeed(current ? { ...current, enabled: false, state: "disabled" } : undefined),
       );
     }),
+  );
+
+  it.effect(
+    "activatePlugin fails instead of silently no-opping when the lockfile is unreadable",
+    () =>
+      Effect.gen(function* () {
+        const pluginId = PluginId.make("read-failure-plugin");
+        const fs = yield* FileSystem.FileSystem;
+        const host = yield* PluginHostModule.PluginHost;
+        const store = yield* PluginLockfileStoreLayer.PluginLockfileStore;
+
+        // Install so a valid lockfile exists, then corrupt it so readLockfile fails
+        // with a parse error (NOT NotFound, which readLockfile treats as an empty
+        // lockfile). Restore it afterwards so the shared lockfile stays valid for
+        // sibling tests.
+        yield* installPlugin({ pluginId });
+        const original = yield* fs.readFileString(store.lockfilePath);
+        yield* fs.writeFileString(store.lockfilePath, "{ not valid json");
+
+        const exit = yield* Effect.exit(host.activatePlugin(pluginId));
+
+        yield* fs.writeFileString(store.lockfilePath, original);
+        // Previously the read failure was swallowed and replaced with an empty
+        // lockfile, so activatePlugin SUCCEEDED without loading anything. It must now
+        // propagate the failure.
+        assert.isTrue(Exit.isFailure(exit));
+      }),
+  );
+
+  it.effect(
+    "concurrent activatePlugin for the same plugin loads it once (single-flight, no leaked runtime)",
+    () =>
+      Effect.gen(function* () {
+        const pluginId = PluginId.make("single-flight-plugin");
+        const config = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const host = yield* PluginHostModule.PluginHost;
+        const registry = yield* PluginRuntimeRegistryLayer.PluginRuntimeRegistry;
+        const previousHealthyDelay = process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+
+        yield* installPlugin({ pluginId, entrySource: registerCountEntrySource() });
+
+        process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = "0";
+        try {
+          // Two concurrent activations. Without single-flight both pass the empty-
+          // registry check and both run loadPlugin (→ two register() calls; the
+          // first runtime's scope is leaked when the second registry.put overwrites
+          // it). The per-plugin lock serializes them so the second's registry.get
+          // double-check short-circuits.
+          yield* Effect.all([host.activatePlugin(pluginId), host.activatePlugin(pluginId)], {
+            concurrency: "unbounded",
+          });
+        } finally {
+          if (previousHealthyDelay === undefined) {
+            delete process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+          } else {
+            process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = previousHealthyDelay;
+          }
+        }
+
+        // register() ran exactly once → loadPlugin ran exactly once.
+        const dataDir = pluginDataDir(config.pluginsDir, pluginId, path.join);
+        const registerCount = yield* fs.readFileString(path.join(dataDir, "register-count"));
+        assert.equal(registerCount, "x");
+        // Exactly one live runtime is registered for the plugin.
+        const runtimes = yield* registry.list;
+        assert.equal(runtimes.filter((runtime) => runtime.manifest.id === pluginId).length, 1);
+      }),
   );
 });
 
