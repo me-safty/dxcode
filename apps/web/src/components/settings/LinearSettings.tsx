@@ -2,8 +2,9 @@ import { useCallback, useState } from "react";
 import { SquareKanbanIcon } from "lucide-react";
 
 import { usePrimaryEnvironmentId } from "../../state/environments";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { usePrimarySettings } from "../../hooks/useSettings";
 import { linearEnvironment } from "../../state/linear";
+import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Badge } from "../ui/badge";
@@ -30,10 +31,25 @@ export function LinearSettingsPanel() {
   const connected = status?.status === "authenticated";
 
   const linear = usePrimarySettings((settings) => settings.linear);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateServerSettings = useAtomCommand(
+    serverEnvironment.updateSettings,
+    "linear settings update",
+  );
+  // Send only the changed key(s). Sending the whole `linear` object would carry
+  // `stateMappingByTeam` on every toggle, which the whole-map replacement would
+  // then overwrite (wiping server-side per-team overrides).
   const setLinear = useCallback(
-    (patch: Partial<typeof linear>) => updateSettings({ linear: { ...linear, ...patch } }),
-    [linear, updateSettings],
+    (patch: {
+      autoSync?: boolean;
+      transitionOnStart?: boolean;
+      transitionOnPrOpen?: boolean;
+      transitionOnMerge?: boolean;
+      postComments?: boolean;
+    }) => {
+      if (environmentId === null) return;
+      void updateServerSettings({ environmentId, input: { patch: { linear: patch } } });
+    },
+    [environmentId, updateServerSettings],
   );
 
   const handleSave = useCallback(async () => {

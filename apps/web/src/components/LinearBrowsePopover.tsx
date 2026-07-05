@@ -96,6 +96,19 @@ export function LinearBrowsePopover({
   const issues = searchQuery.data?.issues ?? [];
   const selectedCount = selected.size;
 
+  // When a new result set arrives, drop selections that are no longer visible
+  // so Import can't act on issues that scrolled out of the current search.
+  useEffect(() => {
+    const data = searchQuery.data;
+    if (!data) return;
+    setSelected((current) => {
+      if (current.size === 0) return current;
+      const visible = new Set(data.issues.map((issue) => issue.id));
+      const filtered = [...current].filter((id) => visible.has(id));
+      return filtered.length === current.size ? current : new Set(filtered);
+    });
+  }, [searchQuery.data]);
+
   const toggle = useCallback((id: string) => {
     setSelected((current) => {
       const next = new Set(current);
@@ -174,6 +187,14 @@ export function LinearBrowsePopover({
         </div>
       );
     }
+    if (authQuery.error !== null) {
+      return (
+        <Empty className="py-8">
+          <p className="text-[13px] font-medium text-foreground">Couldn’t reach Linear</p>
+          <p className="mt-1 max-w-56 text-xs text-muted-foreground">{authQuery.error}</p>
+        </Empty>
+      );
+    }
     if (!connected) {
       return (
         <Empty className="py-8">
@@ -227,6 +248,7 @@ export function LinearBrowsePopover({
     );
   }, [
     authQuery.data,
+    authQuery.error,
     authQuery.isPending,
     connected,
     debounced,

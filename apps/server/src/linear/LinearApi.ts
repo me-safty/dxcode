@@ -603,13 +603,8 @@ export class LinearApi extends Context.Service<
       LinearMutationResult,
       LinearAuthError | LinearRequestError | LinearTokenStoreError
     >;
-    readonly setToken: (
-      token: string,
-    ) => Effect.Effect<LinearAuthStatus, LinearTokenStoreError | LinearRequestError>;
-    readonly clearToken: Effect.Effect<
-      LinearAuthStatus,
-      LinearTokenStoreError | LinearRequestError
-    >;
+    readonly setToken: (token: string) => Effect.Effect<LinearAuthStatus, LinearTokenStoreError>;
+    readonly clearToken: Effect.Effect<LinearAuthStatus, LinearTokenStoreError>;
   }
 >()("t3/linear/LinearApi") {}
 
@@ -978,8 +973,22 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  // After a token write we surface the resulting auth status, but a probe that
+  // can't reach Linear (outage) must not turn the write itself into a failure —
+  // the standalone `probeAuth` RPC still reports connectivity errors.
+  const probeAuthLenient: Effect.Effect<LinearAuthStatus, LinearTokenStoreError> = probeAuth.pipe(
+    Effect.catch((error) =>
+      error._tag === "LinearRequestError"
+        ? Effect.succeed<LinearAuthStatus>({
+            status: "unauthenticated",
+            detail: "Saved, but couldn't reach Linear to verify the token.",
+          })
+        : Effect.fail(error),
+    ),
+  );
+
   const setToken: LinearApi["Service"]["setToken"] = (token) =>
-    persistToken("setToken", token.trim()).pipe(Effect.flatMap(() => probeAuth));
+    persistToken("setToken", token.trim()).pipe(Effect.flatMap(() => probeAuthLenient));
 
   const clearToken: LinearApi["Service"]["clearToken"] = secrets
     .remove(LINEAR_API_TOKEN_SECRET)
@@ -992,7 +1001,7 @@ export const make = Effect.gen(function* () {
             cause,
           }),
       ),
-      Effect.flatMap(() => probeAuth),
+      Effect.flatMap(() => probeAuthLenient),
     );
 
   return LinearApi.of({
