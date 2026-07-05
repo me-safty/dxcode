@@ -177,12 +177,8 @@
     );
   }
 
-  .floating-glass-surface,
-  .chat-composer-lower-chrome {
-    background: color-mix(in srgb, var(--card) 20%, transparent);
-  }
-
   .floating-glass-surface {
+    background: color-mix(in srgb, var(--card) 20%, transparent);
     box-shadow:
       0 18px 48px -20px rgb(0 0 0 / 28%),
       0 4px 14px -7px rgb(0 0 0 / 22%);
@@ -190,26 +186,11 @@
     backdrop-filter: blur(16px);
   }
 
-  .chat-composer-shared-blur {
-    -webkit-backdrop-filter: blur(16px);
-    backdrop-filter: blur(16px);
-  }
-
-  .dark .floating-glass-surface,
-  .dark .chat-composer-lower-chrome {
-    background: color-mix(in srgb, var(--card) 45%, transparent);
-  }
-
   .dark .floating-glass-surface {
+    background: color-mix(in srgb, var(--card) 45%, transparent);
     box-shadow:
       0 18px 48px -20px rgb(0 0 0 / 60%),
       0 4px 14px -7px rgb(0 0 0 / 40%);
-  }
-
-  .chat-composer-lower-chrome {
-    margin-top: -1px;
-    margin-inline-end: var(--app-scrollbar-width);
-    padding-top: 1px;
   }
 
   @media (min-width: 40rem) {
@@ -227,8 +208,7 @@
   }
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    .floating-glass-surface,
-    .chat-composer-lower-chrome {
+    .floating-glass-surface {
       background: var(--card);
     }
   }
