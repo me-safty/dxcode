@@ -1,6 +1,7 @@
 import {
   DEFAULT_RUNTIME_MODE,
   type ModelSelection,
+  type ProviderInteractionMode,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderOptionSelection,
@@ -20,6 +21,7 @@ import {
   ArrowUpIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
+  CircleXIcon,
   CloudIcon,
   FileDiffIcon,
   FileIcon,
@@ -38,6 +40,7 @@ import {
   TableIcon,
   TargetIcon,
   TerminalSquareIcon,
+  type LucideIcon,
   XIcon,
   ZapIcon,
 } from "lucide-react";
@@ -87,6 +90,7 @@ import {
 } from "./ui/menu";
 import { Separator } from "./ui/separator";
 import { SidebarInset } from "./ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
 import { ProjectFavicon } from "./ProjectFavicon";
 
@@ -134,6 +138,37 @@ const fallbackEffortOptions = [
   { label: "High", value: "high" },
 ] as const;
 
+type PendingComposerMode = "goal" | "plan" | "conversation";
+
+const pendingComposerModeConfig: Record<
+  PendingComposerMode,
+  {
+    title: string;
+    pinnedTitle: string;
+    description: string;
+    icon: LucideIcon;
+  }
+> = {
+  goal: {
+    title: "Goal",
+    pinnedTitle: "Goal",
+    description: "Set a goal that Codex will keep working towards",
+    icon: TargetIcon,
+  },
+  plan: {
+    title: "Plan mode",
+    pinnedTitle: "Plan",
+    description: "Turn plan mode on",
+    icon: ListChecksIcon,
+  },
+  conversation: {
+    title: "Conversation mode",
+    pinnedTitle: "Conversation",
+    description: "Talk only, no code changes",
+    icon: MessageCircleIcon,
+  },
+};
+
 const pendingComposerAddItems = [
   {
     section: "Add",
@@ -150,19 +185,19 @@ const pendingComposerAddItems = [
         title: "Goal",
         description: "Set a goal that Codex will keep working towards",
         icon: TargetIcon,
-        muted: true,
+        mode: "goal",
       },
       {
         title: "Plan mode",
         description: "Turn plan mode on",
         icon: ListChecksIcon,
-        muted: true,
+        mode: "plan",
       },
       {
         title: "Conversation mode",
         description: "Talk only, no code changes",
         icon: MessageCircleIcon,
-        muted: true,
+        mode: "conversation",
       },
     ],
   },
@@ -509,7 +544,47 @@ function PendingComposerAccessControl() {
   );
 }
 
-function PendingComposerAddContextMenu() {
+function PendingComposerModeChip({
+  mode,
+  onClear,
+}: {
+  mode: PendingComposerMode;
+  onClear: () => void;
+}) {
+  const option = pendingComposerModeConfig[mode];
+  const Icon = option.icon;
+  const pinnedTitle = option.pinnedTitle;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className="group/mode-clear flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`Clear ${pinnedTitle}`}
+            onClick={onClear}
+          />
+        }
+      >
+        <span className="relative flex size-4 shrink-0 items-center justify-center">
+          <Icon className="absolute size-4 opacity-100 transition-opacity group-hover/mode-clear:opacity-0 group-focus-visible/mode-clear:opacity-0" />
+          <CircleXIcon className="absolute size-4 opacity-0 transition-opacity group-hover/mode-clear:opacity-100 group-focus-visible/mode-clear:opacity-100" />
+        </span>
+        <span className="truncate">{pinnedTitle}</span>
+      </TooltipTrigger>
+      <TooltipPopup side="top">Cancel {pinnedTitle.toLowerCase()}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function PendingComposerAddContextMenu({
+  selectedMode,
+  onSelectMode,
+}: {
+  selectedMode: PendingComposerMode | null;
+  onSelectMode: (mode: PendingComposerMode) => void;
+}) {
   return (
     <Menu>
       <MenuTrigger
@@ -535,6 +610,8 @@ function PendingComposerAddContextMenu() {
               const iconClassName = "iconClassName" in item ? item.iconClassName : undefined;
               const description = "description" in item ? item.description : undefined;
               const muted = "muted" in item && item.muted;
+              const mode = "mode" in item ? (item.mode as PendingComposerMode) : null;
+              const selected = mode !== null && selectedMode === mode;
 
               return (
                 <MenuItem
@@ -542,7 +619,13 @@ function PendingComposerAddContextMenu() {
                   className={[
                     "grid min-h-8 cursor-pointer grid-cols-[1rem_minmax(0,max-content)_1fr] items-center gap-2 rounded-lg px-3 py-1.5 text-sm",
                     muted ? "text-muted-foreground/55" : "",
+                    selected ? "bg-accent text-foreground" : "",
                   ].join(" ")}
+                  onClick={() => {
+                    if (mode !== null) {
+                      onSelectMode(mode);
+                    }
+                  }}
                 >
                   <Icon className={["size-4", iconClassName ?? ""].join(" ")} />
                   <span className={muted ? "" : "text-foreground"}>{item.title}</span>
@@ -561,7 +644,11 @@ function PendingComposerAddContextMenu() {
   );
 }
 
-function PendingComposerWorkspaceControls() {
+function PendingComposerWorkspaceControls({
+  selectedComposerMode,
+}: {
+  selectedComposerMode: PendingComposerMode | null;
+}) {
   const projects = useProjects();
   const openAddProject = useOpenAddProjectCommandPalette();
   const [activeProjectKey, setActiveProjectKey] = useState<string | null>(null);
@@ -600,6 +687,8 @@ function PendingComposerWorkspaceControls() {
     () => (projectRef ? scopedProjectKey(projectRef) : null),
     [projectRef],
   );
+  const pendingInteractionMode: ProviderInteractionMode =
+    selectedComposerMode === "plan" ? "plan" : "default";
   const normalizedProjectSearchQuery = projectSearchQuery.trim().toLocaleLowerCase();
   const filteredProjectOptions = normalizedProjectSearchQuery
     ? projectOptions.filter(({ project }) =>
@@ -624,7 +713,7 @@ function PendingComposerWorkspaceControls() {
     setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
       threadId,
       runtimeMode: DEFAULT_RUNTIME_MODE,
-      interactionMode: "default",
+      interactionMode: pendingInteractionMode,
       envMode,
       startFromOrigin,
     });
@@ -632,11 +721,16 @@ function PendingComposerWorkspaceControls() {
     draftId,
     envMode,
     logicalProjectKey,
+    pendingInteractionMode,
     projectRef,
     setLogicalProjectDraftThreadId,
     startFromOrigin,
     threadId,
   ]);
+
+  useEffect(() => {
+    setDraftThreadContext(draftId, { interactionMode: pendingInteractionMode });
+  }, [draftId, pendingInteractionMode, setDraftThreadContext]);
 
   const handleEnvModeChange = (mode: EnvMode) => {
     setEnvMode(mode);
@@ -898,6 +992,9 @@ function PendingRightToolsPanel() {
 export function NoActiveThreadState() {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [selectedComposerMode, setSelectedComposerMode] = useState<PendingComposerMode | null>(
+    null,
+  );
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -926,11 +1023,21 @@ export function NoActiveThreadState() {
                   Do anything
                 </div>
                 <div className="flex items-center gap-2 px-3 pb-2.5">
-                  <PendingComposerAddContextMenu />
+                  <PendingComposerAddContextMenu
+                    selectedMode={selectedComposerMode}
+                    onSelectMode={setSelectedComposerMode}
+                  />
 
                   <div className="flex items-center text-[#f25c2b] text-sm">
                     <PendingComposerAccessControl />
                   </div>
+
+                  {selectedComposerMode ? (
+                    <PendingComposerModeChip
+                      mode={selectedComposerMode}
+                      onClear={() => setSelectedComposerMode(null)}
+                    />
+                  ) : null}
 
                   <div className="ml-auto flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
                     <div className="hidden min-w-0 items-center gap-1 sm:flex">
@@ -955,7 +1062,7 @@ export function NoActiveThreadState() {
               </div>
 
               <div className="flex min-w-0 items-center gap-4 px-4 pt-1.5 text-sm text-muted-foreground">
-                <PendingComposerWorkspaceControls />
+                <PendingComposerWorkspaceControls selectedComposerMode={selectedComposerMode} />
               </div>
             </div>
 
