@@ -409,6 +409,20 @@ export default {
 };
 `;
 
+const interruptEntrySource = () => `
+import { createRequire } from "node:module";
+const require = createRequire(${JSON.stringify(NodeURL.pathToFileURL(import.meta.url).href)});
+const Effect = require("effect/Effect");
+
+export default {
+  register() {
+    // Interrupt activation for THIS plugin only. In start's per-plugin loop an
+    // interrupt-only cause must be logged-and-skipped, not abort the loop.
+    return Effect.interrupt;
+  },
+};
+`;
+
 const catchUnavailableEntrySource = () => `
 import { createRequire } from "node:module";
 const require = createRequire(${JSON.stringify(NodeURL.pathToFileURL(import.meta.url).href)});
@@ -926,5 +940,51 @@ layer("PluginHost", (it) => {
         caught: "PluginCapabilityUnavailable",
       });
     }),
+  );
+
+  it.effect(
+    "start skips a plugin whose activation is interrupted and still activates the rest",
+    () =>
+      Effect.gen(function* () {
+        const interruptedId = PluginId.make("interrupt-plugin");
+        const survivorId = PluginId.make("after-interrupt-plugin");
+        const host = yield* PluginHostModule.PluginHost;
+        const registry = yield* PluginRuntimeRegistryLayer.PluginRuntimeRegistry;
+        const store = yield* PluginLockfileStoreLayer.PluginLockfileStore;
+        const previousHealthyDelay = process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+
+        // Insertion order: the interrupting plugin is processed first, so if its
+        // interrupt aborted the loop the survivor would never activate.
+        yield* installPlugin({ pluginId: interruptedId, entrySource: interruptEntrySource() });
+        yield* installPlugin({
+          pluginId: survivorId,
+          entrySource: "export default { register() { return {}; } };",
+        });
+
+        process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = "0";
+        try {
+          yield* host.start;
+          for (let attempt = 0; attempt < 10; attempt++) {
+            if ((yield* registry.list).some((runtime) => runtime.manifest.id === survivorId)) break;
+            yield* Effect.yieldNow;
+          }
+        } finally {
+          if (previousHealthyDelay === undefined) {
+            delete process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+          } else {
+            process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = previousHealthyDelay;
+          }
+        }
+
+        const runtimes = yield* registry.list;
+        // The interrupted plugin did not activate...
+        assert.isFalse(runtimes.some((runtime) => runtime.manifest.id === interruptedId));
+        // ...but the loop continued and activated the next plugin.
+        assert.isTrue(runtimes.some((runtime) => runtime.manifest.id === survivorId));
+        // An interrupt-only cause leaves the interrupted plugin's persisted
+        // state intact (not "failed").
+        const lockfile = yield* store.readLockfile;
+        assert.equal(lockfile.plugins[interruptedId]?.state, "active");
+      }),
   );
 });

@@ -635,7 +635,15 @@ export const make = Effect.fn("PluginHost.make")(function* () {
         yield* markFailure(pluginId, message);
         yield* Effect.logWarning("Plugin activation failed", { pluginId, cause: message });
       } else {
-        yield* publishPluginStateChanged(pluginId, "active");
+        // Announce the state actually persisted, not a hardcoded "active", so a
+        // concurrent disable/uninstall (which flips the lockfile and runs
+        // deactivatePlugin after registry.put but before this publish) isn't
+        // contradicted.
+        const persistedState = yield* store.readLockfile.pipe(
+          Effect.map((lockfile) => getLockfilePlugin(lockfile, pluginId)?.state ?? "active"),
+          Effect.orElseSucceed(() => "active" as PluginState),
+        );
+        yield* publishPluginStateChanged(pluginId, persistedState);
       }
     });
 
@@ -787,11 +795,23 @@ export const make = Effect.fn("PluginHost.make")(function* () {
       if (!currentEntry?.enabled || currentEntry.state !== "active") continue;
       yield* loadPlugin(pluginId, currentEntry).pipe(
         Effect.catchCause((cause) =>
-          handleLoadFailureCause(
-            pluginId,
-            "Plugin activation failed before scope acquisition",
-            cause,
-          ),
+          // In THIS start loop an interrupt-only cause is per-plugin (e.g. the
+          // pre-put state re-check firing Effect.interrupt for one plugin), so
+          // log and CONTINUE rather than re-raising — re-raising would abort the
+          // whole loop and skip every remaining plugin. A genuine host shutdown
+          // that interrupts the whole start fiber still terminates the loop: the
+          // next interruptible yield re-observes it and the trailing
+          // Effect.ignoreCause swallows it.
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.logWarning("Plugin activation interrupted; skipping", {
+                pluginId,
+                cause: Cause.pretty(cause),
+              })
+            : handleLoadFailureCause(
+                pluginId,
+                "Plugin activation failed before scope acquisition",
+                cause,
+              ),
         ),
       );
     }

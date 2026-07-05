@@ -149,35 +149,51 @@ function normalizeBootstrapForTurnStart(
   };
 }
 
-export function makeAgentsCapability(input: {
-  readonly pluginId: PluginId;
-  readonly engine: OrchestrationEngineService["Service"];
-  readonly snapshots: ProjectionSnapshotQuery["Service"];
-  readonly turns: ProjectionTurns.ProjectionTurnRepository["Service"];
-  readonly messages: ProjectionThreadMessages.ProjectionThreadMessageRepository["Service"];
-  readonly providerInstances: ProviderInstanceRegistry["Service"];
-}): AgentsCapability {
-  const owner = `plugin:${input.pluginId}` as `plugin:${string}`;
-  const turnAliases = new Map<
+export function makeAgentsCapability(
+  input: {
+    readonly pluginId: PluginId;
+    readonly engine: OrchestrationEngineService["Service"];
+    readonly snapshots: ProjectionSnapshotQuery["Service"];
+    readonly turns: ProjectionTurns.ProjectionTurnRepository["Service"];
+    readonly messages: ProjectionThreadMessages.ProjectionThreadMessageRepository["Service"];
+    readonly providerInstances: ProviderInstanceRegistry["Service"];
+  },
+  // Session-local turnId -> {threadId, messageId} bridge used by readTerminalTurn.
+  // Injectable (defaulting to a fresh map) so tests can assert that a failed
+  // start does not leak entries; production always uses the default.
+  turnAliases: Map<
     string,
     { readonly threadId: ThreadId; readonly messageId: MessageId }
-  >();
+  > = new Map(),
+): AgentsCapability {
+  const owner = `plugin:${input.pluginId}` as `plugin:${string}`;
 
   const requireOwnedThread = (threadId: ThreadId) =>
     input.snapshots.getThreadOwnerById(threadId).pipe(
-      Effect.flatMap((actualOwner) => {
-        if (Option.isSome(actualOwner) && actualOwner.value === owner) {
-          return Effect.void;
-        }
-        return Effect.fail(
-          new AgentsThreadOwnershipError({
-            pluginId: input.pluginId,
-            threadId,
-            expectedOwner: owner,
-            actualOwner: Option.getOrNull(actualOwner),
-          }),
-        );
-      }),
+      Effect.flatMap(
+        (
+          actualOwner,
+        ): Effect.Effect<void, AgentsThreadOwnershipError | AgentsThreadNotFoundError> => {
+          // Distinguish "thread does not exist" from "owned by another plugin": a
+          // missing owner is a not-found (otherwise the AgentsThreadNotFoundError
+          // branches in callers are unreachable), while a real owner mismatch is
+          // an ownership failure. A thread owned by us still passes.
+          if (Option.isNone(actualOwner)) {
+            return Effect.fail(new AgentsThreadNotFoundError({ threadId }));
+          }
+          if (actualOwner.value === owner) {
+            return Effect.void;
+          }
+          return Effect.fail(
+            new AgentsThreadOwnershipError({
+              pluginId: input.pluginId,
+              threadId,
+              expectedOwner: owner,
+              actualOwner: actualOwner.value,
+            }),
+          );
+        },
+      ),
     );
 
   const readTerminalTurn = (threadId: ThreadId, turnId: TurnId) =>
@@ -333,9 +349,18 @@ export function makeAgentsCapability(input: {
         const messageId = request.messageId ?? nextMessageId();
         const turnId = nextTurnId();
         turnAliases.set(String(turnId), { threadId: request.threadId, messageId });
-        // Do NOT forward bootstrap.createThread into turn-start: the thread now
-        // exists, and the decider would ignore it anyway.
-        const turnBootstrap = createdThread ? undefined : bootstrap;
+        // When we created the thread ourselves, forward the rest of the bootstrap
+        // (prepareWorktree / runSetupScript) with ONLY createThread stripped — the
+        // thread now exists and the decider would ignore createThread — so the
+        // first turn still gets its worktree/setup prep instead of dropping the
+        // whole bootstrap. bootstrap is non-null here (the createThread guard above
+        // errored otherwise).
+        const turnBootstrap = createdThread
+          ? (() => {
+              const { createThread: _createThread, ...rest } = bootstrap!;
+              return Object.keys(rest).length > 0 ? rest : undefined;
+            })()
+          : bootstrap;
         yield* input.engine
           .dispatch({
             type: "thread.turn.start",
@@ -357,18 +382,24 @@ export function makeAgentsCapability(input: {
           })
           .pipe(
             Effect.tapError(() =>
-              createdThread
-                ? input.engine
-                    .dispatch({
-                      type: "thread.delete",
-                      commandId: nextCommandId("thread-create-rollback"),
-                      threadId: request.threadId,
-                    })
-                    .pipe(
-                      Effect.ignore,
-                      Effect.andThen(Effect.sync(() => turnAliases.delete(String(turnId)))),
-                    )
-                : Effect.void,
+              // Always drop the pending alias on failure so a failed start never
+              // leaks a turnAliases entry (the map would otherwise grow for the
+              // plugin process lifetime on repeated failed starts). Additionally
+              // roll back the thread we just created, but only when this start
+              // created it.
+              Effect.sync(() => turnAliases.delete(String(turnId))).pipe(
+                Effect.andThen(
+                  createdThread
+                    ? input.engine
+                        .dispatch({
+                          type: "thread.delete",
+                          commandId: nextCommandId("thread-create-rollback"),
+                          threadId: request.threadId,
+                        })
+                        .pipe(Effect.ignore)
+                    : Effect.void,
+                ),
+              ),
             ),
           );
         return { turnId, messageId };
@@ -383,12 +414,10 @@ export function makeAgentsCapability(input: {
           // subscribed AFTER the snapshot was emitted, so any event committed in
           // that window was dropped. The engine commits the projection update
           // before publishing to the domain-event PubSub, so once we are
-          // subscribed here: an event already reflected in the snapshot has
-          // sequence <= snapshotSequence and is filtered out below (no dup),
-          // while every newer event is captured in the buffer (no gap). See the
-          // report note: a hard, scheduler-independent guarantee would require a
-          // subscription-readiness signal from streamDomainEvents (an engine-level
-          // change); ws.ts carries the same residual assumption.
+          // subscribed here every event committed after this point is captured in
+          // the buffer. A hard, scheduler-independent guarantee would additionally
+          // require a subscription-readiness signal from streamDomainEvents (an
+          // engine-level change); ws.ts carries the same residual assumption.
           const buffer = yield* Queue.bounded<OrchestrationEvent>(256);
           yield* input.engine.streamDomainEvents.pipe(
             Stream.filter(
@@ -401,12 +430,21 @@ export function makeAgentsCapability(input: {
             Effect.forkScoped,
           );
 
-          const [threadDetail, snapshotSequence] = yield* Effect.all([
-            input.snapshots.getThreadDetailById(threadId),
-            input.snapshots
-              .getSnapshotSequence()
-              .pipe(Effect.map((snapshot) => snapshot.snapshotSequence)),
-          ]);
+          // Read snapshotSequence FIRST, then the thread detail, sequentially
+          // (not concurrently). getThreadDetailById returns only
+          // Option<OrchestrationThread> with no per-thread sequence, so the replay
+          // is deduped against the GLOBAL snapshotSequence. Reading that threshold
+          // before the detail guarantees it never exceeds the state the detail
+          // reflects, so no committed update is ever filtered out (no dropped
+          // events); a bounded duplicate within the read window is idempotent on
+          // the revision-gated client. Being simultaneously dup-free AND gap-free
+          // is unattainable without a per-thread snapshot sequence
+          // (getThreadDetailById does not expose one), so we deliberately choose
+          // at-least-once: a lost update is worse than an idempotent re-render.
+          const snapshotSequence = yield* input.snapshots
+            .getSnapshotSequence()
+            .pipe(Effect.map((snapshot) => snapshot.snapshotSequence));
+          const threadDetail = yield* input.snapshots.getThreadDetailById(threadId);
           if (Option.isNone(threadDetail)) {
             return yield* new AgentsThreadNotFoundError({ threadId });
           }

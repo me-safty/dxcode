@@ -204,8 +204,17 @@ const acquireAdvisoryLock = (input: {
       const openLock = Effect.scoped(
         Effect.gen(function* () {
           const file = yield* fs.open(input.advisoryLockPath, { flag: "wx", mode: 0o600 });
-          yield* file.writeAll(new TextEncoder().encode(`${ownerToken}\n`));
-          yield* file.sync;
+          // `wx` created the file; only the write/sync can now fail. If it does
+          // (ENOSPC/IO) or is interrupted mid-write, remove the file we just
+          // created — acquire has not succeeded, so acquireRelease's release is
+          // not registered, and an orphaned lock would block all lockfile
+          // mutations until STALE_LOCK_MS elapses.
+          yield* file.writeAll(new TextEncoder().encode(`${ownerToken}\n`)).pipe(
+            Effect.andThen(file.sync),
+            Effect.onError(() =>
+              fs.remove(input.advisoryLockPath, { force: true }).pipe(Effect.ignore),
+            ),
+          );
         }),
       );
 

@@ -192,16 +192,65 @@ const validateRelativeArchivePath = (entryPath: string) => {
   return null;
 };
 
-const ensureSemver = (value: string) => value.split(/[+-]/u)[0]?.split(".").map(Number) ?? [];
+// Parse a version into its numeric core and prerelease identifiers, ignoring
+// build metadata (after `+`), which does not affect precedence (semver.org
+// §10). Missing/short numeric core fields are treated as 0, matching the plain
+// `x.y.z` inputs the minAppVersion comparisons still pass in.
+const parseSemver = (value: string) => {
+  const withoutBuild = value.split("+")[0] ?? "";
+  const dashIndex = withoutBuild.indexOf("-");
+  const core = dashIndex === -1 ? withoutBuild : withoutBuild.slice(0, dashIndex);
+  const prerelease = dashIndex === -1 ? "" : withoutBuild.slice(dashIndex + 1);
+  const coreParts = core.split(".");
+  const numericAt = (index: number) => {
+    const parsed = Number.parseInt(coreParts[index] ?? "", 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return {
+    major: numericAt(0),
+    minor: numericAt(1),
+    patch: numericAt(2),
+    prerelease: prerelease.length === 0 ? [] : prerelease.split("."),
+  };
+};
 
-const compareSemver = (left: string, right: string) => {
-  const leftParts = ensureSemver(left);
-  const rightParts = ensureSemver(right);
-  for (let index = 0; index < 3; index++) {
-    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+// Compare two prerelease identifiers per semver.org §11: numeric identifiers
+// compare numerically and always rank BELOW non-numeric ones; two non-numeric
+// identifiers compare by ASCII.
+const compareIdentifier = (left: string, right: string) => {
+  const leftNumeric = /^\d+$/u.test(left);
+  const rightNumeric = /^\d+$/u.test(right);
+  if (leftNumeric && rightNumeric) {
+    return Number.parseInt(left, 10) - Number.parseInt(right, 10);
+  }
+  if (leftNumeric) return -1;
+  if (rightNumeric) return 1;
+  return left < right ? -1 : left > right ? 1 : 0;
+};
+
+// Semver-precedence-correct comparator (semver.org §11). Returns
+// negative/zero/positive. Callers rely on sign only.
+export const compareSemver = (left: string, right: string) => {
+  const leftVersion = parseSemver(left);
+  const rightVersion = parseSemver(right);
+  if (leftVersion.major !== rightVersion.major) return leftVersion.major - rightVersion.major;
+  if (leftVersion.minor !== rightVersion.minor) return leftVersion.minor - rightVersion.minor;
+  if (leftVersion.patch !== rightVersion.patch) return leftVersion.patch - rightVersion.patch;
+  const leftPre = leftVersion.prerelease;
+  const rightPre = rightVersion.prerelease;
+  // Equal core: a version WITH a prerelease has LOWER precedence than one
+  // WITHOUT.
+  if (leftPre.length === 0 && rightPre.length === 0) return 0;
+  if (leftPre.length === 0) return 1;
+  if (rightPre.length === 0) return -1;
+  // Compare dot-separated identifiers left-to-right; when all preceding
+  // identifiers are equal, the larger set of fields has higher precedence.
+  const shared = Math.min(leftPre.length, rightPre.length);
+  for (let index = 0; index < shared; index++) {
+    const diff = compareIdentifier(leftPre[index] ?? "", rightPre[index] ?? "");
     if (diff !== 0) return diff;
   }
-  return left.localeCompare(right);
+  return leftPre.length - rightPre.length;
 };
 
 const installedEntry = (entry: PluginLockfilePlugin | undefined): PluginLockfilePlugin => {

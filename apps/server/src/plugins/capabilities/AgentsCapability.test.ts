@@ -37,6 +37,7 @@ import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionT
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import {
+  AgentsThreadNotFoundError,
   AgentsThreadOwnershipError,
   AgentsTurnAwaitTimeoutError,
   makeAgentsCapability,
@@ -628,6 +629,148 @@ agentsIt("AgentsCapability", (it) => {
       const instances = yield* agents.listInstances();
       expect(instances.available[0]?.instanceId).toBe("codex");
       expect(instances.unavailable[0]?.instanceId).toBe("missing");
+    }),
+  );
+
+  it.effect(
+    "guarded methods fail not-found for a missing thread and ownership for another plugin's thread",
+    () =>
+      Effect.gen(function* () {
+        const { agents, engine } = yield* makeCapability;
+        yield* createProject(engine);
+        const otherThreadId = ThreadId.make("thread-owned-by-other");
+        yield* dispatchThreadCreate(engine, {
+          threadId: otherThreadId,
+          owner: "plugin:other-plugin",
+          commandId: "cmd-m4-other-thread",
+        });
+
+        // A thread that does not exist fails not-found, NOT ownership: the
+        // not-found branch in the guard must be reachable.
+        const missingExit = yield* Effect.exit(
+          agents.observeThread(ThreadId.make("thread-m4-missing")).pipe(Stream.runCollect),
+        );
+        expect(missingExit._tag).toBe("Failure");
+        if (missingExit._tag === "Failure") {
+          expect(String(missingExit.cause)).toContain(AgentsThreadNotFoundError.name);
+          expect(String(missingExit.cause)).not.toContain(AgentsThreadOwnershipError.name);
+        }
+
+        // A thread owned by a different plugin still fails ownership (guard intact).
+        const ownedExit = yield* Effect.exit(
+          agents.awaitTurn({
+            threadId: otherThreadId,
+            turnId: TurnId.make("turn-m4"),
+            timeout: "10 millis",
+          }),
+        );
+        expect(ownedExit._tag).toBe("Failure");
+        if (ownedExit._tag === "Failure") {
+          expect(String(ownedExit.cause)).toContain(AgentsThreadOwnershipError.name);
+        }
+      }),
+  );
+
+  it.effect(
+    "startTurn forwards bootstrap prep (minus createThread) when it creates the thread",
+    () =>
+      Effect.gen(function* () {
+        const dispatched: OrchestrationCommand[] = [];
+        const agents = makeAgentsCapability({
+          pluginId,
+          engine: {
+            readEvents: () => Stream.empty,
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatched.push(command);
+                return { sequence: dispatched.length };
+              }),
+            streamDomainEvents: Stream.empty,
+          },
+          snapshots: {
+            // Thread does not exist yet, so startTurn creates it from bootstrap.
+            getThreadOwnerById: () => Effect.succeed(Option.none()),
+            getThreadDetailById: () => Effect.succeed(Option.none()),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+          } as any,
+          turns: {} as any,
+          messages: {} as any,
+          providerInstances: makeProviderRegistry(),
+        });
+        const threadId = ThreadId.make("thread-bootstrap-prep");
+
+        yield* agents.startTurn({
+          threadId,
+          text: "bootstrap prep",
+          bootstrap: {
+            createThread: {
+              projectId: ProjectId.make("project-agents"),
+              title: "Bootstrap",
+              modelSelection,
+              runtimeMode: "approval-required",
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              branch: null,
+              worktreePath: null,
+            },
+            prepareWorktree: { projectCwd: "/tmp/project-agents", baseBranch: "main" },
+            runSetupScript: true,
+          },
+        });
+
+        const turnStart = dispatched.find((command) => command.type === "thread.turn.start");
+        expect(turnStart?.type).toBe("thread.turn.start");
+        // createThread is stripped (the thread already exists), but the
+        // worktree/setup prep for the first turn is forwarded, not dropped.
+        const bootstrap =
+          turnStart?.type === "thread.turn.start" ? (turnStart as any).bootstrap : undefined;
+        expect(bootstrap).toBeDefined();
+        expect(bootstrap?.createThread).toBeUndefined();
+        expect(bootstrap?.prepareWorktree).toEqual({
+          projectCwd: "/tmp/project-agents",
+          baseBranch: "main",
+        });
+        expect(bootstrap?.runSetupScript).toBe(true);
+      }),
+  );
+
+  it.effect("startTurn deletes the pending alias when a start on an existing thread fails", () =>
+    Effect.gen(function* () {
+      const turnAliases = new Map<
+        string,
+        { readonly threadId: ThreadId; readonly messageId: MessageId }
+      >();
+      const agents = makeAgentsCapability(
+        {
+          pluginId,
+          engine: {
+            readEvents: () => Stream.empty,
+            dispatch: (command: OrchestrationCommand) =>
+              command.type === "thread.turn.start"
+                ? Effect.fail({ _tag: "SimulatedDispatchFailure" as const })
+                : Effect.succeed({ sequence: 1 }),
+            streamDomainEvents: Stream.empty,
+          } as unknown as OrchestrationEngineService["Service"],
+          snapshots: {
+            // Existing, owned thread -> createdThread is false; a failed turn
+            // start must still remove the alias set before dispatch.
+            getThreadOwnerById: () => Effect.succeed(Option.some("plugin:agent-plugin" as any)),
+            getThreadDetailById: () => Effect.succeed(Option.none()),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+          } as any,
+          turns: {} as any,
+          messages: {} as any,
+          providerInstances: makeProviderRegistry(),
+        },
+        turnAliases,
+      );
+      const threadId = ThreadId.make("thread-existing-owned");
+
+      const exit = yield* Effect.exit(agents.startTurn({ threadId, text: "will fail" }));
+      expect(exit._tag).toBe("Failure");
+      // A failed start on an existing thread must not leak its pending alias;
+      // repeated failed starts would otherwise grow this map for the plugin
+      // process lifetime.
+      expect(turnAliases.size).toBe(0);
     }),
   );
 });

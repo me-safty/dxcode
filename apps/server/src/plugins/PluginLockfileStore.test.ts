@@ -170,3 +170,55 @@ layer("PluginLockfileStore", (it) => {
     }),
   );
 });
+
+// A FileSystem whose `open(..., { flag: "wx" })` returns a File whose writeAll
+// always fails, simulating an IO error (ENOSPC) after `wx` has already created
+// the advisory lock file. Only the "wx" open is intercepted so the temp-file
+// write path is unaffected; the file-close finalizer lives on the underlying
+// acquireRelease, so overriding writeAll alone is safe.
+const writeFailingFileSystem = (base: FileSystem.FileSystem): FileSystem.FileSystem => ({
+  ...base,
+  open: (path, options) =>
+    options?.flag === "wx"
+      ? base.open(path, options).pipe(
+          Effect.map((file) => {
+            const failing = Object.create(file);
+            failing.writeAll = () => Effect.fail({ _tag: "SimulatedWriteFailure" as const });
+            return failing as FileSystem.File;
+          }),
+        )
+      : base.open(path, options),
+});
+
+const writeFailingLayer = it.layer(
+  PluginLockfileStoreModule.layer.pipe(
+    Layer.provideMerge(
+      Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3-plugin-lockfile-fail-" })),
+    ),
+    Layer.provideMerge(
+      Layer.effect(
+        FileSystem.FileSystem,
+        FileSystem.FileSystem.pipe(Effect.map(writeFailingFileSystem)),
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+    Layer.provideMerge(TestClock.layer()),
+  ),
+);
+
+writeFailingLayer("PluginLockfileStore advisory lock cleanup", (it) => {
+  it.effect("removes the just-created lock file when the acquire write fails", () =>
+    Effect.gen(function* () {
+      const store = yield* PluginLockfileStoreModule.PluginLockfileStore;
+      const fs = yield* FileSystem.FileSystem;
+
+      const result = yield* Effect.result(
+        store.updatePlugin(pluginId, () => Effect.succeed(makePlugin())),
+      );
+      assert.isTrue(Result.isFailure(result));
+      // `wx` created the lock file, but writeAll failed; onError must remove it
+      // so a partial acquire does not orphan a lock that would block all
+      // mutations until STALE_LOCK_MS elapses.
+      assert.isFalse(yield* fs.exists(store.advisoryLockPath));
+    }),
+  );
+});

@@ -470,6 +470,44 @@ it.effect("PluginInstaller rejects invalid manifests before staging can be confi
   ),
 );
 
+it("compareSemver orders versions by semver precedence and ignores build metadata", () => {
+  const cmp = PluginInstallerModule.compareSemver;
+  // A release outranks its prereleases.
+  assert.isAbove(cmp("1.0.0", "1.0.0-rc.1"), 0);
+  assert.isBelow(cmp("1.0.0-rc.1", "1.0.0"), 0);
+  // Numeric prerelease identifiers compare numerically, not lexically.
+  assert.isBelow(cmp("1.0.0-rc.2", "1.0.0-rc.10"), 0);
+  // The full precedence chain from semver.org §11.
+  const ordered = [
+    "1.0.0-alpha",
+    "1.0.0-alpha.1",
+    "1.0.0-alpha.beta",
+    "1.0.0-beta",
+    "1.0.0-beta.2",
+    "1.0.0-beta.11",
+    "1.0.0-rc.1",
+    "1.0.0",
+  ];
+  for (let index = 0; index < ordered.length - 1; index++) {
+    assert.isBelow(cmp(ordered[index]!, ordered[index + 1]!), 0);
+    assert.isAbove(cmp(ordered[index + 1]!, ordered[index]!), 0);
+  }
+  // Build metadata does not affect precedence.
+  assert.equal(cmp("1.0.0+build1", "1.0.0+build2"), 0);
+  // Plain x.y.z core comparison (as the minAppVersion checks rely on) is intact.
+  assert.isAbove(cmp("1.2.0", "1.0.0"), 0);
+  assert.isAbove(cmp("2.0.0", "1.9.9"), 0);
+  // A descending sort (as checkUpdates uses) picks the true latest of a
+  // prerelease set.
+  const latest = [
+    { version: "1.0.0-rc.2" },
+    { version: "1.0.0" },
+    { version: "1.0.0-rc.10" },
+    { version: "0.9.9" },
+  ].toSorted((left, right) => cmp(right.version, left.version))[0];
+  assert.equal(latest?.version, "1.0.0");
+});
+
 it("plugin id collision follows the DB table prefix, not the raw id", () => {
   // Same prefix / one a prefix of the other → collide.
   assert.isTrue(PluginInstallerModule.pluginTablePrefixesCollide("test", "test"));
