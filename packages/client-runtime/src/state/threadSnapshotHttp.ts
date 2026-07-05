@@ -16,7 +16,10 @@ import {
   type RemoteEnvironmentRequestError,
 } from "../rpc/http.ts";
 
-const DEFAULT_THREAD_SNAPSHOT_TIMEOUT_MS = 10_000;
+// Bounded so a pathologically slow endpoint cannot block the (cheaper) socket
+// fallback for long. The cached thread renders while this runs, so the wait only
+// delays the transition to live data on the first open, not the initial paint.
+const DEFAULT_THREAD_SNAPSHOT_TIMEOUT_MS = 6_000;
 
 interface EnvironmentHttpAuthHeaders {
   readonly authorization?: string;
@@ -123,6 +126,18 @@ export const threadSnapshotLoaderLayer: Layer.Layer<
           Effect.map(Option.some<OrchestrationThreadDetailSnapshot>),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Effect.provideService(ManagedRelayDpopSigner, signer),
+          // A genuinely missing thread (404) is expected — the socket
+          // subscription is the source of truth for thread existence and will
+          // surface the deletion — so don't treat it as an error worth warning
+          // about; just defer to the socket path.
+          Effect.catchTag("EnvironmentResourceNotFoundError", () =>
+            Effect.logDebug(
+              "Thread snapshot not found over HTTP; deferring to the socket subscription.",
+            ).pipe(
+              Effect.annotateLogs({ threadId }),
+              Effect.as(Option.none<OrchestrationThreadDetailSnapshot>()),
+            ),
+          ),
           Effect.catchCause((cause) =>
             Effect.logWarning(
               "Could not load the thread snapshot over HTTP; using the socket snapshot instead.",
