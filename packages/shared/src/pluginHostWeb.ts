@@ -1,5 +1,6 @@
 export const PLUGIN_HOST_IMPORT_MAP_MARKER = "data-t3-plugin-host-importmap";
 export const PLUGIN_HOST_BOOTSTRAP_MARKER = "data-t3-plugin-host-bootstrap";
+export const PLUGIN_HOST_LAYER_MARKER = "data-t3-plugin-host-layer";
 export const PLUGIN_WEB_BUNDLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 export const PLUGIN_WEB_SHIM_CACHE_CONTROL = "public, max-age=60";
 
@@ -705,6 +706,13 @@ export function buildPluginHostHeadInjection(): string {
   const importMapJson = JSON.stringify(pluginHostImportMap);
   return [
     "<!-- t3-plugin-host:start -->",
+    // Establish the lowest-priority `plugins` cascade layer in the HTML <head> so
+    // it is registered FIRST, before any runtime-injected CSS. Plugin stylesheets
+    // are wrapped in `@layer plugins`, so host styles always win conflicts. This
+    // must be in the head (not only host source CSS) because in dev the host CSS is
+    // injected by JS at runtime — if the plugin's <link> parsed first, `plugins`
+    // would otherwise be created as a HIGH-priority layer and clobber host layout.
+    `<style ${PLUGIN_HOST_LAYER_MARKER}>@layer plugins;</style>`,
     `<script type="importmap" ${PLUGIN_HOST_IMPORT_MAP_MARKER}>${importMapJson}</script>`,
     `<script type="module" ${PLUGIN_HOST_BOOTSTRAP_MARKER}>${pluginHostBootstrapSource}</script>`,
     "<!-- t3-plugin-host:end -->",

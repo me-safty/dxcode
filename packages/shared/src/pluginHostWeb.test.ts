@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   PLUGIN_HOST_IMPORT_MAP_MARKER,
+  PLUGIN_HOST_LAYER_MARKER,
   getPluginHostShimSource,
   injectPluginHostHeadHtml,
   pluginHostImportMap,
@@ -18,6 +19,9 @@ describe("pluginHostWeb", () => {
     expect(injected.indexOf(PLUGIN_HOST_IMPORT_MAP_MARKER)).toBeLessThan(
       injected.indexOf("</head>"),
     );
+    // The `plugins` cascade-layer declaration must be injected into the head so it
+    // is registered first (before any runtime CSS), keeping plugin styles lowest.
+    expect(injected).toContain(`<style ${PLUGIN_HOST_LAYER_MARKER}>@layer plugins;</style>`);
     expect(reinjected.match(new RegExp(PLUGIN_HOST_IMPORT_MAP_MARKER, "g"))?.length).toBe(1);
   });
 
