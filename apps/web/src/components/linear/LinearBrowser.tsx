@@ -274,7 +274,9 @@ export function LinearBrowser() {
           title: "Linear import failed",
           description: result.error ?? "The issues could not be imported.",
         });
-        setSelected(new Set(retryable));
+        // Keep the current selection on a blanket failure (nothing imported);
+        // only narrow it when specific issues were reported as failed.
+        if (result.failedIds !== undefined) setSelected(new Set(retryable));
       }
     } finally {
       setImporting(false);

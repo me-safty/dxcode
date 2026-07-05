@@ -165,7 +165,10 @@ export function LinearBrowsePopover({
           title: "Linear import failed",
           description: result.error ?? "The issues could not be imported.",
         });
-        setSelected(new Set(retryable));
+        // Only narrow the selection when the hook reported specific failures;
+        // a blanket failure (nothing imported) keeps the current selection so
+        // the user can retry it as-is.
+        if (result.failedIds !== undefined) setSelected(new Set(retryable));
       }
     } finally {
       setImporting(false);
