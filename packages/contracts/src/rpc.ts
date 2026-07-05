@@ -12,6 +12,9 @@ import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
   FilesystemBrowseError,
+  FilesystemCreateDirectoryInput,
+  FilesystemCreateDirectoryResult,
+  FilesystemCreateDirectoryError,
 } from "./filesystem.ts";
 import { AssetAccessError, AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
 import {
@@ -159,6 +162,7 @@ export const WS_METHODS = {
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
+  filesystemCreateDirectory: "filesystem.createDirectory",
   assetsCreateUrl: "assets.createUrl",
 
   // VCS methods
@@ -387,6 +391,12 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   payload: FilesystemBrowseInput,
   success: FilesystemBrowseResult,
   error: Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),
+});
+
+export const WsFilesystemCreateDirectoryRpc = Rpc.make(WS_METHODS.filesystemCreateDirectory, {
+  payload: FilesystemCreateDirectoryInput,
+  success: FilesystemCreateDirectoryResult,
+  error: Schema.Union([FilesystemCreateDirectoryError, EnvironmentAuthorizationError]),
 });
 
 export const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
@@ -705,6 +715,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
+  WsFilesystemCreateDirectoryRpc,
   WsAssetsCreateUrlRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
