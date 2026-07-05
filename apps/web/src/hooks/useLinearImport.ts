@@ -35,8 +35,12 @@ export interface LinearImportTarget {
 export type LinearBulkImportMode = "combine" | "perIssue";
 
 export interface LinearImportResult {
+  /** True when the import proceeded (at least one thread was created). */
   readonly ok: boolean;
+  /** Hard failure detail (shown as an error toast); only set when `ok` is false. */
   readonly error?: string;
+  /** Soft/partial detail (shown as a non-blocking notice) when `ok` is true. */
+  readonly warning?: string;
 }
 
 function issueTitle(issue: LinearIssueDetail): string {
@@ -146,17 +150,18 @@ export function useLinearImport() {
         if (createdCount === 0) {
           return { ok: false, error: "Failed to create any threads from Linear." };
         }
+        // Partial success still created threads: succeed, but surface a notice.
         if (failed.length > 0) {
           return {
-            ok: false,
-            error: `Created ${createdCount} of ${issues.length} threads; failed: ${failed.join(", ")}.`,
+            ok: true,
+            warning: `Created ${createdCount} of ${issues.length} threads; failed: ${failed.join(", ")}.`,
           };
         }
         const missing = input.ids.length - issues.length;
         if (missing > 0) {
           return {
-            ok: false,
-            error: `Imported ${issues.length}; ${missing} selected issue(s) could not be loaded.`,
+            ok: true,
+            warning: `Imported ${issues.length}; ${missing} selected issue(s) could not be loaded.`,
           };
         }
         return { ok: true };

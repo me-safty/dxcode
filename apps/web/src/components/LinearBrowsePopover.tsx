@@ -130,6 +130,13 @@ export function LinearBrowsePopover({
         mode: combine ? "combine" : "perIssue",
       });
       if (result.ok) {
+        if (result.warning) {
+          toastManager.add({
+            type: "warning",
+            title: "Imported with issues",
+            description: result.warning,
+          });
+        }
         handleOpenChange(false);
       } else {
         toastManager.add({

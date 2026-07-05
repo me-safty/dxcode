@@ -246,13 +246,17 @@ export function LinearBrowser() {
         mode: perIssue ? "perIssue" : "combine",
       });
       if (result.ok) {
-        toastManager.add({
-          type: "success",
-          title: perIssue ? "Threads created" : "Draft ready",
-          description: perIssue
-            ? `Started ${selected.size} thread${selected.size === 1 ? "" : "s"} from Linear.`
-            : "Review the pre-filled composer and send.",
-        });
+        toastManager.add(
+          result.warning
+            ? { type: "warning", title: "Imported with issues", description: result.warning }
+            : {
+                type: "success",
+                title: perIssue ? "Threads created" : "Draft ready",
+                description: perIssue
+                  ? `Started ${selected.size} thread${selected.size === 1 ? "" : "s"} from Linear.`
+                  : "Review the pre-filled composer and send.",
+              },
+        );
         setSelected(new Set());
         void navigate({ to: "/" });
       } else {
