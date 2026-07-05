@@ -204,9 +204,18 @@ index 72d3f59..435a5fc 100644
       * Number of columns to render items in.
       * @default 1
 diff --git a/react-native.js b/react-native.js
-index 8d4ff89..618e7e3 100644
+index 8d4ff89..18f0d62 100644
 --- a/react-native.js
 +++ b/react-native.js
+@@ -1195,7 +1195,7 @@ function setInitialRenderState(ctx, {
+   if (didInitialScroll) {
+     state.didFinishInitialScroll = true;
+   }
+-  const isReadyToRender = Boolean(state.didContainersLayout && state.didFinishInitialScroll);
++  const isReadyToRender = Boolean(state.didContainersLayout && state.didFinishInitialScroll && !state.insetEndRevealHold);
+   if (isReadyToRender && !peek$(ctx, "readyToRender")) {
+     set$(ctx, "readyToRender", true);
+     setAdaptiveRender(ctx, "normal");
 @@ -1480,18 +1480,23 @@ function calculateOffsetWithOffsetPosition(ctx, offsetParam, params) {
  }
  
@@ -329,12 +338,14 @@ index 8d4ff89..618e7e3 100644
                state.scroll = maxScroll;
                state.scrollPending = maxScroll;
                diff = 0;
-@@ -2374,8 +2402,72 @@ function scrollToIndex(ctx, {
+@@ -2374,8 +2402,121 @@ function scrollToIndex(ctx, {
  }
  
  // src/core/initialScroll.ts
 +var INSET_END_SETTLE_WATCHDOG_FRAMES = 150;
 +var INSET_END_SETTLE_WATCHDOG_STABLE_FRAMES = 20;
++var INSET_END_REVEAL_STABLE_FRAMES = 3;
++var INSET_END_REVEAL_MAX_HOLD_FRAMES = 40;
 +function startInsetEndSettleWatchdog(ctx) {
 +  const state = ctx.state;
 +  if (state.insetEndSettleWatchdogActive) {
@@ -342,14 +353,49 @@ index 8d4ff89..618e7e3 100644
 +  }
 +  state.insetEndSettleWatchdogActive = true;
 +  state.didUserDrag = false;
++  // Hold the readyToRender opacity gate until the end landing is stable, so
++  // the estimated-to-measured settle chase happens before first VISIBLE
++  // paint instead of in front of the user. Capped so slow measurement can
++  // never hide content for long.
++  state.insetEndRevealHold = true;
 +  let frames = 0;
 +  let settledFrames = 0;
++  let revealStableFrames = 0;
++  const releaseRevealHold = () => {
++    if (state.insetEndRevealHold) {
++      state.insetEndRevealHold = false;
++      setInitialRenderState(ctx, {});
++    }
++  };
++  // Revealing flips adaptive rendering to "normal", which re-renders rows and
++  // can move the end target one more time — do that upgrade while still
++  // hidden (phase 1), then require stability again before revealing (phase 2)
++  // so the first visible frame is the settled one.
++  let revealPhase = 1;
++  const onRevealStability = () => {
++    var _a3;
++    if (!state.insetEndRevealHold) {
++      return;
++    }
++    if (revealPhase === 1) {
++      revealPhase = 2;
++      revealStableFrames = 0;
++      setAdaptiveRender(ctx, "normal");
++      (_a3 = state.triggerCalculateItemsInView) == null ? void 0 : _a3.call(state);
++      return;
++    }
++    releaseRevealHold();
++  };
 +  const tick = () => {
 +    // The user owns the scroll from their first drag — a re-pin here would
 +    // pin the list under their finger.
 +    if (frames++ >= INSET_END_SETTLE_WATCHDOG_FRAMES || settledFrames >= INSET_END_SETTLE_WATCHDOG_STABLE_FRAMES || state.didUserDrag || !ctx.state || ctx.state !== state) {
 +      state.insetEndSettleWatchdogActive = false;
++      releaseRevealHold();
 +      return;
++    }
++    if (frames >= INSET_END_REVEAL_MAX_HOLD_FRAMES) {
++      releaseRevealHold();
 +    }
 +    const insetStartAdjustment = getContentInsetStartAdjustment(ctx);
 +    const contentSize = getContentSize(ctx);
@@ -363,12 +409,24 @@ index 8d4ff89..618e7e3 100644
 +      // re-pin to the current true end until sizes stop changing.
 +      if (Math.abs(distance) > 2 && Math.abs(distance) <= scrollLength * 0.5) {
 +        settledFrames = 0;
++        revealStableFrames = 0;
 +        const scroller = state.refScroller.current;
 +        if (scroller) {
 +          scroller.scrollTo({ animated: false, x: 0, y: endOffset });
 +        }
 +      } else {
 +        settledFrames++;
++        revealStableFrames++;
++        if (revealStableFrames >= INSET_END_REVEAL_STABLE_FRAMES) {
++          onRevealStability();
++        }
++      }
++    } else {
++      // Conditions that make re-pinning unnecessary (underflow, in-flight
++      // programmatic scroll) count toward stability for the reveal.
++      revealStableFrames++;
++      if (revealStableFrames >= INSET_END_REVEAL_STABLE_FRAMES) {
++        onRevealStability();
 +      }
 +    }
 +    requestAnimationFrame(tick);
@@ -402,7 +460,7 @@ index 8d4ff89..618e7e3 100644
    const requestedIndex = target.index;
    const index = requestedIndex !== void 0 ? clampScrollIndex(requestedIndex, ctx.state.props.data.length) : void 0;
    const itemSize = getItemSizeAtIndex(ctx, index);
-@@ -2804,7 +2896,9 @@ function clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx) {
+@@ -2804,7 +2945,9 @@ function clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx) {
      return;
    }
    if (didFinishedInitialScrollMoveAwayFromTarget(ctx, initialScroll)) {
@@ -413,7 +471,7 @@ index 8d4ff89..618e7e3 100644
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {
-@@ -4646,7 +4740,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
+@@ -4646,7 +4789,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        }
        contentBelowAnchor += footerSize + stylePaddingBottom;
        isReady = !hasUnknownTailSize;
@@ -423,7 +481,7 @@ index 8d4ff89..618e7e3 100644
      } else if (anchorIndex >= 0) {
        isReady = false;
      }
-@@ -4664,6 +4759,12 @@ function maybeUpdateAnchoredEndSpace(ctx) {
+@@ -4664,6 +4808,12 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        updateScroll(ctx, state.scroll, true);
      }
      (_b = anchoredEndSpace == null ? void 0 : anchoredEndSpace.onReady) == null ? void 0 : _b.call(anchoredEndSpace, { anchorIndex: nextAnchorIndex, anchorKey: nextAnchorKey, size: nextSize });
@@ -436,7 +494,7 @@ index 8d4ff89..618e7e3 100644
    }
    return nextSize;
  }
-@@ -6462,6 +6563,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6462,6 +6612,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
      dataVersion,
      drawDistance = 250,
      contentInsetEndAdjustment,
@@ -444,7 +502,7 @@ index 8d4ff89..618e7e3 100644
      estimatedItemSize = 100,
      estimatedListSize,
      extraData,
-@@ -6492,6 +6594,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6492,6 +6643,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
      onLayout: onLayoutProp,
      onLoad,
      onMomentumScrollEnd,
@@ -452,7 +510,7 @@ index 8d4ff89..618e7e3 100644
      onRefresh,
      onScroll: onScrollProp,
      onStartReached,
-@@ -6710,6 +6813,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6710,6 +6862,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
      contentContainerAlignItems: contentContainerStyle.alignItems,
      contentInset,
      contentInsetEndAdjustment: contentInsetEndAdjustmentResolved,
@@ -460,7 +518,7 @@ index 8d4ff89..618e7e3 100644
      data: dataProp,
      dataVersion,
      drawDistance,
-@@ -6789,6 +6893,13 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6789,6 +6942,13 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
        return void 0;
      }
      const resolvedOffset = (_a4 = initialScroll.contentOffset) != null ? _a4 : resolveInitialScrollOffset(ctx, initialScroll);
@@ -474,7 +532,7 @@ index 8d4ff89..618e7e3 100644
      return usesBootstrapInitialScroll && ((_b2 = state.initialScrollSession) == null ? void 0 : _b2.kind) === "bootstrap" && Platform.OS === "web" ? void 0 : resolvedOffset;
    }, [usesBootstrapInitialScroll]);
    React2.useLayoutEffect(() => {
-@@ -6995,6 +7106,12 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6995,6 +7155,12 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
            onMomentumScrollEnd(event);
          }
        },
@@ -487,7 +545,7 @@ index 8d4ff89..618e7e3 100644
        onScroll: (event) => onScroll(ctx, event)
      }),
      []
-@@ -7019,6 +7136,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -7019,6 +7185,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
        onLayout,
        onLayoutFooter,
        onMomentumScrollEnd: fns.onMomentumScrollEnd,
@@ -496,9 +554,18 @@ index 8d4ff89..618e7e3 100644
        recycleItems,
        refreshControl: refreshControlElement ? stylePaddingTopState > 0 ? React2__namespace.cloneElement(refreshControlElement, {
 diff --git a/react-native.mjs b/react-native.mjs
-index 2e96ca7..84e167b 100644
+index 2e96ca7..6e8913e 100644
 --- a/react-native.mjs
 +++ b/react-native.mjs
+@@ -1174,7 +1174,7 @@ function setInitialRenderState(ctx, {
+   if (didInitialScroll) {
+     state.didFinishInitialScroll = true;
+   }
+-  const isReadyToRender = Boolean(state.didContainersLayout && state.didFinishInitialScroll);
++  const isReadyToRender = Boolean(state.didContainersLayout && state.didFinishInitialScroll && !state.insetEndRevealHold);
+   if (isReadyToRender && !peek$(ctx, "readyToRender")) {
+     set$(ctx, "readyToRender", true);
+     setAdaptiveRender(ctx, "normal");
 @@ -1459,18 +1459,23 @@ function calculateOffsetWithOffsetPosition(ctx, offsetParam, params) {
  }
  
@@ -621,12 +688,14 @@ index 2e96ca7..84e167b 100644
                state.scroll = maxScroll;
                state.scrollPending = maxScroll;
                diff = 0;
-@@ -2353,8 +2381,72 @@ function scrollToIndex(ctx, {
+@@ -2353,8 +2381,121 @@ function scrollToIndex(ctx, {
  }
  
  // src/core/initialScroll.ts
 +var INSET_END_SETTLE_WATCHDOG_FRAMES = 150;
 +var INSET_END_SETTLE_WATCHDOG_STABLE_FRAMES = 20;
++var INSET_END_REVEAL_STABLE_FRAMES = 3;
++var INSET_END_REVEAL_MAX_HOLD_FRAMES = 40;
 +function startInsetEndSettleWatchdog(ctx) {
 +  const state = ctx.state;
 +  if (state.insetEndSettleWatchdogActive) {
@@ -634,14 +703,49 @@ index 2e96ca7..84e167b 100644
 +  }
 +  state.insetEndSettleWatchdogActive = true;
 +  state.didUserDrag = false;
++  // Hold the readyToRender opacity gate until the end landing is stable, so
++  // the estimated-to-measured settle chase happens before first VISIBLE
++  // paint instead of in front of the user. Capped so slow measurement can
++  // never hide content for long.
++  state.insetEndRevealHold = true;
 +  let frames = 0;
 +  let settledFrames = 0;
++  let revealStableFrames = 0;
++  const releaseRevealHold = () => {
++    if (state.insetEndRevealHold) {
++      state.insetEndRevealHold = false;
++      setInitialRenderState(ctx, {});
++    }
++  };
++  // Revealing flips adaptive rendering to "normal", which re-renders rows and
++  // can move the end target one more time — do that upgrade while still
++  // hidden (phase 1), then require stability again before revealing (phase 2)
++  // so the first visible frame is the settled one.
++  let revealPhase = 1;
++  const onRevealStability = () => {
++    var _a3;
++    if (!state.insetEndRevealHold) {
++      return;
++    }
++    if (revealPhase === 1) {
++      revealPhase = 2;
++      revealStableFrames = 0;
++      setAdaptiveRender(ctx, "normal");
++      (_a3 = state.triggerCalculateItemsInView) == null ? void 0 : _a3.call(state);
++      return;
++    }
++    releaseRevealHold();
++  };
 +  const tick = () => {
 +    // The user owns the scroll from their first drag — a re-pin here would
 +    // pin the list under their finger.
 +    if (frames++ >= INSET_END_SETTLE_WATCHDOG_FRAMES || settledFrames >= INSET_END_SETTLE_WATCHDOG_STABLE_FRAMES || state.didUserDrag || !ctx.state || ctx.state !== state) {
 +      state.insetEndSettleWatchdogActive = false;
++      releaseRevealHold();
 +      return;
++    }
++    if (frames >= INSET_END_REVEAL_MAX_HOLD_FRAMES) {
++      releaseRevealHold();
 +    }
 +    const insetStartAdjustment = getContentInsetStartAdjustment(ctx);
 +    const contentSize = getContentSize(ctx);
@@ -655,12 +759,24 @@ index 2e96ca7..84e167b 100644
 +      // re-pin to the current true end until sizes stop changing.
 +      if (Math.abs(distance) > 2 && Math.abs(distance) <= scrollLength * 0.5) {
 +        settledFrames = 0;
++        revealStableFrames = 0;
 +        const scroller = state.refScroller.current;
 +        if (scroller) {
 +          scroller.scrollTo({ animated: false, x: 0, y: endOffset });
 +        }
 +      } else {
 +        settledFrames++;
++        revealStableFrames++;
++        if (revealStableFrames >= INSET_END_REVEAL_STABLE_FRAMES) {
++          onRevealStability();
++        }
++      }
++    } else {
++      // Conditions that make re-pinning unnecessary (underflow, in-flight
++      // programmatic scroll) count toward stability for the reveal.
++      revealStableFrames++;
++      if (revealStableFrames >= INSET_END_REVEAL_STABLE_FRAMES) {
++        onRevealStability();
 +      }
 +    }
 +    requestAnimationFrame(tick);
@@ -694,7 +810,7 @@ index 2e96ca7..84e167b 100644
    const requestedIndex = target.index;
    const index = requestedIndex !== void 0 ? clampScrollIndex(requestedIndex, ctx.state.props.data.length) : void 0;
    const itemSize = getItemSizeAtIndex(ctx, index);
-@@ -2783,7 +2875,9 @@ function clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx) {
+@@ -2783,7 +2924,9 @@ function clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx) {
      return;
    }
    if (didFinishedInitialScrollMoveAwayFromTarget(ctx, initialScroll)) {
@@ -705,7 +821,7 @@ index 2e96ca7..84e167b 100644
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {
-@@ -4625,7 +4719,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
+@@ -4625,7 +4768,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        }
        contentBelowAnchor += footerSize + stylePaddingBottom;
        isReady = !hasUnknownTailSize;
@@ -715,7 +831,7 @@ index 2e96ca7..84e167b 100644
      } else if (anchorIndex >= 0) {
        isReady = false;
      }
-@@ -4643,6 +4738,12 @@ function maybeUpdateAnchoredEndSpace(ctx) {
+@@ -4643,6 +4787,12 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        updateScroll(ctx, state.scroll, true);
      }
      (_b = anchoredEndSpace == null ? void 0 : anchoredEndSpace.onReady) == null ? void 0 : _b.call(anchoredEndSpace, { anchorIndex: nextAnchorIndex, anchorKey: nextAnchorKey, size: nextSize });
@@ -728,7 +844,7 @@ index 2e96ca7..84e167b 100644
    }
    return nextSize;
  }
-@@ -6441,6 +6542,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6441,6 +6591,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
      dataVersion,
      drawDistance = 250,
      contentInsetEndAdjustment,
@@ -736,7 +852,7 @@ index 2e96ca7..84e167b 100644
      estimatedItemSize = 100,
      estimatedListSize,
      extraData,
-@@ -6471,6 +6573,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6471,6 +6622,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
      onLayout: onLayoutProp,
      onLoad,
      onMomentumScrollEnd,
@@ -744,7 +860,7 @@ index 2e96ca7..84e167b 100644
      onRefresh,
      onScroll: onScrollProp,
      onStartReached,
-@@ -6689,6 +6792,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6689,6 +6841,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
      contentContainerAlignItems: contentContainerStyle.alignItems,
      contentInset,
      contentInsetEndAdjustment: contentInsetEndAdjustmentResolved,
@@ -752,7 +868,7 @@ index 2e96ca7..84e167b 100644
      data: dataProp,
      dataVersion,
      drawDistance,
-@@ -6768,6 +6872,13 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6768,6 +6921,13 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
        return void 0;
      }
      const resolvedOffset = (_a4 = initialScroll.contentOffset) != null ? _a4 : resolveInitialScrollOffset(ctx, initialScroll);
@@ -766,7 +882,7 @@ index 2e96ca7..84e167b 100644
      return usesBootstrapInitialScroll && ((_b2 = state.initialScrollSession) == null ? void 0 : _b2.kind) === "bootstrap" && Platform.OS === "web" ? void 0 : resolvedOffset;
    }, [usesBootstrapInitialScroll]);
    useLayoutEffect(() => {
-@@ -6974,6 +7085,12 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6974,6 +7134,12 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
            onMomentumScrollEnd(event);
          }
        },
@@ -779,7 +895,7 @@ index 2e96ca7..84e167b 100644
        onScroll: (event) => onScroll(ctx, event)
      }),
      []
-@@ -6998,6 +7115,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+@@ -6998,6 +7164,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
        onLayout,
        onLayoutFooter,
        onMomentumScrollEnd: fns.onMomentumScrollEnd,
