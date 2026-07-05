@@ -2,12 +2,14 @@ import { useCallback, useState } from "react";
 import { SquareKanbanIcon } from "lucide-react";
 
 import { usePrimaryEnvironmentId } from "../../state/environments";
+import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { linearEnvironment } from "../../state/linear";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -26,6 +28,13 @@ export function LinearSettingsPanel() {
 
   const status = authQuery.data;
   const connected = status?.status === "authenticated";
+
+  const linear = usePrimarySettings((settings) => settings.linear);
+  const updateSettings = useUpdatePrimarySettings();
+  const setLinear = useCallback(
+    (patch: Partial<typeof linear>) => updateSettings({ linear: { ...linear, ...patch } }),
+    [linear, updateSettings],
+  );
 
   const handleSave = useCallback(async () => {
     const trimmed = token.trim();
@@ -141,6 +150,80 @@ export function LinearSettingsPanel() {
             </div>
           )}
         </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection title="Status write-back">
+        <SettingsRow
+          title="Auto-sync issue status"
+          description="Move linked Linear issues as work progresses in T3 Code."
+          control={
+            <Switch
+              checked={linear.autoSync}
+              onCheckedChange={(checked) => setLinear({ autoSync: checked })}
+              aria-label="Auto-sync issue status"
+            />
+          }
+        />
+        <SettingsRow
+          title="In Progress on start"
+          description="Set the issue to an In Progress state when the agent starts working."
+          control={
+            <Switch
+              checked={linear.transitionOnStart}
+              disabled={!linear.autoSync}
+              onCheckedChange={(checked) => setLinear({ transitionOnStart: checked })}
+              aria-label="Move to In Progress on start"
+            />
+          }
+        />
+        <SettingsRow
+          title="In Review on pull request"
+          description="Move the issue to In Review when a pull request opens for the thread."
+          control={
+            <Switch
+              checked={linear.transitionOnPrOpen}
+              disabled={!linear.autoSync}
+              onCheckedChange={(checked) => setLinear({ transitionOnPrOpen: checked })}
+              aria-label="Move to In Review on pull request"
+            />
+          }
+        />
+        <SettingsRow
+          title="Done on merge"
+          description="Complete the issue when its pull request is merged."
+          control={
+            <Switch
+              checked={linear.transitionOnMerge}
+              disabled={!linear.autoSync}
+              onCheckedChange={(checked) => setLinear({ transitionOnMerge: checked })}
+              aria-label="Move to Done on merge"
+            />
+          }
+        />
+        <SettingsRow
+          title="Link the thread on the issue"
+          description="Attach the T3 Code thread to the Linear issue for quick navigation."
+          control={
+            <Switch
+              checked={linear.linkAttachment}
+              disabled={!linear.autoSync}
+              onCheckedChange={(checked) => setLinear({ linkAttachment: checked })}
+              aria-label="Link the thread on the issue"
+            />
+          }
+        />
+        <SettingsRow
+          title="Post progress comments"
+          description="Comment on the issue when work starts. Off by default to reduce noise."
+          control={
+            <Switch
+              checked={linear.postComments}
+              disabled={!linear.autoSync}
+              onCheckedChange={(checked) => setLinear({ postComments: checked })}
+              aria-label="Post progress comments"
+            />
+          }
+        />
       </SettingsSection>
     </SettingsPageContainer>
   );
