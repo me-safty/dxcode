@@ -6,7 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { SearchIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useLinearImport } from "../../hooks/useLinearImport";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -159,25 +159,32 @@ export function LinearBrowser() {
       : null,
   );
 
-  // Reset accumulation whenever the filter changes.
+  // Which filter the accumulated rows belong to, so a page fetched under a
+  // previous filter can never merge into results for the current one.
+  const accumFilterKey = useRef<string | null>(null);
+
+  // Reset paging + selection whenever the filter changes.
   useEffect(() => {
-    setRows([]);
     setCursor(undefined);
     setSelected(new Set());
   }, [filterKey]);
 
-  // Accumulate pages (dedupe by id).
+  // Accumulate pages (dedupe by id); replace instead of append when the filter
+  // changed since the last accumulated page.
   useEffect(() => {
     const data = listQuery.data;
     if (!data) return;
     setRows((prev) => {
-      const seen = new Set(prev.map((issue) => issue.id));
-      const merged = [...prev];
+      const base = accumFilterKey.current === filterKey ? prev : [];
+      const seen = new Set(base.map((issue) => issue.id));
+      const merged = [...base];
       for (const issue of data.issues) if (!seen.has(issue.id)) merged.push(issue);
       return merged;
     });
-    setHasNext(data.pageInfo.hasNextPage);
-  }, [listQuery.data]);
+    accumFilterKey.current = filterKey;
+    // Only offer "load more" when the API actually returned a cursor to advance.
+    setHasNext(data.pageInfo.hasNextPage && data.pageInfo.endCursor != null);
+  }, [listQuery.data, filterKey]);
 
   useEffect(() => {
     if (targetProjectId === null && projects.length > 0) {
@@ -335,7 +342,10 @@ export function LinearBrowser() {
               size="sm"
               variant="outline"
               disabled={listQuery.isPending}
-              onClick={() => setCursor(listQuery.data?.pageInfo.endCursor)}
+              onClick={() => {
+                const next = listQuery.data?.pageInfo.endCursor;
+                if (next != null) setCursor(next);
+              }}
             >
               {listQuery.isPending ? "Loading…" : "Load more"}
             </Button>

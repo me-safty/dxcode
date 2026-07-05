@@ -102,6 +102,9 @@ export function useLinearImport() {
           instanceId: ProviderInstanceId.make("codex"),
           model: DEFAULT_MODEL,
         };
+        // Attempt every issue; report a summary rather than bailing mid-loop and
+        // leaving the caller unsure which threads were actually created.
+        const failed: string[] = [];
         for (const issue of issues) {
           const createdAt = new Date().toISOString();
           const title = issueTitle(issue);
@@ -136,8 +139,25 @@ export function useLinearImport() {
             },
           });
           if (startResult._tag !== "Success") {
-            return { ok: false, error: `Failed to create a thread for ${issue.identifier}.` };
+            failed.push(issue.identifier);
           }
+        }
+        const createdCount = issues.length - failed.length;
+        if (createdCount === 0) {
+          return { ok: false, error: "Failed to create any threads from Linear." };
+        }
+        if (failed.length > 0) {
+          return {
+            ok: false,
+            error: `Created ${createdCount} of ${issues.length} threads; failed: ${failed.join(", ")}.`,
+          };
+        }
+        const missing = input.ids.length - issues.length;
+        if (missing > 0) {
+          return {
+            ok: false,
+            error: `Imported ${issues.length}; ${missing} selected issue(s) could not be loaded.`,
+          };
         }
         return { ok: true };
       }

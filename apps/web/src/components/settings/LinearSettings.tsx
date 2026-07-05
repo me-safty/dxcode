@@ -201,18 +201,6 @@ export function LinearSettingsPanel() {
           }
         />
         <SettingsRow
-          title="Link the thread on the issue"
-          description="Attach the T3 Code thread to the Linear issue for quick navigation."
-          control={
-            <Switch
-              checked={linear.linkAttachment}
-              disabled={!linear.autoSync}
-              onCheckedChange={(checked) => setLinear({ linkAttachment: checked })}
-              aria-label="Link the thread on the issue"
-            />
-          }
-        />
-        <SettingsRow
           title="Post progress comments"
           description="Comment on the issue when work starts. Off by default to reduce noise."
           control={

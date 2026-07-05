@@ -375,7 +375,6 @@ export const LinearSyncSettings = Schema.Struct({
   transitionOnPrOpen: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   transitionOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   postComments: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  linkAttachment: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   stateMappingByTeam: Schema.Record(TrimmedNonEmptyString, LinearTeamStateMapping).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
@@ -559,7 +558,6 @@ export const ServerSettingsPatch = Schema.Struct({
       transitionOnPrOpen: Schema.optionalKey(Schema.Boolean),
       transitionOnMerge: Schema.optionalKey(Schema.Boolean),
       postComments: Schema.optionalKey(Schema.Boolean),
-      linkAttachment: Schema.optionalKey(Schema.Boolean),
       stateMappingByTeam: Schema.optionalKey(
         Schema.Record(TrimmedNonEmptyString, LinearTeamStateMapping),
       ),

@@ -22,7 +22,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../Services/ProjectionSnapshotQuery.ts";
-import { LinearSyncReactor, type LinearSyncReactorShape } from "../Services/LinearSyncReactor.ts";
+import { LinearSyncReactor } from "../Services/LinearSyncReactor.ts";
 
 const STAGE_RANK: Record<LinearLifecycleStage, number> = { started: 1, review: 2, done: 3 };
 
@@ -105,28 +105,23 @@ const make = Effect.gen(function* () {
 
       const result = yield* linear.updateIssueState({ issueId: issue.id, stateId });
       if (!result.success) return;
-      appliedRank.set(issue.id, rank);
 
-      if (stage === "started") {
-        if (settings.linkAttachment) {
-          yield* linear
-            .createAttachment({ issueId: issue.id, url: issue.url, title: "T3 Code" })
-            .pipe(Effect.ignore);
-        }
-        if (settings.postComments) {
-          yield* linear
-            .createComment({
-              issueId: issue.id,
-              body: `T3 Code started working on this issue in thread “${thread.title}”.`,
-            })
-            .pipe(Effect.ignore);
-        }
+      if (stage === "started" && settings.postComments) {
+        yield* linear
+          .createComment({
+            issueId: issue.id,
+            body: `T3 Code started working on this issue in thread “${thread.title}”.`,
+          })
+          .pipe(Effect.ignore);
       }
 
       const nextState = states.find((state) => state.id === stateId);
       if (nextState !== undefined) {
         yield* reflectState(thread.id, issue, nextState);
       }
+      // Mark applied only after the write + best-effort badge reflect, so a
+      // failed issueUpdate can be retried on the next signal.
+      appliedRank.set(issue.id, rank);
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("linear sync failed to apply stage", {
@@ -141,8 +136,11 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const worktreePath = thread.worktreePath;
       if (worktreePath === null || thread.linearIssue == null) return;
-      if (watchedThreads.has(thread.id)) return;
-      watchedThreads.add(thread.id);
+      // Key by worktree so a thread that later moves/creates its worktree gets
+      // a fresh watcher instead of being ignored on the stale path.
+      const watchKey = `${thread.id}:${worktreePath}`;
+      if (watchedThreads.has(watchKey)) return;
+      watchedThreads.add(watchKey);
 
       yield* Effect.forkScoped(
         Stream.runForEach(vcs.streamStatus({ cwd: worktreePath }), (event) => {
@@ -179,7 +177,7 @@ const make = Effect.gen(function* () {
       Effect.catchCause(() => Effect.void),
     );
 
-  const start: LinearSyncReactorShape["start"] = Effect.fn("start")(function* () {
+  const start: LinearSyncReactor["Service"]["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(engine.streamDomainEvents, (event) => {
         switch (event.type) {
@@ -195,7 +193,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  return { start } satisfies LinearSyncReactorShape;
+  return { start } satisfies LinearSyncReactor["Service"];
 });
 
 export const LinearSyncReactorLive = Layer.effect(LinearSyncReactor, make);
