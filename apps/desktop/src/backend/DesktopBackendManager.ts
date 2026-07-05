@@ -486,6 +486,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           ready: false,
           config: Option.some(config.value),
           preflightFailureAttempt: resetFatalPreflightCounter ? 0 : latest.preflightFailureAttempt,
+          neverReadyAttempt: 0,
         }));
 
         const preflightFailure = config.value.preflightFailure;
@@ -578,6 +579,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         const finalizeRun = Effect.fn("desktop.backendInstance.finalizeRun")(function* (
           reason: string,
         ) {
+          yield* Effect.yieldNow();
           yield* mutex.withPermits(1)(
             Effect.gen(function* () {
               const { isCurrentRun, nextState, pid, wasReady } = yield* Ref.modify(
@@ -817,6 +819,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
             ready: false,
             active: Option.none<ActiveBackendRun>(),
             restartFiber: Option.none<Fiber.Fiber<void, never>>(),
+            neverReadyAttempt: 0,
           },
         ]);
         // Ignore failures from spec.onShutdown so a downstream throw
