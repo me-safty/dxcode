@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { PositiveInt, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import { PositiveInt, ThreadId, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 
 const LINEAR_SEARCH_MAX_LIMIT = 50;
 const LINEAR_LIST_MAX_LIMIT = 100;
@@ -231,6 +231,10 @@ export type LinearCreateAttachmentInput = typeof LinearCreateAttachmentInput.Typ
 
 export const LinearMutationResult = Schema.Struct({ success: Schema.Boolean });
 export type LinearMutationResult = typeof LinearMutationResult.Type;
+
+/** Mark the Linear issue linked to a thread as done (right-click → thread menu). */
+export const LinearCompleteIssueInput = Schema.Struct({ threadId: ThreadId });
+export type LinearCompleteIssueInput = typeof LinearCompleteIssueInput.Type;
 
 export const LinearSearchIssuesInput = Schema.Struct({
   query: TrimmedString.check(Schema.isMaxLength(LINEAR_SEARCH_QUERY_MAX_LENGTH)),

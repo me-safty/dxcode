@@ -1,6 +1,5 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
-  DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ProviderInstanceId,
@@ -104,9 +103,11 @@ export function useLinearImport() {
       }
 
       if (input.mode === "perIssue") {
-        const modelSelection: ModelSelection = project?.defaultModelSelection ?? {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: DEFAULT_MODEL,
+        // Imported issues default to Claude Opus 4.8 — the strongest coding
+        // model — rather than the project/Codex default.
+        const modelSelection: ModelSelection = {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-8",
         };
         // Attempt every issue; report a summary rather than bailing mid-loop and
         // leaving the caller unsure which threads were actually created.

@@ -24,6 +24,7 @@ import {
 import { ProjectFavicon } from "./ProjectFavicon";
 import { LinearBrowsePopover } from "./LinearBrowsePopover";
 import { LinearIssueBadge } from "./linear/LinearIssueBadge";
+import { linearEnvironment } from "../state/linear";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
@@ -1122,6 +1123,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const completeLinearIssue = useAtomCommand(linearEnvironment.completeThreadIssue, {
+    reportFailure: false,
+  });
   const updateSettings = useUpdateClientSettings();
   const sidebarThreadPreviewCount = useClientSettings<SidebarThreadPreviewCount>(
     (settings) => settings.sidebarThreadPreviewCount,
@@ -2132,6 +2136,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
+          ...(thread.linearIssue
+            ? [
+                {
+                  id: "linear-complete",
+                  label: `Mark ${thread.linearIssue.identifier} done in Linear`,
+                },
+              ]
+            : []),
           { id: "delete", label: "Delete", destructive: true, icon: "trash" },
         ],
         position,
@@ -2164,6 +2176,34 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         copyThreadIdToClipboard(thread.id, { threadId: thread.id });
         return;
       }
+      if (clicked === "linear-complete") {
+        const linearIssue = thread.linearIssue;
+        if (!linearIssue) return;
+        const result = await completeLinearIssue({
+          environmentId: thread.environmentId,
+          input: { threadId: thread.id },
+        });
+        const succeeded = result._tag === "Success" ? result.value.success : false;
+        toastManager.add(
+          stackedThreadToast(
+            succeeded
+              ? {
+                  type: "success",
+                  title: "Marked done in Linear",
+                  description: `${linearIssue.identifier} moved to your team's completed state.`,
+                }
+              : {
+                  type: "error",
+                  title: "Couldn't complete the issue",
+                  description:
+                    result._tag === "Failure"
+                      ? "Linear rejected the update — check the connection in Settings."
+                      : "No completed state is configured for this team.",
+                },
+          ),
+        );
+        return;
+      }
       if (clicked !== "delete") return;
       if (appSettingsConfirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
@@ -2190,6 +2230,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
     [
       appSettingsConfirmThreadDelete,
+      completeLinearIssue,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,

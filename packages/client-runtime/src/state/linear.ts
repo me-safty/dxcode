@@ -65,6 +65,11 @@ export function createLinearEnvironmentAtoms<R, E>(
       tag: WS_METHODS.linearCreateAttachment,
       scheduler: commandScheduler,
     }),
+    completeThreadIssue: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:linear:complete-thread-issue",
+      tag: WS_METHODS.linearCompleteThreadIssue,
+      scheduler: commandScheduler,
+    }),
     setToken: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:linear:set-token",
       tag: WS_METHODS.linearSetToken,

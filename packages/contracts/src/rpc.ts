@@ -146,6 +146,7 @@ import { VcsError } from "./vcs.ts";
 import {
   LinearAuthError,
   LinearAuthStatus,
+  LinearCompleteIssueInput,
   LinearCreateAttachmentInput,
   LinearCreateCommentInput,
   LinearFetchIssuesInput,
@@ -259,6 +260,7 @@ export const WS_METHODS = {
   linearUpdateIssueState: "linear.updateIssueState",
   linearCreateComment: "linear.createComment",
   linearCreateAttachment: "linear.createAttachment",
+  linearCompleteThreadIssue: "linear.completeThreadIssue",
   linearSetToken: "linear.setToken",
   linearClearToken: "linear.clearToken",
 
@@ -490,6 +492,12 @@ export const WsLinearCreateCommentRpc = Rpc.make(WS_METHODS.linearCreateComment,
 
 export const WsLinearCreateAttachmentRpc = Rpc.make(WS_METHODS.linearCreateAttachment, {
   payload: LinearCreateAttachmentInput,
+  success: LinearMutationResult,
+  error: LinearReadError,
+});
+
+export const WsLinearCompleteThreadIssueRpc = Rpc.make(WS_METHODS.linearCompleteThreadIssue, {
+  payload: LinearCompleteIssueInput,
   success: LinearMutationResult,
   error: LinearReadError,
 });
@@ -851,6 +859,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsLinearUpdateIssueStateRpc,
   WsLinearCreateCommentRpc,
   WsLinearCreateAttachmentRpc,
+  WsLinearCompleteThreadIssueRpc,
   WsLinearSetTokenRpc,
   WsLinearClearTokenRpc,
   WsProjectsListEntriesRpc,

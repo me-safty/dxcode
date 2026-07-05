@@ -56,7 +56,9 @@ import {
   type TerminalMetadataStreamEvent,
   WS_METHODS,
   WsRpcGroup,
+  LinearRequestError,
 } from "@t3tools/contracts";
+import { resolveTargetStateId } from "./linear/linearStateMapping.ts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -312,6 +314,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.linearUpdateIssueState, AuthOrchestrationOperateScope],
   [WS_METHODS.linearCreateComment, AuthOrchestrationOperateScope],
   [WS_METHODS.linearCreateAttachment, AuthOrchestrationOperateScope],
+  [WS_METHODS.linearCompleteThreadIssue, AuthOrchestrationOperateScope],
   [WS_METHODS.linearSetToken, AuthOrchestrationOperateScope],
   [WS_METHODS.linearClearToken, AuthOrchestrationOperateScope],
   [WS_METHODS.projectsListEntries, AuthOrchestrationReadScope],
@@ -525,6 +528,81 @@ const makeWsRpcLayer = (
       const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+
+      // Mark the Linear issue linked to a thread as done: resolve the team's
+      // completed state, write it back, and reflect the new state on the thread
+      // so its badge updates live. Non-Linear failures map to LinearRequestError.
+      const completeLinearThreadIssue = (input: { readonly threadId: ThreadId }) =>
+        Effect.gen(function* () {
+          const shell = yield* projectionSnapshotQuery.getThreadShellById(input.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new LinearRequestError({
+                  operation: "updateIssueState",
+                  detail: "Failed to read the thread.",
+                  cause,
+                }),
+            ),
+          );
+          const issue = Option.isSome(shell) ? shell.value.linearIssue : null;
+          if (issue === null || issue === undefined || issue.teamId === undefined) {
+            return { success: false };
+          }
+          const settings = yield* serverSettings.getSettings.pipe(
+            Effect.mapError(
+              (cause) =>
+                new LinearRequestError({
+                  operation: "updateIssueState",
+                  detail: "Failed to read settings.",
+                  cause,
+                }),
+            ),
+          );
+          const states = yield* linear.listWorkflowStates({ teamId: issue.teamId });
+          const stateId = resolveTargetStateId(
+            states,
+            settings.linear.stateMappingByTeam[issue.teamId],
+            "done",
+          );
+          if (stateId === undefined) {
+            return { success: false };
+          }
+          const result = yield* linear.updateIssueState({ issueId: issue.id, stateId });
+          if (!result.success) {
+            return { success: false };
+          }
+          const nextState = states.find((state) => state.id === stateId);
+          if (nextState !== undefined) {
+            const commandId = yield* serverCommandId("linear-complete").pipe(
+              Effect.mapError(
+                (cause) =>
+                  new LinearRequestError({
+                    operation: "updateIssueState",
+                    detail: "Failed to reflect the completed state.",
+                    cause,
+                  }),
+              ),
+            );
+            yield* orchestrationEngine
+              .dispatch({
+                type: "thread.meta.update",
+                commandId,
+                threadId: input.threadId,
+                linearIssue: { ...issue, stateName: nextState.name, stateType: nextState.type },
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new LinearRequestError({
+                      operation: "updateIssueState",
+                      detail: "Failed to reflect the completed state.",
+                      cause,
+                    }),
+                ),
+              );
+          }
+          return { success: true };
+        });
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -1399,6 +1477,10 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.linearCreateAttachment]: (input) =>
           observeRpcEffect(WS_METHODS.linearCreateAttachment, linear.createAttachment(input), {
+            "rpc.aggregate": "linear",
+          }),
+        [WS_METHODS.linearCompleteThreadIssue]: (input) =>
+          observeRpcEffect(WS_METHODS.linearCompleteThreadIssue, completeLinearThreadIssue(input), {
             "rpc.aggregate": "linear",
           }),
         [WS_METHODS.linearSetToken]: (input) =>
