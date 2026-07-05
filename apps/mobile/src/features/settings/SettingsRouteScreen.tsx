@@ -4,7 +4,7 @@ import * as Notifications from "expo-notifications";
 import * as Updates from "expo-updates";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { SymbolView } from "expo-symbols";
+import { SymbolView } from "../../components/AppSymbol";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Alert, Linking, Platform, ScrollView, View } from "react-native";
