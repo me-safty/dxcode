@@ -18,6 +18,10 @@ function configuredBackendUrl(): string {
   return import.meta.env.VITE_HTTP_URL?.trim() || import.meta.env.VITE_WS_URL?.trim() || "";
 }
 
+export function hasConfiguredBackendUrl(): boolean {
+  return configuredBackendUrl().length > 0;
+}
+
 function configuredHostedAppChannel(): HostedAppChannel | null {
   const channel = import.meta.env.VITE_HOSTED_APP_CHANNEL?.trim().toLowerCase();
   return channel === "latest" || channel === "nightly" ? channel : null;
@@ -32,7 +36,7 @@ function originFromUrl(value: string): string | null {
 }
 
 export function isHostedStaticApp(url: URL = new URL(window.location.href)): boolean {
-  if (configuredBackendUrl()) {
+  if (hasConfiguredBackendUrl()) {
     return false;
   }
 

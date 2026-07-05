@@ -39,7 +39,11 @@ import { useUiStateStore } from "../uiStateStore";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import { configureClientTracing } from "../observability/clientTracing";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
-import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import {
+  hasConfiguredBackendUrl,
+  hasHostedPairingRequest,
+  isHostedStaticApp,
+} from "../hostedPairing";
 import { hasClerkPublicConfig, hasCloudPublicConfig } from "../cloud/publicConfig";
 import { shellEnvironment } from "../state/shell";
 import { useAtomValue } from "@effect/atom-react";
@@ -82,7 +86,11 @@ export const Route = createRootRoute({
       };
     }
 
-    if (!hasCloudPublicConfig() && !isPublicSessionRoutePathname(location.pathname)) {
+    if (
+      !hasCloudPublicConfig() &&
+      !hasConfiguredBackendUrl() &&
+      !isPublicSessionRoutePathname(location.pathname)
+    ) {
       return {
         authGateState: {
           status: "hosted-static",

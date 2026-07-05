@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   buildHostedChannelSelectionUrl,
   buildHostedPairingUrl,
+  hasConfiguredBackendUrl,
   hasHostedPairingRequest,
   isHostedStaticApp,
   readHostedPairingRequest,
@@ -72,12 +73,22 @@ describe("hostedPairing", () => {
     vi.stubEnv("VITE_HTTP_URL", "");
     vi.stubEnv("VITE_WS_URL", "");
 
+    expect(hasConfiguredBackendUrl()).toBe(false);
     expect(isHostedStaticApp(new URL("https://preview.pathwayos.codes/"))).toBe(true);
     expect(isHostedStaticApp(new URL("https://preview.pathwayos.codes/pair"))).toBe(true);
     expect(isHostedStaticApp(new URL("https://backend.example.com/"))).toBe(false);
 
     vi.stubEnv("VITE_HTTP_URL", "https://backend.example.com");
+    expect(hasConfiguredBackendUrl()).toBe(true);
     expect(isHostedStaticApp(new URL("https://preview.pathwayos.codes/"))).toBe(false);
+  });
+
+  it("treats a configured websocket endpoint as a backend URL", () => {
+    vi.stubEnv("VITE_HTTP_URL", "");
+    vi.stubEnv("VITE_WS_URL", "ws://localhost:13773");
+
+    expect(hasConfiguredBackendUrl()).toBe(true);
+    expect(isHostedStaticApp(new URL("https://app.pathwayos.codes/"))).toBe(false);
   });
 
   it("detects hosted channel aliases as static apps", () => {

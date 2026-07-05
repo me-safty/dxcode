@@ -1,25 +1,40 @@
 import {
   DEFAULT_RUNTIME_MODE,
+  ThreadId,
   type ModelSelection,
   type ProviderInteractionMode,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderOptionSelection,
   type RuntimeMode,
+  type ScopedThreadRef,
   type ServerProviderModel,
 } from "@pathwayos/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@pathwayos/client-runtime/environment";
+import {
+  scopedProjectKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@pathwayos/client-runtime/environment";
+import type { EnvironmentProject } from "@pathwayos/client-runtime/state/models";
 import {
   createModelSelection,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
   normalizeModelSlug,
 } from "@pathwayos/shared/model";
+import { projectScriptCwd, projectScriptRuntimeEnv } from "@pathwayos/shared/projectScripts";
+import { nextTerminalId } from "@pathwayos/shared/terminalLabels";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowUpIcon,
-  CheckCircle2Icon,
   ChevronDownIcon,
   CircleXIcon,
   CloudIcon,
@@ -68,10 +83,18 @@ import {
   sortProviderInstanceEntries,
 } from "../providerInstances";
 import { useProjects } from "../state/entities";
-import { primaryServerProvidersAtom } from "../state/server";
+import {
+  primaryServerConfigAtom,
+  primaryServerKeybindingsAtom,
+  primaryServerProvidersAtom,
+} from "../state/server";
+import { terminalEnvironment } from "../state/terminal";
+import { useAtomCommand } from "../state/use-atom-command";
+import type { ThreadTerminalGroup } from "../types";
 import { ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { getComposerProviderState } from "./chat/composerProviderState";
 import { shouldRenderTraitsControls, TraitsPicker } from "./chat/TraitsPicker";
+import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import {
@@ -92,7 +115,10 @@ import { Separator } from "./ui/separator";
 import { SidebarInset } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { cn } from "../lib/utils";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { RightPanelResizeHandle } from "./preview/RightPanelResizeHandle";
 
 const pendingConnectionCards = [
   {
@@ -100,7 +126,6 @@ const pendingConnectionCards = [
     description: "Get context from recent team discussions",
     icon: SparklesIcon,
     iconClassName: "text-[#36c5f0]",
-    connected: true,
     muted: true,
   },
   {
@@ -108,7 +133,6 @@ const pendingConnectionCards = [
     description: "Summarize stakeholder asks from email",
     icon: MailIcon,
     iconClassName: "text-[#ea4335]",
-    connected: true,
     muted: true,
   },
   {
@@ -116,7 +140,6 @@ const pendingConnectionCards = [
     description: "Review results, research, and plans",
     icon: CloudIcon,
     iconClassName: "text-[#4285f4]",
-    connected: false,
     muted: false,
   },
 ] as const;
@@ -138,7 +161,17 @@ const fallbackEffortOptions = [
   { label: "High", value: "high" },
 ] as const;
 
+const PENDING_RIGHT_PANEL_WIDTH_STORAGE_KEY = "pathwayos:pending-right-panel-width";
+const PENDING_RIGHT_PANEL_MIN_WIDTH = 360;
+const PENDING_RIGHT_PANEL_DEFAULT_WIDTH = 704;
+const PENDING_RIGHT_PANEL_MAX_WIDTH_PX = 1400;
+const PENDING_RIGHT_PANEL_MAX_WIDTH_FRACTION = 0.7;
+
 type PendingComposerMode = "goal" | "plan" | "conversation";
+
+interface PendingWorkspaceSelection {
+  readonly project: EnvironmentProject | null;
+}
 
 const pendingComposerModeConfig: Record<
   PendingComposerMode,
@@ -646,8 +679,10 @@ function PendingComposerAddContextMenu({
 
 function PendingComposerWorkspaceControls({
   selectedComposerMode,
+  onWorkspaceSelectionChange,
 }: {
   selectedComposerMode: PendingComposerMode | null;
+  onWorkspaceSelectionChange?: (selection: PendingWorkspaceSelection) => void;
 }) {
   const projects = useProjects();
   const openAddProject = useOpenAddProjectCommandPalette();
@@ -727,6 +762,10 @@ function PendingComposerWorkspaceControls({
     startFromOrigin,
     threadId,
   ]);
+
+  useEffect(() => {
+    onWorkspaceSelectionChange?.({ project: activeProject });
+  }, [activeProject, onWorkspaceSelectionChange]);
 
   useEffect(() => {
     setDraftThreadContext(draftId, { interactionMode: pendingInteractionMode });
@@ -909,81 +948,292 @@ function NoActiveThreadPanelControls({
   );
 }
 
-function PendingTerminalDrawer() {
+function PendingTerminalDrawer({
+  threadId,
+  project,
+}: {
+  threadId: ThreadId;
+  project: EnvironmentProject | null;
+}) {
+  const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
+  const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const [terminalHeight, setTerminalHeight] = useState(280);
+  const [terminalIds, setTerminalIds] = useState<string[]>([]);
+  const [activeTerminalId, setActiveTerminalId] = useState("");
+  const [focusRequestId, setFocusRequestId] = useState(0);
+  const hasAutoOpenedRef = useRef(false);
+
+  const environmentId =
+    project?.environmentId ?? primaryServerConfig?.environment.environmentId ?? null;
+  const threadRef = useMemo<ScopedThreadRef | null>(
+    () => (environmentId ? scopeThreadRef(environmentId, threadId) : null),
+    [environmentId, threadId],
+  );
+  const cwd = useMemo(
+    () =>
+      project
+        ? projectScriptCwd({ project: { cwd: project.workspaceRoot }, worktreePath: null })
+        : "~",
+    [project],
+  );
+  const runtimeEnv = useMemo(
+    () =>
+      project
+        ? projectScriptRuntimeEnv({ project: { cwd: project.workspaceRoot }, worktreePath: null })
+        : {},
+    [project],
+  );
+  const terminalGroups = useMemo<ThreadTerminalGroup[]>(
+    () => (terminalIds.length > 0 ? [{ id: "pending-terminal-group", terminalIds }] : []),
+    [terminalIds],
+  );
+  const terminalLaunchLocationsById = useMemo(
+    () =>
+      new Map(
+        terminalIds.map((terminalId) => [terminalId, { cwd, worktreePath: null, runtimeEnv }]),
+      ),
+    [cwd, runtimeEnv, terminalIds],
+  );
+
+  const createNewTerminal = useCallback(() => {
+    if (!threadRef) {
+      return;
+    }
+    const terminalId = nextTerminalId(terminalIds);
+    setTerminalIds((current) => [...current, terminalId]);
+    setActiveTerminalId(terminalId);
+    setFocusRequestId((value) => value + 1);
+    void openTerminal({
+      environmentId: threadRef.environmentId,
+      input: {
+        threadId,
+        terminalId,
+        cwd,
+        env: runtimeEnv,
+      },
+    });
+  }, [cwd, openTerminal, runtimeEnv, terminalIds, threadId, threadRef]);
+
+  useEffect(() => {
+    if (!threadRef || hasAutoOpenedRef.current || terminalIds.length > 0) {
+      return;
+    }
+    hasAutoOpenedRef.current = true;
+    const terminalId = "term-1";
+    setTerminalIds([terminalId]);
+    setActiveTerminalId(terminalId);
+    setFocusRequestId((value) => value + 1);
+    void openTerminal({
+      environmentId: threadRef.environmentId,
+      input: {
+        threadId,
+        terminalId,
+        cwd,
+        env: runtimeEnv,
+      },
+    });
+  }, [cwd, openTerminal, runtimeEnv, terminalIds.length, threadId, threadRef]);
+
+  const closeTerminal = useCallback(
+    (terminalId: string) => {
+      if (!threadRef) {
+        return;
+      }
+      void closeTerminalMutation({
+        environmentId: threadRef.environmentId,
+        input: {
+          threadId,
+          terminalId,
+          deleteHistory: true,
+        },
+      });
+      setTerminalIds((current) => {
+        const nextIds = current.filter((id) => id !== terminalId);
+        setActiveTerminalId((activeId) =>
+          activeId === terminalId ? (nextIds.at(-1) ?? "") : activeId,
+        );
+        return nextIds;
+      });
+      setFocusRequestId((value) => value + 1);
+    },
+    [closeTerminalMutation, threadId, threadRef],
+  );
+
+  if (!threadRef) {
+    return null;
+  }
+
   return (
-    <div className="absolute inset-x-0 bottom-0 z-40 h-64 border-t border-border bg-background/95 shadow-[0_-12px_28px_rgba(15,23,42,0.08)] backdrop-blur">
-      <div className="flex h-10 items-center gap-2 border-b border-border/80 px-4 text-sm">
-        <TerminalSquareIcon className="size-4 text-muted-foreground" />
-        <span className="font-medium text-foreground">Terminal</span>
-        <span className="rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
-          Pending chat
-        </span>
-      </div>
-      <div className="flex h-[calc(100%-2.5rem)] items-center justify-center px-6 text-center">
-        <div>
-          <p className="text-sm font-medium text-foreground">No terminal session yet</p>
-          <p className="mt-1 max-w-sm text-muted-foreground text-xs">
-            Terminals will appear here once this chat starts with a project.
-          </p>
-        </div>
-      </div>
+    <div className="absolute inset-x-0 bottom-0 z-40">
+      <ThreadTerminalDrawer
+        threadRef={threadRef}
+        threadId={threadId}
+        cwd={cwd}
+        worktreePath={null}
+        runtimeEnv={runtimeEnv}
+        visible
+        height={terminalHeight}
+        terminalIds={terminalIds}
+        activeTerminalId={activeTerminalId}
+        terminalGroups={terminalGroups}
+        activeTerminalGroupId="pending-terminal-group"
+        focusRequestId={focusRequestId}
+        onSplitTerminal={createNewTerminal}
+        onSplitTerminalVertical={createNewTerminal}
+        onNewTerminal={createNewTerminal}
+        onActiveTerminalChange={(terminalId) => {
+          setActiveTerminalId(terminalId);
+          setFocusRequestId((value) => value + 1);
+        }}
+        onCloseTerminal={closeTerminal}
+        onHeightChange={setTerminalHeight}
+        onAddTerminalContext={() => undefined}
+        keybindings={keybindings}
+        terminalLaunchLocationsById={terminalLaunchLocationsById}
+      />
     </div>
   );
 }
 
-function PendingRightToolsPanel() {
+function usePendingRightPanelMaxWidth(): number {
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    let frame = 0;
+    const handleResize = () => {
+      if (frame !== 0) {
+        return;
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        setViewportWidth(window.innerWidth);
+      });
+    };
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (frame !== 0) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, []);
+
+  return Math.min(
+    PENDING_RIGHT_PANEL_MAX_WIDTH_PX,
+    Math.floor(viewportWidth * PENDING_RIGHT_PANEL_MAX_WIDTH_FRACTION),
+  );
+}
+
+function PendingRightToolsPanel({ open }: { open: boolean }) {
+  const maxWidth = usePendingRightPanelMaxWidth();
+  const { width, handlers } = useResizableWidth({
+    storageKey: PENDING_RIGHT_PANEL_WIDTH_STORAGE_KEY,
+    defaultWidth: PENDING_RIGHT_PANEL_DEFAULT_WIDTH,
+    minWidth: PENDING_RIGHT_PANEL_MIN_WIDTH,
+    maxWidth,
+    edge: "left",
+  });
+  const [resizing, setResizing] = useState(false);
+  const resizeHandlers = useMemo(
+    () => ({
+      onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
+        setResizing(true);
+        handlers.onPointerDown(event);
+      },
+      onPointerMove: handlers.onPointerMove,
+      onPointerUp: (event: ReactPointerEvent<HTMLElement>) => {
+        handlers.onPointerUp(event);
+        setResizing(false);
+      },
+      onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => {
+        handlers.onPointerCancel(event);
+        setResizing(false);
+      },
+    }),
+    [handlers],
+  );
   const tools = [
     {
-      title: "Browser",
-      description: "Open previews and local URLs.",
+      label: "Browser",
+      description: "Open a local app or URL.",
       icon: Globe2Icon,
+      available: false,
     },
     {
-      title: "Terminal",
-      description: "Run shell sessions for the workspace.",
+      label: "Terminal",
+      description: "Start a shell in this workspace.",
       icon: TerminalSquareIcon,
+      available: true,
     },
     {
-      title: "Files",
-      description: "Browse and inspect project files.",
+      label: "Files",
+      description: "Browse and read workspace files.",
       icon: FileIcon,
+      available: true,
     },
     {
-      title: "Diff",
-      description: "Review code changes.",
+      label: "Diff",
+      description: "Review changes in this thread.",
       icon: FileDiffIcon,
-    },
-    {
-      title: "Plan",
-      description: "View tasks and proposed work.",
-      icon: ListChecksIcon,
+      available: false,
     },
   ] as const;
 
   return (
-    <aside className="absolute top-0 right-0 bottom-0 z-30 w-80 border-l border-border bg-background/95 shadow-[-12px_0_28px_rgba(15,23,42,0.08)] backdrop-blur">
-      <div className="flex h-12 items-center border-b border-border/80 px-4">
-        <span className="font-medium text-foreground text-sm">Tools</span>
-      </div>
-      <div className="space-y-2 p-3">
-        {tools.map((tool) => {
-          const Icon = tool.icon;
-          return (
-            <button
-              key={tool.title}
-              type="button"
-              className="flex w-full cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0">
-                <span className="block font-medium text-sm">{tool.title}</span>
-                <span className="mt-0.5 block text-muted-foreground text-xs leading-4">
-                  {tool.description}
-                </span>
-              </span>
-            </button>
-          );
-        })}
+    <aside
+      className={cn(
+        "absolute top-0 bottom-0 z-30 flex min-w-0 border-l border-border bg-background/95 shadow-[-12px_0_28px_rgba(15,23,42,0.08)] backdrop-blur",
+        resizing ? "transition-none" : "transition-[right,width] duration-200 ease-linear",
+        open ? "pointer-events-auto" : "pointer-events-none",
+      )}
+      style={{
+        right: open ? 0 : `-${width}px`,
+        width: `${width}px`,
+        maxWidth: "calc(100vw - var(--app-nav-rail-width))",
+      }}
+      aria-hidden={!open}
+    >
+      {open ? <RightPanelResizeHandle handlers={resizeHandlers} /> : null}
+      <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+        <div className="w-full max-w-xl">
+          <div className="mb-5 text-center">
+            <h3 className="text-sm font-medium text-foreground">Open a surface</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Choose what to show in the right panel.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {tools.map((tool) => {
+              const Icon = tool.icon;
+              return (
+                <button
+                  key={tool.label}
+                  type="button"
+                  className={[
+                    "flex min-h-28 w-full flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left transition",
+                    tool.available
+                      ? "cursor-pointer hover:border-border hover:bg-accent/60"
+                      : "cursor-not-allowed opacity-40",
+                  ].join(" ")}
+                  aria-disabled={!tool.available}
+                >
+                  <Icon className="mb-3 size-5" />
+                  <span className="text-sm font-medium">{tool.label}</span>
+                  <span className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {tool.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </aside>
   );
@@ -995,6 +1245,25 @@ export function NoActiveThreadState() {
   const [selectedComposerMode, setSelectedComposerMode] = useState<PendingComposerMode | null>(
     null,
   );
+  const [workspaceSelection, setWorkspaceSelection] = useState<PendingWorkspaceSelection>({
+    project: null,
+  });
+  const [pendingTerminalThreadId, setPendingTerminalThreadId] = useState(() => newThreadId());
+  const [connectionCardsVisible, setConnectionCardsVisible] = useState(true);
+  const handleWorkspaceSelectionChange = useCallback((selection: PendingWorkspaceSelection) => {
+    setWorkspaceSelection((current) => {
+      const currentKey = current.project
+        ? scopedProjectKey(scopeProjectRef(current.project.environmentId, current.project.id))
+        : "home";
+      const nextKey = selection.project
+        ? scopedProjectKey(scopeProjectRef(selection.project.environmentId, selection.project.id))
+        : "home";
+      if (currentKey !== nextKey) {
+        setPendingTerminalThreadId(newThreadId());
+      }
+      return selection;
+    });
+  }, []);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -1005,7 +1274,7 @@ export function NoActiveThreadState() {
           onToggleTerminal={() => setTerminalOpen((open) => !open)}
           onToggleRightPanel={() => setRightPanelOpen((open) => !open)}
         />
-        {rightPanelOpen ? <PendingRightToolsPanel /> : null}
+        <PendingRightToolsPanel open={rightPanelOpen} />
         <Empty className="flex-1 px-6">
           <div className="w-full max-w-[46rem]">
             <EmptyHeader className="max-w-none">
@@ -1062,37 +1331,55 @@ export function NoActiveThreadState() {
               </div>
 
               <div className="flex min-w-0 items-center gap-4 px-4 pt-1.5 text-sm text-muted-foreground">
-                <PendingComposerWorkspaceControls selectedComposerMode={selectedComposerMode} />
+                <PendingComposerWorkspaceControls
+                  selectedComposerMode={selectedComposerMode}
+                  onWorkspaceSelectionChange={handleWorkspaceSelectionChange}
+                />
               </div>
             </div>
 
-            <div className="mx-auto mt-8 grid max-w-[41.5rem] gap-3 sm:grid-cols-3">
-              {pendingConnectionCards.map((card) => {
-                const Icon = card.icon;
-                return (
-                  <button
-                    key={card.title}
-                    type="button"
-                    className={[
-                      "relative min-h-[7.125rem] cursor-pointer rounded-xl border border-border/70 bg-background p-3 text-left shadow-xs transition-colors hover:bg-accent/35",
-                      card.muted ? "opacity-38" : "",
-                    ].join(" ")}
-                  >
-                    <Icon className={`size-4 ${card.iconClassName}`} />
-                    {card.connected ? (
-                      <CheckCircle2Icon className="absolute right-3 top-3 size-4 fill-emerald-500 text-background" />
-                    ) : null}
-                    <div className="mt-4 text-sm font-medium text-foreground">{card.title}</div>
-                    <div className="mt-1 text-sm leading-snug text-muted-foreground">
-                      {card.description}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            {connectionCardsVisible ? (
+              <div className="group/connection-cards relative mx-auto mt-8 max-w-[41.5rem]">
+                <button
+                  type="button"
+                  className="absolute -right-2 -top-2 z-10 flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/80 bg-background text-muted-foreground opacity-0 shadow-sm transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/connection-cards:opacity-100"
+                  aria-label="Dismiss connection suggestions"
+                  onClick={() => setConnectionCardsVisible(false)}
+                >
+                  <XIcon className="size-4" />
+                </button>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {pendingConnectionCards.map((card) => {
+                    const Icon = card.icon;
+                    return (
+                      <button
+                        key={card.title}
+                        type="button"
+                        className={[
+                          "relative min-h-[7.125rem] cursor-pointer rounded-xl border border-border/70 bg-background p-3 text-left shadow-xs transition-colors hover:bg-accent/35",
+                          card.muted ? "opacity-38" : "",
+                        ].join(" ")}
+                      >
+                        <Icon className={`size-4 ${card.iconClassName}`} />
+                        <div className="mt-4 text-sm font-medium text-foreground">{card.title}</div>
+                        <div className="mt-1 text-sm leading-snug text-muted-foreground">
+                          {card.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         </Empty>
-        {terminalOpen ? <PendingTerminalDrawer /> : null}
+        {terminalOpen ? (
+          <PendingTerminalDrawer
+            key={pendingTerminalThreadId}
+            threadId={pendingTerminalThreadId}
+            project={workspaceSelection.project}
+          />
+        ) : null}
       </div>
     </SidebarInset>
   );

@@ -59,6 +59,7 @@ import {
 } from "../observability/Metrics.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
+import { expandHomePath } from "../pathExpansion.ts";
 import * as PtyAdapter from "./PtyAdapter.ts";
 
 export {
@@ -1517,8 +1518,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
   });
 
+  const resolveTerminalCwd = (cwd: string): string => path.resolve(expandHomePath(cwd));
+
   const assertValidCwd = Effect.fn("terminal.assertValidCwd")(function* (cwd: string) {
-    const stats = yield* fileSystem.stat(cwd).pipe(
+    const stats = yield* fileSystem.stat(resolveTerminalCwd(cwd)).pipe(
       Effect.catchTags({
         PlatformError: (cause) =>
           cause.reason._tag === "NotFound"
@@ -2099,6 +2102,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const openLocked = Effect.fn("terminal.openLocked")(function* (input: TerminalOpenInput) {
     const terminalId = input.terminalId;
     yield* assertValidCwd(input.cwd);
+    const cwd = resolveTerminalCwd(input.cwd);
 
     const sessionKey = toSessionKey(input.threadId, terminalId);
     const existing = yield* getSession(input.threadId, terminalId);
@@ -2110,7 +2114,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       const session: TerminalSessionState = {
         threadId: input.threadId,
         terminalId,
-        cwd: input.cwd,
+        cwd,
         worktreePath: input.worktreePath ?? null,
         status: "starting",
         pid: null,
@@ -2146,7 +2150,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         {
           threadId: input.threadId,
           terminalId,
-          cwd: input.cwd,
+          cwd,
           ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
           cols,
           rows,
@@ -2166,13 +2170,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const nextWorktreePath =
       input.worktreePath !== undefined ? (input.worktreePath ?? null) : liveSession.worktreePath;
     const launchContextChanged =
-      liveSession.cwd !== input.cwd ||
-      runtimeEnvChanged ||
-      liveSession.worktreePath !== nextWorktreePath;
+      liveSession.cwd !== cwd || runtimeEnvChanged || liveSession.worktreePath !== nextWorktreePath;
 
     if (launchContextChanged) {
       yield* stopProcess(liveSession);
-      liveSession.cwd = input.cwd;
+      liveSession.cwd = cwd;
       liveSession.worktreePath = nextWorktreePath;
       liveSession.runtimeEnv = nextRuntimeEnv;
       liveSession.history = "";
@@ -2198,7 +2200,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         {
           threadId: input.threadId,
           terminalId,
-          cwd: input.cwd,
+          cwd,
           worktreePath: liveSession.worktreePath,
           cols: targetCols,
           rows: targetRows,
@@ -2512,6 +2514,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         yield* increment(terminalRestartsTotal, { scope: "thread" });
         const terminalId = input.terminalId;
         yield* assertValidCwd(input.cwd);
+        const cwd = resolveTerminalCwd(input.cwd);
 
         const sessionKey = toSessionKey(input.threadId, terminalId);
         const existingSession = yield* getSession(input.threadId, terminalId);
@@ -2522,7 +2525,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           session = {
             threadId: input.threadId,
             terminalId,
-            cwd: input.cwd,
+            cwd,
             worktreePath: input.worktreePath ?? null,
             status: "starting",
             pid: null,
@@ -2554,7 +2557,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         } else {
           session = existingSession.value;
           yield* stopProcess(session);
-          session.cwd = input.cwd;
+          session.cwd = cwd;
           session.worktreePath = input.worktreePath ?? null;
           session.runtimeEnv = normalizedRuntimeEnv(input.env);
         }
@@ -2573,7 +2576,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           {
             threadId: input.threadId,
             terminalId,
-            cwd: input.cwd,
+            cwd,
             ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
             cols,
             rows,
