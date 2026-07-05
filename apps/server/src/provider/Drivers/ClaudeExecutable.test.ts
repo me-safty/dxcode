@@ -61,6 +61,34 @@ describe("resolveClaudeSdkExecutablePath", () => {
     }),
   );
 
+  it.effect("follows .bat and .ps1 launcher shims the same way", () =>
+    Effect.gen(function* () {
+      for (const shim of [`${NPM_DIR}\\claude.bat`, `${NPM_DIR}\\claude.ps1`]) {
+        expect(
+          yield* resolveClaudeSdkExecutablePath("claude", {}).pipe(
+            withWindowsResolution({
+              resolvedCommand: shim,
+              existingFiles: [NPM_PACKAGE_EXE],
+            }),
+          ),
+        ).toBe(NPM_PACKAGE_EXE);
+      }
+    }),
+  );
+
+  it.effect("normalizes mixed-case shim extensions before matching", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* resolveClaudeSdkExecutablePath("claude", {}).pipe(
+          withWindowsResolution({
+            resolvedCommand: `${NPM_DIR}\\claude.CMD`,
+            existingFiles: [NPM_PACKAGE_EXE],
+          }),
+        ),
+      ).toBe(NPM_PACKAGE_EXE);
+    }),
+  );
+
   it.effect("falls back to cli.js when the package ships no native binary", () =>
     Effect.gen(function* () {
       expect(

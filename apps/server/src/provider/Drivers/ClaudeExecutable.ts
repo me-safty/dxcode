@@ -81,6 +81,10 @@ export const resolveClaudeSdkExecutablePath = Effect.fn("resolveClaudeSdkExecuta
       }
     }
 
+    yield* Effect.logWarning(
+      "Claude launcher shim resolved but no known package entry was found next to it; the Claude Agent SDK cannot spawn launcher scripts directly.",
+      { binaryPath, resolvedShimPath: resolved },
+    );
     return binaryPath;
   },
 );
