@@ -111,6 +111,14 @@ const removedObjects = (
   return before.filter((entry) => !afterKeys.has(objectKey(entry)));
 };
 
+// This gate is SCHEMA-OBJECT confinement, not a data-mutation sandbox. It only
+// diffs sqlite_master, so it constrains which tables/indexes/triggers/views a
+// migration may create, alter, or drop (to the plugin's `p_<id>_*` namespace) —
+// it deliberately does NOT restrict INSERT/UPDATE/DELETE against core tables.
+// Plugins run in-process under a full-trust model (they can reach the SqlClient
+// and much else directly), so the prefix rule is a well-behaved-plugin
+// convention that keeps schemas from colliding, not a security boundary against
+// a malicious plugin. Do not mistake it for one.
 const validateMigrationObjects = (input: {
   readonly pluginId: PluginId;
   readonly version: number;

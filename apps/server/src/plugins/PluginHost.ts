@@ -509,23 +509,36 @@ export const make = Effect.fn("PluginHost.make")(function* () {
           );
         }
         yield* Deferred.succeed(readiness, undefined).pipe(Effect.orDie);
-        const clearHealthyActivation = store.updatePlugin(pluginId, ({ current }) =>
-          Effect.succeed(
-            current
-              ? {
-                  ...current,
-                  activation: { activatingSince: null, crashCount: 0 },
-                  lastError: null,
-                }
-              : undefined,
-          ),
-        );
+        // Clear activatingSince immediately on successful activation. Activation
+        // has COMPLETED, so the plugin is no longer "activating"; leaving the
+        // marker set until the delayed healthy-clear fires would make an
+        // unrelated process restart within the stability window look like an
+        // interrupted activation, wrongly incrementing crashCount and eventually
+        // failing a healthy plugin. crashCount is still only forgiven (reset to
+        // 0) after the stability window, so genuine activation-time crash loops
+        // keep accumulating across restarts.
+        const markActivated = (forgiveCrashes: boolean) =>
+          store.updatePlugin(pluginId, ({ current }) =>
+            Effect.succeed(
+              current
+                ? {
+                    ...current,
+                    activation: {
+                      activatingSince: null,
+                      crashCount: forgiveCrashes ? 0 : current.activation.crashCount,
+                    },
+                    lastError: null,
+                  }
+                : undefined,
+            ),
+          );
+        yield* markActivated(false);
         const healthyDelay = healthyActivationDelay();
         if (Duration.toMillis(healthyDelay) === 0) {
-          yield* clearHealthyActivation;
+          yield* markActivated(true);
         } else {
           yield* clock.sleep(healthyDelay).pipe(
-            Effect.flatMap(() => clearHealthyActivation),
+            Effect.flatMap(() => markActivated(true)),
             Effect.ignoreCause({ log: true }),
             Effect.forkScoped,
             Scope.provide(scope),

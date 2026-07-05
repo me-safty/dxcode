@@ -111,30 +111,40 @@ export const make = Effect.fn("PluginManagementRpcHandlers.make")(function* () {
 
   const removeSource: PluginManagementRpcHandlers["Service"]["removeSource"] = (input) =>
     Effect.gen(function* () {
-      const lockfile = yield* store.readLockfile.pipe(Effect.mapError(lockfileError));
-      if (!lockfile.sources.some((source) => source.id === input.sourceId)) {
-        return yield* managementError("source-not-found", "Plugin source was not found.", {
-          sourceId: input.sourceId,
-        });
-      }
-      const usedBy = Object.entries(lockfile.plugins).find(
-        ([, plugin]) => plugin.sourceId === input.sourceId,
-      )?.[0];
-      if (usedBy) {
-        return yield* managementError(
-          "invalid-source",
-          "Plugin source is still used by an installed plugin.",
-          {
-            sourceId: input.sourceId,
-            pluginId: usedBy,
-          },
-        );
-      }
+      // Validate "source exists" and "source not used by an installed plugin"
+      // INSIDE updateSources' critical section, against the lockfile read under
+      // the advisory lock. Doing the check outside (via a separate readLockfile)
+      // races a concurrent install that could reference this source between the
+      // check and the removal, leaving a dangling sourceId.
+      let rejection: PluginManagementError | null = null;
       yield* store
-        .updateSources((sources) =>
-          Effect.succeed(sources.filter((source) => source.id !== input.sourceId)),
-        )
+        .updateSources((sources, lockfile) => {
+          if (!sources.some((source) => source.id === input.sourceId)) {
+            rejection = managementError("source-not-found", "Plugin source was not found.", {
+              sourceId: input.sourceId,
+            });
+            return Effect.succeed(sources);
+          }
+          const usedBy = Object.entries(lockfile.plugins).find(
+            ([, plugin]) => plugin.sourceId === input.sourceId,
+          )?.[0];
+          if (usedBy) {
+            rejection = managementError(
+              "invalid-source",
+              "Plugin source is still used by an installed plugin.",
+              {
+                sourceId: input.sourceId,
+                pluginId: usedBy,
+              },
+            );
+            return Effect.succeed(sources);
+          }
+          return Effect.succeed(sources.filter((source) => source.id !== input.sourceId));
+        })
         .pipe(Effect.asVoid, Effect.mapError(toManagementError));
+      if (rejection !== null) {
+        return yield* rejection as PluginManagementError;
+      }
     });
 
   const catalog: PluginManagementRpcHandlers["Service"]["catalog"] = (input) =>

@@ -3,6 +3,7 @@ import {
   AuthAccessWriteScope,
   AuthAdministrativeScopes,
   AuthStandardClientScopes,
+  satisfiesScope,
   type AuthAccessTokenResult,
   type AuthBrowserSessionResult,
   type AuthClientMetadata,
@@ -694,7 +695,12 @@ export const make = Effect.gen(function* () {
         Effect.flatMap((grant) =>
           Effect.gen(function* () {
             const grantedScopes = requestedScopes ?? grant.scopes;
-            if (!grantedScopes.every((scope) => grant.scopes.includes(scope))) {
+            // Downscope by implicit satisfaction, not verbatim membership: a
+            // full standard-client grant implicitly holds every plugin scope
+            // (and plugins:manage) via the standard-client marker, so requesting
+            // e.g. `plugin:<id>:read` against such a grant must succeed even
+            // though it is not listed literally in grant.scopes.
+            if (!grantedScopes.every((scope) => satisfiesScope(scope, grant.scopes))) {
               return yield* new ServerAuthScopeNotGrantedError({});
             }
             return yield* sessions

@@ -80,6 +80,12 @@ marketplaceTest("PluginMarketplace", (it) => {
         resolveMarketplaceUrl("https://example.test/marketplace.json#ignored"),
         "https://example.test/marketplace.json",
       );
+      // Embedded credentials must be stripped so they are never persisted in
+      // the lockfile or echoed back through listSources / error payloads.
+      assert.equal(
+        resolveMarketplaceUrl("https://user:secret@example.test/marketplace.json"),
+        "https://example.test/marketplace.json",
+      );
       assert.equal(
         resolveMarketplaceUrl("owner/repo"),
         "https://raw.githubusercontent.com/owner/repo/HEAD/marketplace.json",

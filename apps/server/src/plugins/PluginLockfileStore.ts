@@ -224,6 +224,35 @@ const acquireAdvisoryLock = (input: {
         });
       }
 
+      // Re-check the lock's mtime immediately before removing it. Between the
+      // first stat above and now, another process may have released this stale
+      // lock and a third re-acquired it. Removing a lock that was refreshed in
+      // the meantime would delete a fresh, valid lock and break the
+      // single-writer guarantee. Only reclaim when the file is unchanged (same
+      // stale mtime) or already gone; if it was refreshed, treat it as live
+      // contention and fail rather than clobber it.
+      const stillStale = yield* fs.stat(input.advisoryLockPath).pipe(
+        Effect.map((current) => {
+          const currentMtime = Option.getOrUndefined(current.mtime);
+          return (
+            currentMtime !== undefined &&
+            mtime !== undefined &&
+            currentMtime.getTime() === mtime.getTime()
+          );
+        }),
+        // Already released between our checks — safe to (re)acquire.
+        Effect.catchIf(isNotFound, () => Effect.succeed(true)),
+        Effect.mapError(
+          (cause) => new PluginLockfileLockError({ path: input.advisoryLockPath, cause }),
+        ),
+      );
+      if (!stillStale) {
+        return yield* new PluginLockfileLockError({
+          path: input.advisoryLockPath,
+          cause: opened.failure,
+        });
+      }
+
       yield* Effect.logWarning("Reclaiming stale plugin lockfile advisory lock", {
         path: input.advisoryLockPath,
         ageMs,

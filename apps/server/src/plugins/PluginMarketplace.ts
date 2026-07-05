@@ -49,6 +49,11 @@ function canonicalHttpsUrl(input: string): string | null {
     const url = new URL(input);
     if (url.protocol !== "https:") return null;
     url.hash = "";
+    // Strip any embedded credentials: this URL is persisted in the lockfile and
+    // echoed back via listSources / error payloads, so `https://user:pw@host`
+    // would leak the secret. Credentialed marketplace URLs are not supported.
+    url.username = "";
+    url.password = "";
     return url.toString();
   } catch {
     return null;

@@ -211,6 +211,28 @@ if (loopbackAvailable) {
       }),
     );
 
+    it.effect("reaches a root '/' route with and without a trailing slash", () =>
+      Effect.gen(function* () {
+        const registry = yield* PluginHttpRegistry;
+        yield* registry.put(pluginId, [
+          {
+            method: "POST",
+            path: "/",
+            auth: "public",
+            handler: () => Effect.succeed({ status: 200, body: "root" }),
+          },
+        ]);
+
+        const withoutSlash = yield* postText("/hooks/plugins/http-plugin", "");
+        assert.equal(withoutSlash.status, 200);
+        assert.equal(yield* withoutSlash.text, "root");
+
+        const withSlash = yield* postText("/hooks/plugins/http-plugin/", "");
+        assert.equal(withSlash.status, 200);
+        assert.equal(yield* withSlash.text, "root");
+      }),
+    );
+
     it.effect("returns 413 when the request body exceeds the route cap", () =>
       Effect.gen(function* () {
         const registry = yield* PluginHttpRegistry;

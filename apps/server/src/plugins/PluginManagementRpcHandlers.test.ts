@@ -104,4 +104,22 @@ managementTest("PluginManagementRpcHandlers", (it) => {
       if (Result.isFailure(result)) assert.equal(result.failure.code, "invalid-source");
     }),
   );
+
+  it.effect("removes an unused source and reports missing sources", () =>
+    Effect.gen(function* () {
+      const handlers = yield* PluginManagementRpcHandlers;
+      // Unique URL so no plugin installed by a sibling test references it.
+      const source = yield* handlers.addSource({
+        url: "https://example.test/removable-marketplace.json",
+      });
+
+      yield* handlers.removeSource({ sourceId: source.source.id });
+      const listed = yield* handlers.listSources;
+      assert.isFalse(listed.sources.some((entry) => entry.id === source.source.id));
+
+      const missing = yield* Effect.result(handlers.removeSource({ sourceId: "src-missing" }));
+      assert.isTrue(Result.isFailure(missing));
+      if (Result.isFailure(missing)) assert.equal(missing.failure.code, "source-not-found");
+    }),
+  );
 });

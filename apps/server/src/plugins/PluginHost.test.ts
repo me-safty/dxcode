@@ -489,6 +489,51 @@ layer("PluginHost", (it) => {
     }),
   );
 
+  it.effect(
+    "clears activatingSince immediately on success, before the healthy window elapses",
+    () =>
+      Effect.gen(function* () {
+        const pluginId = PluginId.make("test-plugin");
+        const registry = yield* PluginRuntimeRegistryLayer.PluginRuntimeRegistry;
+        const store = yield* PluginLockfileStoreLayer.PluginLockfileStore;
+        const host = yield* PluginHostModule.PluginHost;
+        const previousHealthyDelay = process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+
+        yield* runMigrations({ toMigrationInclusive: 34 });
+        // Seed a prior crashCount so we can prove it is NOT reset yet (the delayed
+        // reset is gated behind a long stability window that never elapses here).
+        yield* installPlugin({
+          pluginId,
+          lockEntry: { activation: { activatingSince: null, crashCount: 1 } },
+        });
+
+        // A long window means the delayed crashCount reset never fires during the
+        // test; only the immediate on-success clear of activatingSince can run.
+        process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = "600000";
+        try {
+          yield* host.start;
+          for (let attempt = 0; attempt < 10; attempt++) {
+            if ((yield* registry.list).length === 1) break;
+            yield* Effect.yieldNow;
+          }
+        } finally {
+          if (previousHealthyDelay === undefined) {
+            delete process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS;
+          } else {
+            process.env.T3_PLUGIN_HOST_HEALTHY_DELAY_MS = previousHealthyDelay;
+          }
+        }
+
+        assert.equal((yield* registry.list).length, 1);
+        const lockfile = yield* store.readLockfile;
+        // activatingSince cleared on successful activation (a quick restart now
+        // would NOT be mistaken for an interrupted activation)...
+        assert.equal(lockfile.plugins[pluginId]?.activation.activatingSince, null);
+        // ...while crashCount is still preserved until the stability window ends.
+        assert.equal(lockfile.plugins[pluginId]?.activation.crashCount, 1);
+      }),
+  );
+
   it.effect("publishes plugin state changes on the server lifecycle stream", () =>
     Effect.gen(function* () {
       const pluginId = PluginId.make("lifecycle-plugin");

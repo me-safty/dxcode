@@ -21,6 +21,7 @@ import {
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
   isPluginScope,
+  satisfiesScope,
 } from "@t3tools/contracts";
 import type { AuthEnvironmentScope, AuthScope } from "@t3tools/contracts";
 import { parseOAuthScope } from "@t3tools/shared/oauthScope";
@@ -350,8 +351,14 @@ export const authHttpApiLayer = HttpApiBuilder.group(
             ) {
               return yield* failEnvironmentInvalidRequest("invalid_scope");
             }
+            const heldScopes = Array.from(session.scopes);
             for (const delegatedScope of delegatedScopes) {
-              if (!session.scopes.has(delegatedScope)) {
+              // Honor implicit satisfaction (satisfiesScope), not just verbatim
+              // membership: a full standard-client session implicitly holds
+              // every plugin scope and plugins:manage via the standard-client
+              // marker, even when those are not listed explicitly (e.g. sessions
+              // persisted before plugins:manage joined the standard bundle).
+              if (!satisfiesScope(delegatedScope, heldScopes)) {
                 return yield* failEnvironmentScopeRequired(delegatedScope);
               }
             }
