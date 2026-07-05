@@ -1,4 +1,4 @@
-import { SymbolView } from "expo-symbols";
+import { SymbolView } from "../components/AppSymbol";
 import { useState } from "react";
 import { Image, View } from "react-native";
 import type { EnvironmentId } from "@t3tools/contracts";
