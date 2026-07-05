@@ -1,4 +1,5 @@
 import type { EnvironmentId, LinearIssueSummary, ProjectId } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -71,6 +72,7 @@ export function LinearBrowsePopover({
   const [importing, setImporting] = useState(false);
 
   const runImport = useLinearImport();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(query), SEARCH_DEBOUNCE_MS);
@@ -125,7 +127,7 @@ export function LinearBrowsePopover({
       const result = await runImport({
         target: { environmentId, projectId },
         ids: [...selected],
-        mode: combine ? "combine" : "subtasks",
+        mode: combine ? "combine" : "perIssue",
       });
       if (result.ok) {
         handleOpenChange(false);
@@ -252,7 +254,18 @@ export function LinearBrowsePopover({
               <Badge variant="secondary" size="sm" className="ml-auto">
                 {selectedCount} selected
               </Badge>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                className="ml-auto text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => {
+                  handleOpenChange(false);
+                  void navigate({ to: "/linear" });
+                }}
+              >
+                Browse all →
+              </button>
+            )}
           </div>
 
           {connected ? (
@@ -273,19 +286,13 @@ export function LinearBrowsePopover({
 
           {connected ? (
             <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-3">
-              <label
-                className={cn(
-                  "flex items-center gap-2 text-xs text-muted-foreground",
-                  selectedCount < 2 && "opacity-50",
-                )}
-              >
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Switch
                   checked={combine}
                   onCheckedChange={setCombine}
-                  disabled={selectedCount < 2}
-                  aria-label="Combine issues into one task"
+                  aria-label="Combine issues into one thread"
                 />
-                {combine ? "Combine into one task" : "As related subtasks"}
+                {combine ? "Combine into one thread" : "One thread per issue"}
               </label>
               <Button
                 size="sm"
