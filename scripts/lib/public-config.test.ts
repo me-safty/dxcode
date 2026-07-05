@@ -25,7 +25,9 @@ describe("loadRepoEnv", () => {
     expect(env.PATHWAYOS_CLERK_JWT_TEMPLATE).toBeUndefined();
     expect(env.VITE_CLERK_JWT_TEMPLATE).toBeUndefined();
     expect(env.EXPO_PUBLIC_CLERK_JWT_TEMPLATE).toBeUndefined();
+    expect(env.PATHWAYOS_CONNECT_URL).toBeUndefined();
     expect(env.PATHWAYOS_RELAY_URL).toBeUndefined();
+    expect(env.VITE_PATHWAYOS_CONNECT_URL).toBeUndefined();
     expect(env.VITE_PATHWAYOS_RELAY_URL).toBeUndefined();
     expect(env.PATHWAYOS_MOBILE_OTLP_TRACES_URL).toBeUndefined();
     expect(env.PATHWAYOS_MOBILE_OTLP_TRACES_DATASET).toBeUndefined();
@@ -73,8 +75,27 @@ describe("loadRepoEnv", () => {
       PATHWAYOS_CLERK_JWT_TEMPLATE: "template_ci",
       VITE_CLERK_JWT_TEMPLATE: "template_ci",
       EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "template_ci",
+      PATHWAYOS_CONNECT_URL: "https://ci.example.test",
       PATHWAYOS_RELAY_URL: "https://ci.example.test",
+      VITE_PATHWAYOS_CONNECT_URL: "https://ci.example.test",
       VITE_PATHWAYOS_RELAY_URL: "https://ci.example.test",
+    });
+  });
+
+  it("prefers the Connect URL name while projecting relay compatibility aliases", () => {
+    expect(
+      loadRepoEnv({
+        baseEnv: {
+          PATHWAYOS_CONNECT_URL: "https://connect.example.test",
+          PATHWAYOS_RELAY_URL: "https://relay.example.test",
+        },
+        repoRoot: makeTemporaryDirectory(),
+      }),
+    ).toMatchObject({
+      PATHWAYOS_CONNECT_URL: "https://connect.example.test",
+      PATHWAYOS_RELAY_URL: "https://connect.example.test",
+      VITE_PATHWAYOS_CONNECT_URL: "https://connect.example.test",
+      VITE_PATHWAYOS_RELAY_URL: "https://connect.example.test",
     });
   });
 
@@ -84,6 +105,7 @@ describe("loadRepoEnv", () => {
         VITE_CLERK_PUBLISHABLE_KEY: "pk_legacy",
         VITE_CLERK_JWT_TEMPLATE: "template_legacy",
         PATHWAYOS_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_canonical",
+        VITE_PATHWAYOS_CONNECT_URL: "https://connect.example.test",
         VITE_PATHWAYOS_RELAY_URL: "https://legacy.example.test",
         EXPO_PUBLIC_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
         EXPO_PUBLIC_OTLP_TRACES_DATASET: "mobile-traces",
@@ -93,7 +115,7 @@ describe("loadRepoEnv", () => {
       clerkPublishableKey: "pk_legacy",
       clerkJwtTemplate: "template_legacy",
       clerkCliOAuthClientId: "oauth_canonical",
-      relayUrl: "https://legacy.example.test",
+      relayUrl: "https://connect.example.test",
       mobileOtlpTracesUrl: "https://api.axiom.co/v1/traces",
       mobileOtlpTracesDataset: "mobile-traces",
       mobileOtlpTracesToken: "mobile-token",
@@ -135,7 +157,9 @@ describe("loadRepoEnv", () => {
         repoRoot: makeTemporaryDirectory(),
       }),
     ).toEqual({
+      PATHWAYOS_CONNECT_URL: "https://relay.example.test",
       PATHWAYOS_RELAY_URL: "https://relay.example.test",
+      VITE_PATHWAYOS_CONNECT_URL: "https://relay.example.test",
       VITE_PATHWAYOS_RELAY_URL: "https://relay.example.test",
       PATHWAYOS_MOBILE_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
       PATHWAYOS_MOBILE_OTLP_TRACES_DATASET: "mobile-traces",

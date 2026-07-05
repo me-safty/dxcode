@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pathwayOS Clerk User Profile Plan</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f6f3;
+        --paper: #ffffff;
+        --ink: #171717;
+        --muted: #737373;
+        --line: #dedbd2;
+        --soft: #eeece5;
+        --accent: #4f46e5;
+        --accent-2: #0f766e;
+        --accent-3: #b45309;
+        --danger: #b42318;
+        --shadow: 0 18px 48px rgba(25, 25, 25, 0.1);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        line-height: 1.5;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .page {
+        min-height: 100vh;
+        padding: 32px;
+      }
+
+      .shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      header.hero {
+        display: grid;
+        gap: 24px;
+        grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+        padding: 36px;
+        border-bottom: 1px solid var(--line);
+        background:
+          linear-gradient(135deg, rgba(79, 70, 229, 0.07), transparent 44%),
+          linear-gradient(180deg, #ffffff, #fbfaf7);
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent-2);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        max-width: 760px;
+        font-size: clamp(34px, 5vw, 58px);
+        line-height: 0.98;
+      }
+
+      h2 {
+        font-size: 24px;
+        line-height: 1.15;
+      }
+
+      h3 {
+        font-size: 16px;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .lead {
+        max-width: 760px;
+        margin-top: 18px;
+        color: #525252;
+        font-size: 18px;
+      }
+
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 22px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.82);
+        padding: 5px 10px;
+        color: #525252;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .preview {
+        align-self: stretch;
+        min-height: 292px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fafafa;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        overflow: hidden;
+      }
+
+      .traffic {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: 1px solid #e8e5dc;
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+
+      .dot.red {
+        background: #ff5f57;
+      }
+
+      .dot.yellow {
+        background: #febc2e;
+      }
+
+      .dot.green {
+        background: #28c840;
+      }
+
+      .brand {
+        margin-left: 16px;
+        font-weight: 740;
+      }
+
+      .side-body {
+        padding: 18px;
+      }
+
+      .search,
+      .project-row,
+      .thread-row {
+        height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #777;
+        font-size: 13px;
+      }
+
+      .section-label {
+        margin: 16px 0 8px;
+        color: #9a9a9a;
+        font-size: 11px;
+        font-weight: 760;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .glyph {
+        width: 15px;
+        height: 15px;
+        border: 1.7px solid currentColor;
+        border-radius: 4px;
+        opacity: 0.72;
+      }
+
+      .profile-footer {
+        padding: 12px;
+        border-top: 1px solid #e8e5dc;
+        background: #efede7;
+      }
+
+      .profile-pill {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 11px;
+        border-radius: 9px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: #e8def8;
+        color: #7c3aed;
+        font-weight: 800;
+      }
+
+      .profile-text {
+        min-width: 0;
+      }
+
+      .email {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .plan {
+        color: #777;
+        font-size: 12px;
+      }
+
+      .phone {
+        width: 16px;
+        height: 22px;
+        border: 2px solid #8b8b8b;
+        border-radius: 4px;
+        position: relative;
+      }
+
+      .phone:after {
+        content: "";
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: #8b8b8b;
+        position: absolute;
+        left: 50%;
+        bottom: 2px;
+        transform: translateX(-50%);
+      }
+
+      main {
+        padding: 34px 36px 42px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      section {
+        margin-top: 34px;
+      }
+
+      section:first-child {
+        margin-top: 0;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        padding: 18px;
+      }
+
+      .card.soft {
+        background: #fbfaf7;
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .list {
+        display: grid;
+        gap: 10px;
+        margin: 14px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .list li {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 10px;
+      }
+
+      .num,
+      .check {
+        display: inline-grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: var(--soft);
+        color: #474747;
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .check {
+        color: var(--accent-2);
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        border-radius: 999px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      .status.keep {
+        background: rgba(15, 118, 110, 0.1);
+        color: var(--accent-2);
+      }
+
+      .status.change {
+        background: rgba(79, 70, 229, 0.1);
+        color: var(--accent);
+      }
+
+      .status.risk {
+        background: rgba(180, 83, 9, 0.11);
+        color: var(--accent-3);
+      }
+
+      .status.blocker {
+        background: rgba(180, 35, 24, 0.1);
+        color: var(--danger);
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 14px;
+        font-size: 13px;
+      }
+
+      .table th,
+      .table td {
+        border-top: 1px solid var(--line);
+        padding: 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .table th {
+        color: #555;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      code {
+        border: 1px solid #e5e0d4;
+        border-radius: 5px;
+        background: #f8f6f0;
+        padding: 1px 5px;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.9em;
+      }
+
+      pre {
+        margin: 14px 0 0;
+        overflow: auto;
+        border: 1px solid #e5e0d4;
+        border-radius: var(--radius);
+        background: #161616;
+        color: #f5f5f5;
+        padding: 14px;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .phase {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 18px;
+        padding: 18px 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .phase:first-of-type {
+        border-top: 0;
+      }
+
+      .phase-label {
+        font-size: 12px;
+        font-weight: 780;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .flow-step {
+        min-height: 118px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 14px;
+        background: #fbfaf7;
+      }
+
+      .source-list {
+        margin: 12px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .source-list li {
+        margin-top: 6px;
+      }
+
+      footer {
+        padding: 22px 36px;
+        border-top: 1px solid var(--line);
+        background: #fbfaf7;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 880px) {
+        .page {
+          padding: 14px;
+        }
+
+        header.hero,
+        .grid.two,
+        .grid.three,
+        .flow,
+        .phase {
+          grid-template-columns: 1fr;
+        }
+
+        header.hero,
+        main,
+        footer {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+
+        h1 {
+          font-size: 38px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <article class="shell">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Implementation plan</p>
+            <h1>Clerk-backed user profile and auth screens for pathwayOS</h1>
+            <p class="lead">
+              Add first-class register, login, and forgotten-password entry points, then replace the
+              main sidebar Settings footer button with a signed-in profile area inspired by the
+              supplied compact profile control.
+            </p>
+            <div class="hero-meta">
+              <span class="pill">Grounded in current repo code</span>
+              <span class="pill">Uses existing Clerk provider wiring</span>
+              <span class="pill">Keeps local pairing auth intact</span>
+              <span class="pill">Validation: vp check + vp run typecheck</span>
+            </div>
+          </div>
+
+          <aside class="preview" aria-label="Target sidebar profile preview">
+            <div class="traffic">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="brand">pathwayOS Code</span>
+            </div>
+            <div class="side-body">
+              <div class="search"><span class="glyph"></span><span>Search</span></div>
+              <div class="section-label">Projects</div>
+              <div class="project-row"><span class="glyph"></span><strong>pathwayos</strong></div>
+              <div class="thread-row"><span></span><span>No threads yet</span></div>
+            </div>
+            <div class="profile-footer">
+              <div class="profile-pill">
+                <div class="avatar">C</div>
+                <div class="profile-text">
+                  <div class="email">cbaines.dev@gmail.com</div>
+                  <div class="plan">Free</div>
+                </div>
+                <div class="phone" aria-hidden="true"></div>
+              </div>
+            </div>
+          </aside>
+        </header>
+
+        <main>
+          <section>
+            <h2>Executive Direction</h2>
+            <div class="grid two" style="margin-top: 16px">
+              <div class="card soft">
+                <span class="status keep">Keep</span>
+                <h3 style="margin-top: 10px">Existing app access model</h3>
+                <p class="small" style="margin-top: 8px">
+                  The current app has a server/pairing gate for local and hosted environment access.
+                  Do not replace that with Clerk. Clerk should own cloud identity, profile, managed
+                  relay tokens, and future billing/account state.
+                </p>
+              </div>
+              <div class="card soft">
+                <span class="status change">Change</span>
+                <h3 style="margin-top: 10px">Make Clerk identity visible everywhere</h3>
+                <p class="small" style="margin-top: 8px">
+                  Move the visible account affordance out of Settings and into the main sidebar
+                  footer. Settings stays available as a menu action inside the profile area, plus via
+                  the command palette and app menu.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Current Code Reading</h2>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Area</th>
+                  <th>What exists now</th>
+                  <th>Planning implication</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>apps/web/src/main.tsx</code></td>
+                  <td>
+                    Wraps the app with <code>ClerkProvider</code> or
+                    <code>ElectronClerkProvider</code> when the Clerk publishable key and cloud
+                    public config exist.
+                  </td>
+                  <td>
+                    Keep this provider boundary. Extend props for sign-in, sign-up, and task URLs
+                    instead of creating a second auth root.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>apps/web/src/cloud/publicConfig.ts</code></td>
+                  <td>
+                    Cloud UI requires publishable key, JWT template, and relay URL. Missing config
+                    intentionally hides cloud UI.
+                  </td>
+                  <td>
+                    Auth screens should gracefully explain unavailable cloud auth in local builds, or
+                    omit entry points when config is absent.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>apps/web/src/cloud/managedAuth.tsx</code></td>
+                  <td>
+                    Uses Clerk <code>useAuth()</code> to activate/deactivate managed relay sessions
+                    and clean relay environments on account changes.
+                  </td>
+                  <td>
+                    Profile sign-out and account switching must preserve this cleanup path. Avoid
+                    bypassing Clerk session APIs.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>apps/web/src/components/Sidebar.tsx</code></td>
+                  <td>
+                    <code>SidebarChromeFooter</code> renders update pills and a Settings button.
+                  </td>
+                  <td>
+                    Replace only the Settings button with a dedicated profile/footer component.
+                    Leave update pills in place.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>apps/web/src/components/settings/SettingsSidebarNav.tsx</code></td>
+                  <td>
+                    Settings footer already renders a Clerk sign-in/avatar pair using
+                    <code>PathwayOSConnectSidebarSignIn</code>.
+                  </td>
+                  <td>
+                    Reuse or split that component into a general sidebar account primitive so main
+                    and settings sidebars do not duplicate Clerk logic.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>docs/cloud/pathwayos-connect-clerk.md</code></td>
+                  <td>
+                    Documents the existing Clerk app, JWT template, relay audience, waitlist,
+                    allowlist, desktop passkeys, and current sidebar behavior.
+                  </td>
+                  <td>
+                    Update the documentation because the web and desktop sidebars will now expose a
+                    dedicated account/profile control.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h2>Target UX</h2>
+            <div class="flow">
+              <div class="flow-step">
+                <span class="status change">Signed out</span>
+                <h3 style="margin-top: 10px">Login</h3>
+                <p class="small" style="margin-top: 8px">
+                  Route: <code>/login</code>. Branded pathwayOS shell around Clerk
+                  <code>SignIn</code>. Links to register and forgotten password.
+                </p>
+              </div>
+              <div class="flow-step">
+                <span class="status change">Signed out</span>
+                <h3 style="margin-top: 10px">Register</h3>
+                <p class="small" style="margin-top: 8px">
+                  Route: <code>/register</code>. Branded shell around Clerk
+                  <code>SignUp</code>. Respects waitlist or allowlist policy in Clerk.
+                </p>
+              </div>
+              <div class="flow-step">
+                <span class="status change">Recovery</span>
+                <h3 style="margin-top: 10px">Forgotten password</h3>
+                <p class="small" style="margin-top: 8px">
+                  Route: <code>/forgot-password</code>. Start with Clerk's reset flow inside the
+                  sign-in experience; add a custom <code>useSignIn</code> screen only if a separate
+                  first-class form is required after implementation spike.
+                </p>
+              </div>
+              <div class="flow-step">
+                <span class="status keep">Signed in</span>
+                <h3 style="margin-top: 10px">Profile footer</h3>
+                <p class="small" style="margin-top: 8px">
+                  Main sidebar footer shows avatar, primary email, current plan label, mobile client
+                  status, and opens Clerk <code>UserButton</code>/<code>UserProfile</code> actions.
+                  Start with <code>Free</code>; later, read this from Clerk Billing.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Route And Component Plan</h2>
+            <div class="grid two" style="margin-top: 16px">
+              <div class="card">
+                <h3>New route files</h3>
+                <ul class="list">
+                  <li>
+                    <span class="num">1</span>
+                    <span><code>routes/login.tsx</code> with <code>SignIn</code>.</span>
+                  </li>
+                  <li>
+                    <span class="num">2</span>
+                    <span><code>routes/register.tsx</code> with <code>SignUp</code>.</span>
+                  </li>
+                  <li>
+                    <span class="num">3</span>
+                    <span>
+                      <code>routes/forgot-password.tsx</code> as the recovery entry point.
+                    </span>
+                  </li>
+                  <li>
+                    <span class="num">4</span>
+                    <span>
+                      <code>routes/session-tasks.reset-password.tsx</code> with Clerk
+                      <code>TaskResetPassword</code> for required reset-password tasks.
+                    </span>
+                  </li>
+                </ul>
+              </div>
+              <div class="card">
+                <h3>New or refactored components</h3>
+                <ul class="list">
+                  <li>
+                    <span class="num">1</span>
+                    <span>
+                      <code>components/auth/AuthRouteShell.tsx</code> for native pathwayOS chrome,
+                      copy, and responsive layout.
+                    </span>
+                  </li>
+                  <li>
+                    <span class="num">2</span>
+                    <span>
+                      <code>components/clerk/PathwayOSUserProfileSidebar.tsx</code> for the main
+                      sidebar footer account area.
+                    </span>
+                  </li>
+                  <li>
+                    <span class="num">3</span>
+                    <span>
+                      Split shared Clerk profile page additions from
+                      <code>PathwayOSConnectSidebarSignIn</code> so settings and main sidebar share
+                      one source of truth.
+                    </span>
+                  </li>
+                  <li>
+                    <span class="num">4</span>
+                    <span>
+                      Optional <code>ForgotPasswordPanel.tsx</code> if the spike confirms a custom
+                      standalone reset flow is cleaner than prebuilt sign-in routing.
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <pre><code>&lt;SignIn
+  routing="path"
+  path="/login"
+  signUpUrl="/register"
+  forceRedirectUrl="/"
+  fallbackRedirectUrl="/"
+/&gt;
+
+&lt;SignUp
+  routing="path"
+  path="/register"
+  signInUrl="/login"
+  forceRedirectUrl="/"
+  fallbackRedirectUrl="/"
+/&gt;
+
+&lt;TaskResetPassword routing="path" path="/session-tasks/reset-password" /&gt;</code></pre>
+          </section>
+
+          <section>
+            <h2>Implementation Phases</h2>
+            <div style="margin-top: 14px">
+              <div class="phase">
+                <div class="phase-label">Phase 1</div>
+                <div>
+                  <h3>Auth route foundation</h3>
+                  <p class="small" style="margin-top: 6px">
+                    Add the route files and shared auth shell. Wire Clerk route URLs in
+                    <code>ClerkProvider</code> and <code>ElectronClerkProvider</code>. Redirect
+                    signed-in users away from login/register. Show a clear unavailable state when
+                    cloud public config is absent.
+                  </p>
+                </div>
+              </div>
+              <div class="phase">
+                <div class="phase-label">Phase 2</div>
+                <div>
+                  <h3>Profile footer replacement</h3>
+                  <p class="small" style="margin-top: 6px">
+                    Replace the Settings button in <code>SidebarChromeFooter</code> with a profile
+                    area. Signed in: avatar, email, plan/status line, mobile-client indicator, and
+                    menu actions. Signed out: compact "Sign in" CTA that opens <code>/login</code>.
+                    Keep Settings reachable as an item in the profile menu.
+                  </p>
+                </div>
+              </div>
+              <div class="phase">
+                <div class="phase-label">Phase 3</div>
+                <div>
+                  <h3>Profile menu content</h3>
+                  <p class="small" style="margin-top: 6px">
+                    Extend the Clerk <code>UserButton</code> with existing "Mobile clients", a
+                    Settings link, and later plan/billing links. The first version should show
+                    <code>Free</code> as the temporary tier. When billing permissions are built,
+                    replace the fallback with the user's current Clerk Billing plan.
+                  </p>
+                </div>
+              </div>
+              <div class="phase">
+                <div class="phase-label">Phase 4</div>
+                <div>
+                  <h3>Password recovery polish</h3>
+                  <p class="small" style="margin-top: 6px">
+                    Verify Clerk's installed package behavior with path routing. Use the prebuilt
+                    reset flow where possible. If product requires a distinct screen, implement a
+                    custom <code>useSignIn</code> flow behind the same shell and test email-code
+                    reset, invalid code, resend, and successful redirect.
+                  </p>
+                </div>
+              </div>
+              <div class="phase">
+                <div class="phase-label">Phase 5</div>
+                <div>
+                  <h3>Docs, tests, and release readiness</h3>
+                  <p class="small" style="margin-top: 6px">
+                    Update Clerk setup docs and any onboarding copy that says the sidebar has no
+                    account control. Add route/shell tests, profile footer rendering tests, and
+                    regression coverage for missing cloud config.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Behavior Matrix</h2>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Runtime state</th>
+                  <th>Main sidebar footer</th>
+                  <th>Auth routes</th>
+                  <th>Environment access</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Cloud config absent</td>
+                  <td>Settings remains visible or profile area shows disabled cloud identity.</td>
+                  <td>Unavailable state with setup guidance, no broken Clerk hooks.</td>
+                  <td>Existing local pairing behavior unchanged.</td>
+                </tr>
+                <tr>
+                  <td>Cloud config present, signed out</td>
+                  <td>Compact sign-in CTA.</td>
+                  <td><code>/login</code>, <code>/register</code>, and <code>/forgot-password</code> available.</td>
+                  <td>Hosted static onboarding may ask the user to sign in before managed relay actions.</td>
+                </tr>
+                <tr>
+                  <td>Signed in</td>
+                  <td>Avatar, email, status line, mobile/profile actions.</td>
+                  <td>Redirect to <code>/</code> unless completing a required task.</td>
+                  <td>Managed relay token provider stays active via existing auth provider.</td>
+                </tr>
+                <tr>
+                  <td>Account changes or sign-out</td>
+                  <td>Profile becomes signed-out CTA after Clerk unloads session.</td>
+                  <td>Return to <code>/login</code> when user initiates sign-in.</td>
+                  <td>Existing managed relay cleanup removes relay environments and token cache.</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h2>Risks And Decisions</h2>
+            <div class="grid three" style="margin-top: 16px">
+              <div class="card">
+                <span class="status risk">Decision</span>
+                <h3 style="margin-top: 10px">Where does the plan label come from?</h3>
+                <p class="small" style="margin-top: 8px">
+                  The profile row should eventually display the user's current Clerk Billing plan.
+                  For this first pass, show <code>Free</code> and defer billing permissions,
+                  entitlements, and paid-plan display logic to a later billing phase.
+                </p>
+              </div>
+              <div class="card">
+                <span class="status risk">Risk</span>
+                <h3 style="margin-top: 10px">Two auth models</h3>
+                <p class="small" style="margin-top: 8px">
+                  The server pairing gate protects local environment access. Clerk protects cloud
+                  account identity. The UI must make this feel coherent without weakening either
+                  boundary.
+                </p>
+              </div>
+              <div class="card">
+                <span class="status risk">Risk</span>
+                <h3 style="margin-top: 10px">Electron routing</h3>
+                <p class="small" style="margin-top: 8px">
+                  Electron uses hash history. Clerk path routing should be verified in both browser
+                  and Electron shells, especially reset-password and callback/task URLs.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Validation Checklist</h2>
+            <div class="grid two" style="margin-top: 16px">
+              <div class="card">
+                <h3>Automated</h3>
+                <ul class="list">
+                  <li><span class="check">✓</span><span><code>vp check</code></span></li>
+                  <li><span class="check">✓</span><span><code>vp run typecheck</code></span></li>
+                  <li><span class="check">✓</span><span><code>vp test --project unit</code> or scoped web tests</span></li>
+                  <li>
+                    <span class="check">✓</span>
+                    <span>Component tests for signed-in, signed-out, and no-cloud-config sidebar states.</span>
+                  </li>
+                </ul>
+              </div>
+              <div class="card">
+                <h3>Manual/browser</h3>
+                <ul class="list">
+                  <li><span class="check">✓</span><span>Desktop width: sidebar footer matches attached profile target.</span></li>
+                  <li><span class="check">✓</span><span>Narrow width: email truncates and footer does not resize the sidebar.</span></li>
+                  <li><span class="check">✓</span><span>Browser and Electron: login, register, forgot password, sign out.</span></li>
+                  <li><span class="check">✓</span><span>Account switch: managed relay environment cleanup still fires.</span></li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Proposed Commit Message</h2>
+            <div class="card soft" style="margin-top: 16px">
+              <pre><code>[new feature] Add Clerk user profile and auth screens
+
+Introduce first-class Clerk-backed login, register, and password recovery routes for
+pathwayOS, and replace the main sidebar Settings button with a signed-in profile area
+that exposes account, mobile client, and settings actions.
+
+Keep the existing local/server pairing gate intact while reusing the current Clerk
+provider, managed relay token activation, and cloud public config gating.</code></pre>
+            </div>
+          </section>
+
+          <section>
+            <h2>Useful References</h2>
+            <ul class="source-list">
+              <li>
+                <a href="https://clerk.com/docs/react/reference/components/authentication/sign-in">Clerk React SignIn component</a>
+              </li>
+              <li>
+                <a href="https://clerk.com/docs/react/reference/components/authentication/sign-up">Clerk React SignUp component</a>
+              </li>
+              <li>
+                <a href="https://clerk.com/docs/react/reference/components/user/user-button">Clerk React UserButton component</a>
+              </li>
+              <li>
+                <a href="https://clerk.com/docs/react/reference/components/authentication/task-reset-password">Clerk React TaskResetPassword component</a>
+              </li>
+            </ul>
+          </section>
+        </main>
+
+        <footer>
+          Draft created for pathwayOS on 2026-06-27. It intentionally contains no scripts, forms,
+          secrets, private URLs, or local filesystem paths.
+        </footer>
+      </article>
+    </div>
+  </body>
+</html>

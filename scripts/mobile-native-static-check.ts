@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off - Native tool discovery checks filesystem boundaries before running Effect services.
 
 import * as NodeFS from "node:fs";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";

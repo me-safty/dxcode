@@ -74,6 +74,11 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
     ...(clerkOrigin ? [clerkOrigin] : []),
     "https://challenges.cloudflare.com",
   ];
+  const frameSources = [
+    "'self'",
+    ...(clerkOrigin ? [clerkOrigin] : []),
+    "https://challenges.cloudflare.com",
+  ];
 
   // The renderer connects directly to user-configured environments in addition to
   // the build-configured Clerk, relay, and OTLP endpoints. Those environment
@@ -89,7 +94,7 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
     "style-src 'self' 'unsafe-inline'",
     `font-src 'self' ${input.scheme}: data:`,
     "worker-src 'self' blob:",
-    "frame-src 'self' https://challenges.cloudflare.com",
+    `frame-src ${frameSources.join(" ")}`,
     "form-action 'self'",
   ].join("; ");
 }

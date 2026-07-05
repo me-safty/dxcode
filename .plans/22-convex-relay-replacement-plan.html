@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Convex Relay Replacement Plan</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #202124;
+        --muted: #667085;
+        --line: #d8dee8;
+        --soft: #f6f8fb;
+        --soft-2: #eef5f2;
+        --accent: #0f766e;
+        --accent-2: #9a3412;
+        --blue: #2563eb;
+        --purple: #6d28d9;
+        --shadow: 0 14px 42px rgba(15, 23, 42, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: #ffffff;
+        line-height: 1.55;
+      }
+
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 48px 24px 72px;
+      }
+
+      header {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 28px;
+        margin-bottom: 34px;
+      }
+
+      .eyebrow {
+        margin: 0 0 12px;
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 760;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        max-width: 900px;
+        font-size: clamp(34px, 6vw, 62px);
+        line-height: 1.02;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        max-width: 860px;
+        margin: 18px 0 0;
+        color: #4b5563;
+        font-size: 19px;
+      }
+
+      h2 {
+        margin: 44px 0 14px;
+        font-size: 28px;
+        line-height: 1.2;
+        letter-spacing: 0;
+      }
+
+      h3 {
+        margin: 26px 0 10px;
+        font-size: 19px;
+      }
+
+      p {
+        margin: 0 0 14px;
+      }
+
+      a {
+        color: var(--blue);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      ul,
+      ol {
+        margin: 10px 0 18px;
+        padding-left: 24px;
+      }
+
+      li {
+        margin: 7px 0;
+      }
+
+      code {
+        border: 1px solid #e5e7eb;
+        border-radius: 5px;
+        background: #f9fafb;
+        padding: 1px 5px;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.92em;
+      }
+
+      .callout {
+        border: 1px solid #b7ded4;
+        background: var(--soft-2);
+        border-radius: 10px;
+        padding: 18px 20px;
+        margin: 22px 0;
+      }
+
+      .warning {
+        border-color: #fed7aa;
+        background: #fff7ed;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin: 20px 0;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        background: #fff;
+        box-shadow: var(--shadow);
+      }
+
+      .card h3 {
+        margin-top: 0;
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .pill {
+        display: inline-block;
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        padding: 6px 10px;
+        color: #334155;
+        background: #fff;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        margin: 18px 0 26px;
+      }
+
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+        background: #fff;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #edf0f5;
+        padding: 13px 14px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--soft);
+        color: #344054;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .phase {
+        border-left: 4px solid var(--accent);
+        background: #fbfdfc;
+        padding: 16px 18px;
+        margin: 16px 0;
+        border-radius: 0 8px 8px 0;
+      }
+
+      .phase h3 {
+        margin-top: 0;
+      }
+
+      .diagram {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfcfe;
+        padding: 18px;
+        margin: 18px 0;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(130px, 1fr));
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .node {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: white;
+        padding: 12px;
+        min-height: 82px;
+      }
+
+      .node strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .node span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .arrow {
+        color: var(--muted);
+        text-align: center;
+        font-weight: 700;
+        margin: -4px 0 8px;
+      }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 22px;
+      }
+
+      .checklist li::marker {
+        color: var(--accent);
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      footer {
+        margin-top: 52px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      @media (max-width: 860px) {
+        main {
+          padding: 34px 18px 56px;
+        }
+
+        .grid,
+        .two-col,
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        h1 {
+          font-size: 38px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Implementation plan</p>
+        <h1>Replace the pathwayOS Connect Relay with Convex</h1>
+        <p class="subtitle">
+          A staged plan to move the hosted relay control plane from the current Cloudflare Worker,
+          PlanetScale, Alchemy, Hyperdrive, and queue stack to Convex while keeping Clerk as identity
+          and making Cloudflare Tunnel/DNS an explicit remote-connection transport only.
+        </p>
+        <div class="pill-row">
+          <span class="pill">Convex backend</span>
+          <span class="pill">Clerk identity</span>
+          <span class="pill">Remote connection provider boundary</span>
+          <span class="pill">Cloudflare only on demand</span>
+          <span class="pill">APNs later phase</span>
+        </div>
+      </header>
+
+      <section>
+        <h2>Executive Summary</h2>
+        <div class="callout">
+          <p>
+            Yes, this can be done. The safest version is not a direct rewrite of every relay file.
+            It is a product and architecture split: Convex becomes the account and Connect control
+            plane, while Cloudflare Tunnel/DNS becomes a pluggable remote-access provider that is
+            only used when a user deliberately creates or enables a remote connection.
+          </p>
+        </div>
+        <p>
+          The current relay is doing three separate jobs that should not all be tied to login:
+          account identity, account/device/environment state, and remote network exposure. The
+          Convex migration should preserve that separation. Signing in should never require
+          Cloudflare configuration, tunnel provisioning, DNS records, APNs, or a local
+          <code>cloudflared</code> runtime.
+        </p>
+        <p>
+          The new model: Clerk authenticates the user, Convex stores and syncs account-level state,
+          and remote access providers are activated only by explicit user intent from a
+          Connections or Remote Access flow.
+        </p>
+      </section>
+
+      <section>
+        <h2>Current Stack to Target Stack</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Current responsibility</th>
+                <th>Current implementation</th>
+                <th>Convex target</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Public relay API</td>
+                <td>Cloudflare Worker with Effect HttpApi</td>
+                <td>Convex HTTP Actions</td>
+                <td>Keep the same external route shapes initially to reduce client churn.</td>
+              </tr>
+              <tr>
+                <td>Relay database</td>
+                <td>PlanetScale Postgres plus Drizzle migrations</td>
+                <td>Convex tables and indexes</td>
+                <td>Model environment links, devices, credentials, replay guards, and activity rows as Convex documents.</td>
+              </tr>
+              <tr>
+                <td>Database connectivity</td>
+                <td>Cloudflare Hyperdrive</td>
+                <td>Not needed</td>
+                <td>Convex owns persistence and live sync.</td>
+              </tr>
+              <tr>
+                <td>Infrastructure deploy</td>
+                <td>Alchemy stack</td>
+                <td>Convex deploy plus small Cloudflare provider config</td>
+                <td>Cloudflare resource creation moves out of global deploy and into the remote connection provider.</td>
+              </tr>
+              <tr>
+                <td>Async APNs delivery</td>
+                <td>Cloudflare Queues and dead-letter queue</td>
+                <td>Convex scheduled functions, retry tables, or a Convex workflow/workpool</td>
+                <td>Port after core remote connection flows are stable.</td>
+              </tr>
+              <tr>
+                <td>Token/proof logic</td>
+                <td>Relay-issued EdDSA JWTs and DPoP replay table</td>
+                <td>Shared crypto helpers called from Convex actions and mutations</td>
+                <td>Security-sensitive area. Preserve tests and behavior before changing UX.</td>
+              </tr>
+              <tr>
+                <td>Managed endpoints</td>
+                <td>Cloudflare Tunnel and DNS bindings through Alchemy</td>
+                <td>Provider module invoked only from remote connection creation</td>
+                <td>This is the key decoupling. No tunnel/DNS requirement for login or normal account sync.</td>
+              </tr>
+              <tr>
+                <td>Tracing</td>
+                <td>Axiom OTLP traces</td>
+                <td>Convex logs plus optional external trace sink</td>
+                <td>Keep user-facing trace IDs or support IDs even if the backend changes.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Target Architecture</h2>
+        <div class="diagram">
+          <div class="flow">
+            <div class="node">
+              <strong>pathwayOS app</strong>
+              <span>Web, desktop, mobile, CLI</span>
+            </div>
+            <div class="node">
+              <strong>Clerk</strong>
+              <span>User session and billing later</span>
+            </div>
+            <div class="node">
+              <strong>Convex</strong>
+              <span>Account state and Connect API</span>
+            </div>
+            <div class="node">
+              <strong>Provider layer</strong>
+              <span>Remote access only</span>
+            </div>
+            <div class="node">
+              <strong>Environment</strong>
+              <span>Local server and agent runtime</span>
+            </div>
+          </div>
+          <p class="arrow">Login and sync stop at Clerk plus Convex. Remote exposure starts only after explicit user action.</p>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <h3>Always-on account layer</h3>
+            <p>
+              Clerk and Convex support login, profile, user preferences, device records, workspace
+              sync, and non-network-exposing account features. These paths must work without
+              Cloudflare credentials, DNS zones, APNs keys, or tunnel binaries.
+            </p>
+          </div>
+          <div class="card">
+            <h3>On-demand remote layer</h3>
+            <p>
+              Cloudflare Tunnel/DNS becomes a transport provider selected during remote connection
+              creation. This provider can be unavailable, disabled, or swapped later without
+              blocking login or general app sync.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Core Product Rule</h2>
+        <div class="callout warning">
+          <p>
+            Cloudflare Tunnel/DNS must be tied only to explicit remote-connection workflows. It must
+            not be part of sign-in, profile rendering, account sync, local pairing, settings load, or
+            app startup.
+          </p>
+        </div>
+        <h3>Concrete gating rules</h3>
+        <ul class="checklist">
+          <li>Signed-out users go to Clerk login; no Convex Connect provider work is attempted.</li>
+          <li>Signed-in users can load profile, plan label, account preferences, and local app state without Cloudflare config.</li>
+          <li>Connections can show an empty remote state when no remote provider is configured.</li>
+          <li>Remote connection creation is the first moment the app asks for or validates Cloudflare provider readiness.</li>
+          <li>If Cloudflare is missing, show a remote-access setup state, not an auth failure.</li>
+          <li>Local server pairing remains independent from Clerk and Convex remote access.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Proposed Backend Package</h2>
+        <p>
+          Add a dedicated Convex backend workspace package rather than mixing Convex functions into
+          the web app. Suggested package name: <code>infra/connect-convex</code> or
+          <code>apps/connect</code>. The package owns Convex schema, HTTP actions, internal
+          mutations, scheduled functions, and provider modules.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Module</th>
+                <th>Responsibility</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>convex/schema.ts</code></td>
+                <td>Tables for users, environments, links, provider allocations, device registrations, activity rows, relay tokens, replay guards, and delivery attempts.</td>
+              </tr>
+              <tr>
+                <td><code>convex/http.ts</code></td>
+                <td>HTTP Actions that expose the relay-compatible API surface.</td>
+              </tr>
+              <tr>
+                <td><code>convex/auth.ts</code></td>
+                <td>Clerk identity helpers, subject validation, billing-plan placeholder, and auth error mapping.</td>
+              </tr>
+              <tr>
+                <td><code>convex/connect/links.ts</code></td>
+                <td>Link challenge creation, link proof verification, environment link upserts, unlinking.</td>
+              </tr>
+              <tr>
+                <td><code>convex/connect/credentials.ts</code></td>
+                <td>Short-lived credential brokering and DPoP-bound access token exchange.</td>
+              </tr>
+              <tr>
+                <td><code>convex/providers/cloudflare.ts</code></td>
+                <td>Optional Cloudflare Tunnel/DNS provider called only by remote connection creation.</td>
+              </tr>
+              <tr>
+                <td><code>convex/agentActivity</code></td>
+                <td>Agent activity rows, aggregation, delivery scheduling, APNs integration.</td>
+              </tr>
+              <tr>
+                <td><code>convex/crons.ts</code></td>
+                <td>Replay guard cleanup, stale connection cleanup, delivery retry sweeps.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Data Model Plan</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Convex table</th>
+                <th>Key fields</th>
+                <th>Indexes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>connectUsers</code></td>
+                <td>Clerk user id, primary email snapshot, plan label fallback, timestamps</td>
+                <td>by Clerk user id</td>
+              </tr>
+              <tr>
+                <td><code>environmentLinks</code></td>
+                <td>User id, environment id, label, public key, endpoint, provider kind, capabilities, revokedAt</td>
+                <td>by user, by environment, by active link</td>
+              </tr>
+              <tr>
+                <td><code>remoteConnectionRequests</code></td>
+                <td>User id, environment id, provider kind, status, requested capabilities, error summary</td>
+                <td>by user/status, by environment</td>
+              </tr>
+              <tr>
+                <td><code>providerAllocations</code></td>
+                <td>Provider kind, user id, environment id, hostname, tunnel id, tunnel name, readyAt</td>
+                <td>by provider, by user/environment, unique hostname if supported</td>
+              </tr>
+              <tr>
+                <td><code>environmentCredentials</code></td>
+                <td>Credential id, environment id, public key, hashed credential, revokedAt</td>
+                <td>by credential hash, by environment/public key</td>
+              </tr>
+              <tr>
+                <td><code>dpopProofs</code></td>
+                <td>Thumbprint, jti, issuedAt, expiresAt</td>
+                <td>by thumbprint/jti, by expiresAt</td>
+              </tr>
+              <tr>
+                <td><code>mobileDevices</code></td>
+                <td>User id, device id, label, platform, APNs tokens, preferences</td>
+                <td>by user, unique push token where possible</td>
+              </tr>
+              <tr>
+                <td><code>liveActivities</code></td>
+                <td>User id, device id, activity token, last aggregate, delivery timestamps</td>
+                <td>by user/device, by activity token</td>
+              </tr>
+              <tr>
+                <td><code>agentActivityRows</code></td>
+                <td>Environment id, public key, thread id, state, updatedAt</td>
+                <td>by environment/thread, by updatedAt</td>
+              </tr>
+              <tr>
+                <td><code>deliveryAttempts</code></td>
+                <td>Job id, user id, environment id, thread id, device id, APNs status/reason</td>
+                <td>by source job, by environment/thread/time</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>API Compatibility Strategy</h2>
+        <p>
+          Start by preserving the existing relay API paths so the client migration is controlled.
+          Convex HTTP Actions can expose public routes at a Convex site URL or custom domain, then
+          parse requests with the existing shared schemas.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Current route</th>
+                <th>Target behavior</th>
+                <th>Cloudflare required?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>GET /health</code></td>
+                <td>Convex health/readiness response</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <td><code>GET /v1/environments</code></td>
+                <td>List linked remote-capable environments for signed-in user</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <td><code>GET /v1/client/devices</code></td>
+                <td>List mobile devices for signed-in user</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <td><code>POST /v1/client/environment-link-challenges</code></td>
+                <td>Create proof challenge. No provider provisioning yet.</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <td><code>POST /v1/client/environment-links</code></td>
+                <td>Link environment. Provider provisioning only when request explicitly includes remote exposure.</td>
+                <td>Only if remote exposure requested</td>
+              </tr>
+              <tr>
+                <td><code>POST /v1/environments/:id/status</code></td>
+                <td>Check status for a linked remote endpoint</td>
+                <td>Only for remote endpoint status</td>
+              </tr>
+              <tr>
+                <td><code>POST /v1/environments/:id/connect</code></td>
+                <td>Broker short-lived credential to connect to remote environment</td>
+                <td>Only when endpoint provider is Cloudflare</td>
+              </tr>
+              <tr>
+                <td><code>POST /v1/mobile/devices</code></td>
+                <td>Register mobile device preferences</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <td><code>POST /v1/environments/:id/threads/:threadId/agent-activity</code></td>
+                <td>Accept signed agent activity and schedule delivery</td>
+                <td>No, unless delivery references remote endpoint metadata</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Implementation Phases</h2>
+
+        <div class="phase">
+          <h3>Phase 0: Architecture lock and test harness</h3>
+          <ul>
+            <li>Freeze the current relay external contract in tests using shared schemas.</li>
+            <li>Document which routes are account-only, remote-provider-only, and mobile-only.</li>
+            <li>Add fixture-based tests for link challenge, link proof, DPoP token exchange, replay rejection, and environment credential minting.</li>
+            <li>Define an explicit <code>RemoteEndpointProvider</code> interface with methods for provision, deprovision, status metadata, and runtime config.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 1: Scaffold Convex backend</h3>
+          <ul>
+            <li>Add a dedicated Convex workspace package and <code>convex.json</code>.</li>
+            <li>Configure Node actions for crypto/APNs/provider calls.</li>
+            <li>Add Convex schema, indexes, generated API, and package scripts for <code>dev</code>, <code>deploy</code>, <code>codegen</code>, <code>test</code>, and <code>typecheck</code>.</li>
+            <li>Wire CI to typecheck Convex functions without deploying production.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 2: Clerk and account baseline</h3>
+          <ul>
+            <li>Configure Clerk auth in Convex and validate the same Clerk user id contract used by the app.</li>
+            <li>Add account bootstrap, profile metadata sync, and <code>Free</code> plan fallback in Convex.</li>
+            <li>Update web app configuration so login/profile requires only Clerk and Convex, not remote-provider settings.</li>
+            <li>Add tests proving missing Cloudflare config does not block login, profile, settings, or account sync.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 3: Port relay-compatible HTTP Actions</h3>
+          <ul>
+            <li>Implement <code>/health</code>, metadata, list environments, list devices, link challenge, link environment, unlink, status, connect, mobile registration, and publish activity routes.</li>
+            <li>Keep route response shapes compatible with <code>@pathwayos/contracts</code>.</li>
+            <li>Map Convex errors into existing relay-style error codes with support IDs.</li>
+            <li>Keep the existing client runtime pointed at <code>PATHWAYOS_RELAY_URL</code> while swapping the URL to Convex.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 4: Port token and proof logic</h3>
+          <ul>
+            <li>Move EdDSA JWT signing and verification helpers into a shared package usable by Convex Node actions.</li>
+            <li>Port link challenge signing, DPoP access token issuing, DPoP proof verification, replay guard persistence, cloud mint proof signing, and environment response verification.</li>
+            <li>Use Convex mutations for atomic replay guard creation.</li>
+            <li>Add golden tests against the current relay to prove token claims and rejection behavior match.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 5: Decouple Cloudflare into remote provider</h3>
+          <ul>
+            <li>Rename product state from generic cloud enabled to remote access provider readiness where appropriate.</li>
+            <li>Move Cloudflare credentials out of global relay requirements and into provider-specific Convex env vars.</li>
+            <li>Do not provision tunnels during login, profile load, device sync, environment listing, or ordinary environment link challenge creation.</li>
+            <li>Provision Cloudflare Tunnel/DNS only when the user chooses Create Remote Connection or Enable Remote Access.</li>
+            <li>Store provider allocation status separately from environment link status so a linked environment can exist without remote exposure.</li>
+            <li>Expose provider setup errors as Connections UI states, not auth errors.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 6: Update local server and CLI</h3>
+          <ul>
+            <li>Preserve local server endpoints for link proof, relay config, health, and mint credential.</li>
+            <li>Update CLI <code>pathwayos connect</code> commands to call Convex HTTP Actions or Convex client actions.</li>
+            <li>Keep desired-link state local, but distinguish linked account from remote exposure intent.</li>
+            <li>Make tunnel runtime startup depend on stored provider runtime config only, not generic account sign-in.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 7: Mobile and APNs</h3>
+          <ul>
+            <li>Port mobile device registration and Live Activity token registration.</li>
+            <li>Port activity aggregation and delivery scheduling.</li>
+            <li>Replace Cloudflare Queue semantics with a Convex delivery table and scheduled retry worker.</li>
+            <li>Keep APNs credentials optional until mobile notifications are enabled.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3>Phase 8: Cutover and decommission</h3>
+          <ul>
+            <li>Run Convex and the existing relay side by side behind separate URLs.</li>
+            <li>Ship a feature flag for Convex Connect backend selection.</li>
+            <li>Validate new links on Convex first; leave existing relay links untouched until migration tooling exists.</li>
+            <li>Build a migration script only after the Convex data model survives real link/connect tests.</li>
+            <li>Remove Alchemy, PlanetScale, Hyperdrive, and Cloudflare Worker deploy once no clients point at the old relay.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>Remote Connection UX Changes</h2>
+        <div class="two-col">
+          <div>
+            <h3>Before</h3>
+            <ul>
+              <li>Cloud config is treated as a broad account capability.</li>
+              <li>Missing relay/provider config can make account surfaces look unavailable.</li>
+              <li>Environment linking and remote exposure are closely coupled.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>After</h3>
+            <ul>
+              <li>Account sign-in and sync are Clerk plus Convex only.</li>
+              <li>Connections shows local link state, account state, and remote exposure state separately.</li>
+              <li>Cloudflare appears only inside a Remote Access provider setup or create-connection flow.</li>
+            </ul>
+          </div>
+        </div>
+        <h3>Suggested UI states</h3>
+        <ul>
+          <li><strong>Signed out:</strong> show sign-in CTA only.</li>
+          <li><strong>Signed in, no remote provider:</strong> account sync works; Connections shows "Remote access not configured".</li>
+          <li><strong>Provider configured, no environment exposed:</strong> show "Create remote connection".</li>
+          <li><strong>Provisioning:</strong> show tunnel/DNS progress and recoverable provider errors.</li>
+          <li><strong>Remote ready:</strong> show endpoint status, connect action, and unlink/deprovision controls.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Configuration After Migration</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th>Required account or service</th>
+                <th>Blocks login?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Login and profile</td>
+                <td>Clerk</td>
+                <td>No, only Clerk is required</td>
+              </tr>
+              <tr>
+                <td>Account preferences and sync</td>
+                <td>Convex and Clerk</td>
+                <td>No Cloudflare dependency</td>
+              </tr>
+              <tr>
+                <td>Remote connection via managed tunnel</td>
+                <td>Cloudflare API token, tunnel/DNS zone config</td>
+                <td>No, required only when creating remote access</td>
+              </tr>
+              <tr>
+                <td>Mobile push and Live Activities</td>
+                <td>Apple Developer APNs credentials</td>
+                <td>No, required only for notification features</td>
+              </tr>
+              <tr>
+                <td>Custom relay domain</td>
+                <td>Convex Pro custom domain plus DNS provider</td>
+                <td>No, can start with Convex site URL</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Testing and Verification</h2>
+        <ul class="checklist">
+          <li>Run existing repo checks: <code>vp check</code> and <code>vp run typecheck</code>.</li>
+          <li>Add Convex function tests for schema, auth helper, link proof validation, replay rejection, and provider allocation state transitions.</li>
+          <li>Add web tests showing login/profile/settings work without Cloudflare provider env vars.</li>
+          <li>Add Connections tests for provider unavailable, provider configured, provisioning failed, remote ready, unlink, and retry states.</li>
+          <li>Add integration tests for full link and connect against a fake provider before calling Cloudflare APIs.</li>
+          <li>Add one manual end-to-end smoke test with a real Cloudflare-managed remote endpoint before production cutover.</li>
+          <li>Add APNs delivery tests with transport mocked at the APNs boundary.</li>
+          <li>Validate desktop and browser flows separately because Clerk/Electron token persistence differs from browser Clerk.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Risks and Mitigations</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Risk</th>
+                <th>Mitigation</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Security drift in DPoP or JWT claims</td>
+                <td>Golden tests against current relay behavior before client cutover.</td>
+              </tr>
+              <tr>
+                <td>Provider provisioning side effects inside Convex actions</td>
+                <td>Use idempotent provider operations and explicit allocation state documents.</td>
+              </tr>
+              <tr>
+                <td>Convex HTTP Action limits or runtime differences</td>
+                <td>Keep HTTP actions thin; move crypto/APNs/provider calls to Node actions where needed.</td>
+              </tr>
+              <tr>
+                <td>Custom domain delays</td>
+                <td>Start with Convex site URL; add custom domain later as a deployment polish step.</td>
+              </tr>
+              <tr>
+                <td>Existing relay-linked environments</td>
+                <td>Do not auto-migrate on day one. New links use Convex, old links stay on old relay until migration tooling is proven.</td>
+              </tr>
+              <tr>
+                <td>Cloudflare still feels required</td>
+                <td>Audit every auth/account path for provider calls and add tests that run with provider config absent.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Decision Points</h2>
+        <ul>
+          <li>Should Convex replace only the relay API, or also become the source of truth for broader account/workspace sync?</li>
+          <li>Should remote access support manual endpoints alongside Cloudflare-managed endpoints from v1?</li>
+          <li>Do we want to keep the old <code>PATHWAYOS_RELAY_URL</code> name for compatibility, or rename to <code>PATHWAYOS_CONNECT_URL</code> with a compatibility alias?</li>
+          <li>Do we require a custom domain for production cutover, or is a Convex site URL acceptable for the first private beta?</li>
+          <li>Should APNs move in the first Convex release, or follow after remote connect is stable?</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>References</h2>
+        <ul>
+          <li><a href="https://docs.convex.dev/functions/http-actions">Convex HTTP Actions</a></li>
+          <li><a href="https://docs.convex.dev/auth/clerk">Convex and Clerk</a></li>
+          <li><a href="https://docs.convex.dev/functions/actions">Convex Actions</a></li>
+          <li><a href="https://docs.convex.dev/scheduling/cron-jobs">Convex Cron Jobs</a></li>
+          <li><a href="https://docs.convex.dev/production/project-configuration">Convex Project Configuration</a></li>
+          <li><a href="https://docs.convex.dev/production/custom-domains">Convex Custom Domains</a></li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>
+          Draft prepared for pathwayOS. This document intentionally avoids secrets, private URLs, and
+          local filesystem paths. It assumes "decouple Cloudflare Tunnel/DNS" means Cloudflare should
+          not be tied to login, profile, or account sync, and should only run during explicit remote
+          connection workflows.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

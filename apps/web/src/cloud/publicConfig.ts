@@ -37,15 +37,21 @@ function normalizeSecureUrl(value: string): string | null {
   }
 }
 
+function configuredConnectUrl(): string {
+  return (
+    trimNonEmpty(import.meta.env.VITE_PATHWAYOS_CONNECT_URL as string | undefined) ??
+    trimNonEmpty(import.meta.env.VITE_PATHWAYOS_RELAY_URL as string | undefined) ??
+    ""
+  );
+}
+
 export function resolveCloudPublicConfig(): CloudPublicConfig {
   return {
     clerkPublishableKey: trimNonEmpty(
       import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined,
     ),
     clerkJwtTemplate: trimNonEmpty(import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined),
-    relayUrl: normalizeSecureRelayUrl(
-      (import.meta.env.VITE_PATHWAYOS_RELAY_URL as string | undefined) ?? "",
-    ),
+    relayUrl: normalizeSecureRelayUrl(configuredConnectUrl()),
     relayTracing: {
       tracesUrl: normalizeSecureUrl(
         (import.meta.env.VITE_RELAY_OTLP_TRACES_URL as string | undefined) ?? "",
@@ -72,6 +78,11 @@ export function resolveRelayTracingConfig() {
 export function hasCloudPublicConfig(): boolean {
   const config = resolveCloudPublicConfig();
   return Boolean(config.clerkPublishableKey && config.clerkJwtTemplate && config.relayUrl);
+}
+
+export function hasClerkPublicConfig(): boolean {
+  const config = resolveCloudPublicConfig();
+  return Boolean(config.clerkPublishableKey);
 }
 
 export function resolveRelayClerkTokenOptions() {

@@ -228,6 +228,7 @@ const startup = Effect.gen(function* () {
     Effect.catchCause((cause) => fatalStartupCause("whenReady", cause)),
   );
   yield* logStartupInfo("app ready");
+  yield* clerk.installNativeRequestHeaderSanitizer;
   yield* appIdentity.configure;
   yield* applicationMenu.configure;
   yield* updates.configure;

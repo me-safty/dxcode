@@ -160,7 +160,7 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     relay: {
-      url: repoEnv.PATHWAYOS_RELAY_URL ?? null,
+      url: repoEnv.PATHWAYOS_CONNECT_URL ?? repoEnv.PATHWAYOS_RELAY_URL ?? null,
     },
     clerk: {
       publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,

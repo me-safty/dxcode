@@ -20,10 +20,6 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "../ui/sidebar";
-import {
-  PathwayOSConnectSidebarAvatar,
-  PathwayOSConnectSidebarSignIn,
-} from "../clerk/PathwayOSConnectSidebarSignIn";
 
 export type SettingsSectionPath =
   | "/settings/general"
@@ -108,22 +104,18 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
 
       <SidebarSeparator />
       <SidebarFooter className="p-2">
-        <PathwayOSConnectSidebarSignIn />
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1">
-          <SidebarMenu className="min-w-0">
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                size="sm"
-                className="gap-2 px-2 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                onClick={handleBackClick}
-              >
-                <ArrowLeftIcon className="size-4" />
-                <span>Back</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <PathwayOSConnectSidebarAvatar />
-        </div>
+        <SidebarMenu className="min-w-0">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="sm"
+              className="gap-2 px-2 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={handleBackClick}
+            >
+              <ArrowLeftIcon className="size-4" />
+              <span>Back</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
     </>
   );

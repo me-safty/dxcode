@@ -59,7 +59,9 @@ export function loadRepoEnv({
       : {}),
     ...(config.relayUrl
       ? {
+          PATHWAYOS_CONNECT_URL: config.relayUrl,
           PATHWAYOS_RELAY_URL: config.relayUrl,
+          VITE_PATHWAYOS_CONNECT_URL: config.relayUrl,
           VITE_PATHWAYOS_RELAY_URL: config.relayUrl,
         }
       : {}),
@@ -117,7 +119,13 @@ export function resolvePublicConfig(...sources: readonly Environment[]): Pathway
       "EXPO_PUBLIC_CLERK_JWT_TEMPLATE",
     ),
     clerkCliOAuthClientId: firstNonEmpty(sources, "PATHWAYOS_CLERK_CLI_OAUTH_CLIENT_ID"),
-    relayUrl: firstNonEmpty(sources, "PATHWAYOS_RELAY_URL", "VITE_PATHWAYOS_RELAY_URL"),
+    relayUrl: firstNonEmpty(
+      sources,
+      "PATHWAYOS_CONNECT_URL",
+      "VITE_PATHWAYOS_CONNECT_URL",
+      "PATHWAYOS_RELAY_URL",
+      "VITE_PATHWAYOS_RELAY_URL",
+    ),
     mobileOtlpTracesUrl: firstNonEmpty(
       sources,
       "PATHWAYOS_MOBILE_OTLP_TRACES_URL",

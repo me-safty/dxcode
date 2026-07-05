@@ -32,13 +32,29 @@ it.effect("prefers a runtime relay URL override over the statically injected val
   }),
 );
 
+it.effect("prefers the runtime Connect URL name over the legacy relay URL", () =>
+  Effect.gen(function* () {
+    const relayUrl = yield* makeRelayUrlConfig("https://embedded.example.test").pipe(
+      provideEnv({
+        PATHWAYOS_CONNECT_URL: "https://connect.example.test///",
+        PATHWAYOS_RELAY_URL: "https://relay.example.test///",
+      }),
+    );
+
+    assert.equal(relayUrl, "https://connect.example.test");
+  }),
+);
+
 it.effect("requires a relay URL when the server bundle has no injected value", () =>
   makeRelayUrlConfig("").pipe(provideEnv({}), Effect.flip),
 );
 
 it.effect("rejects an insecure runtime relay URL override", () =>
   makeRelayUrlConfig("https://embedded.example.test").pipe(
-    provideEnv({ PATHWAYOS_RELAY_URL: "http://runtime.example.test" }),
+    provideEnv({
+      PATHWAYOS_CONNECT_URL: "http://connect.example.test",
+      PATHWAYOS_RELAY_URL: "https://relay.example.test",
+    }),
     Effect.flip,
   ),
 );

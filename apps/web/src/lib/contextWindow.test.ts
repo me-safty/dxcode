@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EventId, type OrchestrationThreadActivity, TurnId } from "@pathwayos/contracts";
 
-import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "./contextWindow";
+import {
+  deriveLatestCodexRateLimitSnapshot,
+  deriveLatestContextWindowSnapshot,
+  formatContextWindowTokens,
+} from "./contextWindow";
 
 function makeActivity(id: string, kind: string, payload: unknown): OrchestrationThreadActivity {
   return {
@@ -80,5 +84,68 @@ describe("contextWindow", () => {
 
     expect(snapshot?.usedTokens).toBe(81_659);
     expect(snapshot?.totalProcessedTokens).toBe(748_126);
+  });
+
+  it("derives the latest Codex account rate-limit snapshot", () => {
+    const snapshot = deriveLatestCodexRateLimitSnapshot([
+      makeActivity("activity-1", "account-rate-limits.updated", {
+        planType: "pro",
+        primary: {
+          usedPercent: 9,
+          resetsAt: 1_782_864_900,
+          windowDurationMins: 300,
+        },
+        secondary: {
+          usedPercent: 46,
+          resetsAt: 1_782_864_900,
+          windowDurationMins: 10_080,
+        },
+        individualLimit: {
+          used: "7",
+          limit: "10",
+          remainingPercent: 30,
+          resetsAt: 1_782_864_900,
+        },
+      }),
+    ]);
+
+    expect(snapshot).toMatchObject({
+      planType: "pro",
+      primary: {
+        label: "5h",
+        usedPercent: 9,
+        remainingPercent: 91,
+      },
+      secondary: {
+        label: "Weekly",
+        usedPercent: 46,
+        remainingPercent: 54,
+      },
+      individualLimit: {
+        used: "7",
+        limit: "10",
+        remainingPercent: 30,
+      },
+    });
+    expect(snapshot?.primary?.resetLabel).toEqual(expect.any(String));
+  });
+
+  it("accepts the legacy wrapped Codex account rate-limit payload", () => {
+    const snapshot = deriveLatestCodexRateLimitSnapshot([
+      makeActivity("activity-1", "account-rate-limits.updated", {
+        rateLimits: {
+          primary: {
+            usedPercent: 25,
+            windowDurationMins: 60,
+          },
+        },
+      }),
+    ]);
+
+    expect(snapshot?.primary).toMatchObject({
+      label: "1h",
+      usedPercent: 25,
+      remainingPercent: 75,
+    });
   });
 });

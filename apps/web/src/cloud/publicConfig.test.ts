@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   CloudPublicConfigMissingError,
+  hasClerkPublicConfig,
   hasCloudPublicConfig,
   resolveRelayClerkTokenOptions,
 } from "./publicConfig.ts";
@@ -11,9 +12,23 @@ afterEach(() => {
 });
 
 describe("hasCloudPublicConfig", () => {
+  it("allows Clerk account screens with only a publishable key", () => {
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "");
+    expect(hasClerkPublicConfig()).toBe(false);
+
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_example");
+    vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "");
+    vi.stubEnv("VITE_PATHWAYOS_CONNECT_URL", "");
+    vi.stubEnv("VITE_PATHWAYOS_RELAY_URL", "");
+
+    expect(hasClerkPublicConfig()).toBe(true);
+    expect(hasCloudPublicConfig()).toBe(false);
+  });
+
   it("requires both public cloud values", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "");
     vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "");
+    vi.stubEnv("VITE_PATHWAYOS_CONNECT_URL", "");
     vi.stubEnv("VITE_PATHWAYOS_RELAY_URL", "");
     expect(hasCloudPublicConfig()).toBe(false);
 
@@ -23,14 +38,25 @@ describe("hasCloudPublicConfig", () => {
     vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "pathwayos-relay");
     expect(hasCloudPublicConfig()).toBe(false);
 
+    vi.stubEnv("VITE_PATHWAYOS_CONNECT_URL", "https://connect.example.test");
     vi.stubEnv("VITE_PATHWAYOS_RELAY_URL", "https://relay.example.test");
+    expect(hasCloudPublicConfig()).toBe(true);
+  });
+
+  it("keeps the legacy relay URL as a fallback for the Connect backend URL", () => {
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_example");
+    vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "pathwayos-relay");
+    vi.stubEnv("VITE_PATHWAYOS_CONNECT_URL", "");
+    vi.stubEnv("VITE_PATHWAYOS_RELAY_URL", "https://relay.example.test");
+
     expect(hasCloudPublicConfig()).toBe(true);
   });
 
   it("rejects an insecure relay URL", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_example");
     vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "pathwayos-relay");
-    vi.stubEnv("VITE_PATHWAYOS_RELAY_URL", "http://relay.example.test");
+    vi.stubEnv("VITE_PATHWAYOS_CONNECT_URL", "http://connect.example.test");
+    vi.stubEnv("VITE_PATHWAYOS_RELAY_URL", "https://relay.example.test");
 
     expect(hasCloudPublicConfig()).toBe(false);
   });

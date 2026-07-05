@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { type ServerLifecycleWelcomePayload } from "@pathwayos/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@pathwayos/client-runtime/environment";
 import { squashAtomCommandFailure } from "@pathwayos/client-runtime/state/runtime";
@@ -8,12 +9,14 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "../branding";
+import { isAuthRoutePathname, isPublicSessionRoutePathname, SIGN_IN_ROUTE } from "../authRoutes";
 import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
+import { AuthComponentFallback, AuthRouteShell } from "../components/auth/AuthRouteShell";
 import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
@@ -37,6 +40,7 @@ import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import { configureClientTracing } from "../observability/clientTracing";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { hasClerkPublicConfig, hasCloudPublicConfig } from "../cloud/publicConfig";
 import { shellEnvironment } from "../state/shell";
 import { useAtomValue } from "@effect/atom-react";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -70,6 +74,22 @@ export const Route = createRootRoute({
       };
     }
 
+    if (isAuthRoutePathname(location.pathname)) {
+      return {
+        authGateState: {
+          status: "hosted-static",
+        } as const,
+      };
+    }
+
+    if (!hasCloudPublicConfig() && !isPublicSessionRoutePathname(location.pathname)) {
+      return {
+        authGateState: {
+          status: "hosted-static",
+        } as const,
+      };
+    }
+
     const authGateState = await resolveInitialServerAuthGateState();
     return {
       authGateState,
@@ -96,7 +116,7 @@ function RootRouteView() {
     };
   }, [pathname]);
 
-  if (pathname === "/pair") {
+  if (isPublicSessionRoutePathname(pathname)) {
     return (
       <>
         <DocumentTitleSync />
@@ -123,19 +143,61 @@ function RootRouteView() {
   );
 
   return (
-    <ToastProvider>
-      <AnchoredToastProvider>
-        <DocumentTitleSync />
-        {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
-        <RelayClientInstallDialog />
-        <SshPasswordPromptDialog />
-        <SlowRpcRequestToastCoordinator />
-        <HostedStaticEnvironmentBootstrap />
-        {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
-        {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
-        {appShell}
-      </AnchoredToastProvider>
-    </ToastProvider>
+    <ClerkSessionGate>
+      <ToastProvider>
+        <AnchoredToastProvider>
+          <DocumentTitleSync />
+          {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
+          <RelayClientInstallDialog />
+          <SshPasswordPromptDialog />
+          <SlowRpcRequestToastCoordinator />
+          <HostedStaticEnvironmentBootstrap />
+          {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
+          {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
+          {appShell}
+        </AnchoredToastProvider>
+      </ToastProvider>
+    </ClerkSessionGate>
+  );
+}
+
+function ClerkSessionGate({ children }: { readonly children: ReactNode }) {
+  if (!hasClerkPublicConfig()) {
+    return <RedirectToLoginFallback label="Opening sign in..." />;
+  }
+
+  return <ConfiguredClerkSessionGate>{children}</ConfiguredClerkSessionGate>;
+}
+
+function ConfiguredClerkSessionGate({ children }: { readonly children: ReactNode }) {
+  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+
+  if (!isLoaded || !isSignedIn) {
+    return <RedirectToLoginFallback label="Opening sign in..." />;
+  }
+
+  return children;
+}
+
+function RedirectToLoginFallback({ label }: { readonly label: string }) {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    void navigate({ to: SIGN_IN_ROUTE, replace: true });
+  }, [navigate]);
+
+  return <SessionGateFallback label={label} />;
+}
+
+function SessionGateFallback({ label }: { readonly label: string }) {
+  return (
+    <AuthRouteShell
+      description="Checking whether this browser has an active pathwayOS account session."
+      eyebrow="Account"
+      title="Sign in to continue"
+    >
+      <AuthComponentFallback label={label} />
+    </AuthRouteShell>
   );
 }
 

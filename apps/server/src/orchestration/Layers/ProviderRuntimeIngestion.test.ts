@@ -2717,6 +2717,63 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
+  it("projects account rate-limit updates into normalized thread activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "account.rate-limits.updated",
+      eventId: asEventId("evt-account-rate-limits-updated"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        rateLimits: {
+          planType: "pro",
+          primary: {
+            usedPercent: 9,
+            resetsAt: 1_782_864_900,
+            windowDurationMins: 300,
+          },
+          secondary: {
+            usedPercent: 46,
+            resetsAt: 1_782_864_900,
+            windowDurationMins: 10_080,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "account-rate-limits.updated",
+      ),
+    );
+
+    const usageActivity = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "account-rate-limits.updated",
+    );
+    expect(usageActivity).toMatchObject({
+      id: "evt-account-rate-limits-updated",
+      tone: "info",
+      kind: "account-rate-limits.updated",
+      summary: "Codex usage updated",
+      payload: {
+        planType: "pro",
+        primary: {
+          usedPercent: 9,
+          resetsAt: 1_782_864_900,
+          windowDurationMins: 300,
+        },
+        secondary: {
+          usedPercent: 46,
+          resetsAt: 1_782_864_900,
+          windowDurationMins: 10_080,
+        },
+      },
+    });
+  });
+
   it("projects Codex camelCase token usage payloads into normalized thread activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

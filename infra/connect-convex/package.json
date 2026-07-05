@@ -1,0 +1,23 @@
+{
+  "name": "@pathwayos/connect-convex",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "codegen": "convex codegen",
+    "deploy": "convex deploy",
+    "dev": "convex dev",
+    "test": "vp test run",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@pathwayos/contracts": "workspace:*",
+    "@pathwayos/shared": "workspace:*",
+    "convex": "^1.42.0",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

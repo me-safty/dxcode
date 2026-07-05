@@ -71,6 +71,10 @@ describe("ElectronProtocol", () => {
             response.headers.get("content-security-policy") ?? "",
             "font-src 'self' pathwayos-dev: data:",
           );
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "frame-src 'self' https://clerk.pathwayos.codes https://challenges.cloudflare.com",
+          );
         }),
       );
 
@@ -225,5 +229,10 @@ describe("ElectronProtocol", () => {
       "https:",
     ]);
     assert.deepEqual(directives["font-src"], ["'self'", "pathwayos:", "data:"]);
+    assert.deepEqual(directives["frame-src"], [
+      "'self'",
+      "https://clerk.pathwayos.codes",
+      "https://challenges.cloudflare.com",
+    ]);
   });
 });

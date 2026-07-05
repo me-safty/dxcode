@@ -42,7 +42,9 @@ export default mergeConfig(
         js: "#!/usr/bin/env node\n",
       },
       define: {
-        __PATHWAYOS_BUILD_RELAY_URL__: JSON.stringify(repoEnv.PATHWAYOS_RELAY_URL?.trim() ?? ""),
+        __PATHWAYOS_BUILD_RELAY_URL__: JSON.stringify(
+          repoEnv.PATHWAYOS_CONNECT_URL?.trim() || repoEnv.PATHWAYOS_RELAY_URL?.trim() || "",
+        ),
         __PATHWAYOS_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
           repoEnv.PATHWAYOS_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
         ),

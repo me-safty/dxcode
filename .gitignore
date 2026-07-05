@@ -6,6 +6,7 @@ node_modules
 *.tsbuildinfo
 apps/*/dist
 infra/*/dist
+infra/connect-convex/convex/_generated/
 .astro
 packages/*/dist
 .env

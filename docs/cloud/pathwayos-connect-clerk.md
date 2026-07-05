@@ -13,12 +13,14 @@ or `.env.local` file:
 PATHWAYOS_CLERK_PUBLISHABLE_KEY=<publishable key>
 PATHWAYOS_CLERK_JWT_TEMPLATE=<JWT template name>
 PATHWAYOS_CLERK_CLI_OAUTH_CLIENT_ID=<public OAuth application client ID>
-PATHWAYOS_RELAY_URL=https://relay.example.com
+PATHWAYOS_CONNECT_URL=https://connect.example.com
 ```
 
 The shared client loader projects these canonical values into framework-specific `VITE_*` and
 `EXPO_PUBLIC_*` aliases. Existing aliases remain accepted as overrides for compatibility, but new
-client configuration should use the canonical names.
+client configuration should use the canonical names. `PATHWAYOS_RELAY_URL` and
+`VITE_PATHWAYOS_RELAY_URL` remain compatibility aliases while the Connect backend moves from the
+hosted relay to Convex.
 
 Configuration precedence is:
 
@@ -26,13 +28,13 @@ Configuration precedence is:
 2. Repository-root `.env.local`.
 3. Repository-root `.env`.
 
-The Clerk publishable key, JWT template name, CLI OAuth client ID, and relay URL are public
+The Clerk publishable key, JWT template name, CLI OAuth client ID, and Connect URL are public
 identifiers, not secrets.
 Web, desktop, mobile, and bundled server builds statically inject the values they consume during
 their build step. A built artifact does not need an environment file at runtime. CI release builds
 should set `PATHWAYOS_CLERK_PUBLISHABLE_KEY`, `PATHWAYOS_CLERK_JWT_TEMPLATE`,
-`PATHWAYOS_CLERK_CLI_OAUTH_CLIENT_ID`, and `PATHWAYOS_RELAY_URL` before building. EAS preview and
-production builds only need the Clerk publishable key, JWT template name, and relay URL in their EAS
+`PATHWAYOS_CLERK_CLI_OAUTH_CLIENT_ID`, and `PATHWAYOS_CONNECT_URL` before building. EAS preview and
+production builds only need the Clerk publishable key, JWT template name, and Connect URL in their EAS
 environment.
 
 When any client-facing public value is absent, cloud UI is omitted. When the CLI public values are
@@ -114,8 +116,9 @@ In **Clerk Dashboard > JWT templates**, create a template with:
 Set `PATHWAYOS_CLERK_JWT_TEMPLATE=pathwayos-relay` in the repository-root `.env`, and set
 `CLERK_JWT_AUDIENCE=pathwayos-relay` in `infra/relay/.env`. Define `CLERK_JWT_TEMPLATE` and
 `CLERK_JWT_AUDIENCE` in the production relay deployment environment as well. The stable `aud` value
-is shared by production and non-production relay stages. The client-facing `PATHWAYOS_RELAY_URL` still
-selects the concrete relay deployment, but changing that URL does not require a JWT template change.
+is shared by production and non-production relay stages. The client-facing `PATHWAYOS_CONNECT_URL`
+selects the concrete Connect backend deployment, but changing that URL does not require a JWT
+template change.
 
 ## Desktop OAuth Redirect Allowlist
 
@@ -211,9 +214,11 @@ For a private beta where people should request access, use **Clerk Dashboard > W
 1. Toggle on **Enable waitlist** and save.
 2. Review requests on the same page and select **Invite** or **Deny**.
 
-Approved signed-in users manage pathwayOS Connect under **Connections**. The web and desktop sidebars do
-not expose a dedicated account or waitlist control. Signed-out users reach Clerk's waitlist and
-sign-in flow contextually from the pathwayOS Connect controls on the Connections page.
+Approved signed-in users manage pathwayOS Connect under **Connections**. The web and desktop sidebars
+also expose a compact account area in the main footer: signed-out users can open the Clerk sign-in
+flow, and signed-in users can open their profile, mobile clients, and Settings actions. The initial
+profile tier label is `Free`; paid plan display and permission checks are handled by a later billing
+phase.
 
 On mobile, signed-out users open **Settings > PathwayOS Account** to reach `/settings/waitlist` within the
 Settings form sheet. It submits enrollment through Clerk's `useWaitlist()` flow because the prebuilt

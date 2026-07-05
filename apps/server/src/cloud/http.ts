@@ -104,7 +104,8 @@ const requireRelayUrl = relayUrlConfig.pipe(
   Effect.mapError(
     () =>
       new EnvironmentHttpInternalServerError({
-        message: "PATHWAYOS_RELAY_URL must be configured as a secure absolute HTTPS origin.",
+        message:
+          "PATHWAYOS_CONNECT_URL or PATHWAYOS_RELAY_URL must be configured as a secure absolute HTTPS origin.",
       }),
   ),
 );

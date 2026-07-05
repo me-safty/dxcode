@@ -25,6 +25,28 @@ export type ContextWindowSnapshot = NullableContextWindowUsage & {
   readonly updatedAt: string;
 };
 
+export interface CodexRateLimitWindowSnapshot {
+  readonly label: string;
+  readonly usedPercent: number;
+  readonly remainingPercent: number;
+  readonly resetsAt: number | null;
+  readonly resetLabel: string | null;
+}
+
+export interface CodexRateLimitSnapshot {
+  readonly planType: string | null;
+  readonly primary: CodexRateLimitWindowSnapshot | null;
+  readonly secondary: CodexRateLimitWindowSnapshot | null;
+  readonly individualLimit: {
+    readonly used: string;
+    readonly limit: string;
+    readonly remainingPercent: number;
+    readonly resetsAt: number;
+    readonly resetLabel: string | null;
+  } | null;
+  readonly updatedAt: string;
+}
+
 /** Map a provider driver kind to a user-facing display name. */
 export function formatProviderDisplayName(provider: string | null | undefined): string {
   if (!provider) return "This agent";
@@ -90,6 +112,136 @@ export function deriveLatestContextWindowSnapshot(
       compactsAutomatically: asBoolean(payload?.compactsAutomatically) ?? false,
       updatedAt: activity.createdAt,
     };
+  }
+
+  return null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function formatRateLimitWindowLabel(minutes: number | null, fallback: string): string {
+  if (minutes === null || !Number.isFinite(minutes) || minutes <= 0) {
+    return fallback;
+  }
+  if (minutes < 60) {
+    return `${Math.round(minutes)}m`;
+  }
+  if (minutes < 60 * 24) {
+    return `${Math.round(minutes / 60)}h`;
+  }
+  if (minutes === 60 * 24 * 7) {
+    return "Weekly";
+  }
+  return `${Math.round(minutes / (60 * 24))}d`;
+}
+
+function formatRateLimitReset(value: number | null): string | null {
+  if (value === null || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const millis = value < 1_000_000_000_000 ? value * 1_000 : value;
+  const date = new Date(millis);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (sameDay) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return date.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+function deriveRateLimitWindow(
+  value: unknown,
+  fallbackLabel: string,
+): CodexRateLimitWindowSnapshot | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const usedPercent = asFiniteNumber(record.usedPercent);
+  if (usedPercent === null) {
+    return null;
+  }
+  const boundedUsedPercent = Math.max(0, Math.min(100, usedPercent));
+  const resetsAt = asFiniteNumber(record.resetsAt);
+  return {
+    label: formatRateLimitWindowLabel(asFiniteNumber(record.windowDurationMins), fallbackLabel),
+    usedPercent: boundedUsedPercent,
+    remainingPercent: Math.max(0, 100 - boundedUsedPercent),
+    resetsAt,
+    resetLabel: formatRateLimitReset(resetsAt),
+  };
+}
+
+function deriveIndividualLimit(value: unknown): CodexRateLimitSnapshot["individualLimit"] {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const used = asString(record.used);
+  const limit = asString(record.limit);
+  const remainingPercent = asFiniteNumber(record.remainingPercent);
+  const resetsAt = asFiniteNumber(record.resetsAt);
+  if (!used || !limit || remainingPercent === null || resetsAt === null) {
+    return null;
+  }
+  return {
+    used,
+    limit,
+    remainingPercent: Math.max(0, Math.min(100, remainingPercent)),
+    resetsAt,
+    resetLabel: formatRateLimitReset(resetsAt),
+  };
+}
+
+export function deriveCodexRateLimitSnapshotFromPayload(
+  payloadValue: unknown,
+  updatedAt: string,
+): CodexRateLimitSnapshot | null {
+  const rawPayload = asRecord(payloadValue);
+  const payload = asRecord(rawPayload?.rateLimits) ?? rawPayload;
+  if (!payload) {
+    return null;
+  }
+
+  const primary = deriveRateLimitWindow(payload.primary, "Primary");
+  const secondary = deriveRateLimitWindow(payload.secondary, "Secondary");
+  const individualLimit = deriveIndividualLimit(payload.individualLimit);
+  if (!primary && !secondary && !individualLimit) {
+    return null;
+  }
+
+  return {
+    planType: asString(payload.planType),
+    primary,
+    secondary,
+    individualLimit,
+    updatedAt,
+  };
+}
+
+export function deriveLatestCodexRateLimitSnapshot(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): CodexRateLimitSnapshot | null {
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
+    if (!activity || activity.kind !== "account-rate-limits.updated") {
+      continue;
+    }
+
+    const snapshot = deriveCodexRateLimitSnapshotFromPayload(activity.payload, activity.createdAt);
+    if (snapshot) {
+      return snapshot;
+    }
   }
 
   return null;

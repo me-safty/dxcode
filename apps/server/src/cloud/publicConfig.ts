@@ -92,7 +92,9 @@ export function resolveRelayClientTracingConfig(
 }
 
 export function makeRelayUrlConfig(fallback = buildTimeRelayUrl) {
-  const runtimeConfig = Config.nonEmptyString("PATHWAYOS_RELAY_URL");
+  const runtimeConfig = Config.nonEmptyString("PATHWAYOS_CONNECT_URL").pipe(
+    Config.orElse(() => Config.nonEmptyString("PATHWAYOS_RELAY_URL")),
+  );
   return (fallback ? runtimeConfig.pipe(Config.withDefault(fallback)) : runtimeConfig).pipe(
     Config.mapOrFail(validateRelayUrl),
   );
@@ -160,8 +162,12 @@ export function makeCloudCliOAuthConfig({
 
 export const cloudCliOAuthConfig = makeCloudCliOAuthConfig();
 
+function configuredRelayUrlFromEnv(env: Readonly<Record<string, string | undefined>>): string {
+  return env.PATHWAYOS_CONNECT_URL?.trim() || env.PATHWAYOS_RELAY_URL?.trim() || "";
+}
+
 export const hasCloudPublicConfig = Boolean(
-  (normalizeSecureRelayUrl(process.env.PATHWAYOS_RELAY_URL ?? "") ?? buildTimeRelayUrl) &&
+  (normalizeSecureRelayUrl(configuredRelayUrlFromEnv(process.env)) ?? buildTimeRelayUrl) &&
   (process.env.PATHWAYOS_CLERK_PUBLISHABLE_KEY?.trim() || buildTimeClerkPublishableKey) &&
   (process.env.PATHWAYOS_CLERK_CLI_OAUTH_CLIENT_ID?.trim() || buildTimeClerkCliOAuthClientId),
 );

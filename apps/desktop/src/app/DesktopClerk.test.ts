@@ -4,14 +4,33 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { createClerkBridgeMock, storageAdapter, storageMock } = vi.hoisted(() => ({
+const {
+  createClerkBridgeMock,
+  onBeforeSendHeadersMock,
+  onHeadersReceivedMock,
+  storageAdapter,
+  storageMock,
+} = vi.hoisted(() => ({
   createClerkBridgeMock: vi.fn(),
+  onBeforeSendHeadersMock: vi.fn(),
+  onHeadersReceivedMock: vi.fn(),
   storageAdapter: {
     getItem: vi.fn(),
     setItem: vi.fn(),
     removeItem: vi.fn(),
   },
   storageMock: vi.fn(),
+}));
+
+vi.mock("electron", () => ({
+  session: {
+    defaultSession: {
+      webRequest: {
+        onBeforeSendHeaders: onBeforeSendHeadersMock,
+        onHeadersReceived: onHeadersReceivedMock,
+      },
+    },
+  },
 }));
 
 vi.mock("@clerk/electron", () => ({
@@ -39,6 +58,8 @@ const makeDesktopClerkLayer = (isDevelopment = true) => {
 describe("DesktopClerk", () => {
   beforeEach(() => {
     createClerkBridgeMock.mockReset();
+    onBeforeSendHeadersMock.mockReset();
+    onHeadersReceivedMock.mockReset();
     storageMock.mockReset();
   });
 
@@ -53,6 +74,164 @@ describe("DesktopClerk", () => {
     assert.equal(DesktopClerk.resolveDesktopClerkFrontendApiHostname("invalid"), undefined);
   });
 
+  it("strips Origin from Clerk native SDK requests", () => {
+    const requestHeaders = {
+      Accept: "*/*",
+      Authorization: "Bearer client-jwt",
+      Origin: "pathwayos-dev://app",
+    };
+
+    assert.deepEqual(
+      DesktopClerk.sanitizeClerkNativeRequestHeaders(
+        {
+          requestHeaders,
+          url: "https://clerk.pathwayos.codes/v1/client?_is_native=1",
+        },
+        "clerk.pathwayos.codes",
+      ),
+      {
+        Accept: "*/*",
+        Authorization: "Bearer client-jwt",
+      },
+    );
+    assert.deepEqual(requestHeaders, {
+      Accept: "*/*",
+      Authorization: "Bearer client-jwt",
+      Origin: "pathwayos-dev://app",
+    });
+  });
+
+  it("leaves non-native or non-Clerk request headers untouched", () => {
+    const requestHeaders = {
+      Authorization: "Bearer token",
+      Origin: "pathwayos-dev://app",
+    };
+
+    assert.strictEqual(
+      DesktopClerk.sanitizeClerkNativeRequestHeaders(
+        {
+          requestHeaders,
+          url: "https://clerk.pathwayos.codes/v1/client",
+        },
+        "clerk.pathwayos.codes",
+      ),
+      requestHeaders,
+    );
+    assert.strictEqual(
+      DesktopClerk.sanitizeClerkNativeRequestHeaders(
+        {
+          requestHeaders,
+          url: "https://other.example.test/v1/client?_is_native=1",
+        },
+        "clerk.pathwayos.codes",
+      ),
+      requestHeaders,
+    );
+  });
+
+  it("adds CORS response headers to Clerk native SDK responses", () => {
+    const responseHeaders = DesktopClerk.withClerkNativeCorsResponseHeaders(
+      {
+        responseHeaders: {
+          Existing: ["yes"],
+          "access-control-allow-origin": ["https://old.example.test"],
+        },
+        url: "https://clerk.pathwayos.codes/v1/client?_is_native=1",
+      },
+      "clerk.pathwayos.codes",
+      "pathwayos-dev://app",
+    );
+
+    assert.deepEqual(responseHeaders, {
+      Existing: ["yes"],
+      "Access-Control-Allow-Origin": ["pathwayos-dev://app"],
+      "Access-Control-Allow-Methods": ["GET,POST,PUT,PATCH,DELETE,OPTIONS"],
+      "Access-Control-Allow-Headers": ["authorization,content-type"],
+      "Access-Control-Expose-Headers": ["authorization"],
+      "Access-Control-Max-Age": ["600"],
+    });
+  });
+
+  it.effect("installs a scoped Clerk native SDK request sanitizer", () =>
+    Effect.gen(function* () {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* DesktopClerk.installClerkNativeRequestHeaderSanitizer(
+            "clerk.pathwayos.codes",
+            "pathwayos-dev://app",
+          );
+
+          assert.equal(onBeforeSendHeadersMock.mock.calls.length, 1);
+          assert.deepEqual(onBeforeSendHeadersMock.mock.calls[0]?.[0], {
+            urls: ["https://clerk.pathwayos.codes/*"],
+          });
+          assert.equal(onHeadersReceivedMock.mock.calls.length, 1);
+          assert.deepEqual(onHeadersReceivedMock.mock.calls[0]?.[0], {
+            urls: ["https://clerk.pathwayos.codes/*"],
+          });
+
+          const listener = onBeforeSendHeadersMock.mock.calls[0]?.[1];
+          assert.equal(typeof listener, "function");
+          const callback = vi.fn();
+          listener(
+            {
+              requestHeaders: {
+                Authorization: "Bearer client-jwt",
+                Origin: "pathwayos-dev://app",
+              },
+              url: "https://clerk.pathwayos.codes/v1/environment?_is_native=1",
+            },
+            callback,
+          );
+
+          assert.deepEqual(callback.mock.calls, [
+            [
+              {
+                requestHeaders: {
+                  Authorization: "Bearer client-jwt",
+                },
+              },
+            ],
+          ]);
+
+          const responseListener = onHeadersReceivedMock.mock.calls[0]?.[1];
+          assert.equal(typeof responseListener, "function");
+          const responseCallback = vi.fn();
+          responseListener(
+            {
+              responseHeaders: {},
+              url: "https://clerk.pathwayos.codes/v1/environment?_is_native=1",
+            },
+            responseCallback,
+          );
+
+          assert.deepEqual(responseCallback.mock.calls, [
+            [
+              {
+                responseHeaders: {
+                  "Access-Control-Allow-Origin": ["pathwayos-dev://app"],
+                  "Access-Control-Allow-Methods": ["GET,POST,PUT,PATCH,DELETE,OPTIONS"],
+                  "Access-Control-Allow-Headers": ["authorization,content-type"],
+                  "Access-Control-Expose-Headers": ["authorization"],
+                  "Access-Control-Max-Age": ["600"],
+                },
+              },
+            ],
+          ]);
+        }),
+      );
+
+      assert.deepEqual(onBeforeSendHeadersMock.mock.calls[1], [
+        { urls: ["https://clerk.pathwayos.codes/*"] },
+        null,
+      ]);
+      assert.deepEqual(onHeadersReceivedMock.mock.calls[1], [
+        { urls: ["https://clerk.pathwayos.codes/*"] },
+        null,
+      ]);
+    }),
+  );
+
   it.effect("acquires and releases the SDK bridge with the layer", () => {
     const cleanup = vi.fn();
     storageMock.mockReturnValue(storageAdapter);
@@ -66,7 +245,11 @@ describe("DesktopClerk", () => {
           {
             storage: storageAdapter,
             passkeys: true,
-            renderer: { scheme: "pathwayos-dev", host: "app" },
+            renderer: {
+              scheme: "pathwayos-dev",
+              host: "app",
+              privileges: { corsEnabled: false },
+            },
           },
         ],
       ]);
@@ -142,7 +325,11 @@ describe("DesktopClerk", () => {
         {
           storage: storageAdapter,
           passkeys: true,
-          renderer: { scheme, host: "app" },
+          renderer: {
+            scheme,
+            host: "app",
+            privileges: { corsEnabled: false },
+          },
         },
       ],
     ]);
