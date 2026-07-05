@@ -32,7 +32,7 @@ import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import { layer as idAllocatorLayer } from "./IdAllocator.ts";
 import type { ProviderAdapterV2Event, ProviderAdapterV2SessionRuntime } from "./ProviderAdapter.ts";
-import { ProviderEventIngestorV2 } from "./ProviderEventIngestor.ts";
+import { ProviderEventIngestorV2, ProviderEventNormalizeError } from "./ProviderEventIngestor.ts";
 import {
   finalProviderThreadStatus,
   layer as runExecutionServiceLayer,
@@ -457,5 +457,169 @@ it.effect("keeps ingesting owned child events after the root turn terminalizes",
     );
     assert.isTrue(Option.isSome(observed), "child message was not ingested after root terminal");
     assert.deepEqual(yield* Ref.get(order), ["root-finalized", "child-message"]);
+  }),
+);
+
+it.effect("drops a poison event whose ingestion fails and keeps ingesting later events", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:run-execution-poison");
+    const runId = RunId.make("run:run-execution-poison");
+    const attemptId = RunAttemptId.make("attempt:run-execution-poison");
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const providerSessionId = ProviderSessionId.make("session:run-execution-poison");
+    const providerThreadId = ProviderThreadId.make("provider-thread:run-execution-poison");
+    const rootProviderTurnId = ProviderTurnId.make("provider-turn:run-execution-poison");
+    const rootNodeId = NodeId.make("node:run-execution-poison");
+    const poisonMessageId = MessageId.make("message:run-execution-poison:poison");
+    const goodMessageId = MessageId.make("message:run-execution-poison:good");
+    const goodMessageIngested = yield* Deferred.make<void>();
+    const rootFinalized = yield* Deferred.make<void>();
+    const order = yield* Ref.make<ReadonlyArray<string>>([]);
+    const testLayer = runExecutionServiceLayer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
+          Layer.mock(EventSinkV2)({
+            write: () => Effect.succeed([]),
+            writeWithEffects: (input) =>
+              Effect.gen(function* () {
+                if (
+                  input.events.some(
+                    (event) => event.type === "run.updated" && event.runId === runId,
+                  )
+                ) {
+                  yield* Ref.update(order, (current) => [...current, "root-finalized"]);
+                  yield* Deferred.succeed(rootFinalized, undefined).pipe(Effect.ignore);
+                }
+                return [];
+              }),
+            writeIfRunCurrent: () => Effect.succeed({ committed: true, storedEvents: [] }),
+          }),
+          idAllocatorLayer,
+          Layer.mock(ProviderEventIngestorV2)({
+            ingestNormalized: (input) =>
+              Effect.gen(function* () {
+                if (
+                  input.event.type === "message.updated" &&
+                  input.event.message.id === poisonMessageId
+                ) {
+                  return yield* new ProviderEventNormalizeError({
+                    providerSessionId,
+                    threadId,
+                    providerEvent: input.event,
+                  });
+                }
+                if (
+                  input.event.type === "message.updated" &&
+                  input.event.message.id === goodMessageId
+                ) {
+                  yield* Ref.update(order, (current) => [...current, "good-message"]);
+                  yield* Deferred.succeed(goodMessageIngested, undefined).pipe(Effect.ignore);
+                }
+                return [];
+              }),
+          }),
+          ServerSettingsService.layerTest(),
+        ),
+      ),
+    );
+    const events: ReadonlyArray<ProviderAdapterV2Event> = [
+      {
+        type: "message.updated",
+        driver,
+        message: {
+          id: poisonMessageId,
+          threadId,
+          runId,
+          nodeId: rootNodeId,
+          role: "assistant",
+          text: "poison",
+          streaming: false,
+        },
+      } as ProviderAdapterV2Event,
+      {
+        type: "message.updated",
+        driver,
+        message: {
+          id: goodMessageId,
+          threadId,
+          runId,
+          nodeId: rootNodeId,
+          role: "assistant",
+          text: "good",
+          streaming: false,
+        },
+      } as ProviderAdapterV2Event,
+      {
+        type: "turn.terminal",
+        driver,
+        providerThreadId,
+        providerTurnId: rootProviderTurnId,
+        runOrdinal: 1,
+        status: "completed",
+        failure: null,
+        threadDisposition: "reusable",
+      },
+    ];
+
+    yield* Effect.gen(function* () {
+      const runExecution = yield* RunExecutionServiceV2;
+      yield* runExecution.startRootRun({
+        commandId: CommandId.make("command:run-execution-poison"),
+        appThread: { id: threadId } as OrchestrationV2AppThread,
+        providerSessionId,
+        session: {
+          events: Stream.fromIterable(events),
+          startTurn: () => Effect.void,
+        } as unknown as ProviderAdapterV2SessionRuntime,
+        run: {
+          id: runId,
+          threadId,
+          ordinal: 1,
+          providerInstanceId,
+        } as OrchestrationV2Run,
+        rootNode: { id: rootNodeId } as OrchestrationV2ExecutionNode,
+        checkpointScope: {
+          id: CheckpointScopeId.make("checkpoint-scope:run-execution-poison"),
+        } as OrchestrationV2CheckpointScope,
+        providerThread: {
+          id: providerThreadId,
+          driver,
+        } as OrchestrationV2ProviderThread,
+        attempt: {
+          id: attemptId,
+          providerTurnId: rootProviderTurnId,
+        } as OrchestrationV2RunAttempt,
+        attemptId,
+        providerTurnOrdinal: 1,
+        message: {
+          messageId: MessageId.make("message:run-execution-poison:user"),
+          text: "Survive a poison event.",
+          attachments: [],
+          createdBy: "user",
+          creationSource: "web",
+        },
+        modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+          approvalPolicy: "never",
+          sandboxPolicy: {
+            type: "readOnly",
+            access: { type: "fullAccess" },
+            networkAccess: false,
+          },
+        },
+      });
+    }).pipe(Effect.provide(testLayer));
+
+    const observed = yield* Deferred.await(goodMessageIngested).pipe(
+      Effect.timeoutOption("2 seconds"),
+    );
+    assert.isTrue(Option.isSome(observed), "good event was not ingested after the poison event");
+    const finalized = yield* Deferred.await(rootFinalized).pipe(Effect.timeoutOption("2 seconds"));
+    assert.isTrue(finalized._tag === "Some", "root run was not finalized after the poison event");
+    assert.deepEqual(yield* Ref.get(order), ["good-message", "root-finalized"]);
   }),
 );
