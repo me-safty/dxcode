@@ -33,16 +33,17 @@ interface EnvironmentHttpAuthHeaders {
  * - bearer connections send a static `Bearer` token,
  * - relay connections send a `DPoP` access token with a freshly signed proof
  *   bound to this request's method and URL.
+ *
+ * The DPoP signer is passed in (not resolved from context) and is only required
+ * for relay/DPoP connections, so bearer/primary connections work even when no
+ * signer is available.
  */
 const buildAuthHeaders = (
   authorization: PreparedHttpAuthorization | null,
   method: HttpMethod.HttpMethod,
   url: string,
-): Effect.Effect<
-  EnvironmentHttpAuthHeaders,
-  RemoteEnvironmentAuthFetchError,
-  ManagedRelayDpopSigner
-> =>
+  signer: Option.Option<ManagedRelayDpopSigner["Service"]>,
+): Effect.Effect<EnvironmentHttpAuthHeaders, RemoteEnvironmentAuthFetchError> =>
   Effect.gen(function* () {
     if (authorization === null) {
       return {};
@@ -50,8 +51,13 @@ const buildAuthHeaders = (
     if (authorization._tag === "Bearer") {
       return { authorization: `Bearer ${authorization.token}` };
     }
-    const signer = yield* ManagedRelayDpopSigner;
-    const proof = yield* signer
+    if (Option.isNone(signer)) {
+      return yield* new RemoteEnvironmentAuthFetchError({
+        message: "No DPoP signer is available to authorize the thread snapshot request.",
+        cause: authorization._tag,
+      });
+    }
+    const proof = yield* signer.value
       .createProof({ method, url, accessToken: authorization.accessToken })
       .pipe(
         Effect.mapError(
@@ -75,6 +81,7 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
 )(function* (input: {
   readonly prepared: PreparedConnection;
   readonly threadId: ThreadId;
+  readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
   readonly timeoutMs?: number;
 }) {
   const requestUrl = environmentEndpointUrl(
@@ -82,7 +89,12 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
     `/api/orchestration/threads/${input.threadId}`,
   );
   const client = yield* makeEnvironmentHttpApiClient(input.prepared.httpBaseUrl);
-  const headers = yield* buildAuthHeaders(input.prepared.httpAuthorization, "GET", requestUrl);
+  const headers = yield* buildAuthHeaders(
+    input.prepared.httpAuthorization,
+    "GET",
+    requestUrl,
+    input.signer,
+  );
   return yield* executeEnvironmentHttpRequest(
     requestUrl,
     input.timeoutMs ?? DEFAULT_THREAD_SNAPSHOT_TIMEOUT_MS,
@@ -114,18 +126,20 @@ export class ThreadSnapshotLoader extends Context.Service<
 export const threadSnapshotLoaderLayer: Layer.Layer<
   ThreadSnapshotLoader,
   never,
-  HttpClient.HttpClient | ManagedRelayDpopSigner
+  HttpClient.HttpClient
 > = Layer.effect(
   ThreadSnapshotLoader,
   Effect.gen(function* () {
     const httpClient = yield* HttpClient.HttpClient;
-    const signer = yield* ManagedRelayDpopSigner;
+    // Resolve the DPoP signer optionally: it is only needed for relay/DPoP
+    // connections, so the loader must not hard-require it (bearer/primary
+    // connections work without one).
+    const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
     return ThreadSnapshotLoader.of({
       load: (prepared: PreparedConnection, threadId: ThreadId) =>
-        fetchEnvironmentThreadSnapshot({ prepared, threadId }).pipe(
+        fetchEnvironmentThreadSnapshot({ prepared, threadId, signer }).pipe(
           Effect.map(Option.some<OrchestrationThreadDetailSnapshot>),
           Effect.provideService(HttpClient.HttpClient, httpClient),
-          Effect.provideService(ManagedRelayDpopSigner, signer),
           // A genuinely missing thread (404) is expected — the socket
           // subscription is the source of truth for thread existence and will
           // surface the deletion — so don't treat it as an error worth warning
