@@ -5,10 +5,13 @@ import {
   type RelayClientInstallProgressStage,
 } from "@t3tools/contracts";
 import { RelayOkResponse } from "@t3tools/contracts/relay";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import * as Terminal from "effect/Terminal";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
+import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -16,6 +19,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as References from "effect/References";
+import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
 import {
   FetchHttpClient,
@@ -25,8 +29,10 @@ import {
 } from "effect/unstable/http";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as BootService from "../cloud/bootService.ts";
 import * as CliState from "../cloud/CliState.ts";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
 import { CLOUD_LINKED_USER_ID, RELAY_URL_SECRET } from "../cloud/config.ts";
@@ -41,6 +47,66 @@ const jsonFlag = Flag.boolean("json").pipe(
   Flag.withDescription("Emit JSON instead of human-readable output."),
   Flag.withDefault(false),
 );
+
+const isCloudCliTokenManagerError = Schema.is(CliTokenManager.CloudCliTokenManagerError);
+
+const pasteFlag = Flag.boolean("paste").pipe(
+  Flag.withDescription(
+    "Authorize by pasting a code from the hosted app instead of a local browser callback.",
+  ),
+  Flag.withDefault(false),
+);
+
+/**
+ * Inside an SSH session there is no local browser to complete the loopback
+ * OAuth callback, so the paste-code flow is the only one that can work.
+ */
+const detectHeadlessSession = Effect.map(
+  HostProcessEnvironment,
+  (env) => env.SSH_CONNECTION !== undefined || env.SSH_TTY !== undefined,
+);
+
+const promptForPastedCode = ({ authorizeUrl, validate }: CliTokenManager.PasteCodePromptInput) =>
+  Console.log(`To set up T3 Connect, open this URL and sign in:\n  ${authorizeUrl}\n`).pipe(
+    Effect.andThen(
+      Prompt.run(Prompt.text({ message: "Paste your authentication code here", validate })),
+    ),
+  );
+
+/** Returns the connected account identity, if the flow could determine one. */
+const authorizeCli = Effect.fn("cloud.cli.authorize")(function* (options: {
+  readonly paste: boolean;
+}) {
+  const tokens = yield* CliTokenManager.CloudCliTokenManager;
+  const paste = options.paste || (yield* detectHeadlessSession);
+  if (!paste) {
+    yield* tokens.get;
+    return null;
+  }
+  // A stored credential whose refresh fails (revoked, expired grant) must
+  // fall through to a fresh paste login, not dead-end the command.
+  const existing = yield* tokens.getExisting.pipe(
+    Effect.catchTag("CloudCliCredentialRefreshError", () =>
+      Console.log(
+        "The stored T3 Connect credential could not be refreshed; signing in again.",
+      ).pipe(Effect.as(Option.none())),
+    ),
+  );
+  if (Option.isSome(existing)) {
+    return null;
+  }
+  const { token, identity } = yield* CliTokenManager.pasteCodeLogin(promptForPastedCode).pipe(
+    Effect.mapError((cause) =>
+      // Ctrl-C / EOF at the prompt is a QuitError; let it propagate so the CLI
+      // cancels quietly instead of dumping an authorization error.
+      Terminal.isQuitError(cause) || isCloudCliTokenManagerError(cause)
+        ? cause
+        : new CliTokenManager.CloudCliAuthorizationError({ cause }),
+    ),
+  );
+  yield* tokens.store(token);
+  return identity;
+});
 
 function bytesToString(value: Uint8Array): string {
   return new TextDecoder().decode(value);
@@ -299,6 +365,21 @@ const disconnectCloud = Effect.fn("cloud.cli.disconnect")(function* (options: {
   if (options.clearAuthorization) {
     const tokens = yield* CliTokenManager.CloudCliTokenManager;
     yield* tokens.clear;
+
+    // uninstall itself no-ops when nothing is installed (and on non-Linux),
+    // so no status pre-check that could mask a real removal failure.
+    const bootService = yield* BootService.BootService;
+    yield* bootService.uninstall.pipe(
+      Effect.tap((removed) =>
+        removed ? Console.log("Removed the T3 Code background service.") : Effect.void,
+      ),
+      Effect.catchTag("BootServiceUnsupportedError", () => Effect.succeed(false)),
+      Effect.catch((error) =>
+        Console.warn(`Could not remove the background service: ${error.message}`).pipe(
+          Effect.as(false),
+        ),
+      ),
+    );
   }
 
   yield* reportCloudDisconnectResults({
@@ -321,6 +402,8 @@ const runCloudCommand = <A, E>(
     | CliTokenManager.CloudCliTokenManager
     | RelayClient.RelayClient
     | EnvironmentAuth.EnvironmentAuth
+    | BootService.BootService
+    | Crypto.Crypto
     | FileSystem.FileSystem
     | HttpClient.HttpClient
     | Prompt.Environment
@@ -341,6 +424,11 @@ const runCloudCommand = <A, E>(
       RelayClient.layerCloudflared({ baseDir: config.baseDir }),
       EnvironmentAuth.runtimeLayer,
       ServerEnvironment.layer,
+      BootService.layer({
+        baseDir: config.baseDir,
+        logsDir: config.logsDir,
+        cliVersion: packageJson.version,
+      }),
       headlessRelayClientTracingLayer,
     ).pipe(
       Layer.provideMerge(FetchHttpClient.layer),
@@ -350,17 +438,41 @@ const runCloudCommand = <A, E>(
     return yield* run.pipe(Effect.provide(runtimeLayer));
   });
 
+const connectedAs = (identity: string | null): string => (identity ? ` as ${identity}` : "");
+
+const linkEnvironmentForConnect = Effect.fn("cloud.cli.link_environment")(function* (options: {
+  readonly paste: boolean;
+}) {
+  const relayClient = yield* RelayClient.RelayClient;
+  const installed = yield* acquireRelayClientForLink(
+    relayClient,
+    confirmRelayClientInstall,
+    reportRelayClientInstallProgress,
+  );
+  if (Option.isNone(installed)) {
+    yield* Console.log("T3 Connect setup cancelled. The relay client was not installed.");
+    return null;
+  }
+  yield* Console.log(
+    `Using relay client ${installed.value.version} from ${installed.value.executablePath}.`,
+  );
+
+  const identity = yield* authorizeCli(options);
+  yield* CliState.setCliDesiredCloudLink(true);
+  return { identity } as const;
+});
+
 const connectLoginCommand = Command.make("login", {
   ...projectLocationFlags,
+  paste: pasteFlag,
 }).pipe(
   Command.withDescription("Authorize the T3 Connect CLI without enabling remote access."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
-        const tokens = yield* CliTokenManager.CloudCliTokenManager;
-        yield* tokens.get;
-        yield* Console.log("Signed in to T3 Connect.");
+        const identity = yield* authorizeCli(flags);
+        yield* Console.log(`Signed in to T3 Connect${connectedAs(identity)}.`);
       }),
     ),
   ),
@@ -368,32 +480,20 @@ const connectLoginCommand = Command.make("login", {
 
 const connectLinkCommand = Command.make("link", {
   ...projectLocationFlags,
+  paste: pasteFlag,
 }).pipe(
   Command.withDescription("Authorize this environment for T3 Connect on next start."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
-        const relayClient = yield* RelayClient.RelayClient;
-        const installed = yield* acquireRelayClientForLink(
-          relayClient,
-          confirmRelayClientInstall,
-          reportRelayClientInstallProgress,
-        );
-        if (Option.isNone(installed)) {
-          yield* Console.log("T3 Connect setup cancelled. The relay client was not installed.");
-          return;
+        const linked = yield* linkEnvironmentForConnect(flags);
+        if (linked) {
+          yield* Console.log(
+            `Authorized T3 Connect${connectedAs(linked.identity)}. This environment will be ` +
+              "available the next time T3 starts.",
+          );
         }
-        yield* Console.log(
-          `Using relay client ${installed.value.version} from ${installed.value.executablePath}.`,
-        );
-
-        const tokens = yield* CliTokenManager.CloudCliTokenManager;
-        yield* tokens.get;
-        yield* CliState.setCliDesiredCloudLink(true);
-        yield* Console.log(
-          "This T3 environment will be available through T3 Connect the next time T3 starts.",
-        );
       }),
     ),
   ),
@@ -456,8 +556,77 @@ const connectLogoutCommand = Command.make("logout", {
   ),
 );
 
-export const connectCommand = Command.make("connect").pipe(
-  Command.withDescription("Manage headless T3 Connect access."),
+const offerBootService = Effect.gen(function* () {
+  const bootService = yield* BootService.BootService;
+  const { supported, installed, current } = yield* bootService.status;
+  if (!supported) {
+    // Don't prompt for something that can only fail; background setup is
+    // Linux/systemd-only for now.
+    return false;
+  }
+  if (installed && current) {
+    yield* Console.log("T3 Code is already set up to run in the background on this machine.");
+    return true;
+  }
+  const wanted = yield* Prompt.run(
+    Prompt.confirm({
+      message: installed
+        ? "The installed T3 Code background service is from an older setup. Update it now?"
+        : "Run T3 Code in the background whenever this machine boots? " +
+          "It stays reachable through T3 Connect even after you log out.",
+      initial: true,
+    }),
+  );
+  if (!wanted) {
+    return false;
+  }
+  const plan = yield* bootService.install;
+  yield* Console.log(`Background service installed. Logs: ${plan.logPath}`);
+  return true;
+});
+
+export const connectCommand = Command.make("connect", {
+  ...projectLocationFlags,
+  paste: pasteFlag,
+}).pipe(
+  Command.withDescription("Set up T3 Connect for this machine."),
+  Command.withHandler((flags) =>
+    runCloudCommand(
+      flags,
+      Effect.gen(function* () {
+        const linked = yield* linkEnvironmentForConnect(flags);
+        if (!linked) {
+          return;
+        }
+        // Show which account was linked so an unexpected identity (a pasted
+        // code that authorized a different account) is visible before the
+        // machine is brought online.
+        yield* Console.log(`\nConnected${connectedAs(linked.identity)}!`);
+
+        // Connect itself already succeeded; a boot-service failure must not
+        // fail the command, just tell the user what happened and move on.
+        const background = yield* offerBootService.pipe(
+          Effect.catchTags({
+            BootServiceUnsupportedError: (error) =>
+              Console.log(`Skipping background setup: ${error.message}`).pipe(Effect.as(false)),
+            BootServiceCommandError: (error) =>
+              Console.warn(`Background setup did not finish: ${error.message}`).pipe(
+                Effect.as(false),
+              ),
+            BootServiceInstallError: (error) =>
+              Console.warn(`Background setup did not finish: ${error.message}`).pipe(
+                Effect.as(false),
+              ),
+          }),
+        );
+        yield* Console.log(
+          background
+            ? "\nGreat, T3 Code is now set up and ready to go."
+            : "\nT3 Connect is set up. Start the server with `t3 serve` to make this machine reachable.",
+        );
+      }),
+    ),
+  ),
   Command.withSubcommands([
     connectLoginCommand,
     connectLinkCommand,
