@@ -432,26 +432,35 @@ function updateProviderSession(
   });
 }
 
-const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
+const closeOpenCodeContext = Effect.fn("closeOpenCodeContext")(function* (
   context: OpenCodeSessionContext,
+  options?: { readonly abortRemote?: boolean },
 ) {
   // Race-safe one-shot: first caller flips the flag, everyone else no-ops.
   if (yield* Ref.getAndSet(context.stopped, true)) {
     return false;
   }
 
-  // Best-effort remote abort. The scope close below tears down the local
-  // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
-  // but we still want to tell OpenCode that this session is done.
-  yield* runOpenCodeSdk("session.abort", () =>
-    context.client.session.abort({ sessionID: context.openCodeSessionId }),
-  ).pipe(Effect.ignore({ log: true }));
+  if (options?.abortRemote ?? true) {
+    // Best-effort remote abort. The scope close below tears down the local
+    // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
+    // but we still want to tell OpenCode that this session is done.
+    yield* runOpenCodeSdk("session.abort", () =>
+      context.client.session.abort({ sessionID: context.openCodeSessionId }),
+    ).pipe(Effect.ignore({ log: true }));
+  }
 
   // Closing the session scope interrupts every fiber forked into it and
   // runs each finalizer we registered — the `AbortController.abort()` call,
   // the child-process termination, etc.
   yield* Scope.close(context.sessionScope, Exit.void);
   return true;
+});
+
+const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
+  context: OpenCodeSessionContext,
+) {
+  return yield* closeOpenCodeContext(context, { abortRemote: true });
 });
 
 export function makeOpenCodeAdapter(
@@ -1061,9 +1070,14 @@ export function makeOpenCodeAdapter(
         const serverUrl = openCodeSettings.serverUrl;
         const serverPassword = openCodeSettings.serverPassword;
         const directory = input.cwd ?? serverConfig.cwd;
+        const incomingResumeCursor = parseOpenCodeResumeCursor(input.resumeCursor);
         const existing = sessions.get(input.threadId);
         if (existing) {
-          yield* stopOpenCodeContext(existing);
+          const shouldPreserveRemoteSession =
+            incomingResumeCursor?.sessionId === existing.openCodeSessionId;
+          yield* closeOpenCodeContext(existing, {
+            abortRemote: !shouldPreserveRemoteSession,
+          });
           sessions.delete(input.threadId);
         }
 
@@ -1100,10 +1114,9 @@ export function makeOpenCodeAdapter(
                   }),
                 );
               }
-              const resumeCursor = parseOpenCodeResumeCursor(input.resumeCursor);
-              const openCodeSession = resumeCursor
+              const openCodeSession = incomingResumeCursor
                 ? yield* runOpenCodeSdk("session.get", () =>
-                    client.session.get({ sessionID: resumeCursor.sessionId }),
+                    client.session.get({ sessionID: incomingResumeCursor.sessionId }),
                   )
                 : yield* runOpenCodeSdk("session.create", () =>
                     client.session.create({
@@ -1113,8 +1126,8 @@ export function makeOpenCodeAdapter(
                   );
               if (!openCodeSession.data) {
                 return yield* new OpenCodeRuntimeError({
-                  operation: resumeCursor ? "session.get" : "session.create",
-                  detail: resumeCursor
+                  operation: incomingResumeCursor ? "session.get" : "session.create",
+                  detail: incomingResumeCursor
                     ? "OpenCode session.get returned no session payload."
                     : "OpenCode session.create returned no session payload.",
                 });
@@ -1124,7 +1137,7 @@ export function makeOpenCodeAdapter(
                 server,
                 client,
                 openCodeSession: openCodeSession.data,
-                createdRemoteSession: resumeCursor === undefined,
+                createdRemoteSession: incomingResumeCursor === undefined,
               };
             }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
           );

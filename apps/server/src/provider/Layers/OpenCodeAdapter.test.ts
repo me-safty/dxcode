@@ -319,6 +319,39 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("preserves an existing upstream session when restarting with its resume cursor", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-restart-with-cursor");
+
+      const first = yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const cursor = first.resumeCursor;
+      NodeAssert.deepEqual(cursor, {
+        schemaVersion: 1,
+        sessionId: "http://127.0.0.1:9999/session",
+      });
+
+      const second = yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        resumeCursor: cursor,
+      });
+
+      NodeAssert.deepEqual(runtimeMock.state.abortCalls, []);
+      NodeAssert.deepEqual(runtimeMock.state.sessionGetCalls, ["http://127.0.0.1:9999/session"]);
+      NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, ["http://127.0.0.1:9999"]);
+      NodeAssert.deepEqual(second.resumeCursor, cursor);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("sends follow-up prompts to the resumed OpenCode session", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
