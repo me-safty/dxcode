@@ -91,7 +91,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     Effect.succeed({ commitSha: "abc123", remoteRefName: "origin/dev" }),
   );
   const createWorktree = vi.fn(
-    (input: { readonly newRefName?: string; readonly path: string | null }) =>
+    (input: { readonly newRefName?: string | undefined; readonly path: string | null }) =>
       Effect.succeed({
         worktree: {
           path: input.path ?? `/worktrees/project/${input.newRefName}`,
@@ -136,13 +136,13 @@ const makeHarness = (options: HarnessOptions = {}) => {
     makeInvocationLayer(options.capabilities ?? new Set(["preview", "worktree"])),
     Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
       dispatch,
-    } as Partial<OrchestrationEngine.OrchestrationEngineService["Service"]> as never),
+    } satisfies Partial<OrchestrationEngine.OrchestrationEngineService["Service"]>),
     Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
       getThreadDetailById: (id) =>
         Effect.succeed(id === threadId && thread ? Option.some(thread) : Option.none()),
       getProjectShellById: (id) =>
         Effect.succeed(id === projectId ? Option.some(projectShell) : Option.none()),
-    } as Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]> as never),
+    } satisfies Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>),
     ServerSettings.ServerSettingsService.layerTest({
       newWorktreesStartFromOrigin: options.newWorktreesStartFromOrigin ?? false,
     }),
@@ -151,13 +151,13 @@ const makeHarness = (options: HarnessOptions = {}) => {
       fetchRemote,
       resolveRemoteTrackingCommit,
       createWorktree,
-    } as Partial<GitWorkflowService.GitWorkflowService["Service"]> as never),
+    } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
     Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
       runForThread,
-    } as Partial<ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]> as never),
+    } satisfies Partial<ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]>),
     Layer.mock(VcsStatusBroadcaster)({
       refreshStatus,
-    } as Partial<VcsStatusBroadcaster["Service"]> as never),
+    } satisfies Partial<VcsStatusBroadcaster["Service"]>),
   ).pipe(Layer.provideMerge(NodeServices.layer));
 
   return {

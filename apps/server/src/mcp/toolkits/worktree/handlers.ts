@@ -2,6 +2,7 @@ import {
   CommandId,
   WorktreeCapabilityUnavailableError,
   WorktreeHandoffAlreadyInWorktreeError,
+  type WorktreeHandoffInput,
   WorktreeHandoffInvalidRequestError,
   type WorktreeHandoffResult,
   type WorktreeHandoffSetupScriptStatus,
@@ -35,7 +36,7 @@ const errorDetail = (error: unknown): string => {
 const asOperationError = (operation: WorktreeOperation) => (error: unknown) =>
   new WorktreeOperationError({ operation, detail: errorDetail(error) });
 
-const requireWorktreeCapability = Effect.gen(function* () {
+const requireWorktreeCapability = Effect.fn("mcp.requireWorktreeCapability")(function* () {
   const invocation = yield* McpInvocationContext.McpInvocationContext;
   if (!invocation.capabilities.has("worktree")) {
     return yield* new WorktreeCapabilityUnavailableError({
@@ -49,14 +50,10 @@ const requireWorktreeCapability = Effect.gen(function* () {
   return invocation;
 });
 
-const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (input: {
-  readonly branch: string;
-  readonly baseRef?: string | undefined;
-  readonly startFromOrigin?: boolean | undefined;
-  readonly path?: string | undefined;
-  readonly runSetupScript?: boolean | undefined;
-}) {
-  const invocation = yield* requireWorktreeCapability;
+const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
+  input: WorktreeHandoffInput,
+) {
+  const invocation = yield* requireWorktreeCapability();
   const crypto = yield* Crypto.Crypto;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -71,7 +68,7 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
   if (!thread) {
     return yield* new WorktreeThreadNotFoundError({ threadId: invocation.threadId });
   }
-  if (thread.worktreePath !== null && thread.worktreePath !== undefined) {
+  if (thread.worktreePath !== null) {
     return yield* new WorktreeHandoffAlreadyInWorktreeError({
       threadId: invocation.threadId,
       worktreePath: thread.worktreePath,
@@ -202,7 +199,7 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
 });
 
 const worktreeStatus = Effect.fn("WorktreeToolkit.worktreeStatus")(function* () {
-  const invocation = yield* requireWorktreeCapability;
+  const invocation = yield* requireWorktreeCapability();
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
 
