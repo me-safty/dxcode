@@ -264,6 +264,17 @@ export const make = Effect.gen(function* () {
         });
       }
 
+      // Refreshed eagerly on resize/move (not just when a persist runs) so a
+      // resize followed within the debounce window by fullscreen entry still
+      // captures the pre-fullscreen frame.
+      const refreshSnapshots = () => {
+        if (window.isFullScreen() || fullscreenExitPending) {
+          return;
+        }
+        lastRestorable = readRestorableState(window);
+        lastVisibleBounds = window.getBounds();
+      };
+
       const resolveDocument = (): PersistedWindowStateDocument => {
         if (window.isFullScreen() || fullscreenExitPending) {
           return {
@@ -271,8 +282,7 @@ export const make = Effect.gen(function* () {
             fullscreenOriginBounds: lastVisibleBounds,
           };
         }
-        lastRestorable = readRestorableState(window);
-        lastVisibleBounds = window.getBounds();
+        refreshSnapshots();
         return lastRestorable;
       };
 
@@ -329,8 +339,13 @@ export const make = Effect.gen(function* () {
         runFork(persistEffect);
       };
 
-      window.on("resize", schedulePersist);
-      window.on("move", schedulePersist);
+      const handleBoundsChange = () => {
+        refreshSnapshots();
+        schedulePersist();
+      };
+
+      window.on("resize", handleBoundsChange);
+      window.on("move", handleBoundsChange);
       window.on("maximize", persistNow);
       window.on("unmaximize", persistNow);
       window.on("enter-full-screen", persistNow);

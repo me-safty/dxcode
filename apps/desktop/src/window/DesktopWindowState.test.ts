@@ -451,6 +451,31 @@ describe("DesktopWindowState.attach", () => {
     ),
   );
 
+  it.live("captures a resize that lands inside the debounce window before fullscreen", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const fake = makeFakeWindow({ bounds: { x: 100, y: 100, width: 1000, height: 700 } });
+        yield* attachWindow(fake.window);
+
+        // Resize, then enter fullscreen before the 250ms debounced save fires:
+        // the resized frame must still be captured as the fullscreen origin.
+        const resized = { x: 60, y: 50, width: 1200, height: 800 };
+        fake.state.bounds = resized;
+        fake.emit("resize");
+        fake.state.fullScreen = true;
+        fake.state.bounds = { x: 0, y: 0, width: 1920, height: 1080 };
+        fake.emit("enter-full-screen");
+        fake.emit("close");
+
+        const document = yield* awaitPersistedDocument(
+          (candidate) => candidate.fullscreenOriginBounds !== undefined,
+        );
+        assert.deepEqual(document.fullscreenOriginBounds, resized);
+        assert.deepEqual(document.normalBounds, resized);
+      }),
+    ),
+  );
+
   it.live("close right after leave-full-screen keeps the fullscreen snapshot", () =>
     withWindowState(
       Effect.gen(function* () {
