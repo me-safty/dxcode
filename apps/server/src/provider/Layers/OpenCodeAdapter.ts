@@ -104,6 +104,20 @@ interface OpenCodeSessionContext {
   readonly sessionScope: Scope.Closeable;
 }
 
+interface OpenCodeSessionMemory {
+  readonly session: ProviderSession;
+  readonly pendingPermissions: OpenCodeSessionContext["pendingPermissions"];
+  readonly pendingQuestions: OpenCodeSessionContext["pendingQuestions"];
+  readonly messageRoleById: OpenCodeSessionContext["messageRoleById"];
+  readonly partById: OpenCodeSessionContext["partById"];
+  readonly emittedTextByPartId: OpenCodeSessionContext["emittedTextByPartId"];
+  readonly completedAssistantPartIds: OpenCodeSessionContext["completedAssistantPartIds"];
+  readonly turns: OpenCodeSessionContext["turns"];
+  readonly activeTurnId: OpenCodeSessionContext["activeTurnId"];
+  readonly activeAgent: OpenCodeSessionContext["activeAgent"];
+  readonly activeVariant: OpenCodeSessionContext["activeVariant"];
+}
+
 export interface OpenCodeAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
@@ -134,6 +148,22 @@ function parseOpenCodeResumeCursor(input: unknown): OpenCodeResumeCursor | undef
   return {
     schemaVersion: OPENCODE_RESUME_CURSOR_SCHEMA_VERSION,
     sessionId: cursor.sessionId,
+  };
+}
+
+function captureOpenCodeSessionMemory(context: OpenCodeSessionContext): OpenCodeSessionMemory {
+  return {
+    session: context.session,
+    pendingPermissions: context.pendingPermissions,
+    pendingQuestions: context.pendingQuestions,
+    messageRoleById: context.messageRoleById,
+    partById: context.partById,
+    emittedTextByPartId: context.emittedTextByPartId,
+    completedAssistantPartIds: context.completedAssistantPartIds,
+    turns: context.turns,
+    activeTurnId: context.activeTurnId,
+    activeAgent: context.activeAgent,
+    activeVariant: context.activeVariant,
   };
 }
 
@@ -1071,10 +1101,14 @@ export function makeOpenCodeAdapter(
         const serverPassword = openCodeSettings.serverPassword;
         const directory = input.cwd ?? serverConfig.cwd;
         const incomingResumeCursor = parseOpenCodeResumeCursor(input.resumeCursor);
+        let preservedSessionMemory: OpenCodeSessionMemory | undefined;
         const existing = sessions.get(input.threadId);
         if (existing) {
           const shouldPreserveRemoteSession =
             incomingResumeCursor?.sessionId === existing.openCodeSessionId;
+          preservedSessionMemory = shouldPreserveRemoteSession
+            ? captureOpenCodeSessionMemory(existing)
+            : undefined;
           yield* closeOpenCodeContext(existing, {
             abortRemote: !shouldPreserveRemoteSession,
           });
@@ -1166,14 +1200,19 @@ export function makeOpenCodeAdapter(
         }
 
         const createdAt = yield* nowIso;
+        const preservedSession = preservedSessionMemory?.session;
         const session: ProviderSession = {
           provider: PROVIDER,
           providerInstanceId: boundInstanceId,
-          status: "ready",
+          status: preservedSession?.status ?? "ready",
           runtimeMode: input.runtimeMode,
           cwd: directory,
           ...(input.modelSelection ? { model: input.modelSelection.model } : {}),
           threadId: input.threadId,
+          ...(preservedSession?.activeTurnId
+            ? { activeTurnId: preservedSession.activeTurnId }
+            : {}),
+          ...(preservedSession?.lastError ? { lastError: preservedSession.lastError } : {}),
           resumeCursor: {
             schemaVersion: OPENCODE_RESUME_CURSOR_SCHEMA_VERSION,
             sessionId: started.openCodeSession.id,
@@ -1188,16 +1227,16 @@ export function makeOpenCodeAdapter(
           server: started.server,
           directory,
           openCodeSessionId: started.openCodeSession.id,
-          pendingPermissions: new Map(),
-          pendingQuestions: new Map(),
-          partById: new Map(),
-          emittedTextByPartId: new Map(),
-          messageRoleById: new Map(),
-          completedAssistantPartIds: new Set(),
-          turns: [],
-          activeTurnId: undefined,
-          activeAgent: undefined,
-          activeVariant: undefined,
+          pendingPermissions: preservedSessionMemory?.pendingPermissions ?? new Map(),
+          pendingQuestions: preservedSessionMemory?.pendingQuestions ?? new Map(),
+          partById: preservedSessionMemory?.partById ?? new Map(),
+          emittedTextByPartId: preservedSessionMemory?.emittedTextByPartId ?? new Map(),
+          messageRoleById: preservedSessionMemory?.messageRoleById ?? new Map(),
+          completedAssistantPartIds: preservedSessionMemory?.completedAssistantPartIds ?? new Set(),
+          turns: preservedSessionMemory?.turns ?? [],
+          activeTurnId: preservedSessionMemory?.activeTurnId,
+          activeAgent: preservedSessionMemory?.activeAgent,
+          activeVariant: preservedSessionMemory?.activeVariant,
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
         };

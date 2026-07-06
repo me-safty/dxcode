@@ -15,6 +15,7 @@ import { beforeEach } from "vite-plus/test";
 
 import {
   OpenCodeSettings,
+  ApprovalRequestId,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
@@ -63,6 +64,7 @@ const runtimeMock = {
     abortCalls: [] as string[],
     closeCalls: [] as string[],
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
+    permissionReplyCalls: [] as Array<{ requestID: string; reply: string }>,
     promptCalls: [] as Array<unknown>,
     promptAsyncError: null as Error | null,
     closeError: null as Error | null,
@@ -81,6 +83,7 @@ const runtimeMock = {
     this.state.abortCalls.length = 0;
     this.state.closeCalls.length = 0;
     this.state.revertCalls.length = 0;
+    this.state.permissionReplyCalls.length = 0;
     this.state.promptCalls.length = 0;
     this.state.promptAsyncError = null;
     this.state.closeError = null;
@@ -181,6 +184,11 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             targetIndex >= 0
               ? runtimeMock.state.messages.slice(0, targetIndex + 1)
               : runtimeMock.state.messages;
+        },
+      },
+      permission: {
+        reply: async ({ requestID, reply }: { requestID: string; reply: string }) => {
+          runtimeMock.state.permissionReplyCalls.push({ requestID, reply });
         },
       },
       event: {
@@ -347,6 +355,52 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.deepEqual(runtimeMock.state.sessionGetCalls, ["http://127.0.0.1:9999/session"]);
       NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, ["http://127.0.0.1:9999"]);
       NodeAssert.deepEqual(second.resumeCursor, cursor);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("preserves pending permissions when restarting with the same resume cursor", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-restart-with-permission");
+      const sessionID = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-restart",
+            sessionID,
+            permission: "bash",
+            patterns: ["npm test"],
+            metadata: {},
+            always: [],
+          },
+        },
+      ];
+
+      const first = yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* advanceTestClock(10);
+
+      runtimeMock.state.subscribedEvents = [];
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        resumeCursor: first.resumeCursor,
+      });
+
+      yield* adapter.respondToRequest(threadId, ApprovalRequestId.make("perm-restart"), "accept");
+
+      NodeAssert.deepEqual(runtimeMock.state.abortCalls, []);
+      NodeAssert.deepEqual(runtimeMock.state.sessionGetCalls, [sessionID]);
+      NodeAssert.deepEqual(runtimeMock.state.permissionReplyCalls, [
+        { requestID: "perm-restart", reply: "once" },
+      ]);
 
       yield* adapter.stopSession(threadId);
     }),
