@@ -414,14 +414,16 @@ describe("DesktopWindowState.attach", () => {
     ),
   );
 
-  it.live("persists bounds and restore mode on close", () =>
+  it.live("persists bounds and restore mode durably before the close handler returns", () =>
     withWindowState(
       Effect.gen(function* () {
         const fake = makeFakeWindow({ bounds: { x: 40, y: 30, width: 1000, height: 700 } });
         yield* attachWindow(fake.window);
 
         fake.emit("close");
-        const document = yield* awaitPersistedDocument(() => true);
+        // Read immediately, no polling: the close path must write synchronously
+        // so the save can't race process exit.
+        const document = yield* readPersistedDocument;
         assert.deepEqual(document.normalBounds, { x: 40, y: 30, width: 1000, height: 700 });
         assert.equal(document.restoreMode, "normal");
         assert.isUndefined(document.fullscreenOriginBounds);

@@ -1,3 +1,6 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off - the close-time save writes synchronously so it can't race process exit
+import * as NodeFS from "node:fs";
+
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -61,6 +64,7 @@ type PersistedWindowStateDocument = typeof PersistedWindowStateDocument.Type;
 const PersistedWindowStateJson = fromLenientJson(PersistedWindowStateDocument);
 const decodePersistedWindowStateJson = Schema.decodeEffect(PersistedWindowStateJson);
 const encodePersistedWindowStateJson = Schema.encodeEffect(PersistedWindowStateJson);
+const encodePersistedWindowStateJsonSync = Schema.encodeSync(PersistedWindowStateJson);
 
 function isFiniteNumber(value: number): boolean {
   return Number.isFinite(value);
@@ -240,6 +244,27 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const runSync = Effect.runSyncWith(context);
+
+  // The close-time save must complete before the process can exit, so it
+  // bypasses the async FileSystem layer and writes synchronously.
+  const persistSync = (document: PersistedWindowStateDocument): void => {
+    try {
+      const encoded = encodePersistedWindowStateJsonSync(document);
+      persistSequence += 1;
+      const tempPath = `${windowStatePath}.${process.pid}.${persistSequence}.tmp`;
+      NodeFS.mkdirSync(path.dirname(windowStatePath), { recursive: true });
+      NodeFS.writeFileSync(tempPath, `${encoded}\n`, "utf8");
+      NodeFS.renameSync(tempPath, windowStatePath);
+    } catch (error) {
+      try {
+        runSync(logWarning("failed to persist window state on close", { error: String(error) }));
+      } catch {
+        // logging is best-effort during teardown
+      }
+    }
+  };
+
   const attach = (window: Electron.BrowserWindow): Effect.Effect<void> =>
     Effect.sync(() => {
       let debounceFiber: Fiber.Fiber<void> | undefined;
@@ -330,13 +355,14 @@ export const make = Effect.gen(function* () {
 
       // Unlike persistNow, keeps fullscreenExitPending: a close right after
       // leave-full-screen is the quit sequence, and must save the fullscreen
-      // snapshot rather than the half-transitioned window.
+      // snapshot rather than the half-transitioned window. Written
+      // synchronously so the save can't race process exit.
       const persistOnClose = () => {
         if (!armed) {
           return;
         }
         cancelDebounce();
-        runFork(persistEffect);
+        persistSync(resolveDocument());
       };
 
       const handleBoundsChange = () => {
