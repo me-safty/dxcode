@@ -542,14 +542,15 @@ describe("ProviderRuntimeIngestion", () => {
     await waitForThread(
       harness.readModel,
       (thread) =>
-        thread.session?.status === "ready" &&
-        thread.session.activeTurnId === null &&
+        thread.session?.status === "running" &&
+        thread.session.activeTurnId === turnId &&
         thread.latestTurn?.state === "interrupted",
     );
 
     // Cursor session/load emits this startup sequence while recovering the
-    // provider session. It must use the cleared projected active turn rather
-    // than restoring the turn that was interrupted before recovery began.
+    // provider session. The interrupt request alone must not mark the session
+    // idle, but the provider's ready state is confirmation that the recovered
+    // session is no longer running the interrupted turn.
     harness.emit({
       type: "session.started",
       eventId: asEventId("evt-cursor-session-started-after-interrupt"),

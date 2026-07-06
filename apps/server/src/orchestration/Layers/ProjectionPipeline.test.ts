@@ -1734,7 +1734,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       }),
   );
 
-  it.effect("clears the active session turn when it is interrupted", () =>
+  it.effect("keeps the active session turn until provider confirms an interrupt", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
       const eventStore = yield* OrchestrationEventStore;
@@ -1801,8 +1801,49 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         WHERE thread_id = ${threadId} AND turn_id = ${turnId}
       `;
 
-      assert.deepEqual(sessions, [{ status: "ready", activeTurnId: null }]);
+      assert.deepEqual(sessions, [{ status: "running", activeTurnId: turnId }]);
       assert.deepEqual(turns, [{ state: "interrupted" }]);
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-interrupt-session-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T13:00:02.000Z",
+        commandId: CommandId.make("cmd-interrupt-session-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-interrupt-session-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "cursor",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-26T13:00:02.000Z",
+          },
+        },
+      });
+
+      const confirmedSessions = yield* sql<{
+        readonly status: string;
+        readonly activeTurnId: string | null;
+      }>`
+        SELECT status, active_turn_id AS "activeTurnId"
+        FROM projection_thread_sessions
+        WHERE thread_id = ${threadId}
+      `;
+      const confirmedTurns = yield* sql<{ readonly state: string }>`
+        SELECT state
+        FROM projection_turns
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+
+      assert.deepEqual(confirmedSessions, [{ status: "ready", activeTurnId: null }]);
+      assert.deepEqual(confirmedTurns, [{ state: "interrupted" }]);
     }),
   );
 
