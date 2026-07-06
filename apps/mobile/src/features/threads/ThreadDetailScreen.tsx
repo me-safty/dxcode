@@ -171,7 +171,11 @@ function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedE
   }, [threadId, feed]);
 }
 
-const WORKING_INDICATOR_HEIGHT = 44;
+// Pre-measurement estimate for the working pill's slot (the real height is
+// measured via onComposerLayout since the pill lives inside the composer
+// overlay). Matches the rendered pill: pt-2 + pb-2 (16) wrapping a bordered
+// px-3/py-2 row (~36), so ~52 — keep it in sync with WorkingDurationPill.
+const WORKING_INDICATOR_HEIGHT = 52;
 
 const WorkingDurationPill = memo(function WorkingDurationPill(props: {
   readonly startedAt: string;
