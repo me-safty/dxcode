@@ -486,7 +486,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           ready: false,
           config: Option.some(config.value),
           preflightFailureAttempt: resetFatalPreflightCounter ? 0 : latest.preflightFailureAttempt,
-          neverReadyAttempt: 0,
+          neverReadyAttempt: !current.desiredRunning ? 0 : latest.neverReadyAttempt,
         }));
 
         const preflightFailure = config.value.preflightFailure;
