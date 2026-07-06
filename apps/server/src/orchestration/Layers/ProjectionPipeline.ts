@@ -992,9 +992,26 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const applyThreadSessionsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadSessionsProjection",
     )(function* (event, _attachmentSideEffects) {
-      if (event.type !== "thread.session-set") {
+      if (event.type === "thread.turn-interrupt-requested" && event.payload.turnId !== undefined) {
+        const session = yield* projectionThreadSessionRepository.getByThreadId({
+          threadId: event.payload.threadId,
+        });
+        if (
+          Option.isSome(session) &&
+          session.value.activeTurnId === event.payload.turnId &&
+          session.value.status === "running"
+        ) {
+          yield* projectionThreadSessionRepository.upsert({
+            ...session.value,
+            status: "ready",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: event.payload.createdAt,
+          });
+        }
         return;
       }
+      if (event.type !== "thread.session-set") return;
       yield* projectionThreadSessionRepository.upsert({
         threadId: event.payload.threadId,
         status: event.payload.session.status,

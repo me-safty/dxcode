@@ -1734,6 +1734,78 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       }),
   );
 
+  it.effect("clears the active session turn when it is interrupted", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-interrupt-session");
+      const turnId = TurnId.make("turn-interrupt-session");
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-interrupt-session-1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T13:00:00.000Z",
+        commandId: CommandId.make("cmd-interrupt-session-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-interrupt-session-1"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "cursor",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-02-26T13:00:00.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-interrupt-requested",
+        eventId: EventId.make("evt-interrupt-session-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T13:00:01.000Z",
+        commandId: CommandId.make("cmd-interrupt-session-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-interrupt-session-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          createdAt: "2026-02-26T13:00:01.000Z",
+        },
+      });
+
+      const sessions = yield* sql<{
+        readonly status: string;
+        readonly activeTurnId: string | null;
+      }>`
+        SELECT status, active_turn_id AS "activeTurnId"
+        FROM projection_thread_sessions
+        WHERE thread_id = ${threadId}
+      `;
+      const turns = yield* sql<{ readonly state: string }>`
+        SELECT state
+        FROM projection_turns
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+
+      assert.deepEqual(sessions, [{ status: "ready", activeTurnId: null }]);
+      assert.deepEqual(turns, [{ state: "interrupted" }]);
+    }),
+  );
+
   it.effect("clears stale pending approvals from projected shell summaries", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
