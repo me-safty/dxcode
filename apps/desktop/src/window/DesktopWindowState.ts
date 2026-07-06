@@ -24,7 +24,7 @@ export interface WindowRectangle {
   readonly height: number;
 }
 
-export type PersistedWindowRestoreMode = "normal" | "maximized" | "fullscreen-origin";
+export type PersistedWindowRestoreMode = "normal" | "maximized";
 
 export interface ResolvedWindowState {
   readonly bounds: WindowRectangle;
@@ -44,18 +44,16 @@ const WindowRectangleSchema = Schema.Struct({
   height: Schema.Number,
 });
 
-const PersistedWindowRestoreModeSchema = Schema.Literals([
-  "normal",
-  "maximized",
-  "fullscreen-origin",
-]);
+const PersistedWindowRestoreModeSchema = Schema.Literals(["normal", "maximized"]);
 
 const PersistedWindowStateDocument = Schema.Struct({
   version: Schema.Literal(WINDOW_STATE_VERSION),
   normalBounds: WindowRectangleSchema,
   restoreMode: PersistedWindowRestoreModeSchema,
-  // Set only for "fullscreen-origin": the pre-fullscreen frame we reopen at to
-  // avoid re-entering macOS fullscreen (and its white startup flash).
+  // Present when the window was in macOS fullscreen: the pre-fullscreen frame
+  // we reopen at to avoid re-entering fullscreen (and its white startup flash).
+  // Kept separate from restoreMode so a maximized window that entered
+  // fullscreen still restores as maximized.
   fullscreenOriginBounds: Schema.optionalKey(WindowRectangleSchema),
 });
 type PersistedWindowStateDocument = typeof PersistedWindowStateDocument.Type;
@@ -195,12 +193,25 @@ export const make = Effect.gen(function* () {
         return fallback;
       }
       const parsed = decoded.value;
+      const workAreas = getDisplayWorkAreas();
+
+      if (
+        parsed.fullscreenOriginBounds !== undefined &&
+        hasUsableDimensions(parsed.fullscreenOriginBounds)
+      ) {
+        const originBounds = sanitizeBounds(
+          parsed.fullscreenOriginBounds,
+          defaults.minWidth,
+          defaults.minHeight,
+        );
+        if (isWindowVisibleEnough(originBounds, workAreas)) {
+          return { bounds: originBounds, restoreMode: parsed.restoreMode };
+        }
+      }
 
       if (!hasUsableDimensions(parsed.normalBounds)) {
         return fallback;
       }
-
-      const workAreas = getDisplayWorkAreas();
       const normalBounds = sanitizeBounds(
         parsed.normalBounds,
         defaults.minWidth,
@@ -209,26 +220,16 @@ export const make = Effect.gen(function* () {
       if (!isWindowVisibleEnough(normalBounds, workAreas)) {
         return fallback;
       }
-
-      if (parsed.restoreMode === "fullscreen-origin") {
-        const originBounds = parsed.fullscreenOriginBounds;
-        if (originBounds === undefined || !hasUsableDimensions(originBounds)) {
-          return fallback;
-        }
-        const sanitizedOrigin = sanitizeBounds(originBounds, defaults.minWidth, defaults.minHeight);
-        if (!isWindowVisibleEnough(sanitizedOrigin, workAreas)) {
-          return fallback;
-        }
-        return { bounds: sanitizedOrigin, restoreMode: "fullscreen-origin" };
-      }
-
       return { bounds: normalBounds, restoreMode: parsed.restoreMode };
     });
+
+  let persistSequence = 0;
 
   const persist = (document: PersistedWindowStateDocument): Effect.Effect<void> =>
     Effect.gen(function* () {
       const directory = path.dirname(windowStatePath);
-      const tempPath = `${windowStatePath}.${process.pid}.tmp`;
+      persistSequence += 1;
+      const tempPath = `${windowStatePath}.${process.pid}.${persistSequence}.tmp`;
       const encoded = yield* encodePersistedWindowStateJson(document);
       yield* fileSystem.makeDirectory(directory, { recursive: true });
       yield* fileSystem.writeFileString(tempPath, `${encoded}\n`);
@@ -242,16 +243,31 @@ export const make = Effect.gen(function* () {
   const attach = (window: Electron.BrowserWindow): Effect.Effect<void> =>
     Effect.sync(() => {
       let debounceFiber: Fiber.Fiber<void> | undefined;
+      // Saved state is applied at first reveal, so drop persists from a window
+      // that was never shown — they would clobber good on-disk state with the
+      // pre-restore defaults (e.g. quit during the connecting splash).
+      let armed = window.isVisible();
       // In fullscreen, getNormalBounds() returns the fullscreen frame, so keep
       // the last non-fullscreen frame around to persist instead.
       let lastRestorable: PersistedWindowStateDocument = readRestorableState(window);
       let lastVisibleBounds: WindowRectangle = window.getBounds();
+      // macOS quit-from-fullscreen fires leave-full-screen before close; hold
+      // the fullscreen snapshot through the exit transition so the close-time
+      // save doesn't demote it with mid-transition bounds.
+      let fullscreenExitPending = false;
+
+      if (!armed) {
+        window.once("show", () => {
+          armed = true;
+          lastRestorable = readRestorableState(window);
+          lastVisibleBounds = window.getBounds();
+        });
+      }
 
       const resolveDocument = (): PersistedWindowStateDocument => {
-        if (window.isFullScreen()) {
+        if (window.isFullScreen() || fullscreenExitPending) {
           return {
             ...lastRestorable,
-            restoreMode: "fullscreen-origin",
             fullscreenOriginBounds: lastVisibleBounds,
           };
         }
@@ -271,15 +287,18 @@ export const make = Effect.gen(function* () {
         runFork(Fiber.interrupt(fiber));
       };
 
-      const persistNow = () => {
-        cancelDebounce();
-        runFork(persistEffect);
-      };
-
       const schedulePersist = () => {
+        if (!armed) {
+          return;
+        }
         cancelDebounce();
         debounceFiber = runFork(
           Effect.sleep(WINDOW_STATE_PERSIST_DEBOUNCE_MS).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                fullscreenExitPending = false;
+              }),
+            ),
             Effect.andThen(persistEffect),
             Effect.ensuring(
               Effect.sync(() => {
@@ -290,13 +309,39 @@ export const make = Effect.gen(function* () {
         );
       };
 
+      const persistNow = () => {
+        if (!armed) {
+          return;
+        }
+        fullscreenExitPending = false;
+        cancelDebounce();
+        runFork(persistEffect);
+      };
+
+      // Unlike persistNow, keeps fullscreenExitPending: a close right after
+      // leave-full-screen is the quit sequence, and must save the fullscreen
+      // snapshot rather than the half-transitioned window.
+      const persistOnClose = () => {
+        if (!armed) {
+          return;
+        }
+        cancelDebounce();
+        runFork(persistEffect);
+      };
+
       window.on("resize", schedulePersist);
       window.on("move", schedulePersist);
       window.on("maximize", persistNow);
       window.on("unmaximize", persistNow);
       window.on("enter-full-screen", persistNow);
-      window.on("leave-full-screen", persistNow);
-      window.on("close", persistNow);
+      window.on("leave-full-screen", () => {
+        if (!armed) {
+          return;
+        }
+        fullscreenExitPending = true;
+        schedulePersist();
+      });
+      window.on("close", persistOnClose);
     });
 
   return DesktopWindowState.of({ load, attach });

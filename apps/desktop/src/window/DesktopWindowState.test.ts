@@ -3,8 +3,10 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import type * as Electron from "electron";
 import { vi } from "vite-plus/test";
 
 // Pin a single 1920x1080 display so the off-screen check is deterministic.
@@ -44,9 +46,9 @@ const TestWindowStateDocument = Schema.Struct({
   restoreMode: Schema.String,
   fullscreenOriginBounds: Schema.optionalKey(TestRectangle),
 });
-const encodeTestWindowStateDocument = Schema.encodeEffect(
-  Schema.fromJsonString(TestWindowStateDocument),
-);
+const TestWindowStateDocumentJson = Schema.fromJsonString(TestWindowStateDocument);
+const encodeTestWindowStateDocument = Schema.encodeEffect(TestWindowStateDocumentJson);
+const decodeTestWindowStateDocument = Schema.decodeEffect(TestWindowStateDocumentJson);
 
 function makeEnvironmentLayer(baseDir: string) {
   return DesktopEnvironment.layer({
@@ -108,6 +110,80 @@ const loadResolved = Effect.gen(function* () {
   const service = yield* DesktopWindowState.DesktopWindowState;
   return yield* service.load(DEFAULTS);
 });
+
+interface FakeWindowState {
+  bounds: DesktopWindowState.WindowRectangle;
+  maximized: boolean;
+  fullScreen: boolean;
+  visible: boolean;
+}
+
+function makeFakeWindow(initial: Partial<FakeWindowState> = {}) {
+  const state: FakeWindowState = {
+    bounds: { x: 100, y: 100, width: 1200, height: 800 },
+    maximized: false,
+    fullScreen: false,
+    visible: true,
+    ...initial,
+  };
+  const listeners = new Map<string, Array<() => void>>();
+  const addListener = (event: string, listener: () => void) => {
+    listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+  };
+  const fake = {
+    on: addListener,
+    once: (event: string, listener: () => void) => {
+      const wrapped = () => {
+        listeners.set(
+          event,
+          (listeners.get(event) ?? []).filter((existing) => existing !== wrapped),
+        );
+        listener();
+      };
+      addListener(event, wrapped);
+    },
+    isVisible: () => state.visible,
+    isFullScreen: () => state.fullScreen,
+    isMaximized: () => state.maximized,
+    getBounds: () => state.bounds,
+    getNormalBounds: () => state.bounds,
+    isDestroyed: () => false,
+  };
+  const emit = (event: string) => {
+    // Copy so once-listeners that remove themselves don't skip the next entry.
+    for (const listener of (listeners.get(event) ?? []).slice()) {
+      listener();
+    }
+  };
+  return { window: fake as unknown as Electron.BrowserWindow, state, emit };
+}
+
+const attachWindow = (window: Electron.BrowserWindow) =>
+  Effect.gen(function* () {
+    const service = yield* DesktopWindowState.DesktopWindowState;
+    yield* service.attach(window);
+  });
+
+const readPersistedDocument = Effect.gen(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const raw = yield* fileSystem.readFileString(environment.windowStatePath);
+  return yield* decodeTestWindowStateDocument(raw);
+});
+
+const awaitPersistedDocument = (
+  predicate: (document: typeof TestWindowStateDocument.Type) => boolean,
+) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const document = yield* readPersistedDocument.pipe(Effect.option);
+      if (Option.isSome(document) && predicate(document.value)) {
+        return document.value;
+      }
+      yield* Effect.sleep(10);
+    }
+    return yield* Effect.die(new Error("window state document was not persisted in time"));
+  });
 
 describe("DesktopWindowState geometry helpers", () => {
   it("rejects rectangles with non-positive or non-finite dimensions", () => {
@@ -252,35 +328,50 @@ describe("DesktopWindowState.load", () => {
     ),
   );
 
-  it.effect("restores fullscreen-origin using the saved visible frame", () =>
+  it.effect("restores the fullscreen origin frame with the underlying restore mode", () =>
     withWindowState(
       Effect.gen(function* () {
         yield* writeWindowStateDocument({
           version: 1,
-          normalBounds: { x: 0, y: 0, width: 1920, height: 1080 },
-          restoreMode: "fullscreen-origin",
+          normalBounds: { x: 0, y: 0, width: 1400, height: 900 },
+          restoreMode: "maximized",
           fullscreenOriginBounds: { x: 60, y: 50, width: 1200, height: 800 },
         });
         const resolved = yield* loadResolved;
         assert.deepEqual(resolved, {
           bounds: { x: 60, y: 50, width: 1200, height: 800 },
-          restoreMode: "fullscreen-origin",
+          restoreMode: "maximized",
         });
       }),
     ),
   );
 
-  it.effect("falls back when fullscreen-origin bounds are missing", () =>
+  it.effect("restores the fullscreen origin frame even when normal bounds are off-screen", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        yield* writeWindowStateDocument({
+          version: 1,
+          normalBounds: { x: 6_000, y: 6_000, width: 1400, height: 900 },
+          restoreMode: "normal",
+          fullscreenOriginBounds: { x: 60, y: 50, width: 1200, height: 800 },
+        });
+        const resolved = yield* loadResolved;
+        assert.deepEqual(resolved.bounds, { x: 60, y: 50, width: 1200, height: 800 });
+      }),
+    ),
+  );
+
+  it.effect("ignores off-screen fullscreen origin bounds and restores normal bounds", () =>
     withWindowState(
       Effect.gen(function* () {
         yield* writeWindowStateDocument({
           version: 1,
           normalBounds: { x: 120, y: 90, width: 1300, height: 850 },
-          restoreMode: "fullscreen-origin",
+          restoreMode: "normal",
+          fullscreenOriginBounds: { x: 6_000, y: 6_000, width: 1200, height: 800 },
         });
         const resolved = yield* loadResolved;
-        assert.deepEqual(resolved.bounds, EXPECTED_DEFAULT_BOUNDS);
-        assert.equal(resolved.restoreMode, "normal");
+        assert.deepEqual(resolved.bounds, { x: 120, y: 90, width: 1300, height: 850 });
       }),
     ),
   );
@@ -295,6 +386,121 @@ describe("DesktopWindowState.load", () => {
         });
         const resolved = yield* loadResolved;
         assert.deepEqual(resolved.bounds, EXPECTED_DEFAULT_BOUNDS);
+      }),
+    ),
+  );
+});
+
+// Persists are forked from window-event callbacks and the debounce uses the
+// wall clock, so these run under it.live and poll the state file.
+describe("DesktopWindowState.attach", () => {
+  it.live("drops persist events fired before the window is first shown", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const fake = makeFakeWindow({ visible: false, maximized: true });
+        yield* attachWindow(fake.window);
+
+        fake.emit("resize");
+        fake.emit("close");
+        yield* Effect.sleep(100);
+        assert.isTrue(Option.isNone(yield* readPersistedDocument.pipe(Effect.option)));
+
+        fake.state.visible = true;
+        fake.emit("show");
+        fake.emit("close");
+        const document = yield* awaitPersistedDocument(() => true);
+        assert.equal(document.restoreMode, "maximized");
+      }),
+    ),
+  );
+
+  it.live("persists bounds and restore mode on close", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const fake = makeFakeWindow({ bounds: { x: 40, y: 30, width: 1000, height: 700 } });
+        yield* attachWindow(fake.window);
+
+        fake.emit("close");
+        const document = yield* awaitPersistedDocument(() => true);
+        assert.deepEqual(document.normalBounds, { x: 40, y: 30, width: 1000, height: 700 });
+        assert.equal(document.restoreMode, "normal");
+        assert.isUndefined(document.fullscreenOriginBounds);
+      }),
+    ),
+  );
+
+  it.live("quitting while in fullscreen keeps the pre-fullscreen frame and mode", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const preFullscreen = { x: 60, y: 50, width: 1200, height: 800 };
+        const fake = makeFakeWindow({ bounds: preFullscreen, maximized: true });
+        yield* attachWindow(fake.window);
+
+        fake.state.fullScreen = true;
+        fake.state.bounds = { x: 0, y: 0, width: 1920, height: 1080 };
+        fake.emit("enter-full-screen");
+        fake.emit("close");
+
+        const document = yield* awaitPersistedDocument(
+          (candidate) => candidate.fullscreenOriginBounds !== undefined,
+        );
+        assert.deepEqual(document.fullscreenOriginBounds, preFullscreen);
+        assert.deepEqual(document.normalBounds, preFullscreen);
+        assert.equal(document.restoreMode, "maximized");
+      }),
+    ),
+  );
+
+  it.live("close right after leave-full-screen keeps the fullscreen snapshot", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const preFullscreen = { x: 60, y: 50, width: 1200, height: 800 };
+        const fake = makeFakeWindow({ bounds: preFullscreen });
+        yield* attachWindow(fake.window);
+
+        fake.state.fullScreen = true;
+        fake.state.bounds = { x: 0, y: 0, width: 1920, height: 1080 };
+        fake.emit("enter-full-screen");
+
+        // macOS quit sequence: exit transition starts, close lands before the
+        // debounced post-exit save.
+        fake.state.fullScreen = false;
+        fake.state.bounds = { x: 12, y: 8, width: 1740, height: 1002 };
+        fake.emit("leave-full-screen");
+        fake.emit("close");
+
+        const document = yield* awaitPersistedDocument(
+          (candidate) => candidate.fullscreenOriginBounds !== undefined,
+        );
+        assert.deepEqual(document.fullscreenOriginBounds, preFullscreen);
+        yield* Effect.sleep(350);
+        const settled = yield* readPersistedDocument;
+        assert.deepEqual(settled.fullscreenOriginBounds, preFullscreen);
+      }),
+    ),
+  );
+
+  it.live("a window that stays open after leaving fullscreen persists its live state", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const preFullscreen = { x: 60, y: 50, width: 1200, height: 800 };
+        const fake = makeFakeWindow({ bounds: preFullscreen });
+        yield* attachWindow(fake.window);
+
+        fake.state.fullScreen = true;
+        fake.state.bounds = { x: 0, y: 0, width: 1920, height: 1080 };
+        fake.emit("enter-full-screen");
+
+        const postExit = { x: 80, y: 70, width: 1100, height: 750 };
+        fake.state.fullScreen = false;
+        fake.state.bounds = postExit;
+        fake.emit("leave-full-screen");
+
+        const document = yield* awaitPersistedDocument(
+          (candidate) => candidate.fullscreenOriginBounds === undefined,
+        );
+        assert.deepEqual(document.normalBounds, postExit);
+        assert.equal(document.restoreMode, "normal");
       }),
     ),
   );
