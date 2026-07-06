@@ -4,6 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
@@ -78,10 +79,33 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         ),
       });
       const bodyText = yield* listResponse.text;
-      const toolNames = Array.from(bodyText.matchAll(/"name":"([a-z_]+)"/g)).map((m) => m[1]);
+      const ToolsListPayload = Schema.fromJsonString(
+        Schema.Struct({
+          result: Schema.Struct({
+            tools: Schema.Array(
+              Schema.Struct({
+                name: Schema.String,
+                inputSchema: Schema.Struct({ type: Schema.optional(Schema.String) }),
+              }),
+            ),
+          }),
+        }),
+      );
+      const payload = yield* Schema.decodeUnknownEffect(ToolsListPayload)(
+        bodyText.match(/\{.*\}/s)![0],
+      );
+      const tools = payload.result.tools;
+      const toolNames = tools.map((tool) => tool.name);
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("worktree_handoff");
       expect(toolNames).toContain("worktree_status");
+
+      // MCP requires every tool input schema to be a top-level object schema.
+      // A non-object schema (e.g. the anyOf produced by an empty
+      // Schema.Struct({})) makes clients reject the entire server.
+      for (const tool of tools) {
+        expect(tool.inputSchema.type, `inputSchema.type of ${tool.name}`).toBe("object");
+      }
     }),
   ).pipe(Effect.provide(Layer.mergeAll(NodeHttpServer.layerTest, NodeServices.layer))),
 );

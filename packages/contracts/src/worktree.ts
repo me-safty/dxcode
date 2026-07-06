@@ -149,13 +149,6 @@ export const WorktreeHandoffError = Schema.Union([
 ]);
 export type WorktreeHandoffError = typeof WorktreeHandoffError.Type;
 
-/**
- * Input for the `worktree_status` MCP tool. Takes no parameters; the tool
- * reports on the calling agent thread.
- */
-export const WorktreeStatusInput = Schema.Struct({});
-export type WorktreeStatusInput = typeof WorktreeStatusInput.Type;
-
 export const WorktreeStatusResult = Schema.Struct({
   attached: Schema.Boolean.annotate({
     description: "True when this thread is already attached to a git worktree.",

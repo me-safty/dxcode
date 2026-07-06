@@ -3,7 +3,6 @@ import {
   WorktreeHandoffInput,
   WorktreeHandoffResult,
   WorktreeStatusError,
-  WorktreeStatusInput,
   WorktreeStatusResult,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -45,7 +44,10 @@ export const WorktreeHandoffTool = Tool.make("worktree_handoff", {
 export const WorktreeStatusTool = Tool.make("worktree_status", {
   description:
     "Report this agent thread's worktree binding: whether it is attached to a git worktree, the worktree path and branch, the project's main workspace root, and the server default for worktree_handoff's startFromOrigin. Call this before worktree_handoff to check whether a handoff is possible or has already happened.",
-  parameters: WorktreeStatusInput,
+  // No `parameters`: Tool.make defaults to Tool.EmptyParams, which serializes
+  // to a top-level `type: "object"` JSON Schema. An explicit empty
+  // Schema.Struct({}) serializes to `anyOf: [object, array]`, which is not a
+  // valid MCP tool input schema and makes clients reject the whole server.
   success: WorktreeStatusResult,
   failure: WorktreeStatusError,
   dependencies,
