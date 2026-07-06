@@ -31,6 +31,10 @@
       "types": "./src/operations/projects.ts",
       "default": "./src/operations/projects.ts"
     },
+    "./linear-format": {
+      "types": "./src/linearFormat.ts",
+      "default": "./src/linearFormat.ts"
+    },
     "./platform": {
       "types": "./src/platform/index.ts",
       "default": "./src/platform/index.ts"
