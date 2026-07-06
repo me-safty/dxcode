@@ -9,8 +9,7 @@ import * as Schema from "effect/Schema";
 import type * as Electron from "electron";
 import { vi } from "vite-plus/test";
 
-// Pin a single 1920x1080 display so the off-screen check is deterministic.
-// Inlined because vi.mock factories are hoisted above module-level bindings.
+// Single 1920x1080 display; inlined because vi.mock factories are hoisted.
 vi.mock("electron", () => ({
   screen: {
     getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
@@ -114,6 +113,7 @@ const loadResolved = Effect.gen(function* () {
 interface FakeWindowState {
   bounds: DesktopWindowState.WindowRectangle;
   maximized: boolean;
+  minimized: boolean;
   fullScreen: boolean;
   visible: boolean;
 }
@@ -122,6 +122,7 @@ function makeFakeWindow(initial: Partial<FakeWindowState> = {}) {
   const state: FakeWindowState = {
     bounds: { x: 100, y: 100, width: 1200, height: 800 },
     maximized: false,
+    minimized: false,
     fullScreen: false,
     visible: true,
     ...initial,
@@ -144,13 +145,14 @@ function makeFakeWindow(initial: Partial<FakeWindowState> = {}) {
     },
     isVisible: () => state.visible,
     isFullScreen: () => state.fullScreen,
+    isMinimized: () => state.minimized,
     isMaximized: () => state.maximized,
     getBounds: () => state.bounds,
     getNormalBounds: () => state.bounds,
     isDestroyed: () => false,
   };
   const emit = (event: string) => {
-    // Copy so once-listeners that remove themselves don't skip the next entry.
+    // Copy: once-listeners remove themselves mid-iteration.
     for (const listener of (listeners.get(event) ?? []).slice()) {
       listener();
     }
@@ -328,18 +330,20 @@ describe("DesktopWindowState.load", () => {
     ),
   );
 
-  it.effect("restores the fullscreen origin frame with the underlying restore mode", () =>
+  it.effect("restores a maximized fullscreen session at its normal bounds", () =>
     withWindowState(
       Effect.gen(function* () {
+        // Origin bounds must not become the creation bounds here, or they would
+        // replace the real normal bounds once the window re-maximizes.
         yield* writeWindowStateDocument({
           version: 1,
-          normalBounds: { x: 0, y: 0, width: 1400, height: 900 },
+          normalBounds: { x: 10, y: 20, width: 1400, height: 900 },
           restoreMode: "maximized",
-          fullscreenOriginBounds: { x: 60, y: 50, width: 1200, height: 800 },
+          fullscreenOriginBounds: { x: 0, y: 0, width: 1920, height: 1080 },
         });
         const resolved = yield* loadResolved;
         assert.deepEqual(resolved, {
-          bounds: { x: 60, y: 50, width: 1200, height: 800 },
+          bounds: { x: 10, y: 20, width: 1400, height: 900 },
           restoreMode: "maximized",
         });
       }),
@@ -391,8 +395,7 @@ describe("DesktopWindowState.load", () => {
   );
 });
 
-// Persists are forked from window-event callbacks and the debounce uses the
-// wall clock, so these run under it.live and poll the state file.
+// The debounce uses the wall clock, so these run under it.live.
 describe("DesktopWindowState.attach", () => {
   it.live("drops persist events fired before the window is first shown", () =>
     withWindowState(
@@ -421,8 +424,7 @@ describe("DesktopWindowState.attach", () => {
         yield* attachWindow(fake.window);
 
         fake.emit("close");
-        // Read immediately, no polling: the close path must write synchronously
-        // so the save can't race process exit.
+        // No polling: the close save must be synchronous.
         const document = yield* readPersistedDocument;
         assert.deepEqual(document.normalBounds, { x: 40, y: 30, width: 1000, height: 700 });
         assert.equal(document.restoreMode, "normal");
@@ -459,8 +461,8 @@ describe("DesktopWindowState.attach", () => {
         const fake = makeFakeWindow({ bounds: { x: 100, y: 100, width: 1000, height: 700 } });
         yield* attachWindow(fake.window);
 
-        // Resize, then enter fullscreen before the 250ms debounced save fires:
-        // the resized frame must still be captured as the fullscreen origin.
+        // Fullscreen entry before the debounce fires must still capture the
+        // resized frame as the origin.
         const resized = { x: 60, y: 50, width: 1200, height: 800 };
         fake.state.bounds = resized;
         fake.emit("resize");
@@ -489,8 +491,7 @@ describe("DesktopWindowState.attach", () => {
         fake.state.bounds = { x: 0, y: 0, width: 1920, height: 1080 };
         fake.emit("enter-full-screen");
 
-        // macOS quit sequence: exit transition starts, close lands before the
-        // debounced post-exit save.
+        // Quit sequence: close lands before the debounced post-exit save.
         fake.state.fullScreen = false;
         fake.state.bounds = { x: 12, y: 8, width: 1740, height: 1002 };
         fake.emit("leave-full-screen");
@@ -503,6 +504,78 @@ describe("DesktopWindowState.attach", () => {
         yield* Effect.sleep(350);
         const settled = yield* readPersistedDocument;
         assert.deepEqual(settled.fullscreenOriginBounds, preFullscreen);
+      }),
+    ),
+  );
+
+  it.live("keeps the fullscreen snapshot through exit-transition resizes", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const preFullscreen = { x: 60, y: 50, width: 1200, height: 800 };
+        const fake = makeFakeWindow({ bounds: preFullscreen });
+        yield* attachWindow(fake.window);
+
+        fake.state.fullScreen = true;
+        fake.state.bounds = { x: 0, y: 0, width: 1920, height: 1080 };
+        fake.emit("enter-full-screen");
+
+        // Quit sequence with the macOS exit animation emitting resize/move
+        // before close lands: none of it may demote the snapshot.
+        fake.state.fullScreen = false;
+        fake.emit("leave-full-screen");
+        fake.state.bounds = { x: 30, y: 25, width: 1560, height: 940 };
+        fake.emit("resize");
+        fake.emit("move");
+        fake.emit("close");
+
+        yield* Effect.sleep(350);
+        const settled = yield* readPersistedDocument;
+        assert.deepEqual(settled.fullscreenOriginBounds, preFullscreen);
+        assert.deepEqual(settled.normalBounds, preFullscreen);
+      }),
+    ),
+  );
+
+  it.live("does not demote a maximized window persisted while minimized", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const frame = { x: 40, y: 30, width: 1000, height: 700 };
+        const fake = makeFakeWindow({ bounds: frame, maximized: true });
+        yield* attachWindow(fake.window);
+        fake.emit("maximize");
+
+        // Windows: isMaximized() is false while minimized and the window is
+        // parked off-screen; neither may reach the saved state.
+        fake.state.minimized = true;
+        fake.state.maximized = false;
+        fake.state.bounds = { x: -32_000, y: -32_000, width: 160, height: 28 };
+        fake.emit("move");
+        fake.emit("close");
+
+        yield* Effect.sleep(350);
+        const settled = yield* readPersistedDocument;
+        assert.equal(settled.restoreMode, "maximized");
+        assert.deepEqual(settled.normalBounds, frame);
+      }),
+    ),
+  );
+
+  it.live("an immediate save is never overwritten by an earlier pending one", () =>
+    withWindowState(
+      Effect.gen(function* () {
+        const fake = makeFakeWindow({ bounds: { x: 100, y: 100, width: 1000, height: 700 } });
+        yield* attachWindow(fake.window);
+
+        // A pending debounced resize save must not overwrite the maximize save.
+        fake.emit("resize");
+        fake.state.maximized = true;
+        fake.emit("maximize");
+
+        const immediate = yield* readPersistedDocument;
+        assert.equal(immediate.restoreMode, "maximized");
+        yield* Effect.sleep(350);
+        const settled = yield* readPersistedDocument;
+        assert.equal(settled.restoreMode, "maximized");
       }),
     ),
   );

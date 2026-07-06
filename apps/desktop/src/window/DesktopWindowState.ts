@@ -1,4 +1,4 @@
-// @effect-diagnostics-next-line nodeBuiltinImport:off - the close-time save writes synchronously so it can't race process exit
+// @effect-diagnostics-next-line nodeBuiltinImport:off - sync writes keep saves ordered and durable at exit
 import * as NodeFS from "node:fs";
 
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
@@ -53,17 +53,14 @@ const PersistedWindowStateDocument = Schema.Struct({
   version: Schema.Literal(WINDOW_STATE_VERSION),
   normalBounds: WindowRectangleSchema,
   restoreMode: PersistedWindowRestoreModeSchema,
-  // Present when the window was in macOS fullscreen: the pre-fullscreen frame
-  // we reopen at to avoid re-entering fullscreen (and its white startup flash).
-  // Kept separate from restoreMode so a maximized window that entered
-  // fullscreen still restores as maximized.
+  // Pre-fullscreen frame to reopen at without re-entering fullscreen. Separate
+  // from restoreMode so a maximized window survives a fullscreen round trip.
   fullscreenOriginBounds: Schema.optionalKey(WindowRectangleSchema),
 });
 type PersistedWindowStateDocument = typeof PersistedWindowStateDocument.Type;
 
 const PersistedWindowStateJson = fromLenientJson(PersistedWindowStateDocument);
 const decodePersistedWindowStateJson = Schema.decodeEffect(PersistedWindowStateJson);
-const encodePersistedWindowStateJson = Schema.encodeEffect(PersistedWindowStateJson);
 const encodePersistedWindowStateJsonSync = Schema.encodeSync(PersistedWindowStateJson);
 
 function isFiniteNumber(value: number): boolean {
@@ -199,7 +196,11 @@ export const make = Effect.gen(function* () {
       const parsed = decoded.value;
       const workAreas = getDisplayWorkAreas();
 
+      // Origin bounds only drive normal restores: a maximized session opens at
+      // its normalBounds and re-maximizes, otherwise the fullscreen frame would
+      // replace the real normal bounds and unmaximize would stop shrinking.
       if (
+        parsed.restoreMode === "normal" &&
         parsed.fullscreenOriginBounds !== undefined &&
         hasUsableDimensions(parsed.fullscreenOriginBounds)
       ) {
@@ -229,25 +230,10 @@ export const make = Effect.gen(function* () {
 
   let persistSequence = 0;
 
-  const persist = (document: PersistedWindowStateDocument): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const directory = path.dirname(windowStatePath);
-      persistSequence += 1;
-      const tempPath = `${windowStatePath}.${process.pid}.${persistSequence}.tmp`;
-      const encoded = yield* encodePersistedWindowStateJson(document);
-      yield* fileSystem.makeDirectory(directory, { recursive: true });
-      yield* fileSystem.writeFileString(tempPath, `${encoded}\n`);
-      yield* fileSystem.rename(tempPath, windowStatePath);
-    }).pipe(
-      Effect.catch((error) =>
-        logWarning("failed to persist window state", { error: error.message }),
-      ),
-    );
-
   const runSync = Effect.runSyncWith(context);
 
-  // The close-time save must complete before the process can exit, so it
-  // bypasses the async FileSystem layer and writes synchronously.
+  // Single writer: synchronous writes are totally ordered on the main thread
+  // (a slow save can't overwrite a newer one) and durable before process exit.
   const persistSync = (document: PersistedWindowStateDocument): void => {
     try {
       const encoded = encodePersistedWindowStateJsonSync(document);
@@ -258,7 +244,7 @@ export const make = Effect.gen(function* () {
       NodeFS.renameSync(tempPath, windowStatePath);
     } catch (error) {
       try {
-        runSync(logWarning("failed to persist window state on close", { error: String(error) }));
+        runSync(logWarning("failed to persist window state", { error: String(error) }));
       } catch {
         // logging is best-effort during teardown
       }
@@ -268,17 +254,15 @@ export const make = Effect.gen(function* () {
   const attach = (window: Electron.BrowserWindow): Effect.Effect<void> =>
     Effect.sync(() => {
       let debounceFiber: Fiber.Fiber<void> | undefined;
-      // Saved state is applied at first reveal, so drop persists from a window
-      // that was never shown — they would clobber good on-disk state with the
-      // pre-restore defaults (e.g. quit during the connecting splash).
+      // Saved state is applied at first reveal — drop persists from a
+      // never-shown window so they can't clobber good on-disk state.
       let armed = window.isVisible();
       // In fullscreen, getNormalBounds() returns the fullscreen frame, so keep
       // the last non-fullscreen frame around to persist instead.
       let lastRestorable: PersistedWindowStateDocument = readRestorableState(window);
       let lastVisibleBounds: WindowRectangle = window.getBounds();
-      // macOS quit-from-fullscreen fires leave-full-screen before close; hold
-      // the fullscreen snapshot through the exit transition so the close-time
-      // save doesn't demote it with mid-transition bounds.
+      // macOS quit-from-fullscreen fires leave-full-screen before close; keep
+      // the fullscreen snapshot so close doesn't save mid-transition bounds.
       let fullscreenExitPending = false;
 
       if (!armed) {
@@ -289,11 +273,12 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      // Refreshed eagerly on resize/move (not just when a persist runs) so a
-      // resize followed within the debounce window by fullscreen entry still
-      // captures the pre-fullscreen frame.
+      // Sampled eagerly on resize/move so fullscreen entry inside the debounce
+      // window still captures the pre-fullscreen frame. Skipped while minimized:
+      // isMaximized() reports false there (Windows) and bounds are parked
+      // off-screen, so sampling would demote the saved state.
       const refreshSnapshots = () => {
-        if (window.isFullScreen() || fullscreenExitPending) {
+        if (window.isFullScreen() || window.isMinimized() || fullscreenExitPending) {
           return;
         }
         lastRestorable = readRestorableState(window);
@@ -311,8 +296,6 @@ export const make = Effect.gen(function* () {
         return lastRestorable;
       };
 
-      const persistEffect = Effect.suspend(() => persist(resolveDocument()));
-
       const cancelDebounce = () => {
         if (debounceFiber === undefined) {
           return;
@@ -327,38 +310,44 @@ export const make = Effect.gen(function* () {
           return;
         }
         cancelDebounce();
-        debounceFiber = runFork(
+        const fiber = runFork(
           Effect.sleep(WINDOW_STATE_PERSIST_DEBOUNCE_MS).pipe(
             Effect.andThen(
               Effect.sync(() => {
+                // Interruption is async — a cancelled fiber can fire after close.
+                if (window.isDestroyed()) {
+                  return;
+                }
                 fullscreenExitPending = false;
+                persistSync(resolveDocument());
               }),
             ),
-            Effect.andThen(persistEffect),
             Effect.ensuring(
               Effect.sync(() => {
-                debounceFiber = undefined;
+                // Interrupts finalize late — don't clear a newer fiber's slot.
+                if (debounceFiber === fiber) {
+                  debounceFiber = undefined;
+                }
               }),
             ),
           ),
         );
+        debounceFiber = fiber;
       };
 
       const persistNow = () => {
-        if (!armed) {
+        if (!armed || window.isDestroyed()) {
           return;
         }
         fullscreenExitPending = false;
         cancelDebounce();
-        runFork(persistEffect);
+        persistSync(resolveDocument());
       };
 
-      // Unlike persistNow, keeps fullscreenExitPending: a close right after
-      // leave-full-screen is the quit sequence, and must save the fullscreen
-      // snapshot rather than the half-transitioned window. Written
-      // synchronously so the save can't race process exit.
+      // Keeps fullscreenExitPending (unlike persistNow): close right after
+      // leave-full-screen is the quit sequence — save the fullscreen snapshot.
       const persistOnClose = () => {
-        if (!armed) {
+        if (!armed || window.isDestroyed()) {
           return;
         }
         cancelDebounce();
@@ -366,6 +355,9 @@ export const make = Effect.gen(function* () {
       };
 
       const handleBoundsChange = () => {
+        if (!armed || window.isDestroyed()) {
+          return;
+        }
         refreshSnapshots();
         schedulePersist();
       };
