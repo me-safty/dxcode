@@ -2,6 +2,9 @@ import {
   WorktreeHandoffError,
   WorktreeHandoffInput,
   WorktreeHandoffResult,
+  WorktreeStatusError,
+  WorktreeStatusInput,
+  WorktreeStatusResult,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import { Tool, Toolkit } from "effect/unstable/ai";
@@ -39,4 +42,18 @@ export const WorktreeHandoffTool = Tool.make("worktree_handoff", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const WorktreeToolkit = Toolkit.make(WorktreeHandoffTool);
+export const WorktreeStatusTool = Tool.make("worktree_status", {
+  description:
+    "Report this agent thread's worktree binding: whether it is attached to a git worktree, the worktree path and branch, the project's main workspace root, and the server default for worktree_handoff's startFromOrigin. Call this before worktree_handoff to check whether a handoff is possible or has already happened.",
+  parameters: WorktreeStatusInput,
+  success: WorktreeStatusResult,
+  failure: WorktreeStatusError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Get thread worktree status")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
+export const WorktreeToolkit = Toolkit.make(WorktreeHandoffTool, WorktreeStatusTool);

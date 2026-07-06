@@ -70,8 +70,8 @@ export const WorktreeHandoffResult = Schema.Struct({
 });
 export type WorktreeHandoffResult = typeof WorktreeHandoffResult.Type;
 
-export class WorktreeHandoffUnavailableError extends Schema.TaggedErrorClass<WorktreeHandoffUnavailableError>()(
-  "WorktreeHandoffUnavailableError",
+export class WorktreeCapabilityUnavailableError extends Schema.TaggedErrorClass<WorktreeCapabilityUnavailableError>()(
+  "WorktreeCapabilityUnavailableError",
   {
     capability: Schema.Literal("worktree"),
     environmentId: EnvironmentId,
@@ -81,18 +81,18 @@ export class WorktreeHandoffUnavailableError extends Schema.TaggedErrorClass<Wor
   },
 ) {
   override get message(): string {
-    return `Worktree handoff is not available for this agent session.`;
+    return `Worktree tools are not available for this agent session.`;
   }
 }
 
-export class WorktreeHandoffThreadNotFoundError extends Schema.TaggedErrorClass<WorktreeHandoffThreadNotFoundError>()(
-  "WorktreeHandoffThreadNotFoundError",
+export class WorktreeThreadNotFoundError extends Schema.TaggedErrorClass<WorktreeThreadNotFoundError>()(
+  "WorktreeThreadNotFoundError",
   {
     threadId: ThreadId,
   },
 ) {
   override get message(): string {
-    return `Thread '${this.threadId}' was not found for worktree handoff.`;
+    return `Thread '${this.threadId}' was not found.`;
   }
 }
 
@@ -119,8 +119,8 @@ export class WorktreeHandoffInvalidRequestError extends Schema.TaggedErrorClass<
   }
 }
 
-export class WorktreeHandoffOperationError extends Schema.TaggedErrorClass<WorktreeHandoffOperationError>()(
-  "WorktreeHandoffOperationError",
+export class WorktreeOperationError extends Schema.TaggedErrorClass<WorktreeOperationError>()(
+  "WorktreeOperationError",
   {
     operation: Schema.Literals([
       "resolveThread",
@@ -130,20 +130,50 @@ export class WorktreeHandoffOperationError extends Schema.TaggedErrorClass<Workt
       "resolveRemoteTrackingCommit",
       "createWorktree",
       "updateThreadMetadata",
+      "resolveSettings",
     ]),
     detail: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Worktree handoff operation '${this.operation}' failed: ${this.detail}`;
+    return `Worktree operation '${this.operation}' failed: ${this.detail}`;
   }
 }
 
 export const WorktreeHandoffError = Schema.Union([
-  WorktreeHandoffUnavailableError,
-  WorktreeHandoffThreadNotFoundError,
+  WorktreeCapabilityUnavailableError,
+  WorktreeThreadNotFoundError,
   WorktreeHandoffAlreadyInWorktreeError,
   WorktreeHandoffInvalidRequestError,
-  WorktreeHandoffOperationError,
+  WorktreeOperationError,
 ]);
 export type WorktreeHandoffError = typeof WorktreeHandoffError.Type;
+
+/**
+ * Input for the `worktree_status` MCP tool. Takes no parameters; the tool
+ * reports on the calling agent thread.
+ */
+export const WorktreeStatusInput = Schema.Struct({});
+export type WorktreeStatusInput = typeof WorktreeStatusInput.Type;
+
+export const WorktreeStatusResult = Schema.Struct({
+  attached: Schema.Boolean.annotate({
+    description: "True when this thread is already attached to a git worktree.",
+  }),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  projectWorkspaceRoot: TrimmedNonEmptyString.annotate({
+    description: "Root of the project's main workspace checkout.",
+  }),
+  defaultStartFromOrigin: Schema.Boolean.annotate({
+    description: "Server default used by worktree_handoff when startFromOrigin is omitted.",
+  }),
+});
+export type WorktreeStatusResult = typeof WorktreeStatusResult.Type;
+
+export const WorktreeStatusError = Schema.Union([
+  WorktreeCapabilityUnavailableError,
+  WorktreeThreadNotFoundError,
+  WorktreeOperationError,
+]);
+export type WorktreeStatusError = typeof WorktreeStatusError.Type;

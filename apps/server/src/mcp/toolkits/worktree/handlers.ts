@@ -1,12 +1,13 @@
 import {
   CommandId,
+  WorktreeCapabilityUnavailableError,
   WorktreeHandoffAlreadyInWorktreeError,
   WorktreeHandoffInvalidRequestError,
-  WorktreeHandoffOperationError,
   type WorktreeHandoffResult,
   type WorktreeHandoffSetupScriptStatus,
-  WorktreeHandoffThreadNotFoundError,
-  WorktreeHandoffUnavailableError,
+  WorktreeOperationError,
+  type WorktreeStatusResult,
+  WorktreeThreadNotFoundError,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -21,7 +22,7 @@ import * as VcsStatusBroadcaster from "../../../vcs/VcsStatusBroadcaster.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { WorktreeToolkit } from "./tools.ts";
 
-type HandoffOperation = typeof WorktreeHandoffOperationError.fields.operation.Type;
+type WorktreeOperation = typeof WorktreeOperationError.fields.operation.Type;
 
 const errorDetail = (error: unknown): string => {
   if (error instanceof Error) return error.message;
@@ -31,13 +32,13 @@ const errorDetail = (error: unknown): string => {
   return String(error);
 };
 
-const asOperationError = (operation: HandoffOperation) => (error: unknown) =>
-  new WorktreeHandoffOperationError({ operation, detail: errorDetail(error) });
+const asOperationError = (operation: WorktreeOperation) => (error: unknown) =>
+  new WorktreeOperationError({ operation, detail: errorDetail(error) });
 
 const requireWorktreeCapability = Effect.gen(function* () {
   const invocation = yield* McpInvocationContext.McpInvocationContext;
   if (!invocation.capabilities.has("worktree")) {
-    return yield* new WorktreeHandoffUnavailableError({
+    return yield* new WorktreeCapabilityUnavailableError({
       capability: "worktree",
       environmentId: invocation.environmentId,
       threadId: invocation.threadId,
@@ -68,7 +69,7 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
     .getThreadDetailById(invocation.threadId)
     .pipe(Effect.map(Option.getOrUndefined), Effect.mapError(asOperationError("resolveThread")));
   if (!thread) {
-    return yield* new WorktreeHandoffThreadNotFoundError({ threadId: invocation.threadId });
+    return yield* new WorktreeThreadNotFoundError({ threadId: invocation.threadId });
   }
   if (thread.worktreePath !== null && thread.worktreePath !== undefined) {
     return yield* new WorktreeHandoffAlreadyInWorktreeError({
@@ -81,7 +82,7 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
     .getProjectShellById(thread.projectId)
     .pipe(Effect.map(Option.getOrUndefined), Effect.mapError(asOperationError("resolveProject")));
   if (!project) {
-    return yield* new WorktreeHandoffOperationError({
+    return yield* new WorktreeOperationError({
       operation: "resolveProject",
       detail: `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
     });
@@ -200,11 +201,50 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
   return result;
 });
 
+const worktreeStatus = Effect.fn("WorktreeToolkit.worktreeStatus")(function* () {
+  const invocation = yield* requireWorktreeCapability;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+
+  const thread = yield* projectionSnapshotQuery
+    .getThreadDetailById(invocation.threadId)
+    .pipe(Effect.map(Option.getOrUndefined), Effect.mapError(asOperationError("resolveThread")));
+  if (!thread) {
+    return yield* new WorktreeThreadNotFoundError({ threadId: invocation.threadId });
+  }
+
+  const project = yield* projectionSnapshotQuery
+    .getProjectShellById(thread.projectId)
+    .pipe(Effect.map(Option.getOrUndefined), Effect.mapError(asOperationError("resolveProject")));
+  if (!project) {
+    return yield* new WorktreeOperationError({
+      operation: "resolveProject",
+      detail: `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
+    });
+  }
+
+  const defaultStartFromOrigin = yield* serverSettings.getSettings.pipe(
+    Effect.map((settings) => settings.newWorktreesStartFromOrigin),
+    Effect.mapError(asOperationError("resolveSettings")),
+  );
+
+  const result: WorktreeStatusResult = {
+    attached: thread.worktreePath !== null,
+    worktreePath: thread.worktreePath,
+    branch: thread.branch,
+    projectWorkspaceRoot: project.workspaceRoot,
+    defaultStartFromOrigin,
+  };
+  return result;
+});
+
 export const WorktreeToolkitHandlersLive = WorktreeToolkit.toLayer({
   worktree_handoff: (input) => worktreeHandoff(input),
+  worktree_status: () => worktreeStatus(),
 });
 
 /** Exposed for tests. */
 export const __testing = {
   worktreeHandoff,
+  worktreeStatus,
 };

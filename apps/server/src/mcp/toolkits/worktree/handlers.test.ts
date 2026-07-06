@@ -281,7 +281,7 @@ describe("worktree_handoff", () => {
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Fail") {
         expect(exit.cause.reasons[0].error).toMatchObject({
-          _tag: "WorktreeHandoffUnavailableError",
+          _tag: "WorktreeCapabilityUnavailableError",
         });
       }
     });
@@ -306,6 +306,55 @@ describe("worktree_handoff", () => {
       const result = yield* runHandoff(harness, { branch: "feature/setup-fails" });
       expect(result.setupScript.status).toBe("failed");
       expect(harness.dispatch).toHaveBeenCalled();
+    });
+  });
+});
+
+describe("worktree_status", () => {
+  it.effect("reports an unattached thread", () => {
+    const harness = makeHarness({ newWorktreesStartFromOrigin: true });
+    return Effect.gen(function* () {
+      const result = yield* __testing.worktreeStatus().pipe(Effect.provide(harness.layer));
+      expect(result).toEqual({
+        attached: false,
+        worktreePath: null,
+        branch: null,
+        projectWorkspaceRoot: workspaceRoot,
+        defaultStartFromOrigin: true,
+      });
+    });
+  });
+
+  it.effect("reports an attached thread's worktree and branch", () => {
+    const harness = makeHarness({
+      thread: makeThread({
+        worktreePath: "/worktrees/project/existing",
+        branch: "feature/existing",
+      }),
+    });
+    return Effect.gen(function* () {
+      const result = yield* __testing.worktreeStatus().pipe(Effect.provide(harness.layer));
+      expect(result).toMatchObject({
+        attached: true,
+        worktreePath: "/worktrees/project/existing",
+        branch: "feature/existing",
+        defaultStartFromOrigin: false,
+      });
+    });
+  });
+
+  it.effect("fails when the worktree capability is missing", () => {
+    const harness = makeHarness({ capabilities: new Set(["preview"]) });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        __testing.worktreeStatus().pipe(Effect.provide(harness.layer)),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Fail") {
+        expect(exit.cause.reasons[0].error).toMatchObject({
+          _tag: "WorktreeCapabilityUnavailableError",
+        });
+      }
     });
   });
 });
