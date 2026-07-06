@@ -262,8 +262,15 @@ export default function ProjectScriptsControl({
                   size="xs"
                   variant="outline"
                   aria-label={`Run ${primaryScript.name}`}
-                  disabled={!runAvailable}
-                  onClick={() => onRunScript(primaryScript)}
+                  aria-disabled={!runAvailable}
+                  className={!runAvailable ? "cursor-not-allowed opacity-64" : undefined}
+                  onClick={(event) => {
+                    if (!runAvailable) {
+                      event.preventDefault();
+                      return;
+                    }
+                    onRunScript(primaryScript);
+                  }}
                 />
               }
             >
