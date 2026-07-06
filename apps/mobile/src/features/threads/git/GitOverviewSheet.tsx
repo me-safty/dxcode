@@ -357,16 +357,8 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         }}
       />
 
-      <View
-        className={
-          isInspector
-            ? "gap-1 border-b border-border px-4 pb-4 pt-3"
-            : "items-center gap-1 px-5 pb-3 pt-4"
-        }
-      >
-        {/* Android relies on the scroll view's pull-to-refresh instead of a
-            floating button; iOS and the inspector keep the corner control. */}
-        {Platform.OS === "android" && !isInspector ? null : (
+      {isInspector ? (
+        <View className="gap-1 border-b border-border px-4 pb-4 pt-3">
           <Pressable
             className="absolute right-3 top-4 h-9 w-9 items-center justify-center rounded-full bg-subtle"
             style={{ zIndex: 1, opacity: busy ? 0.45 : 1 }}
@@ -381,20 +373,40 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
               weight="medium"
             />
           </Pressable>
-        )}
-        <Text
-          className="text-xs font-t3-bold uppercase text-foreground-muted"
-          style={{ letterSpacing: 1 }}
-        >
-          {isInspector ? "Repository" : "Branch"}
-        </Text>
-        <Text className={isInspector ? "pr-10 text-xl font-t3-bold" : "text-3xl font-t3-bold"}>
-          {currentBranchLabel}
-        </Text>
-        <Text className="text-foreground-secondary text-sm font-medium leading-normal">
-          {currentStatusSummary}
-        </Text>
-      </View>
+          <Text
+            className="text-xs font-t3-bold uppercase text-foreground-muted"
+            style={{ letterSpacing: 1 }}
+          >
+            Repository
+          </Text>
+          <Text className="pr-10 text-xl font-t3-bold">{currentBranchLabel}</Text>
+          <Text className="text-foreground-secondary text-sm font-medium leading-normal">
+            {currentStatusSummary}
+          </Text>
+        </View>
+      ) : (
+        // Compact header row: labeled branch on the left, status summary at
+        // the trailing end. Horizontal padding lines the text up with the
+        // rows' icon column inside the card below (20 screen + 16 card + 4
+        // row). The sheet relies on pull-to-refresh instead of a corner
+        // refresh button.
+        <View className="flex-row items-end justify-between gap-3 px-10 pb-4 pt-4">
+          <View className="shrink gap-0.5">
+            <Text
+              className="text-xs font-t3-bold uppercase text-foreground-muted"
+              style={{ letterSpacing: 1 }}
+            >
+              Branch
+            </Text>
+            <Text className="text-xl font-t3-bold" numberOfLines={1}>
+              {currentBranchLabel}
+            </Text>
+          </View>
+          <Text className="text-foreground-secondary pb-0.5 text-sm font-medium" numberOfLines={1}>
+            {currentStatusSummary}
+          </Text>
+        </View>
+      )}
 
       {content}
     </View>
