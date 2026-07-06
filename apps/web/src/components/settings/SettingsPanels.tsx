@@ -1,11 +1,15 @@
 import {
   ArchiveIcon,
   ArchiveX,
+  ChevronDownIcon,
+  CloudIcon,
   LoaderIcon,
+  MailIcon,
   MonitorIcon,
   MoonIcon,
   PlusIcon,
   RefreshCwIcon,
+  ServerIcon,
   SunIcon,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -132,6 +136,29 @@ const DEFAULT_PROVIDER_DRIVER_KINDS = new Set<ProviderDriverKind>([
   ProviderDriverKind.make("claudeAgent"),
 ]);
 type ThemePreferenceValue = (typeof THEME_OPTIONS)[number]["value"];
+type EmailProviderPlaceholder = {
+  readonly label: string;
+  readonly description: string;
+  readonly Icon: typeof MailIcon;
+};
+
+const EMAIL_PROVIDER_PLACEHOLDERS = [
+  {
+    label: "Google",
+    description: "Connect Gmail and Google Workspace mailboxes.",
+    Icon: MailIcon,
+  },
+  {
+    label: "Outlook",
+    description: "Connect Microsoft 365 and Outlook accounts.",
+    Icon: CloudIcon,
+  },
+  {
+    label: "SMTP",
+    description: "Configure a custom SMTP sender.",
+    Icon: ServerIcon,
+  },
+] as const satisfies ReadonlyArray<EmailProviderPlaceholder>;
 
 function ThemeSegmentedControl({
   value,
@@ -178,6 +205,39 @@ function ThemeSegmentedControl({
         })}
       </div>
     </TooltipProvider>
+  );
+}
+
+function EmailProviderPlaceholderRow({ provider }: { provider: EmailProviderPlaceholder }) {
+  const Icon = provider.Icon;
+  return (
+    <div className="border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="relative flex size-5 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/40 text-muted-foreground">
+              <Icon className="size-3.5" />
+            </span>
+            <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-foreground">
+              {provider.label}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground/80">Coming soon - {provider.description}</p>
+        </div>
+        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            disabled
+            aria-label={`${provider.label} setup details`}
+          >
+            <ChevronDownIcon className="size-3.5" />
+          </Button>
+          <Switch checked={false} disabled aria-label={`${provider.label} email setup`} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1019,6 +1079,18 @@ export function GeneralSettingsPanel() {
             </Button>
           }
         />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function EmailSettingsPanel() {
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Email">
+        {EMAIL_PROVIDER_PLACEHOLDERS.map((provider) => (
+          <EmailProviderPlaceholderRow key={provider.label} provider={provider} />
+        ))}
       </SettingsSection>
     </SettingsPageContainer>
   );

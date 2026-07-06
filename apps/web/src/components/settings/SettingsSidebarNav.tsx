@@ -6,6 +6,7 @@ import {
   GitBranchIcon,
   KeyboardIcon,
   Link2Icon,
+  MailIcon,
   Settings2Icon,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -23,6 +24,7 @@ export type SettingsSectionPath =
   | "/settings/profile"
   | "/settings/general"
   | "/settings/keybindings"
+  | "/settings/email"
   | "/settings/providers"
   | "/settings/source-control"
   | "/settings/connections"
@@ -36,6 +38,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   { label: "Profile", to: "/settings/profile", icon: CircleUserRoundIcon },
   { label: "General", to: "/settings/general", icon: Settings2Icon },
   { label: "Keybindings", to: "/settings/keybindings", icon: KeyboardIcon },
+  { label: "Email", to: "/settings/email", icon: MailIcon },
   { label: "Providers", to: "/settings/providers", icon: BotIcon },
   { label: "Source Control", to: "/settings/source-control", icon: GitBranchIcon },
   { label: "Connections", to: "/settings/connections", icon: Link2Icon },

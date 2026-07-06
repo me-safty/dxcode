@@ -2,7 +2,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
-import { isChatSurfacePathname, shouldShowSecondarySidebar } from "../appNavRoutes";
+import {
+  isChatSurfacePathname,
+  isEmailSurfacePathname,
+  shouldShowSecondarySidebar,
+} from "../appNavRoutes";
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { isMacPlatform } from "../lib/utils";
@@ -70,6 +74,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const showChatSidebar = isChatSurfacePathname(pathname);
+  const showEmailSidebar = isEmailSurfacePathname(pathname);
+  const showResizableSecondarySidebar = showChatSidebar || showEmailSidebar;
   const sidebarWidth = shouldShowSecondarySidebar(pathname)
     ? THREAD_SIDEBAR_DEFAULT_WIDTH
     : THREAD_SIDEBAR_APP_NAV_RAIL_WIDTH;
@@ -103,13 +109,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   useEffect(() => {
-    if (showChatSidebar || typeof document === "undefined") {
+    if (showResizableSecondarySidebar || typeof document === "undefined") {
       return;
     }
     document
       .querySelector<HTMLElement>("[data-slot='sidebar-wrapper']")
       ?.style.setProperty("--sidebar-width", sidebarWidth);
-  }, [showChatSidebar, sidebarWidth]);
+  }, [showResizableSecondarySidebar, sidebarWidth]);
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={macosWindowControlsStyle}>
@@ -118,7 +124,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         collapsible="icon"
         className="border-r border-border bg-card text-foreground"
         resizable={
-          showChatSidebar
+          showResizableSecondarySidebar
             ? {
                 minWidth: THREAD_SIDEBAR_MIN_WIDTH,
                 shouldAcceptWidth: ({ nextWidth, wrapper }) =>

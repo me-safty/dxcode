@@ -8,11 +8,14 @@ import {
   ChevronRightIcon,
   CloudIcon,
   EllipsisIcon,
+  FolderIcon,
   FolderPlusIcon,
   FolderKanbanIcon,
+  GitBranchIcon,
   GitBranchPlusIcon,
   Globe2Icon,
   HomeIcon,
+  ImageIcon,
   ListTodoIcon,
   MailIcon,
   PinIcon,
@@ -129,7 +132,11 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
-import { isChatSurfacePathname, shouldShowSecondarySidebar } from "../appNavRoutes";
+import {
+  isChatSurfacePathname,
+  isEmailSurfacePathname,
+  shouldShowSecondarySidebar,
+} from "../appNavRoutes";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
@@ -156,15 +163,14 @@ import {
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
-  Dialog,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from "./ui/dialog";
-import { Input } from "./ui/input";
+  Sheet,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetPanel,
+  SheetPopup,
+  SheetTitle,
+} from "./ui/sheet";
 import {
   Menu,
   MenuGroup,
@@ -1727,6 +1733,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     null,
   );
   const [projectRenameTitle, setProjectRenameTitle] = useState("");
+  const [projectDetailsView, setProjectDetailsView] = useState<"details" | "archive">("details");
+  const projectIconInputRef = useRef<HTMLInputElement | null>(null);
   const memberProjectByScopedKey = useMemo(
     () =>
       new Map(
@@ -1948,9 +1956,47 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [suppressProjectClickAfterDragRef, suppressProjectClickForContextMenuRef],
   );
 
+  const projectDetailsGitStatus = useEnvironmentQuery(
+    projectRenameTarget
+      ? vcsEnvironment.status({
+          environmentId: projectRenameTarget.environmentId,
+          input: { cwd: projectRenameTarget.workspaceRoot },
+        })
+      : null,
+  );
+  const projectDetailsArchivedThreads = useMemo(() => {
+    if (!projectRenameTarget) {
+      return [];
+    }
+    return sortThreads(
+      projectThreads.filter(
+        (thread) =>
+          thread.environmentId === projectRenameTarget.environmentId &&
+          thread.projectId === projectRenameTarget.id &&
+          thread.archivedAt !== null,
+      ),
+      threadSortOrder,
+    );
+  }, [projectRenameTarget, projectThreads, threadSortOrder]);
+  const projectDetailsRepoLabel =
+    projectRenameTarget?.repositoryIdentity?.displayName ??
+    projectRenameTarget?.repositoryIdentity?.name ??
+    projectRenameTarget?.repositoryIdentity?.canonicalKey ??
+    (projectDetailsGitStatus.data?.isRepo ? "Git repository" : "No repository detected");
+  const projectDetailsRepoRemote =
+    projectRenameTarget?.repositoryIdentity?.locator.remoteUrl ??
+    (projectDetailsGitStatus.isPending
+      ? "Checking repository"
+      : projectDetailsGitStatus.error
+        ? "Could not read repository details"
+        : projectDetailsGitStatus.data?.isRepo
+          ? "Connected to local Git metadata"
+          : "No Git repository found for this directory");
+
   const openProjectRenameDialog = useCallback((member: SidebarProjectGroupMember) => {
     setProjectRenameTarget(member);
     setProjectRenameTitle(member.title);
+    setProjectDetailsView("details");
   }, []);
 
   const removeProject = useCallback(
@@ -2345,6 +2391,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const closeProjectRenameDialog = useCallback(() => {
     setProjectRenameTarget(null);
     setProjectRenameTitle("");
+    setProjectDetailsView("details");
+    if (projectIconInputRef.current) {
+      projectIconInputRef.current.value = "";
+    }
   }, []);
 
   const submitProjectRename = useCallback(async () => {
@@ -2632,7 +2682,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         collapseThreadListForProject={collapseThreadListForProject}
       />
 
-      <Dialog
+      <Sheet
         open={projectRenameTarget !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -2640,44 +2690,178 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           }
         }}
       >
-        <DialogPopup className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Edit project details</DialogTitle>
-            <DialogDescription>
-              {projectRenameTarget
-                ? `Update details for ${projectRenameTarget.workspaceRoot}.`
-                : "Update the project details."}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="space-y-4">
-            <div className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">Project title</span>
-              <Input
-                aria-label="Project title"
-                value={projectRenameTitle}
-                onChange={(event) => setProjectRenameTitle(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void submitProjectRename();
-                  }
-                }}
-              />
-            </div>
-            {projectRenameTarget?.environmentLabel ? (
-              <p className="text-xs text-muted-foreground">
-                Environment: {projectRenameTarget.environmentLabel}
-              </p>
+        <SheetPopup className="max-w-[27rem]" side="right">
+          <SheetHeader className={projectDetailsView === "archive" ? "gap-3" : undefined}>
+            {projectDetailsView === "archive" ? (
+              <Button
+                className="-ml-2 w-fit gap-2"
+                size="sm"
+                variant="ghost"
+                onClick={() => setProjectDetailsView("details")}
+              >
+                <ArrowLeftIcon className="size-4" />
+                Back
+              </Button>
             ) : null}
-          </DialogPanel>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeProjectRenameDialog}>
-              Cancel
-            </Button>
-            <Button onClick={() => void submitProjectRename()}>Save</Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
+            <SheetTitle>
+              {projectDetailsView === "archive" ? "Archived chats" : "Project details"}
+            </SheetTitle>
+            <SheetDescription>
+              {projectDetailsView === "archive"
+                ? projectRenameTarget
+                  ? `Archived conversations for ${projectRenameTarget.title}.`
+                  : "Archived conversations for this project."
+                : projectRenameTarget
+                  ? `Manage ${projectRenameTarget.title}.`
+                  : "Manage this project."}
+            </SheetDescription>
+          </SheetHeader>
+
+          {projectDetailsView === "archive" ? (
+            <SheetPanel className="space-y-3">
+              {projectDetailsArchivedThreads.length === 0 ? (
+                <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+                  <div className="text-sm font-medium text-foreground">No archived chats</div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Archived conversations for this project will appear here.
+                  </p>
+                </div>
+              ) : (
+                projectDetailsArchivedThreads.map((thread) => (
+                  <button
+                    key={scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-border/70 bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/35"
+                    onClick={() => {
+                      void threadRows.navigateToThread(
+                        scopeThreadRef(thread.environmentId, thread.id),
+                      );
+                      closeProjectRenameDialog();
+                    }}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {thread.title}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                      </span>
+                    </span>
+                    <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                  </button>
+                ))
+              )}
+            </SheetPanel>
+          ) : (
+            <>
+              <SheetPanel className="space-y-6">
+                <section>
+                  <div className="flex items-center gap-3">
+                    <label
+                      className="group/project-icon relative flex size-14 shrink-0 cursor-pointer items-center justify-center rounded-2xl border border-border/70 bg-muted/35 transition-colors hover:border-border hover:bg-muted/55"
+                      aria-label="Choose project icon image"
+                    >
+                      {projectRenameTarget ? (
+                        <ProjectFavicon
+                          environmentId={projectRenameTarget.environmentId}
+                          cwd={projectRenameTarget.workspaceRoot}
+                          className="size-9 rounded-lg"
+                        />
+                      ) : (
+                        <FolderIcon className="size-6 text-muted-foreground" />
+                      )}
+                      <span className="absolute inset-0 flex items-center justify-center rounded-2xl bg-background/70 opacity-0 transition-opacity group-hover/project-icon:opacity-100 group-focus-within/project-icon:opacity-100">
+                        <ImageIcon className="size-5 text-foreground" />
+                      </span>
+                      <input
+                        ref={projectIconInputRef}
+                        aria-label="Choose project icon image"
+                        accept="image/*"
+                        className="sr-only"
+                        type="file"
+                      />
+                    </label>
+                    <div className="min-w-0 flex-1">
+                      <input
+                        aria-label="Project title"
+                        className="-ml-1 h-7 w-full rounded-md border border-transparent bg-transparent px-1 text-sm font-medium text-foreground outline-none transition-colors hover:bg-muted/45 focus:border-ring focus:bg-background focus:ring-[3px] focus:ring-ring/50"
+                        value={projectRenameTitle}
+                        onChange={(event) => setProjectRenameTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void submitProjectRename();
+                          }
+                        }}
+                      />
+                      <div className="mt-1 truncate text-xs text-muted-foreground">
+                        {projectRenameTarget?.environmentLabel ?? "Local environment"}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                    <FolderIcon className="size-4 text-muted-foreground" />
+                    File directory
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-muted/25 p-3">
+                    <div className="break-all text-sm text-foreground">
+                      {projectRenameTarget?.workspaceRoot ?? "No directory connected"}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                    <GitBranchIcon className="size-4 text-muted-foreground" />
+                    Git repository
+                  </div>
+                  <div className="space-y-2 rounded-xl border border-border/70 bg-muted/25 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">
+                          {projectDetailsRepoLabel}
+                        </div>
+                        <div className="mt-1 break-all text-xs text-muted-foreground">
+                          {projectDetailsRepoRemote}
+                        </div>
+                      </div>
+                      {projectDetailsGitStatus.data?.refName ? (
+                        <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                          {projectDetailsGitStatus.data.refName}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+
+                <div className="pt-2">
+                  <Button
+                    className="w-full justify-between"
+                    variant="outline"
+                    onClick={() => setProjectDetailsView("archive")}
+                  >
+                    <span className="flex items-center gap-2">
+                      <ArchiveIcon className="size-4" />
+                      Archive chats
+                    </span>
+                    <ChevronRightIcon className="size-4" />
+                  </Button>
+                </div>
+              </SheetPanel>
+
+              <SheetFooter>
+                <Button variant="outline" onClick={closeProjectRenameDialog}>
+                  Cancel
+                </Button>
+                <Button onClick={() => void submitProjectRename()}>Save</Button>
+              </SheetFooter>
+            </>
+          )}
+        </SheetPopup>
+      </Sheet>
     </>
   );
 });
@@ -3025,6 +3209,53 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   );
 });
 
+const EmailSidebarContent = memo(function EmailSidebarContent({
+  commandPaletteShortcutLabel,
+  onCreateNewEmail,
+}: {
+  commandPaletteShortcutLabel: string | null;
+  onCreateNewEmail: () => void;
+}) {
+  return (
+    <SidebarContent className="gap-0">
+      <SidebarGroup className="px-2 pt-2 pb-1">
+        <SidebarMenu className="gap-1.5">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="sm"
+              className="gap-2 px-2 py-1.5 text-foreground hover:bg-accent focus-visible:ring-0"
+              data-testid="new-email-sidebar-button"
+              onClick={onCreateNewEmail}
+            >
+              <SquarePenIcon className="size-3.5 text-muted-foreground/80" />
+              <span className="flex-1 truncate text-left text-xs font-medium">New Email</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <CommandDialogTrigger
+              render={
+                <SidebarMenuButton
+                  size="sm"
+                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                  data-testid="command-palette-trigger"
+                />
+              }
+            >
+              <SearchIcon className="size-3.5 text-muted-foreground/70" />
+              <span className="flex-1 truncate text-left text-xs">Search</span>
+              {commandPaletteShortcutLabel ? (
+                <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
+                  {commandPaletteShortcutLabel}
+                </Kbd>
+              ) : null}
+            </CommandDialogTrigger>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+    </SidebarContent>
+  );
+});
+
 interface SidebarProjectsContentProps {
   showArm64IntelBuildWarning: boolean;
   arm64IntelBuildWarningDescription: string | null;
@@ -3352,6 +3583,7 @@ export default function Sidebar() {
   const isOnSettings = pathname.startsWith("/settings");
   const showSecondarySidebar = shouldShowSecondarySidebar(pathname);
   const showChatSidebar = isChatSurfacePathname(pathname);
+  const showEmailSidebar = isEmailSurfacePathname(pathname);
   const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const sidebarProjectGroupingMode = useClientSettings((s) => s.sidebarProjectGroupingMode);
@@ -3523,6 +3755,12 @@ export default function Sidebar() {
       setOpenMobile(false);
     }
     void navigate({ to: "/chat" });
+  }, [isMobile, navigate, setOpenMobile]);
+  const handleCreateNewEmail = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void navigate({ to: "/email" });
   }, [isMobile, navigate, setOpenMobile]);
 
   const navigateToThread = useCallback(
@@ -3996,10 +4234,21 @@ export default function Sidebar() {
         <SidebarAppNavRail pathname={pathname} />
         {showSecondarySidebar ? (
           <div className="flex min-w-0 flex-1 flex-col group-data-[state=collapsed]:hidden">
-            {showChatSidebar ? <SidebarChromeHeader isElectron={isElectron} /> : null}
+            {showChatSidebar || showEmailSidebar ? (
+              <SidebarChromeHeader isElectron={isElectron} />
+            ) : null}
 
             {isOnSettings ? (
               <SettingsSidebarNav pathname={pathname} />
+            ) : showEmailSidebar ? (
+              <>
+                <EmailSidebarContent
+                  commandPaletteShortcutLabel={commandPaletteShortcutLabel}
+                  onCreateNewEmail={handleCreateNewEmail}
+                />
+
+                <SidebarChromeFooter />
+              </>
             ) : (
               <>
                 <SidebarProjectsContent

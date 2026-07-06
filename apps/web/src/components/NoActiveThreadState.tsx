@@ -131,21 +131,18 @@ const pendingConnectionCards = [
     description: "Get context from recent team discussions",
     icon: SparklesIcon,
     iconClassName: "text-[#36c5f0]",
-    muted: true,
   },
   {
     title: "Connect email",
     description: "Summarize stakeholder asks from email",
     icon: MailIcon,
     iconClassName: "text-[#ea4335]",
-    muted: true,
   },
   {
     title: "Connect files",
     description: "Review results, research, and plans",
     icon: CloudIcon,
     iconClassName: "text-[#4285f4]",
-    muted: false,
   },
 ] as const;
 
@@ -1471,10 +1468,7 @@ export function NoActiveThreadState() {
                       <button
                         key={card.title}
                         type="button"
-                        className={[
-                          "relative min-h-[7.125rem] cursor-pointer rounded-xl border border-border/70 bg-background p-3 text-left shadow-xs transition-colors hover:bg-accent/35",
-                          card.muted ? "opacity-38" : "",
-                        ].join(" ")}
+                        className="relative min-h-[7.125rem] cursor-pointer rounded-xl border border-border/70 bg-background p-3 text-left shadow-xs transition-colors hover:bg-accent/35"
                       >
                         <Icon className={`size-4 ${card.iconClassName}`} />
                         <div className="mt-4 text-sm font-medium text-foreground">{card.title}</div>
