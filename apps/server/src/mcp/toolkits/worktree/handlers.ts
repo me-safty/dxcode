@@ -109,7 +109,7 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
     input.startFromOrigin ??
     (yield* serverSettings.getSettings.pipe(
       Effect.map((settings) => settings.newWorktreesStartFromOrigin),
-      Effect.mapError(asOperationError("resolveBaseRef")),
+      Effect.mapError(asOperationError("resolveSettings")),
     ));
 
   let worktreeBaseRef = baseRef;

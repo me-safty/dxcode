@@ -171,6 +171,17 @@ const makeHarness = (options: HarnessOptions = {}) => {
   };
 };
 
+const expectTypedFailure = (exit: Exit.Exit<unknown, unknown>, expected: object): void => {
+  if (!Exit.isFailure(exit)) {
+    expect.fail(`Expected a failure exit, got: ${JSON.stringify(exit)}`);
+  }
+  const reason = exit.cause.reasons[0];
+  if (reason?._tag !== "Fail") {
+    expect.fail(`Expected a typed Fail cause, got: ${reason?._tag ?? "no reason"}`);
+  }
+  expect(reason.error).toMatchObject(expected);
+};
+
 const runHandoff = (
   harness: ReturnType<typeof makeHarness>,
   input: Parameters<typeof __testing.worktreeHandoff>[0],
@@ -263,13 +274,10 @@ describe("worktree_handoff", () => {
     });
     return Effect.gen(function* () {
       const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/second" }));
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Fail") {
-        expect(exit.cause.reasons[0].error).toMatchObject({
-          _tag: "WorktreeHandoffAlreadyInWorktreeError",
-          worktreePath: "/worktrees/project/existing",
-        });
-      }
+      expectTypedFailure(exit, {
+        _tag: "WorktreeHandoffAlreadyInWorktreeError",
+        worktreePath: "/worktrees/project/existing",
+      });
       expect(harness.createWorktree).not.toHaveBeenCalled();
     });
   });
@@ -278,12 +286,7 @@ describe("worktree_handoff", () => {
     const harness = makeHarness({ capabilities: new Set(["preview"]) });
     return Effect.gen(function* () {
       const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/no-capability" }));
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Fail") {
-        expect(exit.cause.reasons[0].error).toMatchObject({
-          _tag: "WorktreeCapabilityUnavailableError",
-        });
-      }
+      expectTypedFailure(exit, { _tag: "WorktreeCapabilityUnavailableError" });
     });
   });
 
@@ -291,12 +294,7 @@ describe("worktree_handoff", () => {
     const harness = makeHarness({ currentBranch: null });
     return Effect.gen(function* () {
       const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/detached" }));
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Fail") {
-        expect(exit.cause.reasons[0].error).toMatchObject({
-          _tag: "WorktreeHandoffInvalidRequestError",
-        });
-      }
+      expectTypedFailure(exit, { _tag: "WorktreeHandoffInvalidRequestError" });
     });
   });
 
@@ -349,12 +347,7 @@ describe("worktree_status", () => {
       const exit = yield* Effect.exit(
         __testing.worktreeStatus().pipe(Effect.provide(harness.layer)),
       );
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Fail") {
-        expect(exit.cause.reasons[0].error).toMatchObject({
-          _tag: "WorktreeCapabilityUnavailableError",
-        });
-      }
+      expectTypedFailure(exit, { _tag: "WorktreeCapabilityUnavailableError" });
     });
   });
 });
