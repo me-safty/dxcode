@@ -29,6 +29,13 @@ vi.mock("electron", () => ({
 
 import * as BrowserSession from "./BrowserSession.ts";
 
+type PermissionRequestHandler = (
+  webContents: unknown,
+  permission: string,
+  callback: (granted: boolean) => void,
+) => void;
+type PermissionCheckHandler = (webContents: unknown, permission: string) => boolean;
+
 const layer = BrowserSession.layer.pipe(Layer.provide(NodeServices.layer));
 
 describe("BrowserSession", () => {
@@ -73,11 +80,8 @@ describe("BrowserSession", () => {
       assert.isDefined(mockSession);
 
       assert.strictEqual(mockSession.setPermissionRequestHandler.mock.calls.length, 1);
-      const requestHandler = mockSession.setPermissionRequestHandler.mock.calls[0]?.[0] as (
-        webContents: unknown,
-        permission: string,
-        callback: (granted: boolean) => void,
-      ) => void;
+      const requestHandler = mockSession.setPermissionRequestHandler.mock
+        .calls[0]?.[0] as PermissionRequestHandler;
       const requested = new Map<string, boolean>();
       for (const permission of ["clipboard-read", "clipboard-sanitized-write", "midi"]) {
         requestHandler(undefined, permission, (granted) => requested.set(permission, granted));
@@ -87,10 +91,8 @@ describe("BrowserSession", () => {
       assert.strictEqual(requested.get("midi"), false);
 
       assert.strictEqual(mockSession.setPermissionCheckHandler.mock.calls.length, 1);
-      const checkHandler = mockSession.setPermissionCheckHandler.mock.calls[0]?.[0] as (
-        webContents: unknown,
-        permission: string,
-      ) => boolean;
+      const checkHandler = mockSession.setPermissionCheckHandler.mock
+        .calls[0]?.[0] as PermissionCheckHandler;
       assert.strictEqual(checkHandler(undefined, "clipboard-read"), true);
       assert.strictEqual(checkHandler(undefined, "clipboard-sanitized-write"), true);
       assert.strictEqual(checkHandler(undefined, "midi"), false);
