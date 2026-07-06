@@ -30,6 +30,7 @@ import {
   ClientOrchestrationCommand,
   DispatchResult,
   OrchestrationReadModel,
+  OrchestrationShellSnapshot,
   OrchestrationThreadDetailSnapshot,
 } from "./orchestration.ts";
 import {
@@ -456,6 +457,13 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
     HttpApiEndpoint.get("snapshot", "/api/orchestration/snapshot", {
       headers: OptionalBearerHeaders,
       success: OrchestrationReadModel,
+      error: EnvironmentOrchestrationSnapshotErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("shellSnapshot", "/api/orchestration/shell", {
+      headers: OptionalBearerHeaders,
+      success: OrchestrationShellSnapshot,
       error: EnvironmentOrchestrationSnapshotErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )

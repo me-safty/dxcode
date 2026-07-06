@@ -56,22 +56,27 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           threadId,
           error: error.message,
         }),
-        Effect.as(Option.none<OrchestrationThread>()),
+        Effect.as(Option.none<OrchestrationThreadDetailSnapshot>()),
       ),
     ),
   );
+  const cachedThread = Option.map(cached, (snapshot) => snapshot.thread);
   const state = yield* SubscriptionRef.make<EnvironmentThreadState>({
-    data: cached,
-    status: statusWithoutLiveData(cached),
+    data: cachedThread,
+    status: statusWithoutLiveData(cachedThread),
     error: Option.none(),
   });
-  const lastSequence = yield* SubscriptionRef.make(0);
-  const persistence = yield* Queue.sliding<OrchestrationThread>(1);
+  // Seed the resume cursor from the cached snapshot so a warm cache can catch up
+  // via `afterSequence` instead of re-downloading the full thread body.
+  const lastSequence = yield* SubscriptionRef.make(
+    Option.match(cached, { onNone: () => 0, onSome: (snapshot) => snapshot.snapshotSequence }),
+  );
+  const persistence = yield* Queue.sliding<OrchestrationThreadDetailSnapshot>(1);
 
   const persist = Effect.fn("EnvironmentThreadState.persist")(function* (
-    thread: OrchestrationThread,
+    snapshot: OrchestrationThreadDetailSnapshot,
   ) {
-    yield* cache.saveThread(environmentId, thread).pipe(
+    yield* cache.saveThread(environmentId, snapshot).pipe(
       Effect.catch((error) =>
         Effect.logWarning("Could not persist the thread cache.").pipe(
           Effect.annotateLogs({
@@ -123,7 +128,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       status: "live",
       error: Option.none(),
     });
-    yield* Queue.offer(persistence, thread);
+    // Persist the thread together with the sequence it reflects so the next warm
+    // cache can resume from exactly here.
+    const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
+    yield* Queue.offer(persistence, { snapshotSequence, thread });
   });
 
   const setDeleted = Effect.fn("EnvironmentThreadState.setDeleted")(function* () {
@@ -192,30 +200,36 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   yield* setSynchronizing;
   yield* Effect.forkScoped(
     Effect.gen(function* () {
-      // Load the initial snapshot over HTTP (gzip-compressible, and off the
-      // socket) rather than as a multi-KB first WebSocket frame, then subscribe
-      // to live events resuming after the snapshot's sequence. If the snapshot
-      // cannot be loaded over HTTP we fall back to the socket-embedded snapshot
-      // so the thread still synchronizes. Overlapping events are deduped by
-      // sequence in applyItem.
-      //
-      // Wait for a prepared connection so we can authenticate the HTTP request;
-      // this mirrors the socket path, which likewise waits for a live session.
-      const prepared = yield* SubscriptionRef.changes(supervisor.prepared).pipe(
-        Stream.filter(Option.isSome),
-        Stream.map((current) => current.value),
-        Stream.runHead,
-      );
+      // Establish the base snapshot to resume from, minimizing bytes over the
+      // wire:
+      // - Warm cache: reuse the cached snapshot (zero network) and resume via
+      //   `afterSequence` so we only receive events since the cached sequence.
+      // - Cold cache: load the full snapshot over HTTP (gzip-compressible, and
+      //   off the socket), then resume via `afterSequence`.
+      // If no base can be established we fall back to the socket-embedded
+      // snapshot so the thread still synchronizes. Overlapping/replayed events
+      // are deduped by sequence in applyItem.
+      const base = Option.isSome(cached)
+        ? cached
+        : yield* Effect.gen(function* () {
+            // Cold cache only: wait for a prepared connection so we can
+            // authenticate the HTTP request; this mirrors the socket path, which
+            // likewise waits for a live session.
+            const prepared = yield* SubscriptionRef.changes(supervisor.prepared).pipe(
+              Stream.filter(Option.isSome),
+              Stream.map((current) => current.value),
+              Stream.runHead,
+            );
+            return Option.isSome(prepared)
+              ? yield* snapshotLoader.load(prepared.value, threadId)
+              : Option.none<OrchestrationThreadDetailSnapshot>();
+          });
 
-      const httpSnapshot = Option.isSome(prepared)
-        ? yield* snapshotLoader.load(prepared.value, threadId)
-        : Option.none<OrchestrationThreadDetailSnapshot>();
-
-      if (Option.isSome(httpSnapshot)) {
-        yield* applyItem({ kind: "snapshot", snapshot: httpSnapshot.value });
+      if (Option.isSome(base)) {
+        yield* applyItem({ kind: "snapshot", snapshot: base.value });
       }
 
-      const subscribeInput = Option.match(httpSnapshot, {
+      const subscribeInput = Option.match(base, {
         onNone: () => ({ threadId }),
         onSome: (snapshot) => ({ threadId, afterSequence: snapshot.snapshotSequence }),
       });
@@ -228,11 +242,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   );
 
   yield* Effect.addFinalizer(() =>
-    SubscriptionRef.get(state).pipe(
-      Effect.flatMap((current) =>
+    Effect.all([SubscriptionRef.get(state), SubscriptionRef.get(lastSequence)]).pipe(
+      Effect.flatMap(([current, snapshotSequence]) =>
         Option.match(current.data, {
           onNone: () => Effect.void,
-          onSome: persist,
+          onSome: (thread) => persist({ snapshotSequence, thread }),
         }),
       ),
     ),
