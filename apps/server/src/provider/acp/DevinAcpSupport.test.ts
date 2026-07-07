@@ -142,6 +142,71 @@ describe("DevinAcpSupport", () => {
     ]);
   });
 
+  it("keeps custom Devin thinking levels grouped and selectable", () => {
+    const configOptions = [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "gpt-5-5-ultra",
+        options: [
+          { value: "gpt-5-5-low", name: "GPT-5.5 Low Thinking" },
+          { value: "gpt-5-5-ultra", name: "GPT-5.5 Ultra Thinking" },
+        ],
+      },
+    ] satisfies ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
+
+    const groups = devinAcpModelVariantGroupsFromConfigOptions(configOptions);
+    expect(
+      groups.map((group) => ({
+        id: group.baseModelId,
+        name: group.baseModelName,
+        current: group.currentVariant?.exactModelId,
+        variants: group.variants.map((variant) => ({
+          exact: variant.exactModelId,
+          reasoning: variant.reasoning,
+          label: variant.reasoningLabel,
+        })),
+      })),
+    ).toEqual([
+      {
+        id: "gpt-5-5",
+        name: "GPT-5.5",
+        current: "gpt-5-5-ultra",
+        variants: [
+          { exact: "gpt-5-5-low", reasoning: "low", label: undefined },
+          { exact: "gpt-5-5-ultra", reasoning: "ultra", label: "Ultra" },
+        ],
+      },
+    ]);
+
+    const models = buildDevinDiscoveredModelsFromSessionSetup({
+      sessionId: "session-1",
+      configOptions,
+    } satisfies EffectAcpSchema.NewSessionResponse);
+    expect(models[0]?.capabilities?.optionDescriptors).toEqual([
+      {
+        id: "reasoning",
+        label: "Thinking",
+        type: "select",
+        currentValue: "ultra",
+        options: [
+          { id: "low", label: "Low" },
+          { id: "ultra", label: "Ultra", isDefault: true },
+        ],
+      },
+    ]);
+
+    expect(
+      resolveDevinAcpModelSelection({
+        configOptions,
+        model: "gpt-5-5",
+        selections: [{ id: "reasoning", value: "ultra" }],
+      }),
+    ).toBe("gpt-5-5-ultra");
+  });
+
   it("resolves Devin base model options back to exact ACP model ids", () => {
     const configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> = [
       {

@@ -38,16 +38,20 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 
 type DevinAcpRuntimeDevinSettings = Pick<DevinSettings, "binaryPath" | "configPath">;
 
-export type DevinAcpReasoningLevel =
-  | "standard"
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-  | "thinking";
+export const DEVIN_REASONING_LEVEL_ORDER = [
+  "standard",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "thinking",
+] as const;
+
+export type DevinAcpKnownReasoningLevel = (typeof DEVIN_REASONING_LEVEL_ORDER)[number];
+export type DevinAcpReasoningLevel = DevinAcpKnownReasoningLevel | (string & {});
 
 export interface DevinAcpModelVariant {
   readonly exactModelId: string;
@@ -55,6 +59,7 @@ export interface DevinAcpModelVariant {
   readonly baseModelId: string;
   readonly baseModelName: string;
   readonly reasoning?: DevinAcpReasoningLevel;
+  readonly reasoningLabel?: string;
   readonly fastMode: boolean;
   readonly contextWindow?: string;
 }
@@ -66,19 +71,9 @@ export interface DevinAcpModelVariantGroup {
   readonly currentVariant?: DevinAcpModelVariant;
 }
 
-export const DEVIN_REASONING_LEVEL_ORDER: ReadonlyArray<DevinAcpReasoningLevel> = [
-  "standard",
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "thinking",
-];
+const DEVIN_REASONING_LEVEL_SET: ReadonlySet<string> = new Set(DEVIN_REASONING_LEVEL_ORDER);
 
-export const DEVIN_REASONING_LEVEL_LABELS: Readonly<Record<DevinAcpReasoningLevel, string>> = {
+export const DEVIN_REASONING_LEVEL_LABELS: Readonly<Record<DevinAcpKnownReasoningLevel, string>> = {
   standard: "Standard",
   none: "No Thinking",
   minimal: "Minimal",
@@ -189,6 +184,89 @@ function slugifyDevinBaseModelName(value: string): string {
     .replace(/^-+|-+$/gu, "");
 }
 
+function normalizeDevinReasoningToken(value: string | null | undefined): string | undefined {
+  const normalized = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/[\s_]+/gu, "-")
+    .replace(/[^a-z0-9-]+/gu, "-")
+    .replace(/-+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function knownDevinReasoningLevelFromToken(
+  token: string | undefined,
+): DevinAcpKnownReasoningLevel | undefined {
+  switch (token) {
+    case "standard":
+    case "default":
+      return "standard";
+    case "none":
+    case "no":
+    case "no-thinking":
+      return "none";
+    case "minimal":
+      return "minimal";
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+      return "high";
+    case "xhigh":
+    case "x-high":
+    case "extra-high":
+    case "extrahigh":
+      return "xhigh";
+    case "max":
+      return "max";
+    case "thinking":
+      return "thinking";
+    default:
+      return undefined;
+  }
+}
+
+function normalizeDevinReasoningSelection(
+  value: string | null | undefined,
+): DevinAcpReasoningLevel | undefined {
+  const normalized = normalizeDevinReasoningToken(value);
+  const known = knownDevinReasoningLevelFromToken(normalized);
+  if (known) {
+    return known;
+  }
+
+  const withoutThinkingSuffix =
+    normalized && normalized !== "thinking" && normalized.endsWith("-thinking")
+      ? normalized.slice(0, -"-thinking".length)
+      : normalized;
+  const knownWithoutThinkingSuffix = knownDevinReasoningLevelFromToken(withoutThinkingSuffix);
+  return knownWithoutThinkingSuffix ?? withoutThinkingSuffix;
+}
+
+function isKnownDevinReasoningLevel(level: string): level is DevinAcpKnownReasoningLevel {
+  return DEVIN_REASONING_LEVEL_SET.has(level);
+}
+
+function labelFromReasoningToken(level: string): string {
+  return level
+    .split(/[\s_-]+/gu)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function devinReasoningLabelForLevel(
+  group: DevinAcpModelVariantGroup,
+  level: DevinAcpReasoningLevel,
+): string {
+  return isKnownDevinReasoningLevel(level)
+    ? DEVIN_REASONING_LEVEL_LABELS[level]
+    : (group.variants.find((variant) => devinReasoningKeyForVariant(variant) === level)
+        ?.reasoningLabel ?? labelFromReasoningToken(level));
+}
+
 function stripNameSuffix(
   name: string,
   pattern: RegExp,
@@ -202,7 +280,7 @@ function parseDevinReasoningSuffix(name: string): {
   readonly reasoning: DevinAcpReasoningLevel | undefined;
 } {
   const patterns: ReadonlyArray<{
-    readonly reasoning: DevinAcpReasoningLevel;
+    readonly reasoning: DevinAcpKnownReasoningLevel;
     readonly pattern: RegExp;
   }> = [
     { reasoning: "none", pattern: /\s+No\s+Thinking$/iu },
@@ -260,12 +338,95 @@ export function parseDevinAcpModelVariant(
   };
 }
 
+const DEVIN_CUSTOM_REASONING_SUFFIX_BLOCKLIST: ReadonlySet<string> = new Set([
+  "claude",
+  "codex",
+  "gemini",
+  "gpt",
+  "haiku",
+  "model",
+  "opus",
+  "sonnet",
+  "swe",
+]);
+
+interface DevinCustomReasoningCandidate {
+  readonly baseModelId: string;
+  readonly baseModelName: string;
+  readonly reasoning: DevinAcpReasoningLevel;
+  readonly reasoningLabel: string;
+}
+
+function customDevinReasoningCandidateFromPlainThinkingVariant(
+  variant: DevinAcpModelVariant,
+): DevinCustomReasoningCandidate | undefined {
+  if (variant.reasoning !== "thinking") {
+    return undefined;
+  }
+
+  const match = /\s+([^\s]+)$/u.exec(variant.baseModelName);
+  const reasoningLabel = match?.[1]?.trim();
+  const baseModelName =
+    match?.index !== undefined ? variant.baseModelName.slice(0, match.index).trim() : "";
+  if (!reasoningLabel || !baseModelName || !/[a-z]/iu.test(reasoningLabel)) {
+    return undefined;
+  }
+
+  const reasoning = normalizeDevinReasoningSelection(reasoningLabel);
+  if (
+    !reasoning ||
+    reasoning === "thinking" ||
+    DEVIN_CUSTOM_REASONING_SUFFIX_BLOCKLIST.has(reasoning)
+  ) {
+    return undefined;
+  }
+
+  const baseModelId = slugifyDevinBaseModelName(baseModelName);
+  if (!baseModelId) {
+    return undefined;
+  }
+  return {
+    baseModelId,
+    baseModelName,
+    reasoning,
+    reasoningLabel,
+  };
+}
+
+function normalizeCustomDevinReasoningVariants(
+  variants: ReadonlyArray<DevinAcpModelVariant>,
+): ReadonlyArray<DevinAcpModelVariant> {
+  const existingBaseModelIds = new Set(variants.map((variant) => variant.baseModelId));
+  return variants.map((variant) => {
+    const candidate = customDevinReasoningCandidateFromPlainThinkingVariant(variant);
+    if (!candidate) {
+      return variant;
+    }
+
+    const hasExistingBaseModel = existingBaseModelIds.has(candidate.baseModelId);
+    const baseNameLooksVersioned = /\d/u.test(candidate.baseModelName);
+    if (!hasExistingBaseModel && !baseNameLooksVersioned) {
+      return variant;
+    }
+
+    return {
+      ...variant,
+      baseModelId: candidate.baseModelId,
+      baseModelName: candidate.baseModelName,
+      reasoning: candidate.reasoning,
+      reasoningLabel: candidate.reasoningLabel,
+    };
+  });
+}
+
 export function devinAcpModelVariantsFromConfigOptions(
   configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | null | undefined,
 ): ReadonlyArray<DevinAcpModelVariant> {
-  return flattenSessionConfigSelectOptions(findSessionModelConfigOption(configOptions))
-    .map(parseDevinAcpModelVariant)
-    .filter((variant): variant is DevinAcpModelVariant => variant !== undefined);
+  return normalizeCustomDevinReasoningVariants(
+    flattenSessionConfigSelectOptions(findSessionModelConfigOption(configOptions))
+      .map(parseDevinAcpModelVariant)
+      .filter((variant): variant is DevinAcpModelVariant => variant !== undefined),
+  );
 }
 
 function devinVariantOptionKey(variant: DevinAcpModelVariant): string {
@@ -302,9 +463,11 @@ export function devinAcpModelVariantGroupsFromConfigOptions(
     string,
     { baseModelName: string; variants: Array<DevinAcpModelVariant> }
   >();
-  const variants = flattenSessionConfigSelectOptions(modelConfigOption)
-    .map(parseDevinAcpModelVariant)
-    .filter((variant): variant is DevinAcpModelVariant => variant !== undefined);
+  const variants = normalizeCustomDevinReasoningVariants(
+    flattenSessionConfigSelectOptions(modelConfigOption)
+      .map(parseDevinAcpModelVariant)
+      .filter((variant): variant is DevinAcpModelVariant => variant !== undefined),
+  );
   const ambiguousBaseModelIds = ambiguousDevinBaseModelIds(variants);
   for (const variant of variants) {
     const hasAmbiguousBaseModel = ambiguousBaseModelIds.has(variant.baseModelId);
@@ -334,41 +497,6 @@ export function devinAcpModelVariantGroupsFromConfigOptions(
       ...(currentVariant ? { currentVariant } : {}),
     };
   });
-}
-
-function normalizeDevinReasoningSelection(
-  value: string | null | undefined,
-): DevinAcpReasoningLevel | undefined {
-  const normalized = value
-    ?.trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/gu, "-");
-  switch (normalized) {
-    case "standard":
-    case "default":
-      return "standard";
-    case "none":
-    case "no-thinking":
-      return "none";
-    case "minimal":
-      return "minimal";
-    case "low":
-      return "low";
-    case "medium":
-      return "medium";
-    case "high":
-      return "high";
-    case "xhigh":
-    case "x-high":
-    case "extra-high":
-      return "xhigh";
-    case "max":
-      return "max";
-    case "thinking":
-      return "thinking";
-    default:
-      return undefined;
-  }
 }
 
 function modelAliasMatchesDevinBaseModelId(requestedModel: string, baseModelId: string): boolean {
@@ -463,8 +591,13 @@ function selectPreferredDevinVariant(input: {
     input.group.currentVariant;
   let candidates = input.group.variants;
 
+  const requestedReasoning =
+    input.requestedReasoning &&
+    candidates.some((variant) => devinReasoningKeyForVariant(variant) === input.requestedReasoning)
+      ? input.requestedReasoning
+      : undefined;
   const desiredReasoning =
-    input.requestedReasoning ??
+    requestedReasoning ??
     (exactRequested ? devinReasoningKeyForVariant(exactRequested) : undefined);
   if (
     desiredReasoning &&
@@ -656,7 +789,10 @@ function buildDevinDiscoveredModelsFromSessionModelState(
 
 function uniqueSortedDevinReasoningLevels(group: DevinAcpModelVariantGroup) {
   const levels = new Set(group.variants.map(devinReasoningKeyForVariant));
-  return DEVIN_REASONING_LEVEL_ORDER.filter((level) => levels.has(level));
+  return [
+    ...DEVIN_REASONING_LEVEL_ORDER.filter((level) => levels.has(level)),
+    ...Array.from(levels).filter((level) => !isKnownDevinReasoningLevel(level)),
+  ];
 }
 
 function buildDevinCapabilitiesForVariantGroup(group: DevinAcpModelVariantGroup) {
@@ -674,7 +810,7 @@ function buildDevinCapabilitiesForVariantGroup(group: DevinAcpModelVariantGroup)
             label: "Thinking",
             options: reasoningLevels.map((level) => ({
               value: level,
-              label: DEVIN_REASONING_LEVEL_LABELS[level],
+              label: devinReasoningLabelForLevel(group, level),
               ...(devinReasoningKeyForVariant(defaultVariant) === level ? { isDefault: true } : {}),
             })),
           }),
