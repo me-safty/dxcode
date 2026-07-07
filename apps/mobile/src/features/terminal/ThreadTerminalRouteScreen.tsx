@@ -835,8 +835,19 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   }, [navigation, selectedThread, terminalId, terminalMenuSessions]);
 
   useEffect(() => {
+    // Detached (hidden surface or environment drop): forget the local
+    // markers so a reattach takes the stale-reopen path instead of
+    // misreading the dead snapshot as an exit observed on this screen.
+    if (terminalAttachInput === null) {
+      runningTerminalKeyRef.current = null;
+      pendingExitNavigationRef.current = null;
+      return;
+    }
     if (isRunning) {
       runningTerminalKeyRef.current = terminalKey;
+      // The session came back (e.g. respawned elsewhere) before the user
+      // returned; a stale pending exit must not eject a live terminal.
+      pendingExitNavigationRef.current = null;
       return;
     }
     // The web drawer treats both exited and closed as session end.
@@ -871,6 +882,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     navigation,
     selectedThread,
     terminal.status,
+    terminalAttachInput,
     terminalId,
     terminalKey,
   ]);
