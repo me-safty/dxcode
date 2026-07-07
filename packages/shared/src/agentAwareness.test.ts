@@ -131,6 +131,29 @@ describe("projectThreadAwareness", () => {
     expect(trulyInterrupted).toBeNull();
   });
 
+  it("projects ready sessions with no materialized turn as completed", () => {
+    // Quick threads without code changes never get a checkpoint, so the SQL
+    // shell has no latestTurn row and latest_turn_id is cleared when the
+    // session settles; the ready session is the only completion signal left.
+    const state = projectThreadAwareness({
+      environmentId: "env-1" as EnvironmentId,
+      project,
+      thread: thread({
+        session: {
+          threadId: "thread-1" as ThreadId,
+          status: "ready",
+          providerName: "Codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: NOW,
+        },
+      }),
+    });
+
+    expect(state?.phase).toBe("completed");
+  });
+
   it("projects failures with the session error detail", () => {
     const state = projectThreadAwareness({
       environmentId: "env-1" as EnvironmentId,
