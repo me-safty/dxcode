@@ -1,3 +1,7 @@
+import {
+  type AtomCommandResult,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import type {
   NeuropharmBasicsPackResult,
   NeuropharmCompoundComparisonResult,
@@ -20,8 +24,9 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { readEnvironmentApi } from "../../environmentApi";
+import { usePrimaryEnvironmentId } from "../../state/environments";
+import { neuropharmEnvironment } from "../../state/neuropharm";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -51,8 +56,38 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 }
 
+function unwrapCommandResult<A, E>(result: AtomCommandResult<A, E>): A {
+  if (result._tag === "Failure") {
+    throw squashAtomCommandFailure(result);
+  }
+  return result.value;
+}
+
+function errorMessageFromUnknown(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function DatabaseConsole() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const installBasicsPackCommand = useAtomCommand(neuropharmEnvironment.installBasicsPack, {
+    reportFailure: false,
+  });
+  const downloadDatabasesCommand = useAtomCommand(neuropharmEnvironment.downloadDatabases, {
+    reportFailure: false,
+  });
+  const databaseStatusCommand = useAtomCommand(neuropharmEnvironment.databaseStatus, {
+    reportFailure: false,
+  });
+  const syncDatabasesCommand = useAtomCommand(neuropharmEnvironment.syncDatabases, {
+    reportFailure: false,
+  });
+  const searchLocalInteractionsCommand = useAtomCommand(
+    neuropharmEnvironment.searchLocalInteractions,
+    { reportFailure: false },
+  );
+  const compareCompoundsCommand = useAtomCommand(neuropharmEnvironment.compareCompounds, {
+    reportFailure: false,
+  });
   const [compoundText, setCompoundText] = useState(DEFAULT_COMPARISON);
   const [syncResult, setSyncResult] = useState<NeuropharmDatabaseSyncResult | null>(null);
   const [databaseStatus, setDatabaseStatus] = useState<NeuropharmLocalDatabaseStatusResult | null>(
@@ -68,8 +103,6 @@ export function DatabaseConsole() {
     "basics" | "download" | "status" | "sync" | "search" | "compare" | null
   >(null);
 
-  const api = primaryEnvironmentId ? readEnvironmentApi(primaryEnvironmentId) : undefined;
-
   const currentLocalSources = useCallback((): NeuropharmLocalDatabaseSource[] => {
     return databaseStatus?.manifest.map((entry) => entry.source) ?? [];
   }, [databaseStatus]);
@@ -78,35 +111,48 @@ export function DatabaseConsole() {
     setRunning((current) => current ?? "status");
     setError(null);
     try {
-      if (!api) throw new Error("Neuropharm database not connected.");
-      setDatabaseStatus(await api.neuropharm.databaseStatus({}));
+      if (primaryEnvironmentId === null) throw new Error("Neuropharm database not connected.");
+      setDatabaseStatus(
+        unwrapCommandResult(
+          await databaseStatusCommand({ environmentId: primaryEnvironmentId, input: {} }),
+        ),
+      );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Database status failed.");
+      setError(errorMessageFromUnknown(cause, "Database status failed."));
     } finally {
       setRunning((current) => (current === "status" ? null : current));
     }
-  }, [api]);
+  }, [databaseStatusCommand, primaryEnvironmentId]);
 
   useEffect(() => {
-    if (!api) return;
+    if (primaryEnvironmentId === null) return;
     void refreshDatabaseStatus();
-  }, [api, refreshDatabaseStatus]);
+  }, [primaryEnvironmentId, refreshDatabaseStatus]);
 
   const downloadAllDatabases = async () => {
     setRunning("download");
     setError(null);
     try {
-      if (!api) throw new Error("Neuropharm database not connected.");
+      if (primaryEnvironmentId === null) throw new Error("Neuropharm database not connected.");
       const sources = currentLocalSources();
-      const result = await api.neuropharm.downloadDatabases({
-        ...(sources.length > 0 ? { sources } : {}),
-        forceRefresh: false,
-        importAfterDownload: true,
-      });
+      const result = unwrapCommandResult(
+        await downloadDatabasesCommand({
+          environmentId: primaryEnvironmentId,
+          input: {
+            ...(sources.length > 0 ? { sources } : {}),
+            forceRefresh: false,
+            importAfterDownload: true,
+          },
+        }),
+      );
       setDownloadResult(result);
-      setDatabaseStatus(await api.neuropharm.databaseStatus({}));
+      setDatabaseStatus(
+        unwrapCommandResult(
+          await databaseStatusCommand({ environmentId: primaryEnvironmentId, input: {} }),
+        ),
+      );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Database download failed.");
+      setError(errorMessageFromUnknown(cause, "Database download failed."));
     } finally {
       setRunning(null);
     }
@@ -116,19 +162,29 @@ export function DatabaseConsole() {
     setRunning("basics");
     setError(null);
     try {
-      if (!api) throw new Error("Neuropharm database not connected.");
-      const result = await api.neuropharm.installBasicsPack({ forceRefresh: false });
+      if (primaryEnvironmentId === null) throw new Error("Neuropharm database not connected.");
+      const result = unwrapCommandResult(
+        await installBasicsPackCommand({
+          environmentId: primaryEnvironmentId,
+          input: { forceRefresh: false },
+        }),
+      );
       setBasicsPack(result);
       const sources = currentLocalSources();
       setLocalSearch(
-        await api.neuropharm.searchLocalInteractions({
-          query: compoundText,
-          ...(sources.length > 0 ? { sources } : {}),
-          limit: 20,
-        }),
+        unwrapCommandResult(
+          await searchLocalInteractionsCommand({
+            environmentId: primaryEnvironmentId,
+            input: {
+              query: compoundText,
+              ...(sources.length > 0 ? { sources } : {}),
+              limit: 20,
+            },
+          }),
+        ),
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Basics pack install failed.");
+      setError(errorMessageFromUnknown(cause, "Basics pack install failed."));
     } finally {
       setRunning(null);
     }
@@ -138,14 +194,19 @@ export function DatabaseConsole() {
     setRunning("sync");
     setError(null);
     try {
-      if (!api) throw new Error("Neuropharm database not connected.");
-      const result = await api.neuropharm.syncDatabases({
-        compounds: parseCompounds(compoundText),
-        sources: ["pubchem", "chembl", "iuphar", "pubmed", "bindingdb"],
-      });
+      if (primaryEnvironmentId === null) throw new Error("Neuropharm database not connected.");
+      const result = unwrapCommandResult(
+        await syncDatabasesCommand({
+          environmentId: primaryEnvironmentId,
+          input: {
+            compounds: parseCompounds(compoundText),
+            sources: ["pubchem", "chembl", "iuphar", "pubmed", "bindingdb"],
+          },
+        }),
+      );
       setSyncResult(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Database sync failed.");
+      setError(errorMessageFromUnknown(cause, "Database sync failed."));
     } finally {
       setRunning(null);
     }
@@ -155,17 +216,22 @@ export function DatabaseConsole() {
     setRunning("search");
     setError(null);
     try {
-      if (!api) throw new Error("Neuropharm database not connected.");
+      if (primaryEnvironmentId === null) throw new Error("Neuropharm database not connected.");
       const sources = currentLocalSources();
       setLocalSearch(
-        await api.neuropharm.searchLocalInteractions({
-          query: compoundText,
-          ...(sources.length > 0 ? { sources } : {}),
-          limit: 20,
-        }),
+        unwrapCommandResult(
+          await searchLocalInteractionsCommand({
+            environmentId: primaryEnvironmentId,
+            input: {
+              query: compoundText,
+              ...(sources.length > 0 ? { sources } : {}),
+              limit: 20,
+            },
+          }),
+        ),
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Local database search failed.");
+      setError(errorMessageFromUnknown(cause, "Local database search failed."));
     } finally {
       setRunning(null);
     }
@@ -175,17 +241,22 @@ export function DatabaseConsole() {
     setRunning("compare");
     setError(null);
     try {
-      if (!api) throw new Error("Neuropharm database not connected.");
+      if (primaryEnvironmentId === null) throw new Error("Neuropharm database not connected.");
       const compounds = parseCompounds(compoundText);
       if (compounds.length < 2) throw new Error("Enter at least two compounds.");
-      const result = await api.neuropharm.compareCompounds({
-        compounds,
-        focus: ["M1", "sigma-1", "DAT", "NET", "cognition"],
-        includeSpeculative: false,
-      });
+      const result = unwrapCommandResult(
+        await compareCompoundsCommand({
+          environmentId: primaryEnvironmentId,
+          input: {
+            compounds,
+            focus: ["M1", "sigma-1", "DAT", "NET", "cognition"],
+            includeSpeculative: false,
+          },
+        }),
+      );
       setComparison(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Compound comparison failed.");
+      setError(errorMessageFromUnknown(cause, "Compound comparison failed."));
     } finally {
       setRunning(null);
     }
