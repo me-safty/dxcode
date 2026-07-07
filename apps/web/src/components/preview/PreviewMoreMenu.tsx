@@ -140,6 +140,8 @@ export function PreviewMoreMenu({
         </MenuItem>
         <MenuSeparator />
         <MenuCheckboxItem
+          variant="switch"
+          closeOnClick={false}
           checked={disableWebSecurity}
           onCheckedChange={(checked) => {
             const enabled = Boolean(checked);
