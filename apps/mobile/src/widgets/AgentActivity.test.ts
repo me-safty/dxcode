@@ -238,6 +238,31 @@ describe("AgentActivity widget layout", () => {
     expect(JSON.stringify(layout.minimal)).toContain("xmark.octagon.fill");
   });
 
+  it("lets a failure dominate mixed finished outcomes across every presentation", () => {
+    const layout = AgentActivity(
+      {
+        ...props,
+        // The server subtitle keys off the newest terminal row (completed
+        // here); the layout must still read Failed everywhere so the header
+        // text never disagrees with the tint, count slots, or minimal glyph.
+        subtitle: "Agent work completed",
+        activeCount: 0,
+        activities: [
+          makeRow({ phase: "completed", status: "Done" }),
+          makeRow({ threadId: "thread-2", phase: "failed", status: "Failed" }),
+        ],
+      },
+      environment as never,
+    );
+    const banner = JSON.stringify(layout.banner);
+    expect(banner).toContain("Agent work failed");
+    expect(banner).not.toContain("Agent work completed");
+    expect(banner).toContain("#fca5a5"); // red-300 header tint
+    expect(JSON.stringify(layout.compactTrailing)).toContain("Failed");
+    expect(JSON.stringify(layout.expandedLeading)).toContain("Failed");
+    expect(JSON.stringify(layout.minimal)).toContain("xmark.octagon.fill");
+  });
+
   it("renders up to five rows in the banner", () => {
     const layout = AgentActivity(
       {
