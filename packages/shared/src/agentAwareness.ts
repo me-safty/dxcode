@@ -103,6 +103,15 @@ function resolveThreadAwarenessPhase(
   if (thread.latestTurn?.state === "completed") {
     return "completed";
   }
+  // A turn that finished can still read as "interrupted" here: session
+  // teardown settles still-running turns by session status, and that write
+  // can race the turn.completed one. completedAt survives the race — a turn
+  // that has a completion timestamp finished, whatever the state column says.
+  // Without this, quick finish-then-teardown threads resolve to null
+  // persistently and get tombstoned instead of published as completed.
+  if (thread.latestTurn?.state === "interrupted" && thread.latestTurn.completedAt !== null) {
+    return "completed";
+  }
   return null;
 }
 

@@ -102,6 +102,35 @@ describe("projectThreadAwareness", () => {
     });
   });
 
+  it("projects completed turns as completed even when teardown settled them as interrupted", () => {
+    const finishedTurn = {
+      turnId: "turn-1" as TurnId,
+      state: "interrupted" as const,
+      requestedAt: NOW,
+      startedAt: NOW,
+      completedAt: NOW,
+      assistantMessageId: null,
+    };
+    const state = projectThreadAwareness({
+      environmentId: "env-1" as EnvironmentId,
+      project,
+      thread: thread({ latestTurn: finishedTurn }),
+    });
+
+    // Session teardown settles still-running turns by session status, and
+    // that write can race turn.completed; the completion timestamp is the
+    // durable signal. Without this the thread resolves to null persistently
+    // and gets tombstoned off the lock-screen card instead of showing Done.
+    expect(state?.phase).toBe("completed");
+
+    const trulyInterrupted = projectThreadAwareness({
+      environmentId: "env-1" as EnvironmentId,
+      project,
+      thread: thread({ latestTurn: { ...finishedTurn, completedAt: null } }),
+    });
+    expect(trulyInterrupted).toBeNull();
+  });
+
   it("projects failures with the session error detail", () => {
     const state = projectThreadAwareness({
       environmentId: "env-1" as EnvironmentId,
