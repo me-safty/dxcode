@@ -483,5 +483,5 @@ export type NeuropharmGenerateGraphSpecInput = typeof NeuropharmGenerateGraphSpe
 
 export class NeuropharmError extends Schema.TaggedErrorClass<NeuropharmError>()("NeuropharmError", {
   message: TrimmedNonEmptyString,
-  cause: Schema.optional(Schema.Defect),
+  cause: Schema.optional(Schema.Defect()),
 }) {}
