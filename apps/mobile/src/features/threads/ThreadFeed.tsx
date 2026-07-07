@@ -1380,6 +1380,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         <View style={{ flex: 1 }}>
           <KeyboardAwareLegendList
             ref={props.listRef}
+            testID="thread-feed"
             // The empty↔filled key remounts the list when messages first
             // arrive. LegendList's maintainScrollAtEnd calls scrollToEnd(),
             // which is blind to UIKit's adjustedContentInset — inserting into

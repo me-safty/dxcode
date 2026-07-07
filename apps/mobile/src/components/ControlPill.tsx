@@ -15,6 +15,7 @@ export function ControlPill(props: {
   readonly onPress?: () => void;
   readonly variant?: "circle" | "pill" | "primary" | "danger";
   readonly disabled?: boolean;
+  readonly testID?: string;
 }) {
   const variant = props.variant ?? "circle";
 
@@ -62,6 +63,7 @@ export function ControlPill(props: {
       accessibilityRole="button"
       onPress={props.onPress}
       disabled={props.disabled}
+      testID={props.testID}
       className={containerClassName}
     >
       {props.iconNode ? (

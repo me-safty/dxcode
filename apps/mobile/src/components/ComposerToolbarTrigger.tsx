@@ -151,6 +151,7 @@ export function ComposerToolbarButton(props: {
   readonly textTransform?: "none" | "uppercase";
   readonly variant?: "default" | "primary" | "danger";
   readonly style?: StyleProp<ViewStyle>;
+  readonly testID?: string;
 }) {
   const isDarkMode = useColorScheme() === "dark";
   const iconColor = useThemeColor("--color-icon");
@@ -182,6 +183,7 @@ export function ComposerToolbarButton(props: {
       accessibilityRole="button"
       disabled={props.disabled}
       onPress={props.onPress}
+      testID={props.testID}
       className={cn(
         "h-11 flex-row items-center justify-center rounded-full active:opacity-70",
         isCircle ? "w-11" : "gap-2 px-3.5",

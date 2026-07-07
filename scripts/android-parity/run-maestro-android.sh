@@ -15,6 +15,7 @@ MAESTRO_FLOWS=(
   "apps/mobile/.maestro/flows/smoke-launch.yaml"
   "apps/mobile/.maestro/flows/smoke-review.yaml"
   "apps/mobile/.maestro/flows/smoke-tablet-split.yaml"
+  "apps/mobile/.maestro/flows/smoke-composer.yaml"
 )
 TABLET_SPLIT_FLOW="apps/mobile/.maestro/flows/smoke-tablet-split.yaml"
 TABLET_RESIZE_SCRIPT="apps/mobile/.maestro/scripts/resize-tablet-emulator.sh"

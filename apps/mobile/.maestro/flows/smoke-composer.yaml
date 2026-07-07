@@ -1,0 +1,20 @@
+appId: ${APP_ID}
+---
+- runFlow: ../fixtures/auth-bypass.yaml
+- tapOn:
+    id: "home-thread-row"
+    index: 0
+- assertVisible:
+    id: "thread-screen"
+- tapOn:
+    id: "thread-composer-input"
+- inputText: "Maestro T2 composer ping"
+- tapOn:
+    id: "thread-composer-send"
+- extendedWaitUntil:
+    visible:
+      text: "Maestro T2 composer ping"
+    timeout: 30000
+- assertVisible:
+    id: "thread-feed"
+- stopApp

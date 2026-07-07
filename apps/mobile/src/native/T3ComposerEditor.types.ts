@@ -37,4 +37,5 @@ export interface ComposerEditorProps {
   readonly onBlur?: () => void;
   /** Invoked by the native editor when Command-Return is pressed on a hardware keyboard. */
   readonly onSubmit?: () => void;
+  readonly testID?: string;
 }

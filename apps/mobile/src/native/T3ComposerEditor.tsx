@@ -46,6 +46,7 @@ export function ComposerEditor({
       <TextInput
         ref={inputRef}
         {...props}
+        testID={props.testID}
         selection={selection}
         onSelectionChange={(event) => props.onSelectionChange?.(event.nativeEvent.selection)}
         multiline={props.multiline ?? true}

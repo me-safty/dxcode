@@ -801,6 +801,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           <View style={isExpanded ? undefined : { flex: 1, minWidth: 0 }}>
             <ComposerEditor
               ref={inputRef}
+              testID="thread-composer-input"
               multiline
               value={props.draftMessage}
               skills={selectedProviderStatus?.skills ?? []}
@@ -877,6 +878,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   variant="primary"
                   disabled={!canSend}
                   onPress={handleSend}
+                  testID="thread-composer-send"
                 />
               )}
             </Animated.View>
@@ -934,6 +936,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 disabled={!canSend}
                 onPress={handleSend}
                 showChevron={false}
+                testID="thread-composer-send"
               />
             </ComposerToolbarRow>
           </Animated.View>
