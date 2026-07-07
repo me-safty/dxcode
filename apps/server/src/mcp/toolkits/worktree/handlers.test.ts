@@ -290,6 +290,17 @@ describe("worktree_handoff", () => {
     });
   });
 
+  it.effect("rejects a relative path", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        runHandoff(harness, { branch: "feature/relative-path", path: "worktrees/nested" }),
+      );
+      expectTypedFailure(exit, { _tag: "WorktreeHandoffInvalidRequestError" });
+      expect(harness.createWorktree).not.toHaveBeenCalled();
+    });
+  });
+
   it.effect("fails when baseRef is omitted and HEAD is detached", () => {
     const harness = makeHarness({ currentBranch: null });
     return Effect.gen(function* () {

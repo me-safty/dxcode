@@ -13,6 +13,7 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
@@ -34,7 +35,7 @@ const errorDetail = (error: unknown): string => {
 };
 
 const asOperationError = (operation: WorktreeOperation) => (error: unknown) =>
-  new WorktreeOperationError({ operation, detail: errorDetail(error) });
+  new WorktreeOperationError({ operation, cause: error });
 
 const requireWorktreeCapability = Effect.fn("mcp.requireWorktreeCapability")(function* () {
   const invocation = yield* McpInvocationContext.McpInvocationContext;
@@ -81,10 +82,19 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
   if (!project) {
     return yield* new WorktreeOperationError({
       operation: "resolveProject",
-      detail: `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
+      cause: new Error(
+        `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
+      ),
     });
   }
   const projectCwd = project.workspaceRoot;
+
+  const path = yield* Path.Path;
+  if (input.path !== undefined && !path.isAbsolute(input.path)) {
+    return yield* new WorktreeHandoffInvalidRequestError({
+      detail: `path must be an absolute filesystem path, got '${input.path}'. A relative path would be created relative to the project workspace but stored verbatim as the thread's worktree binding.`,
+    });
+  }
 
   let baseRef = input.baseRef;
   if (baseRef === undefined) {
@@ -216,7 +226,9 @@ const worktreeStatus = Effect.fn("WorktreeToolkit.worktreeStatus")(function* () 
   if (!project) {
     return yield* new WorktreeOperationError({
       operation: "resolveProject",
-      detail: `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
+      cause: new Error(
+        `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
+      ),
     });
   }
 

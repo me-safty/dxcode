@@ -6,6 +6,7 @@ import {
   WorktreeStatusResult,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as Path from "effect/Path";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
@@ -19,6 +20,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   Crypto.Crypto,
+  Path.Path,
   OrchestrationEngine.OrchestrationEngineService,
   ProjectionSnapshotQuery.ProjectionSnapshotQuery,
   ServerSettings.ServerSettingsService,

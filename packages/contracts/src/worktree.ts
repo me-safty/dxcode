@@ -132,11 +132,11 @@ export class WorktreeOperationError extends Schema.TaggedErrorClass<WorktreeOper
       "updateThreadMetadata",
       "resolveSettings",
     ]),
-    detail: Schema.String,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Worktree operation '${this.operation}' failed: ${this.detail}`;
+    return `Worktree operation '${this.operation}' failed.`;
   }
 }
 
