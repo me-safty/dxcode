@@ -119,7 +119,7 @@ export function HostedBrowserWebview(props: {
       webview.removeEventListener("did-attach", register);
       webview.removeEventListener("dom-ready", register);
     };
-  }, [config, tabId]);
+  }, [config, tabId, disableWebSecurity]);
 
   const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;
