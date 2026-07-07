@@ -1,4 +1,4 @@
-import type { RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
+import type { RelayIosDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -9,14 +9,14 @@ import * as RelayDb from "../db.ts";
 import { relayLiveActivities, relayMobileDevices } from "../persistence/schema.ts";
 import * as Devices from "./Devices.ts";
 
-const registration: RelayDeviceRegistrationRequest = {
-  deviceId: "device-1" as RelayDeviceRegistrationRequest["deviceId"],
+const registration: RelayIosDeviceRegistrationRequest = {
+  deviceId: "device-1" as RelayIosDeviceRegistrationRequest["deviceId"],
   label: "Julius's iPhone",
   platform: "ios",
   iosMajorVersion: 18,
-  appVersion: "1.0.0" as RelayDeviceRegistrationRequest["appVersion"],
-  pushToken: "apns-device-token" as RelayDeviceRegistrationRequest["pushToken"],
-  pushToStartToken: "push-to-start-token" as RelayDeviceRegistrationRequest["pushToStartToken"],
+  appVersion: "1.0.0" as RelayIosDeviceRegistrationRequest["appVersion"],
+  pushToken: "apns-device-token" as RelayIosDeviceRegistrationRequest["pushToken"],
+  pushToStartToken: "push-to-start-token" as RelayIosDeviceRegistrationRequest["pushToStartToken"],
   preferences: {
     notificationsEnabled: true,
     liveActivitiesEnabled: true,

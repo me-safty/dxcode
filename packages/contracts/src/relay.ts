@@ -11,7 +11,7 @@ import * as OpenApi from "effect/unstable/httpapi/OpenApi";
 import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 
-export const RelayAgentAwarenessPlatform = Schema.Literal("ios");
+export const RelayAgentAwarenessPlatform = Schema.Literals(["ios", "android"]);
 export type RelayAgentAwarenessPlatform = typeof RelayAgentAwarenessPlatform.Type;
 
 export const RelayAgentAwarenessPhase = Schema.Literals([
@@ -35,36 +35,78 @@ export const RelayAgentAwarenessPreferences = Schema.Struct({
 });
 export type RelayAgentAwarenessPreferences = typeof RelayAgentAwarenessPreferences.Type;
 
-export const RelayDeviceRegistrationRequest = Schema.Struct({
+const RelayDeviceRegistrationBase = {
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
-  platform: RelayAgentAwarenessPlatform,
-  iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
   appVersion: Schema.optional(TrimmedNonEmptyString),
   pushToken: Schema.optional(TrimmedNonEmptyString),
-  pushToStartToken: Schema.optional(TrimmedNonEmptyString),
   preferences: RelayAgentAwarenessPreferences,
+} as const;
+
+export const RelayIosDeviceRegistrationRequest = Schema.Struct({
+  ...RelayDeviceRegistrationBase,
+  platform: Schema.Literal("ios"),
+  iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
+  pushToStartToken: Schema.optional(TrimmedNonEmptyString),
 });
+export type RelayIosDeviceRegistrationRequest = typeof RelayIosDeviceRegistrationRequest.Type;
+
+export const RelayAndroidDeviceRegistrationRequest = Schema.Struct({
+  ...RelayDeviceRegistrationBase,
+  platform: Schema.Literal("android"),
+  androidSdkVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(26)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type RelayAndroidDeviceRegistrationRequest =
+  typeof RelayAndroidDeviceRegistrationRequest.Type;
+
+export const RelayDeviceRegistrationRequest = Schema.Union([
+  RelayIosDeviceRegistrationRequest,
+  RelayAndroidDeviceRegistrationRequest,
+]);
 export type RelayDeviceRegistrationRequest = typeof RelayDeviceRegistrationRequest.Type;
 
-export const RelayClientDeviceRecord = Schema.Struct({
+const RelayClientDeviceNotifications = Schema.Struct({
+  enabled: Schema.Boolean,
+  notifyOnApproval: Schema.Boolean,
+  notifyOnInput: Schema.Boolean,
+  notifyOnCompletion: Schema.Boolean,
+  notifyOnFailure: Schema.Boolean,
+});
+
+const RelayClientDeviceLiveActivities = Schema.Struct({
+  enabled: Schema.Boolean,
+});
+
+export const RelayIosClientDeviceRecord = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
-  platform: RelayAgentAwarenessPlatform,
+  platform: Schema.Literal("ios"),
   iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
   appVersion: Schema.NullOr(TrimmedNonEmptyString),
-  notifications: Schema.Struct({
-    enabled: Schema.Boolean,
-    notifyOnApproval: Schema.Boolean,
-    notifyOnInput: Schema.Boolean,
-    notifyOnCompletion: Schema.Boolean,
-    notifyOnFailure: Schema.Boolean,
-  }),
+  notifications: RelayClientDeviceNotifications,
+  liveActivities: RelayClientDeviceLiveActivities,
+  updatedAt: TrimmedNonEmptyString,
+});
+export type RelayIosClientDeviceRecord = typeof RelayIosClientDeviceRecord.Type;
+
+export const RelayAndroidClientDeviceRecord = Schema.Struct({
+  deviceId: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  platform: Schema.Literal("android"),
+  androidSdkVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(26)),
+  appVersion: Schema.NullOr(TrimmedNonEmptyString),
+  notifications: RelayClientDeviceNotifications,
   liveActivities: Schema.Struct({
-    enabled: Schema.Boolean,
+    enabled: Schema.Literal(false),
   }),
   updatedAt: TrimmedNonEmptyString,
 });
+export type RelayAndroidClientDeviceRecord = typeof RelayAndroidClientDeviceRecord.Type;
+
+export const RelayClientDeviceRecord = Schema.Union([
+  RelayIosClientDeviceRecord,
+  RelayAndroidClientDeviceRecord,
+]);
 export type RelayClientDeviceRecord = typeof RelayClientDeviceRecord.Type;
 
 export const RelayListDevicesResponse = Schema.Struct({

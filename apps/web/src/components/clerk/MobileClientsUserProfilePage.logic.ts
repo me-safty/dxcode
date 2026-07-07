@@ -15,7 +15,11 @@ const NOTIFICATION_PREFERENCES = [
 >;
 
 export function mobileClientPlatformLabel(device: RelayClientDeviceRecord): string {
-  return `iOS ${device.iosMajorVersion}${device.appVersion ? ` · T3 Code ${device.appVersion}` : ""}`;
+  const appVersionSuffix = device.appVersion ? ` · T3 Code ${device.appVersion}` : "";
+  if (device.platform === "android") {
+    return `Android SDK ${device.androidSdkVersion}${appVersionSuffix}`;
+  }
+  return `iOS ${device.iosMajorVersion}${appVersionSuffix}`;
 }
 
 export function mobileClientNotificationDetail(device: RelayClientDeviceRecord): string {

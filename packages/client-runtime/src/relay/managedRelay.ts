@@ -808,16 +808,18 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
             clerkToken: input.clerkToken,
             target: dpopProofTargets.registerDevice(),
           },
-          (authorization) =>
-            client.mobile
-              .registerDevice({
-                headers: dpopHeaders(authorization),
-                payload: input.payload,
-              })
+          (authorization) => {
+            const request = {
+              headers: dpopHeaders(authorization),
+              payload: input.payload,
+            } as Parameters<typeof client.mobile.registerDevice>[0];
+            return client.mobile
+              .registerDevice(request)
               .pipe(
                 Effect.mapError(relayRequestError("register relay mobile device")),
                 timeoutRelayRequest("Relay mobile device registration"),
-              ),
+              );
+          },
         );
       },
       Effect.withSpan("clientRuntime.managedRelay.registerDevice"),

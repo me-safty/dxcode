@@ -508,4 +508,50 @@ describe("ManagedRelayClient", () => {
       ]);
     }).pipe(Effect.provide(managedRelayTestLayer(fetchFn)));
   });
+
+  it.effect("decodes android devices from the Clerk bearer client endpoint", () => {
+    const fetchFn = ((input, init) => {
+      expect(String(input)).toBe("https://relay.example.test/v1/client/devices");
+      expect(init?.headers).toMatchObject({
+        authorization: "Bearer clerk-token",
+      });
+      return Promise.resolve(
+        Response.json({
+          devices: [
+            {
+              deviceId: "device-android",
+              label: "Pixel 8",
+              platform: "android",
+              androidSdkVersion: 34,
+              appVersion: "2.0.0",
+              notifications: {
+                enabled: true,
+                notifyOnApproval: true,
+                notifyOnInput: false,
+                notifyOnCompletion: true,
+                notifyOnFailure: false,
+              },
+              liveActivities: {
+                enabled: false,
+              },
+              updatedAt: "2026-06-01T00:00:00.000Z",
+            },
+          ],
+        }),
+      );
+    }) satisfies typeof globalThis.fetch;
+
+    return Effect.gen(function* () {
+      const relayClient = yield* ManagedRelay.ManagedRelayClient;
+      const devices = yield* relayClient.listDevices({ clerkToken: "clerk-token" });
+      expect(devices).toMatchObject([
+        {
+          deviceId: "device-android",
+          platform: "android",
+          androidSdkVersion: 34,
+          liveActivities: { enabled: false },
+        },
+      ]);
+    }).pipe(Effect.provide(managedRelayTestLayer(fetchFn)));
+  });
 });

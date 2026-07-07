@@ -80,6 +80,16 @@ export const make = Effect.gen(function* () {
       });
       const updatedAt = DateTime.formatIso(yield* DateTime.now);
       const registration = input.registration;
+      if (registration.platform === "android") {
+        return yield* new DeviceRegistrationPersistenceError({
+          userId: input.userId,
+          deviceId: registration.deviceId,
+          stage: "upsert-device",
+          cause: new Error(
+            "Android device registration persistence is enabled in step s03 (relay DB migration).",
+          ),
+        });
+      }
 
       yield* Effect.all(
         [
