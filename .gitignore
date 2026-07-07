@@ -31,7 +31,7 @@ node_modules/
 .alchemy/
 .aden/
 .grok-worktrees/
-scratch/android-parity/loop-state.json
+scratch/
 *.log
 .env*
 !.env.example
