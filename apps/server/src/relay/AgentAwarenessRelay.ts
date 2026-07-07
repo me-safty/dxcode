@@ -421,6 +421,34 @@ export const make = Effect.gen(function* () {
       return;
     }
 
+    // A brand-new session boots at "ready" before its first turn starts, which
+    // projects as completed for an instant; publishing that sends a spurious
+    // Done notification at thread birth. Completed as the thread's FIRST
+    // published state gets the same defer-and-confirm treatment as
+    // tombstones: real completions (previous state was live) publish
+    // immediately, and at-rest threads still publish 5 seconds later.
+    if (
+      snapshot.state?.phase === "completed" &&
+      options?.confirmTombstone !== true &&
+      !publishedStateByThread.has(threadId)
+    ) {
+      if (pendingTombstoneConfirms.has(threadId)) {
+        return;
+      }
+      pendingTombstoneConfirms.add(threadId);
+      yield* Effect.logInfo("agent activity first-state completion deferred", {
+        environmentId,
+        threadId,
+        shell: describeThreadShellForAwareness(thread),
+      });
+      yield* Effect.forkDetach(
+        confirmTombstoneLater(threadId).pipe(
+          Effect.ensuring(Effect.sync(() => pendingTombstoneConfirms.delete(threadId))),
+        ),
+      );
+      return;
+    }
+
     if (
       snapshot.state === null &&
       options?.confirmTombstone !== true &&

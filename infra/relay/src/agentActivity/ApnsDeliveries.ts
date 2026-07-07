@@ -298,9 +298,14 @@ function shouldUpdateLiveActivity(input: {
   );
 }
 
+// Completions replayed long after the fact (server restarts republish every
+// recently-finished thread) must not ring the device again.
+const TERMINAL_NOTIFICATION_FRESHNESS_MS = 2 * 60 * 1_000;
+
 function notificationForAggregate(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
+  readonly nowMs: number;
 }): ApnsNotificationPayload | null {
   if (!input.target.push_token || input.aggregate === null) {
     return null;
@@ -312,6 +317,15 @@ function notificationForAggregate(input: {
   const activity = input.aggregate.activities[0];
   if (!activity) {
     return null;
+  }
+  if (activity.phase === "completed" || activity.phase === "failed") {
+    const updatedAtMs = Option.match(DateTime.make(activity.updatedAt), {
+      onNone: () => null,
+      onSome: (dt) => dt.epochMilliseconds,
+    });
+    if (updatedAtMs === null || input.nowMs - updatedAtMs > TERMINAL_NOTIFICATION_FRESHNESS_MS) {
+      return null;
+    }
   }
   const enabled =
     (activity.phase === "waiting_for_approval" && preferences.notifyOnApproval) ||
@@ -1032,7 +1046,12 @@ export const make = Effect.gen(function* () {
     sendPushNotification,
     processSignedJob,
     sendPushNotificationForTarget: Effect.fnUntraced(function* (input) {
-      const notification = notificationForAggregate(input);
+      const now = yield* DateTime.now;
+      const notification = notificationForAggregate({
+        target: input.target,
+        aggregate: input.aggregate,
+        nowMs: now.epochMilliseconds,
+      });
       const token = input.target.push_token;
       return yield* notification && token
         ? deliveryQueue.enqueuePushNotification({
@@ -1068,6 +1087,7 @@ export const make = Effect.gen(function* () {
       const notification = notificationForAggregate({
         target: input.target,
         aggregate: input.aggregate,
+        nowMs: input.nowMs,
       });
       // The end event doubles as the "task finished" moment. When a companion
       // push notification is about to ring the device (below), the activity end
