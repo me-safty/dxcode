@@ -125,6 +125,51 @@ const encodeApnsJwtPayloadJson = Schema.encodeEffect(
   ),
 );
 
+// APNs requires REUSING the provider token: refreshing it more than roughly
+// once per 20 minutes returns 403/429 TooManyProviderTokenUpdates and drops
+// the push (observed live: bursty Live Activity updates got 429'd, leaving
+// stale lock-screen state). Cache the signed JWT per signing key for most of
+// its 60-minute validity; the cache is module-level so it survives across
+// requests within a worker isolate.
+const APNS_JWT_REUSE_SECONDS = 45 * 60;
+
+interface ApnsJwtCacheEntry {
+  readonly jwt: string;
+  readonly issuedAtUnixSeconds: number;
+}
+
+const apnsJwtCache = new Map<string, ApnsJwtCacheEntry>();
+
+export function __resetApnsJwtCacheForTest(): void {
+  apnsJwtCache.clear();
+}
+
+const getOrMintApnsJwt = Effect.fnUntraced(function* (input: {
+  readonly teamId: ApnsCredentials["teamId"];
+  readonly keyId: ApnsCredentials["keyId"];
+  readonly privateKey: ApnsCredentials["privateKey"];
+  readonly issuedAtUnixSeconds: number;
+}) {
+  // Fingerprint the key material so rotated credentials never reuse a JWT
+  // signed by the previous key.
+  const keyFingerprint = NodeCrypto.createHash("sha256")
+    .update(Redacted.value(input.privateKey))
+    .digest("hex")
+    .slice(0, 16);
+  const cacheKey = `${input.teamId}:${input.keyId}:${keyFingerprint}`;
+  const cached = apnsJwtCache.get(cacheKey);
+  if (
+    cached &&
+    input.issuedAtUnixSeconds - cached.issuedAtUnixSeconds < APNS_JWT_REUSE_SECONDS &&
+    input.issuedAtUnixSeconds >= cached.issuedAtUnixSeconds
+  ) {
+    return cached.jwt;
+  }
+  const jwt = yield* makeApnsJwt(input);
+  apnsJwtCache.set(cacheKey, { jwt, issuedAtUnixSeconds: input.issuedAtUnixSeconds });
+  return jwt;
+});
+
 const makeApnsJwt = Effect.fn("relay.apns.make_jwt")(function* (input: {
   readonly teamId: ApnsCredentials["teamId"];
   readonly keyId: ApnsCredentials["keyId"];
@@ -328,7 +373,7 @@ export const make = Effect.gen(function* () {
     "relay.apns.send_live_activity_request",
   )(function* (input) {
     yield* Effect.annotateCurrentSpan({ "relay.apns.event": input.request.event });
-    const jwt = yield* makeApnsJwt({
+    const jwt = yield* getOrMintApnsJwt({
       ...input.credentials,
       issuedAtUnixSeconds: input.issuedAtUnixSeconds,
     });
@@ -386,7 +431,7 @@ export const make = Effect.gen(function* () {
   const sendPushNotificationRequest: ApnsClient["Service"]["sendPushNotificationRequest"] =
     Effect.fn("relay.apns.send_push_notification_request")(function* (input) {
       yield* Effect.annotateCurrentSpan({ "relay.apns.event": "push_notification" });
-      const jwt = yield* makeApnsJwt({
+      const jwt = yield* getOrMintApnsJwt({
         ...input.credentials,
         issuedAtUnixSeconds: input.issuedAtUnixSeconds,
       });

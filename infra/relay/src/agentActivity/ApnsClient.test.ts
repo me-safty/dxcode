@@ -10,6 +10,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
 import type { ApnsCredentials } from "../Config.ts";
 import * as ApnsClient from "./ApnsClient.ts";
@@ -278,6 +279,62 @@ describe("ApnsClient", () => {
         _tag: "TransportError",
         cause: httpCause,
       });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("reuses the signed provider JWT across pushes within the reuse window", () => {
+    ApnsClient.__resetApnsJwtCacheForTest();
+    const { privateKey } = NodeCrypto.generateKeyPairSync("ec", {
+      namedCurve: "prime256v1",
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    const credentials = {
+      teamId: "team-jwt-cache",
+      keyId: "key-jwt-cache",
+      privateKey: Redacted.make(privateKey),
+      bundleId: "com.t3tools.test",
+      environment: "sandbox",
+    } satisfies ApnsCredentials;
+    const authorizations: Array<string> = [];
+    const capturingHttpClient = HttpClient.make((request) => {
+      authorizations.push(request.headers.authorization ?? "");
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          new Response("", { status: 200, headers: { "apns-id": "apns-id-1" } }),
+        ),
+      );
+    });
+    const layer = ApnsClient.layer.pipe(
+      Layer.provide(Layer.succeed(HttpClient.HttpClient, capturingHttpClient)),
+    );
+
+    return Effect.gen(function* () {
+      const apns = yield* ApnsClient.ApnsClient;
+      const request = apns.makePushNotificationRequest({
+        token: "push-token",
+        notification: {
+          title: "Thread",
+          body: "Input: Project",
+          environmentId: "env",
+          threadId: "thread",
+          deepLink: "/threads/env/thread",
+        },
+      });
+      const send = (issuedAtUnixSeconds: number) =>
+        apns.sendPushNotificationRequest({ credentials, request, issuedAtUnixSeconds });
+
+      yield* send(1_000);
+      yield* send(1_000 + 44 * 60);
+      yield* send(1_000 + 46 * 60);
+
+      expect(authorizations).toHaveLength(3);
+      // Within the 45-minute window APNs must see the byte-identical token;
+      // refreshing it per push trips TooManyProviderTokenUpdates.
+      expect(authorizations[1]).toBe(authorizations[0]);
+      expect(authorizations[2]).not.toBe(authorizations[0]);
+      ApnsClient.__resetApnsJwtCacheForTest();
     }).pipe(Effect.provide(layer));
   });
 });
