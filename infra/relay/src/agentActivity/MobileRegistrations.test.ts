@@ -388,7 +388,7 @@ describe("MobileRegistrations", () => {
   });
 
   it.effect(
-    "starts a remote Live Activity through the real publisher and APNs queue when a device registers after work is already active",
+    "does not remotely start a Live Activity when a device registers after work is already active",
     () => {
       const queuedJobs: Array<SignedApnsDeliveryJob> = [];
       const queuedStarts: Array<
@@ -440,46 +440,13 @@ describe("MobileRegistrations", () => {
           },
         });
 
+        // Activities are armed by the app in the foreground; a device
+        // registration alone never remote-starts one, even when work is
+        // already active and a push-to-start token is on file.
         expect(result).toEqual({ ok: true });
-        expect(registeredDevices).toEqual([
-          {
-            userId: "dev:julius",
-            registration: {
-              ...device,
-              pushToken: "apns-device-token",
-              pushToStartToken: "push-to-start-token",
-            },
-          },
-        ]);
-        expect(queuedStarts).toMatchObject([
-          {
-            userId: "dev:julius",
-            deviceId: "device-1",
-          },
-        ]);
-        expect(queuedJobs).toHaveLength(1);
-        expect(queuedJobs[0]?.payload).toMatchObject({
-          kind: "live_activity_start",
-          target: {
-            userId: "dev:julius",
-            deviceId: "device-1",
-            token: "push-to-start-token",
-          },
-          aggregate: {
-            title: "T3 Code",
-            subtitle: "Agent work in progress",
-            activeCount: 1,
-            activities: [
-              {
-                environmentId: "env-1",
-                threadId: "thread-1",
-                threadTitle: "Implement APNs",
-                status: "Working",
-              },
-            ],
-          },
-          notification: null,
-        });
+        expect(registeredDevices).toHaveLength(1);
+        expect(queuedStarts).toEqual([]);
+        expect(queuedJobs).toEqual([]);
       }).pipe(Effect.provide(makeRegistrationReplayLayer({ devices, liveActivities, queuedJobs })));
     },
   );

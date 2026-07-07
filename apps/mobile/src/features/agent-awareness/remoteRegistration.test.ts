@@ -38,7 +38,6 @@ import {
   unregisterAgentAwarenessConnection,
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
-import { addPushToStartTokenListener } from "expo-widgets";
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const widgetMocks = vi.hoisted(() => ({
@@ -621,51 +620,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       yield* refreshAgentAwarenessRegistration();
       expect(getAgentAwarenessRegistrationStatus()).toBe("registered");
       expect(saveAgentAwarenessRegistrationRecord).not.toHaveBeenCalled();
-    }).pipe(Effect.provide(relayTestLayer));
-  });
-
-  it.effect("carries the accepted push-to-start token forward so tokenless refreshes skip", () => {
-    const fetchMock = vi.fn((request: RequestInfo | URL) => {
-      const url = request instanceof Request ? request.url : String(request);
-      return Promise.resolve(
-        Response.json(
-          url.endsWith("/v1/client/dpop-token")
-            ? {
-                access_token: "relay-dpop-token",
-                issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-                token_type: "DPoP",
-                expires_in: 300,
-                scope: "mobile:registration",
-              }
-            : { ok: true },
-        ),
-      );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    Constants.expoConfig!.extra = {
-      relay: {
-        url: "https://relay.example.test/",
-      },
-    };
-
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
-    const pushToStartListener = vi.mocked(addPushToStartTokenListener).mock.calls.at(-1)?.[0];
-    expect(pushToStartListener).toBeDefined();
-    pushToStartListener?.({ activityPushToStartToken: "push-to-start-token" });
-
-    return Effect.gen(function* () {
-      yield* runBackgroundOperations();
-      expect(registrationRecordStore.current?.pushToStartToken).toBe("push-to-start-token");
-
-      // A later refresh has no token event to carry — it must reuse the
-      // persisted token and skip instead of re-posting. (Fetch counts are
-      // unreliable here: the module-level relay layer captures the first
-      // test's fetch, so assert via the record save that only follows a real
-      // relay POST.)
-      vi.mocked(saveAgentAwarenessRegistrationRecord).mockClear();
-      yield* refreshAgentAwarenessRegistration();
-      expect(saveAgentAwarenessRegistrationRecord).not.toHaveBeenCalled();
-      expect(getAgentAwarenessRegistrationStatus()).toBe("registered");
     }).pipe(Effect.provide(relayTestLayer));
   });
 

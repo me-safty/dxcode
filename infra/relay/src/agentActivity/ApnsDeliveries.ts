@@ -329,19 +329,33 @@ function notificationForAggregate(input: {
 // "suppressed" means a Live Activity owns this state but no update is due
 // (unchanged or throttled); callers must not fall back to an alert push, or
 // every republish of a waiting aggregate would ring the device.
+// The lock-screen card shown when the user's card is armed but nothing is
+// running: activities are created only by the app in the foreground (never
+// remotely), so an empty aggregate means "show idle", not "tear the card
+// down" — ending it would force an unreliable background token handoff the
+// next time work starts.
+export function idleAggregateState(nowMs: number): RelayAgentActivityAggregateState {
+  return {
+    title: "T3 Code",
+    subtitle: "Waiting for agents",
+    activeCount: 0,
+    updatedAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs)),
+    activities: [],
+  };
+}
+
+function isIdleAggregate(aggregate: RelayAgentActivityAggregateState): boolean {
+  return aggregate.activeCount === 0 && aggregate.activities.length === 0;
+}
+
 function chooseLiveActivityDelivery(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
   readonly nowMs: number;
 }): ChosenLiveActivityDelivery | "suppressed" | null {
-  const hasActiveActivity =
-    input.target.ended_at === null &&
-    (input.target.remote_start_queued_at !== null ||
-      input.target.remote_started_at !== null ||
-      input.target.activity_push_token !== null);
   const preferences = parsePreferences(input.target.preferences_json);
   if (preferences?.liveActivitiesEnabled === false) {
-    return hasActiveActivity && input.target.activity_push_token
+    return input.target.activity_push_token
       ? {
           kind: "live_activity_end",
           token: input.target.activity_push_token,
@@ -350,49 +364,43 @@ function chooseLiveActivityDelivery(input: {
         }
       : null;
   }
-  if (input.aggregate === null || input.aggregate.activeCount === 0) {
-    return hasActiveActivity && input.target.activity_push_token
-      ? {
-          kind: "live_activity_end",
-          token: input.target.activity_push_token,
-          aggregate: input.aggregate,
-          alert: null,
-        }
-      : null;
-  }
-  if (!hasActiveActivity) {
-    return input.target.push_to_start_token
-      ? {
-          kind: "live_activity_start",
-          token: input.target.push_to_start_token,
-          aggregate: input.aggregate,
-          alert: null,
-        }
-      : null;
-  }
+  // Activities are started by the app in the foreground, never remotely.
+  // Without a registered token there is nothing addressable; attention
+  // transitions fall back to the push notification channel until the user
+  // next arms the card from the app.
   if (!input.target.activity_push_token) {
     return null;
   }
+  const nextAggregate = input.aggregate ?? idleAggregateState(input.nowMs);
   const previousAggregate = parseAggregate(input.target.last_aggregate_json);
+  // An idle card that is already idle needs no redraw; updatedAt alone would
+  // otherwise defeat the equality check inside shouldUpdateLiveActivity.
+  if (
+    isIdleAggregate(nextAggregate) &&
+    previousAggregate !== null &&
+    isIdleAggregate(previousAggregate)
+  ) {
+    return "suppressed";
+  }
   return shouldUpdateLiveActivity({
     previousAggregate,
-    nextAggregate: input.aggregate,
+    nextAggregate,
     lastDeliveryAt: input.target.last_live_activity_delivery_at,
     nowMs: input.nowMs,
   })
     ? {
         kind: "live_activity_update",
         token: input.target.activity_push_token,
-        aggregate: input.aggregate,
+        aggregate: nextAggregate,
         alert:
           alertForAttentionTransition({
             previousAggregate,
-            nextAggregate: input.aggregate,
+            nextAggregate,
             preferences,
           }) ??
           alertForNewlyTerminal({
             previousAggregate,
-            nextAggregate: input.aggregate,
+            nextAggregate,
             preferences,
           }),
       }

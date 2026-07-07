@@ -246,14 +246,11 @@ function makeLayer(input: {
 }
 
 describe("ApnsDeliveries", () => {
-  it.effect("queues a restart using the push-to-start token", () => {
+  it.effect("never starts an activity remotely when no update token is registered", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const queuedJobs: Array<SignedApnsDeliveryJob> = [];
     const queuedStarts: Array<
       Parameters<LiveActivities.LiveActivities["Service"]["markStartQueued"]>[0]
-    > = [];
-    const markedDeliveries: Array<
-      Parameters<LiveActivities.LiveActivities["Service"]["markDelivery"]>[0]
     > = [];
 
     return Effect.gen(function* () {
@@ -261,36 +258,26 @@ describe("ApnsDeliveries", () => {
       const result = yield* deliveries.sendForTarget({
         target: {
           ...target,
+          activity_push_token: null,
+          remote_started_at: null,
           ended_at: "1970-01-01T00:00:05.000Z",
         },
         aggregate,
         nowMs: 10_000,
       });
 
-      expect(result?.kind).toBe("live_activity_start");
-      expect(result?.ok).toBe(true);
-      expect(queuedJobs).toMatchObject([
-        {
-          payload: {
-            kind: "live_activity_start",
-            target: {
-              token: "start-token",
-            },
-          },
-        },
-      ]);
+      // Activities are armed by the app in the foreground; the relay never
+      // uses the push-to-start token, so the only fallback is the push
+      // notification channel (none here: the aggregate is not an attention
+      // phase).
+      expect(result).toBeNull();
+      expect(queuedJobs).toEqual([]);
+      expect(queuedStarts).toEqual([]);
       expect(attempts).toEqual([]);
-      expect(queuedStarts).toMatchObject([
-        {
-          userId: target.user_id,
-          deviceId: target.device_id,
-        },
-      ]);
-      expect(markedDeliveries).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs, queuedStarts, markedDeliveries })));
+    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs, queuedStarts })));
   });
 
-  it.effect("queues an end using the activity token", () => {
+  it.effect("updates an armed card to the idle state when nothing is running", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const queuedJobs: Array<SignedApnsDeliveryJob> = [];
 
@@ -302,14 +289,22 @@ describe("ApnsDeliveries", () => {
         nowMs: 5_000,
       });
 
-      expect(result?.kind).toBe("live_activity_end");
+      // The card is user-armed: tearing it down on an empty aggregate would
+      // force a remote start (which no longer exists) the next time work
+      // begins, so it idles instead.
+      expect(result?.kind).toBe("live_activity_update");
       expect(result?.ok).toBe(true);
       expect(queuedJobs).toMatchObject([
         {
           payload: {
-            kind: "live_activity_end",
+            kind: "live_activity_update",
             target: {
               token: "activity-token",
+            },
+            aggregate: {
+              activeCount: 0,
+              subtitle: "Waiting for agents",
+              activities: [],
             },
           },
         },
@@ -389,12 +384,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       yield* deliveries.sendForTarget({
-        target: {
-          ...target,
-          activity_push_token: null,
-          remote_started_at: null,
-          ended_at: "1970-01-01T00:00:05.000Z",
-        },
+        target,
         aggregate: inputAggregate,
         nowMs: 10_000,
       });
@@ -430,9 +420,9 @@ describe("ApnsDeliveries", () => {
       expect(queuedJobs).toMatchObject([
         {
           payload: {
-            kind: "live_activity_start",
+            kind: "live_activity_update",
             target: {
-              token: "start-token",
+              token: "activity-token",
               bundleId: "com.t3tools.t3code.preview",
               apsEnvironment: "production",
             },
