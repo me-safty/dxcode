@@ -280,10 +280,26 @@ export const make = Effect.gen(function* () {
           .onConflictDoUpdate({
             target: [relayLiveActivities.userId, relayLiveActivities.deviceId],
             set: {
-              remoteStartedAt: sql`coalesce(
-                ${relayLiveActivities.remoteStartedAt},
-                excluded.remote_started_at
-              )`,
+              // A delivered start begins a NEW activity generation: the stored
+              // update token belongs to the previous activity (dead once a new
+              // one starts, and certainly dead after an end), so keep it only
+              // for plain updates. Deliveries pause until the app registers
+              // the fresh activity's token; registerLiveActivity + replay then
+              // reconcile content (or end the activity if work already
+              // finished). Without this, updates and ends route to the dead
+              // token and the new lock-screen card is stranded at its start
+              // content forever.
+              activityPushToken:
+                input.kind === "live_activity_update"
+                  ? sql`${relayLiveActivities.activityPushToken}`
+                  : null,
+              remoteStartedAt:
+                input.kind === "live_activity_start"
+                  ? input.deliveredAt
+                  : sql`coalesce(
+                      ${relayLiveActivities.remoteStartedAt},
+                      excluded.remote_started_at
+                    )`,
               remoteStartQueuedAt: null,
               endedAt:
                 input.kind === "live_activity_start"
