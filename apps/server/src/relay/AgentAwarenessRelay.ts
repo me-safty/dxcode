@@ -203,6 +203,26 @@ const makePublishProof = Effect.fn("makePublishProof")(function* (input: {
   return yield* signRelayAgentActivityPublishProof({ privateKey: input.privateKey, payload });
 });
 
+// Compact, log-safe view of the fields the awareness phase ladder reads.
+export function describeThreadShellForAwareness(
+  thread: Option.Option<OrchestrationThreadShell>,
+): Record<string, unknown> {
+  if (Option.isNone(thread)) {
+    return { found: false };
+  }
+  const shell = thread.value;
+  return {
+    found: true,
+    sessionStatus: shell.session?.status ?? null,
+    sessionActiveTurnId: shell.session?.activeTurnId ?? null,
+    latestTurnId: shell.latestTurn?.turnId ?? null,
+    latestTurnState: shell.latestTurn?.state ?? null,
+    latestTurnCompletedAt: shell.latestTurn?.completedAt ?? null,
+    hasPendingApprovals: shell.hasPendingApprovals,
+    hasPendingUserInput: shell.hasPendingUserInput,
+  };
+}
+
 export function resolveAgentAwarenessRelayPublishSnapshot(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -309,6 +329,10 @@ export const make = Effect.gen(function* () {
   // Assigned after publishThreadUnsafe below; indirection keeps the deferred
   // tombstone confirmation from making the definition self-referential.
   let confirmTombstoneLater: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
+  // One pending confirmation per thread: birth/teardown flapping can resolve
+  // null on several consecutive events, and each would otherwise fork its own
+  // confirm fiber.
+  const pendingTombstoneConfirms = new Set<ThreadId>();
 
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (
     threadId: ThreadId,
@@ -408,13 +432,34 @@ export const make = Effect.gen(function* () {
       // immediately deletes the thread from the lock-screen card mid-
       // conversation. Defer, re-resolve, and only tombstone if it holds;
       // genuinely deleted threads still propagate a few seconds later.
+      if (pendingTombstoneConfirms.has(threadId)) {
+        return;
+      }
+      pendingTombstoneConfirms.add(threadId);
       yield* Effect.logInfo("agent activity tombstone deferred pending confirmation", {
         environmentId,
         threadId,
         reason: snapshot.reason,
+        shell: describeThreadShellForAwareness(thread),
       });
-      yield* Effect.forkDetach(confirmTombstoneLater(threadId));
+      yield* Effect.forkDetach(
+        confirmTombstoneLater(threadId).pipe(
+          Effect.ensuring(Effect.sync(() => pendingTombstoneConfirms.delete(threadId))),
+        ),
+      );
       return;
+    }
+
+    if (snapshot.state === null && options?.confirmTombstone === true) {
+      // Publishing a confirmed tombstone deletes the thread from every armed
+      // card; log exactly what the shell resolved to so a wrongly-null
+      // projection is diagnosable from the server log alone.
+      yield* Effect.logInfo("agent activity tombstone confirmed", {
+        environmentId,
+        threadId,
+        reason: snapshot.reason,
+        shell: describeThreadShellForAwareness(thread),
+      });
     }
 
     if (snapshot.reason === "thread-not-found") {
