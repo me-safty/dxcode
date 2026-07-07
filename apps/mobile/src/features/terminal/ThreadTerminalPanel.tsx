@@ -32,6 +32,8 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
 ) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const resizeTerminal = useAtomCommand(terminalEnvironment.resize, "terminal resize");
+  const closeTerminal = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const nativeTerminalAvailable = hasNativeTerminalSurface();
   const terminalId = DEFAULT_TERMINAL_ID;
   const lastGridSizeRef = useRef<TerminalGridSize>({
@@ -62,6 +64,75 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
 
   const terminalKey = `${props.environmentId}:${props.threadId}:${terminalId}`;
   const isRunning = terminal.status === "running" || terminal.status === "starting";
+
+  // Close the session and dismiss the panel when the process ends while
+  // attached (e.g. typing `exit`), mirroring the web drawer's
+  // onSessionExited flow.
+  const runningTerminalKeyRef = useRef<string | null>(null);
+  const reopenedStaleTerminalKeyRef = useRef<string | null>(null);
+
+  // Attach subscriptions are cached with an idle TTL; reopening the panel
+  // after its session ended reuses the stale stream without a new attach
+  // RPC. Issue an explicit open so the server respawns the session and its
+  // snapshot flows into the live subscription.
+  useEffect(() => {
+    if (isRunning) {
+      reopenedStaleTerminalKeyRef.current = null;
+      return;
+    }
+    if (
+      attachInput === null ||
+      (terminal.status !== "closed" && terminal.status !== "exited") ||
+      terminal.version === 0 ||
+      runningTerminalKeyRef.current === terminalKey ||
+      reopenedStaleTerminalKeyRef.current === terminalKey
+    ) {
+      return;
+    }
+    reopenedStaleTerminalKeyRef.current = terminalKey;
+    void openTerminal({
+      environmentId: props.environmentId,
+      input: {
+        threadId: props.threadId,
+        terminalId,
+        cwd: props.cwd,
+        worktreePath: props.worktreePath,
+        cols: lastGridSizeRef.current.cols,
+        rows: lastGridSizeRef.current.rows,
+      },
+    });
+  }, [
+    attachInput,
+    isRunning,
+    openTerminal,
+    props.cwd,
+    props.environmentId,
+    props.threadId,
+    props.worktreePath,
+    terminal.status,
+    terminal.version,
+    terminalId,
+    terminalKey,
+  ]);
+
+  useEffect(() => {
+    if (isRunning) {
+      runningTerminalKeyRef.current = terminalKey;
+      return;
+    }
+    if (terminal.status !== "exited" || runningTerminalKeyRef.current !== terminalKey) {
+      return;
+    }
+    runningTerminalKeyRef.current = null;
+    void closeTerminal({
+      environmentId: props.environmentId,
+      input: {
+        threadId: props.threadId,
+        terminalId,
+      },
+    });
+    props.onClose();
+  }, [closeTerminal, isRunning, props, terminal.status, terminalId, terminalKey]);
 
   const sendResize = useCallback(
     (size: TerminalGridSize) => {
