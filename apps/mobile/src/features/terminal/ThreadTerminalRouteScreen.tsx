@@ -390,6 +390,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
         worktreePath: terminalAttachInput.worktreePath,
         cols: terminalAttachInput.cols,
         rows: terminalAttachInput.rows,
+        ...(terminalAttachInput.env ? { env: terminalAttachInput.env } : {}),
       },
     });
   }, [
@@ -799,10 +800,15 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       runningTerminalKeyRef.current = terminalKey;
       return;
     }
-    if (terminal.status !== "exited" || runningTerminalKeyRef.current !== terminalKey) {
+    // The web drawer treats both exited and closed as session end.
+    const sessionEnded = terminal.status === "exited" || terminal.status === "closed";
+    if (!sessionEnded || runningTerminalKeyRef.current !== terminalKey) {
       return;
     }
     runningTerminalKeyRef.current = null;
+    // Mark this key handled so the stale-attach effect doesn't respawn the
+    // session the user just ended.
+    reopenedStaleTerminalKeyRef.current = terminalKey;
     if (selectedThread) {
       void closeTerminal({
         environmentId: selectedThread.environmentId,

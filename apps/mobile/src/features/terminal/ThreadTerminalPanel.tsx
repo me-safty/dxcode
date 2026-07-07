@@ -116,14 +116,26 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
   ]);
 
   useEffect(() => {
+    // Forget the running marker while hidden: if the process exits while the
+    // panel is unobserved, the next show must take the stale-reopen path
+    // instead of treating it as a live exit and immediately closing.
+    if (attachInput === null) {
+      runningTerminalKeyRef.current = null;
+      return;
+    }
     if (isRunning) {
       runningTerminalKeyRef.current = terminalKey;
       return;
     }
-    if (terminal.status !== "exited" || runningTerminalKeyRef.current !== terminalKey) {
+    // The web drawer treats both exited and closed as session end.
+    const sessionEnded = terminal.status === "exited" || terminal.status === "closed";
+    if (!sessionEnded || runningTerminalKeyRef.current !== terminalKey) {
       return;
     }
     runningTerminalKeyRef.current = null;
+    // Mark this key handled so the stale-attach effect doesn't respawn the
+    // session the user just ended.
+    reopenedStaleTerminalKeyRef.current = terminalKey;
     void closeTerminal({
       environmentId: props.environmentId,
       input: {
@@ -132,7 +144,7 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
       },
     });
     props.onClose();
-  }, [closeTerminal, isRunning, props, terminal.status, terminalId, terminalKey]);
+  }, [attachInput, closeTerminal, isRunning, props, terminal.status, terminalId, terminalKey]);
 
   const sendResize = useCallback(
     (size: TerminalGridSize) => {
