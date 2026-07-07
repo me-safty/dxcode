@@ -392,6 +392,11 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
         rows: terminalAttachInput.rows,
         ...(terminalAttachInput.env ? { env: terminalAttachInput.env } : {}),
       },
+    }).then((result) => {
+      // Release the guard on failure so a later render can retry the respawn.
+      if (result._tag === "Failure" && reopenedStaleTerminalKeyRef.current === terminalKey) {
+        reopenedStaleTerminalKeyRef.current = null;
+      }
     });
   }, [
     isRunning,
@@ -1061,19 +1066,34 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
           subtitle={headerSubtitle}
           onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
           trailing={
-            isEnvironmentReady ? (
-              <ControlPillMenu
-                actions={androidTerminalMenuActions}
-                isAnchoredToRight
-                title={getTerminalStatusLabel({
-                  status: terminal.status,
-                  hasRunningSubprocess: terminal.hasRunningSubprocess,
-                })}
-                onPressAction={handleAndroidTerminalMenuAction}
-              >
-                <AndroidHeaderIconButton accessibilityLabel="Terminal options" icon="terminal" />
-              </ControlPillMenu>
-            ) : null
+            <>
+              {layout.usesSplitView ? (
+                <AndroidHeaderIconButton
+                  accessibilityLabel={
+                    panes.primarySidebarVisible ? "Maximize terminal" : "Show threads"
+                  }
+                  icon={
+                    panes.primarySidebarVisible
+                      ? "arrow.up.left.and.arrow.down.right"
+                      : "sidebar.left"
+                  }
+                  onPress={togglePrimarySidebar}
+                />
+              ) : null}
+              {isEnvironmentReady ? (
+                <ControlPillMenu
+                  actions={androidTerminalMenuActions}
+                  isAnchoredToRight
+                  title={getTerminalStatusLabel({
+                    status: terminal.status,
+                    hasRunningSubprocess: terminal.hasRunningSubprocess,
+                  })}
+                  onPressAction={handleAndroidTerminalMenuAction}
+                >
+                  <AndroidHeaderIconButton accessibilityLabel="Terminal options" icon="terminal" />
+                </ControlPillMenu>
+              ) : null}
+            </>
           }
         />
       ) : null}

@@ -100,6 +100,11 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
         cols: lastGridSizeRef.current.cols,
         rows: lastGridSizeRef.current.rows,
       },
+    }).then((result) => {
+      // Release the guard on failure so a later render can retry the respawn.
+      if (result._tag === "Failure" && reopenedStaleTerminalKeyRef.current === terminalKey) {
+        reopenedStaleTerminalKeyRef.current = null;
+      }
     });
   }, [
     attachInput,
