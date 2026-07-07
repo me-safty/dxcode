@@ -1512,7 +1512,7 @@ const makeService = Effect.gen(function* () {
   const loadLocalSnapshots = (sources: ReadonlyArray<NeuropharmLocalDatabaseSource>) =>
     Effect.gen(function* () {
       const rows = yield* findLocalSnapshots({ sources: [...sources] }).pipe(
-        Effect.catch(() => Effect.succeed([] as LocalDatabaseSnapshotRow[])),
+        Effect.orElseSucceed(() => [] as LocalDatabaseSnapshotRow[]),
       );
       const bySource = new Map(rows.map((row) => [row.source, toLocalSnapshot(row)]));
       return sources.map(
