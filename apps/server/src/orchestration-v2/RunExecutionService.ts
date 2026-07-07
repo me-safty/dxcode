@@ -681,7 +681,26 @@ export const layer: Layer.Layer<
                   yield* finalizeRootRun(event);
                 }
                 yield* trackChildLifecycle(event);
-              }),
+              }).pipe(
+                // A single unmappable event (e.g. a late subagent notification
+                // that references an already-finalized run) must not tear down
+                // ingestion for the whole session: dropping it keeps the
+                // pipeline alive for every later event. Root turn.terminal
+                // failures still escalate so the fallback finalization in the
+                // outer catch keeps running.
+                Effect.catchCause((eventCause) =>
+                  event.type === "turn.terminal"
+                    ? Effect.failCause(eventCause)
+                    : Effect.logWarning(
+                        "orchestration V2 provider event dropped after ingestion failure",
+                        {
+                          runId: input.run.id,
+                          eventType: event.type,
+                          cause: Cause.pretty(eventCause),
+                        },
+                      ),
+                ),
+              ),
             ),
             Stream.takeUntilEffect(() => shouldStopProviderEventIngestion),
             Stream.runDrain,
@@ -700,7 +719,7 @@ export const layer: Layer.Layer<
                 Effect.flatMap((finalized) =>
                   Effect.logWarning("orchestration V2 provider event ingestion failed", {
                     runId: input.run.id,
-                    cause,
+                    cause: Cause.pretty(cause),
                   }).pipe(
                     Effect.andThen(
                       finalized
@@ -773,7 +792,7 @@ export const layer: Layer.Layer<
               Effect.catchCause((cause) =>
                 Effect.logError("orchestration V2 provider turn start failed", {
                   runId: input.run.id,
-                  cause,
+                  cause: Cause.pretty(cause),
                 }).pipe(
                   Effect.andThen(Fiber.interrupt(providerEventFiber)),
                   Effect.andThen(Ref.get(latestProviderThread)),

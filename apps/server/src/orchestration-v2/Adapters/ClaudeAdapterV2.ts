@@ -25,6 +25,7 @@ import {
   type ModelSelection,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ExecutionNode,
+  type OrchestrationV2PlanArtifact,
   type OrchestrationV2ProviderCapabilities,
   type OrchestrationV2ProviderFailure,
   type OrchestrationV2ProviderSession,
@@ -166,7 +167,7 @@ export const ClaudeProviderCapabilitiesV2 = {
   planning: {
     emitsPlanUpdated: false,
     emitsTodoList: false,
-    emitsProposedPlan: false,
+    emitsProposedPlan: true,
     supportsStructuredQuestions: false,
     planDeltasHaveItemIds: false,
   },
@@ -275,8 +276,23 @@ export class ClaudeAgentSdkQueryRunnerError extends Schema.TaggedErrorClass<Clau
   },
 ) {
   override get message(): string {
-    return "Claude Agent SDK query failed.";
+    return `Claude Agent SDK query failed (${this.method}).`;
   }
+}
+
+/**
+ * Provider-failure payloads render the failure's own message, so the runner
+ * wrapper would mask the actionable SDK error (missing binary, resume
+ * rejection, spawn failure). Surface the underlying error to the existing
+ * redaction/bounding pipeline in makeProviderFailure; the wrapper stays the
+ * failure for anything that is not a real Error.
+ */
+const isClaudeAgentSdkQueryRunnerError = Schema.is(ClaudeAgentSdkQueryRunnerError);
+
+function claudeProviderFailureCause(failure: unknown): unknown {
+  return isClaudeAgentSdkQueryRunnerError(failure) && failure.cause instanceof Error
+    ? failure.cause
+    : failure;
 }
 
 export interface ClaudeAgentSdkQueryRunnerShape {
@@ -1138,11 +1154,14 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
       : undefined;
 
   if (permissionMode === "plan") {
+    // The permission callback must be installed in plan mode: without it the
+    // SDK has no way to raise ExitPlanMode, so the model can never propose a
+    // plan and the plan interaction mode dead-ends in prose.
     return {
       permissionMode,
       ...(readOnlyTools === undefined ? {} : { tools: readOnlyTools }),
       ...(allowedTools === undefined ? {} : { allowedTools }),
-      installPermissionCallback: false,
+      installPermissionCallback: true,
     };
   }
 
@@ -1161,9 +1180,6 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
 }
 
 function shouldInstallClaudePermissionCallback(policy: ClaudeRuntimeQueryPolicy): boolean {
-  if (policy.permissionMode === "plan") {
-    return false;
-  }
   return policy.installPermissionCallback;
 }
 
@@ -1794,6 +1810,9 @@ interface ClaudeLiveQueryContext {
   readonly queryPolicyKey: string;
   readonly selectionKey: string;
   readonly closed: Deferred.Deferred<void, never>;
+  readonly openedWithResumeSessionAt: boolean;
+  /** True once any SDK message arrived on this query. */
+  receivedSdkMessage: boolean;
 }
 
 interface ActiveClaudeToolCall {
@@ -1848,6 +1867,26 @@ export function makeClaudeAdapterV2(
         });
         const events = yield* Queue.unbounded<ProviderAdapterV2Event>();
         const activeTurn = yield* Ref.make<ActiveClaudeTurnContext | null>(null);
+        /**
+         * Async native tasks (Task tool with isAsync) usually complete after
+         * their parent turn has finalized and activeTurn is null. Their turn
+         * contexts are retained here, keyed by native task id, so the late
+         * task_notification can still resolve the subagent under the original
+         * run — which RunExecutionService keeps draining until every child
+         * subagent is terminal. Entries are removed when the notification
+         * arrives.
+         */
+        const pendingAsyncTaskContexts = yield* Ref.make(
+          new Map<string, ActiveClaudeTurnContext>(),
+        );
+        /**
+         * Native threads whose next open must skip the resumeSessionAt pin.
+         * A dirty shutdown can record a conversation head that the killed
+         * claude process never flushed to its transcript; resuming at that
+         * head fails the first query. Entries are one-shot: consumed by the
+         * next openQuery and re-added if the unpinned open fails again.
+         */
+        const suppressResumeSessionAt = yield* Ref.make(new Set<string>());
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
@@ -2665,6 +2704,16 @@ export function makeClaudeAdapterV2(
             ],
             { concurrency: 1 },
           );
+          yield* Ref.update(pendingAsyncTaskContexts, (current) => {
+            let updated: Map<string, ActiveClaudeTurnContext> | null = null;
+            for (const [taskId, subagent] of input.context.subagentsByTaskId) {
+              if (subagent.task.status === "running") {
+                updated ??= new Map(current);
+                updated.set(taskId, input.context);
+              }
+            }
+            return updated ?? current;
+          });
           yield* Ref.update(activeTurn, (current) =>
             current?.providerTurnId === input.context.providerTurnId ? null : current,
           );
@@ -2721,6 +2770,24 @@ export function makeClaudeAdapterV2(
         const finalizeActiveTurnAfterQueryExit = Effect.fnUntraced(function* (
           cause?: Cause.Cause<ClaudeAgentSdkQueryRunnerError>,
         ) {
+          if (cause !== undefined) {
+            const failedQuery = yield* Ref.get(queryContext);
+            if (
+              failedQuery !== null &&
+              failedQuery.openedWithResumeSessionAt &&
+              !failedQuery.receivedSdkMessage
+            ) {
+              yield* Ref.update(suppressResumeSessionAt, (current) => {
+                const updated = new Set(current);
+                updated.add(failedQuery.nativeThreadId);
+                return updated;
+              });
+              yield* Effect.logWarning("orchestration-v2.claude-resume-pin-suppressed", {
+                providerSessionId: input.providerSessionId,
+                nativeThreadId: failedQuery.nativeThreadId,
+              });
+            }
+          }
           const context = yield* Ref.get(activeTurn);
           if (context === null) {
             return;
@@ -2735,7 +2802,10 @@ export function makeClaudeAdapterV2(
               ? {}
               : {
                   failure: makeProviderFailure({
-                    cause: cause === undefined ? undefined : Cause.squash(cause),
+                    cause:
+                      cause === undefined
+                        ? undefined
+                        : claudeProviderFailureCause(Cause.squash(cause)),
                     class: "transport_error",
                   }),
                 }),
@@ -2750,7 +2820,7 @@ export function makeClaudeAdapterV2(
               providerSessionId: input.providerSessionId,
               providerThreadId: context.input.providerThread.id,
               providerTurnId: context.providerTurnId,
-              cause,
+              cause: Cause.pretty(cause),
             });
           }
         });
@@ -2763,8 +2833,45 @@ export function makeClaudeAdapterV2(
           if (liveQuery?.query !== input.query) {
             return;
           }
+          liveQuery.receivedSdkMessage = true;
 
           const message = input.message;
+          if (message.type === "system" && message.subtype === "task_notification") {
+            // Async task completions typically land after the parent turn has
+            // finalized (activeTurn is null) or while an unrelated turn is
+            // active; resolve them against the retained owning context so the
+            // subagent terminalizes under its original run.
+            const active = yield* Ref.get(activeTurn);
+            const retired = (yield* Ref.get(pendingAsyncTaskContexts)).get(message.task_id);
+            const taskContext =
+              active !== null && active.subagentsByTaskId.has(message.task_id)
+                ? active
+                : (retired ?? active);
+            if (taskContext !== null && !taskContext.ignoredTaskIds.has(message.task_id)) {
+              yield* updateClaudeSubagentNode({
+                context: taskContext,
+                taskId: message.task_id,
+                ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
+                result: message.summary,
+                status:
+                  message.status === "completed"
+                    ? "completed"
+                    : message.status === "stopped"
+                      ? "cancelled"
+                      : "failed",
+              });
+            }
+            yield* Ref.update(pendingAsyncTaskContexts, (current) => {
+              if (!current.has(message.task_id)) {
+                return current;
+              }
+              const updated = new Map(current);
+              updated.delete(message.task_id);
+              return updated;
+            });
+            return;
+          }
+
           const context = yield* Ref.get(activeTurn);
           if (context === null) {
             return;
@@ -2798,23 +2905,6 @@ export function makeClaudeAdapterV2(
                 ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
                 progress,
                 status: "running",
-              });
-            }
-          }
-
-          if (message.type === "system" && message.subtype === "task_notification") {
-            if (!context.ignoredTaskIds.has(message.task_id)) {
-              yield* updateClaudeSubagentNode({
-                context,
-                taskId: message.task_id,
-                ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
-                result: message.summary,
-                status:
-                  message.status === "completed"
-                    ? "completed"
-                    : message.status === "stopped"
-                      ? "cancelled"
-                      : "failed",
               });
             }
           }
@@ -2926,6 +3016,92 @@ export function makeClaudeAdapterV2(
           }
         });
 
+        const emitProposedPlanArtifacts = Effect.fnUntraced(function* (input: {
+          readonly context: ActiveClaudeTurnContext;
+          readonly nativeItemId: string;
+          readonly markdown: string;
+        }) {
+          const now = yield* DateTime.now;
+          const nativeItemId = `plan:${input.nativeItemId}`;
+          const planId = yield* idAllocator.allocate.plan({
+            threadId: input.context.input.threadId,
+            ...(input.context.input.runId === null ? {} : { runId: input.context.input.runId }),
+            driver: CLAUDE_PROVIDER,
+          });
+          const ordinal = yield* resolveItemOrdinal(input.context, nativeItemId);
+          const nodeId = idAllocator.derive.nodeFromProviderItem({
+            driver: CLAUDE_PROVIDER,
+            nativeItemId,
+          });
+          const nativeItemRef = {
+            driver: CLAUDE_PROVIDER,
+            nativeId: input.nativeItemId,
+            strength: "strong" as const,
+          };
+          const plan: OrchestrationV2PlanArtifact = {
+            id: planId,
+            threadId: input.context.input.threadId,
+            runId: input.context.input.runId,
+            nodeId,
+            kind: "proposed_plan",
+            status: "active",
+            markdown: input.markdown,
+          };
+          yield* emitProviderEvent({
+            type: "node.updated",
+            driver: CLAUDE_PROVIDER,
+            node: {
+              id: nodeId,
+              threadId: input.context.input.threadId,
+              runId: input.context.input.runId,
+              parentNodeId: input.context.input.rootNodeId,
+              rootNodeId: input.context.input.rootNodeId,
+              kind: "plan",
+              status: "completed",
+              countsForRun: false,
+              providerThreadId: input.context.input.providerThread.id,
+              providerTurnId: input.context.providerTurnId,
+              nativeItemRef,
+              runtimeRequestId: null,
+              checkpointScopeId: null,
+              startedAt: now,
+              completedAt: now,
+            },
+          });
+          yield* emitProviderEvent({
+            type: "plan.updated",
+            driver: CLAUDE_PROVIDER,
+            plan,
+          });
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver: CLAUDE_PROVIDER,
+            turnItem: {
+              id: idAllocator.derive.turnItemFromProviderItem({
+                driver: CLAUDE_PROVIDER,
+                nativeItemId,
+              }),
+              threadId: input.context.input.threadId,
+              runId: input.context.input.runId,
+              nodeId,
+              providerThreadId: input.context.input.providerThread.id,
+              providerTurnId: input.context.providerTurnId,
+              nativeItemRef,
+              parentItemId: null,
+              ordinal,
+              status: "completed",
+              title: null,
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              type: "proposed_plan",
+              planId,
+              markdown: input.markdown,
+              streaming: false,
+            },
+          });
+        });
+
         const canUseToolEffect = Effect.fn("ClaudeAdapterV2.canUseTool")(function* (
           toolName: Parameters<CanUseTool>[0],
           toolInput: Parameters<CanUseTool>[1],
@@ -2936,6 +3112,25 @@ export function makeClaudeAdapterV2(
             return {
               behavior: "deny",
               message: "Claude V2 adapter has no active turn for this tool request.",
+              toolUseID: callbackOptions.toolUseID,
+            } satisfies PermissionResult;
+          }
+
+          if (toolName === "ExitPlanMode" || toolName === "exit_plan_mode") {
+            // Plan proposals are approved through the app's plan card, not the
+            // SDK permission flow: capture the plan as a v2 artifact so the
+            // thread flips to Plan Ready, and keep the session in plan mode.
+            const planMarkdown = toolInput["plan"];
+            yield* emitProposedPlanArtifacts({
+              context,
+              nativeItemId: callbackOptions.toolUseID,
+              markdown: typeof planMarkdown === "string" ? planMarkdown : "",
+            });
+            return {
+              behavior: "deny",
+              message:
+                "The proposed plan has been shared with the user for review in the app. " +
+                "End the turn now; do not start implementing until the user approves the plan.",
               toolUseID: callbackOptions.toolUseID,
             } satisfies PermissionResult;
           }
@@ -3061,7 +3256,17 @@ export function makeClaudeAdapterV2(
             updated.add(nativeThreadId);
             return [false, updated];
           });
-          const shouldResume = resumeSessionAt !== undefined || openedWithResume;
+          const pinSuppressed = yield* Ref.modify(suppressResumeSessionAt, (current) => {
+            if (!current.has(nativeThreadId)) {
+              return [false, current] as const;
+            }
+            const updated = new Set(current);
+            updated.delete(nativeThreadId);
+            return [true, updated] as const;
+          });
+          const effectiveResumeSessionAt = pinSuppressed ? undefined : resumeSessionAt;
+          const shouldResume =
+            effectiveResumeSessionAt !== undefined || openedWithResume || pinSuppressed;
           const querySession = yield* queryRunner.open({
             threadId: turnInput.threadId,
             providerSessionId: input.providerSessionId,
@@ -3069,7 +3274,9 @@ export function makeClaudeAdapterV2(
               modelSelection: turnInput.modelSelection,
               nativeThreadId,
               resume: shouldResume,
-              ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
+              ...(effectiveResumeSessionAt === undefined
+                ? {}
+                : { resumeSessionAt: effectiveResumeSessionAt }),
               cwd: turnInput.runtimePolicy.cwd,
               settings: adapterOptions.settings,
               environment: adapterOptions.environment,
@@ -3089,6 +3296,8 @@ export function makeClaudeAdapterV2(
             queryPolicyKey,
             selectionKey: compiledSelection.queryIdentity,
             closed,
+            openedWithResumeSessionAt: effectiveResumeSessionAt !== undefined,
+            receivedSdkMessage: false,
           };
           yield* Ref.set(queryContext, context);
           yield* querySession.messages.pipe(
