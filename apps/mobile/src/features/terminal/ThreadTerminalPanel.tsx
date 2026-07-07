@@ -116,11 +116,13 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
   ]);
 
   useEffect(() => {
-    // Forget the running marker while hidden: if the process exits while the
-    // panel is unobserved, the next show must take the stale-reopen path
-    // instead of treating it as a live exit and immediately closing.
+    // Forget both markers while hidden: if the process ends while the panel
+    // is unobserved (or was just auto-closed), the next show must take the
+    // stale-reopen path instead of treating it as a live exit or skipping
+    // the respawn.
     if (attachInput === null) {
       runningTerminalKeyRef.current = null;
+      reopenedStaleTerminalKeyRef.current = null;
       return;
     }
     if (isRunning) {

@@ -839,6 +839,17 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     }
     if (navigation.canGoBack()) {
       navigation.goBack();
+      return;
+    }
+    // Deep-linked/root mounts have nothing to pop; land on the thread
+    // instead of stranding the user on a dead terminal.
+    if (selectedThread) {
+      navigation.dispatch(
+        StackActions.replace("Thread", {
+          environmentId: String(selectedThread.environmentId),
+          threadId: String(selectedThread.id),
+        }),
+      );
     }
   }, [
     closeTerminal,
