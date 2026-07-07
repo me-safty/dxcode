@@ -67,6 +67,7 @@ import {
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
+import { highlightHtml } from "../lib/searchHighlight";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useActiveEnvironmentId } from "../state/entities";
 import { serverEnvironment } from "../state/server";
@@ -114,6 +115,7 @@ interface ChatMarkdownProps {
   className?: string;
   /** Treat single newlines as hard breaks — chat-style user input. */
   lineBreaks?: boolean;
+  searchQuery?: string;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -153,10 +155,12 @@ function findTaskListMarkerOffset(markdown: string, listItemStart: number): numb
 }
 const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
   attributes: {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
     code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta"],
+    mark: ["className", "class"],
   },
   protocols: {
     ...defaultSchema.protocols,
@@ -1237,6 +1241,7 @@ function ChatMarkdown({
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
   lineBreaks = false,
+  searchQuery,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -1253,6 +1258,10 @@ function ChatMarkdown({
     serverConfig?.availableEditors ?? [],
   );
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const highlightedText = useMemo(
+    () => (searchQuery ? highlightHtml(text, searchQuery) : text),
+    [searchQuery, text],
+  );
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
@@ -1328,6 +1337,9 @@ function ChatMarkdown({
   );
   const markdownComponents = useMemo<Components>(
     () => ({
+      mark({ children }) {
+        return <mark className="search-highlight">{children}</mark>;
+      },
       p({ node: _node, children, ...props }) {
         return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
       },
@@ -1553,7 +1565,7 @@ function ChatMarkdown({
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >
-        {text}
+        {highlightedText}
       </ReactMarkdown>
     </div>
   );
