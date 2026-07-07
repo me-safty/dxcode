@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.widget.OverScroller
 import kotlin.math.ceil
 import kotlin.math.max
 
@@ -33,6 +34,23 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   private val contentPadding = 8f * density
   private var frame: TerminalFrame? = null
   private var scrollRemainder = 0f
+  private val scroller = OverScroller(context)
+  private var flingLastY = 0
+  private val flingRunnable = object : Runnable {
+    override fun run() {
+      if (!scroller.computeScrollOffset()) return
+      val currentY = scroller.currY
+      val deltaPx = (currentY - flingLastY).toFloat()
+      flingLastY = currentY
+      scrollRemainder += -deltaPx / cellHeightPx
+      val rows = scrollRemainder.toInt()
+      if (rows != 0) {
+        scrollRemainder -= rows
+        onScrollRows?.invoke(rows)
+      }
+      postOnAnimation(this)
+    }
+  }
   private var cursorOn = true
   private val cursorBlink = object : Runnable {
     override fun run() {
@@ -149,6 +167,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
 
   override fun onDetachedFromWindow() {
     removeCallbacks(cursorBlink)
+    removeCallbacks(flingRunnable)
     super.onDetachedFromWindow()
   }
 
@@ -220,6 +239,8 @@ internal class TerminalCanvasView(context: Context) : View(context) {
 
   private inner class TerminalGestureListener : GestureDetector.SimpleOnGestureListener() {
     override fun onDown(event: MotionEvent): Boolean {
+      scroller.forceFinished(true)
+      removeCallbacks(flingRunnable)
       onRequestKeyboard?.invoke()
       return true
     }
@@ -241,6 +262,18 @@ internal class TerminalCanvasView(context: Context) : View(context) {
         scrollRemainder -= rows
         onScrollRows?.invoke(rows)
       }
+      return true
+    }
+
+    override fun onFling(
+      first: MotionEvent?,
+      current: MotionEvent,
+      velocityX: Float,
+      velocityY: Float
+    ): Boolean {
+      flingLastY = 0
+      scroller.fling(0, 0, 0, velocityY.toInt(), 0, 0, Int.MIN_VALUE / 2, Int.MAX_VALUE / 2)
+      postOnAnimation(flingRunnable)
       return true
     }
   }
