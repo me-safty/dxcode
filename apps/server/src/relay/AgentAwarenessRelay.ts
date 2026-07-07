@@ -306,7 +306,14 @@ export const make = Effect.gen(function* () {
       transformClient: relayEnvironmentClient(relayConfig.environmentCredential),
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
-  const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
+  // Assigned after publishThreadUnsafe below; indirection keeps the deferred
+  // tombstone confirmation from making the definition self-referential.
+  let confirmTombstoneLater: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
+
+  const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (
+    threadId: ThreadId,
+    options?: { readonly confirmTombstone?: boolean },
+  ) {
     const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
       Effect.orElseSucceed(() => false),
     );
@@ -390,6 +397,26 @@ export const make = Effect.gen(function* () {
       return;
     }
 
+    if (
+      snapshot.state === null &&
+      options?.confirmTombstone !== true &&
+      publishedStateByThread.get(threadId) !== agentAwarenessPublishIdentity(null)
+    ) {
+      // A live thread that suddenly resolves to null is usually a transient
+      // handoff gap (an answered prompt whose next turn has not started yet,
+      // a shell lookup racing a write), and publishing the tombstone
+      // immediately deletes the thread from the lock-screen card mid-
+      // conversation. Defer, re-resolve, and only tombstone if it holds;
+      // genuinely deleted threads still propagate a few seconds later.
+      yield* Effect.logInfo("agent activity tombstone deferred pending confirmation", {
+        environmentId,
+        threadId,
+        reason: snapshot.reason,
+      });
+      yield* Effect.forkDetach(confirmTombstoneLater(threadId));
+      return;
+    }
+
     if (snapshot.reason === "thread-not-found") {
       yield* Effect.logDebug("publishing agent activity tombstone; thread not found", {
         environmentId,
@@ -414,6 +441,18 @@ export const make = Effect.gen(function* () {
       return nextPublishedStates;
     });
   });
+
+  confirmTombstoneLater = (threadId) =>
+    publishThreadUnsafe(threadId, { confirmTombstone: true }).pipe(
+      Effect.delay("5 seconds"),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("deferred agent activity tombstone failed", {
+          threadId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+      Effect.asVoid,
+    );
 
   const publishThread: AgentAwarenessRelay["Service"]["publishThread"] = (threadId) =>
     publishThreadUnsafe(threadId).pipe(

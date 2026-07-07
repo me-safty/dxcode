@@ -143,6 +143,22 @@ describe("ApnsClient", () => {
           "dismissal-date": 300,
         },
       });
+
+      // Without final content the card would freeze on its previous state;
+      // contentless ends dismiss quickly instead.
+      const contentless = apns.makeLiveActivityRequest({
+        event: "end",
+        token: "token",
+        state: null,
+        nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
+        nowIso: DateTime.formatIso(now),
+      });
+      expect(contentless.payload).toMatchObject({
+        aps: {
+          event: "end",
+          "dismissal-date": 15,
+        },
+      });
     }).pipe(Effect.provide(TestLayer)),
   );
 
