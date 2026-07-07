@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase / FCM (never commit; use EAS GOOGLE_SERVICES_JSON file secret)
+google-services.json
+secrets/google-services.*.json

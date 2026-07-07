@@ -59,6 +59,14 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 
+function resolveGoogleServicesFile(appVariant: AppVariant): string {
+  const envPath = repoEnv.GOOGLE_SERVICES_JSON ?? process.env.GOOGLE_SERVICES_JSON;
+  if (typeof envPath === "string" && envPath.trim().length > 0) {
+    return envPath.trim();
+  }
+  return `./secrets/google-services.${appVariant}.json`;
+}
+
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "t3-code",
@@ -105,6 +113,7 @@ const config: ExpoConfig = {
   android: {
     icon: "./assets/icon.png",
     package: variant.androidPackage,
+    googleServicesFile: resolveGoogleServicesFile(APP_VARIANT),
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/android-icon-foreground.png",
@@ -173,6 +182,7 @@ const config: ExpoConfig = {
     ],
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
+    "./plugins/withAndroidGoogleServices.cjs",
   ],
   extra: {
     appVariant: APP_VARIANT,
