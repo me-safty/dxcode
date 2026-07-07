@@ -283,10 +283,19 @@ describe("ApnsDeliveries", () => {
 
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
-      const result = yield* deliveries.sendForTarget({
+      // Within the freshly-armed grace window an empty aggregate delivers
+      // nothing: the environment's first publish may still be in flight.
+      const graced = yield* deliveries.sendForTarget({
         target,
         aggregate: null,
         nowMs: 5_000,
+      });
+      expect(graced).toBeNull();
+
+      const result = yield* deliveries.sendForTarget({
+        target,
+        aggregate: null,
+        nowMs: 5_000 + 3 * 60 * 1_000,
       });
 
       // An armed card always shows content (live or recently finished work);

@@ -43,6 +43,10 @@ import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
 import { withSpanAttributes } from "../observability.ts";
 
 const MIN_LIVE_ACTIVITY_UPDATE_INTERVAL_MS = 15_000;
+// How long a just-armed card may sit with an empty aggregate before an end is
+// warranted; covers the gap between arming on send and the environment's
+// first publish reaching the relay.
+const FRESHLY_ARMED_GRACE_MS = 2 * 60 * 1_000;
 const PERMANENT_APNS_TOKEN_REASONS = new Set([
   "BadDeviceToken",
   "DeviceTokenNotForTopic",
@@ -358,6 +362,20 @@ function chooseLiveActivityDelivery(input: {
   // the card ends — arming is cheap now that the app re-arms on any open
   // with content.
   if (input.aggregate === null) {
+    // Except right after arming: the app arms the card the moment the user
+    // starts work, and the token registration's replay can land before the
+    // environment's first publish for the brand-new thread. Ending here
+    // would retire the token and orphan the card at its seed content, so a
+    // freshly armed card keeps its seed until real state arrives.
+    const armedAtMs = Option.match(
+      input.target.remote_started_at === null
+        ? Option.none()
+        : DateTime.make(input.target.remote_started_at),
+      { onNone: () => null, onSome: (dt) => dt.epochMilliseconds },
+    );
+    if (armedAtMs !== null && input.nowMs - armedAtMs < FRESHLY_ARMED_GRACE_MS) {
+      return null;
+    }
     return {
       kind: "live_activity_end",
       token: input.target.activity_push_token,
