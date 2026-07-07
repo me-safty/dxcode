@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.util.Log
 import android.view.ActionMode
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
@@ -19,6 +20,29 @@ import android.widget.OverScroller
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+
+/**
+ * Bundled terminal font with Nerd Font glyphs (powerline, file icons).
+ * MesloLGS NF is the powerlevel10k-tuned Meslo Nerd Font patch.
+ */
+internal object TerminalTypefaces {
+  private var loaded = false
+  var regular: Typeface = Typeface.MONOSPACE
+    private set
+  var bold: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+    private set
+
+  fun ensureLoaded(context: Context) {
+    if (loaded) return
+    loaded = true
+    try {
+      regular = Typeface.createFromAsset(context.assets, "fonts/MesloLGS-NF-Regular.ttf")
+      bold = Typeface.createFromAsset(context.assets, "fonts/MesloLGS-NF-Bold.ttf")
+    } catch (error: RuntimeException) {
+      Log.w("TerminalCanvasView", "bundled terminal font unavailable, using monospace", error)
+    }
+  }
+}
 
 /**
  * Selection operations backed by the native terminal. The terminal owns the
@@ -54,10 +78,15 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   private val density = resources.displayMetrics.density
   private val scaledDensity = density * resources.configuration.fontScale
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
-  private val regularTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
-  private val boldTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-  private val italicTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC)
-  private val boldItalicTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD_ITALIC)
+
+  init {
+    TerminalTypefaces.ensureLoaded(context)
+  }
+
+  private val regularTypeface = TerminalTypefaces.regular
+  private val boldTypeface = TerminalTypefaces.bold
+  private val italicTypeface = Typeface.create(TerminalTypefaces.regular, Typeface.ITALIC)
+  private val boldItalicTypeface = Typeface.create(TerminalTypefaces.bold, Typeface.ITALIC)
   private val gestureDetector = GestureDetector(context, TerminalGestureListener())
   private val contentPadding = 8f * density
   private var frame: TerminalFrame? = null
