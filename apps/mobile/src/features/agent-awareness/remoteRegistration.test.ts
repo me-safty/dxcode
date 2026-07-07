@@ -145,7 +145,7 @@ vi.mock("../../lib/runtime", () => ({
 vi.mock("../../lib/storage", () => ({
   loadAgentAwarenessDeviceId: vi.fn(() => Promise.resolve("device-1")),
   loadOrCreateAgentAwarenessDeviceId: vi.fn(() => Promise.resolve("device-1")),
-  loadPreferences: vi.fn(() => Promise.resolve({})),
+  loadPreferences: vi.fn(() => Promise.resolve({ liveActivitiesEnabled: false })),
   loadAgentAwarenessRegistrationRecord: vi.fn(() =>
     Promise.resolve(registrationRecordStore.current),
   ),

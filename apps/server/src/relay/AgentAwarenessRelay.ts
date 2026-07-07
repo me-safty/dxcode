@@ -326,18 +326,15 @@ export const make = Effect.gen(function* () {
       transformClient: relayEnvironmentClient(relayConfig.environmentCredential),
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
-  // Assigned after publishThreadUnsafe below; indirection keeps the deferred
-  // tombstone confirmation from making the definition self-referential.
-  let confirmTombstoneLater: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
-  // One pending confirmation per thread: birth/teardown flapping can resolve
-  // null on several consecutive events, and each would otherwise fork its own
-  // confirm fiber.
-  const pendingTombstoneConfirms = new Set<ThreadId>();
+  // Deadlines for publishes that need confirmation (tombstones and
+  // first-state completions). The confirming publish is re-enqueued through
+  // the same drainable worker as every other publish, so a confirmed
+  // tombstone can never race an in-flight live update; a recovered state
+  // clears the deadline. Assigned after the worker exists.
+  const publishConfirmDeadlines = new Map<ThreadId, number>();
+  let schedulePublishConfirm: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
 
-  const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (
-    threadId: ThreadId,
-    options?: { readonly confirmTombstone?: boolean },
-  ) {
+  const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
     const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
       Effect.orElseSucceed(() => false),
     );
@@ -421,73 +418,48 @@ export const make = Effect.gen(function* () {
       return;
     }
 
-    // A brand-new session boots at "ready" before its first turn starts, which
-    // projects as completed for an instant; publishing that sends a spurious
-    // Done notification at thread birth. Completed as the thread's FIRST
-    // published state gets the same defer-and-confirm treatment as
-    // tombstones: real completions (previous state was live) publish
-    // immediately, and at-rest threads still publish 5 seconds later.
-    if (
-      snapshot.state?.phase === "completed" &&
-      options?.confirmTombstone !== true &&
-      !publishedStateByThread.has(threadId)
-    ) {
-      if (pendingTombstoneConfirms.has(threadId)) {
+    // Two projections need confirmation before publishing, because both can
+    // appear transiently while the projector is mid-write and publishing them
+    // immediately is destructive or noisy:
+    // - null (tombstone) while the previous published state was live: deletes
+    //   the thread from every armed card mid-conversation.
+    // - completed as the thread's FIRST published state: sessions boot at
+    //   "ready" before their first turn, which projects as completed for an
+    //   instant and sends a spurious Done notification at thread birth.
+    // Defer, schedule a re-publish through the ordinary worker queue, and
+    // only publish if the projection still holds when it drains.
+    const requiresConfirmation =
+      (snapshot.state === null &&
+        publishedStateByThread.get(threadId) !== agentAwarenessPublishIdentity(null)) ||
+      (snapshot.state?.phase === "completed" && !publishedStateByThread.has(threadId));
+    if (requiresConfirmation) {
+      const nowMs = (yield* DateTime.now).epochMilliseconds;
+      const deadline = publishConfirmDeadlines.get(threadId);
+      if (deadline === undefined) {
+        publishConfirmDeadlines.set(threadId, nowMs + 5_000);
+        yield* Effect.logInfo("agent activity publish deferred pending confirmation", {
+          environmentId,
+          threadId,
+          reason: snapshot.reason,
+          statePhase: snapshot.state?.phase ?? null,
+          shell: describeThreadShellForAwareness(thread),
+        });
+        yield* schedulePublishConfirm(threadId);
         return;
       }
-      pendingTombstoneConfirms.add(threadId);
-      yield* Effect.logInfo("agent activity first-state completion deferred", {
-        environmentId,
-        threadId,
-        shell: describeThreadShellForAwareness(thread),
-      });
-      yield* Effect.forkDetach(
-        confirmTombstoneLater(threadId).pipe(
-          Effect.ensuring(Effect.sync(() => pendingTombstoneConfirms.delete(threadId))),
-        ),
-      );
-      return;
-    }
-
-    if (
-      snapshot.state === null &&
-      options?.confirmTombstone !== true &&
-      publishedStateByThread.get(threadId) !== agentAwarenessPublishIdentity(null)
-    ) {
-      // A live thread that suddenly resolves to null is usually a transient
-      // handoff gap (an answered prompt whose next turn has not started yet,
-      // a shell lookup racing a write), and publishing the tombstone
-      // immediately deletes the thread from the lock-screen card mid-
-      // conversation. Defer, re-resolve, and only tombstone if it holds;
-      // genuinely deleted threads still propagate a few seconds later.
-      if (pendingTombstoneConfirms.has(threadId)) {
+      if (nowMs < deadline) {
         return;
       }
-      pendingTombstoneConfirms.add(threadId);
-      yield* Effect.logInfo("agent activity tombstone deferred pending confirmation", {
+      publishConfirmDeadlines.delete(threadId);
+      yield* Effect.logInfo("agent activity deferred publish confirmed", {
         environmentId,
         threadId,
         reason: snapshot.reason,
+        statePhase: snapshot.state?.phase ?? null,
         shell: describeThreadShellForAwareness(thread),
       });
-      yield* Effect.forkDetach(
-        confirmTombstoneLater(threadId).pipe(
-          Effect.ensuring(Effect.sync(() => pendingTombstoneConfirms.delete(threadId))),
-        ),
-      );
-      return;
-    }
-
-    if (snapshot.state === null && options?.confirmTombstone === true) {
-      // Publishing a confirmed tombstone deletes the thread from every armed
-      // card; log exactly what the shell resolved to so a wrongly-null
-      // projection is diagnosable from the server log alone.
-      yield* Effect.logInfo("agent activity tombstone confirmed", {
-        environmentId,
-        threadId,
-        reason: snapshot.reason,
-        shell: describeThreadShellForAwareness(thread),
-      });
+    } else {
+      publishConfirmDeadlines.delete(threadId);
     }
 
     if (snapshot.reason === "thread-not-found") {
@@ -514,18 +486,6 @@ export const make = Effect.gen(function* () {
       return nextPublishedStates;
     });
   });
-
-  confirmTombstoneLater = (threadId) =>
-    publishThreadUnsafe(threadId, { confirmTombstone: true }).pipe(
-      Effect.delay("5 seconds"),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("deferred agent activity tombstone failed", {
-          threadId,
-          cause: Cause.pretty(cause),
-        }),
-      ),
-      Effect.asVoid,
-    );
 
   const publishThread: AgentAwarenessRelay["Service"]["publishThread"] = (threadId) =>
     publishThreadUnsafe(threadId).pipe(
@@ -589,6 +549,19 @@ export const make = Effect.gen(function* () {
     });
 
   const worker = yield* makeDrainableWorker(publishThread);
+
+  schedulePublishConfirm = (threadId) =>
+    Effect.forkDetach(
+      Effect.sleep("5 seconds").pipe(
+        Effect.andThen(worker.enqueue(threadId)),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("deferred agent activity confirmation failed", {
+            threadId,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      ),
+    ).pipe(Effect.asVoid);
 
   const start: AgentAwarenessRelay["Service"]["start"] = Effect.fn("AgentAwarenessRelay.start")(
     function* () {

@@ -1552,6 +1552,7 @@ describe("live activity alert decisions", () => {
         previousAggregate: aggregate,
         nextAggregate: next,
         preferences,
+        nowMs: 0,
       }),
     ).toEqual({ title: "Thread", body: "Done: Project" });
     // The completion switch mutes it.
@@ -1560,6 +1561,7 @@ describe("live activity alert decisions", () => {
         previousAggregate: aggregate,
         nextAggregate: next,
         preferences: { ...preferences, notifyOnCompletion: false },
+        nowMs: 0,
       }),
     ).toBeNull();
     // No baseline means no transition to ring on.
@@ -1568,6 +1570,7 @@ describe("live activity alert decisions", () => {
         previousAggregate: null,
         nextAggregate: next,
         preferences,
+        nowMs: 0,
       }),
     ).toBeNull();
     // A Done row that was already terminal (or absent) before stays silent.
@@ -1576,6 +1579,7 @@ describe("live activity alert decisions", () => {
         previousAggregate: next,
         nextAggregate: next,
         preferences,
+        nowMs: 0,
       }),
     ).toBeNull();
     expect(
@@ -1583,6 +1587,7 @@ describe("live activity alert decisions", () => {
         previousAggregate: { ...aggregate, activities: [attentionRow] },
         nextAggregate: next,
         preferences,
+        nowMs: 0,
       }),
     ).toBeNull();
   });

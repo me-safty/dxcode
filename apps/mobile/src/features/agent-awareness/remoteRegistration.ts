@@ -447,6 +447,20 @@ export function armAgentAwarenessLiveActivityForLocalWork(input: {
   if (!canRegisterRemoteLiveActivities() || !relayTokenProvider) {
     return;
   }
+  void loadPreferences()
+    .catch(() => null)
+    .then((preferences) => {
+      if (preferences?.liveActivitiesEnabled === false) {
+        return;
+      }
+      armAgentAwarenessLiveActivityForLocalWorkNow(input);
+    });
+}
+
+function armAgentAwarenessLiveActivityForLocalWorkNow(input: {
+  readonly threadTitle: string;
+  readonly projectTitle: string;
+}): void {
   try {
     if (AgentActivity.getInstances().length > 0) {
       return;
@@ -1007,7 +1021,9 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
             cause,
           }),
       }).pipe(Effect.orElseSucceed(() => null));
-      if (preferences?.liveActivitiesEnabled) {
+      // The toggle defaults to on: an unset preference (fresh install) must
+      // prime, so only an explicit false blocks it.
+      if (preferences?.liveActivitiesEnabled !== false) {
         const snapshot = yield* readAgentActivitySnapshot();
         // The snapshot request yields; an arm-on-send may have created the
         // card in the meantime. Re-check so two cards are never started.

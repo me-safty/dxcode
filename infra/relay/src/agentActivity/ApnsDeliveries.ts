@@ -215,29 +215,51 @@ export function alertForAttentionTransition(input: {
 // completion buzz while other agents keep the activity alive. Requires the
 // thread to have been present and non-terminal before, so a baseline-less
 // replay or a row that merely fell off the display cap never rings.
-export function alertForNewlyTerminal(input: {
-  readonly previousAggregate: RelayAgentActivityAggregateState | null;
-  readonly nextAggregate: RelayAgentActivityAggregateState;
-  readonly preferences: RelayAgentAwarenessPreferences | null;
-}): ApnsLiveActivityAlert | null {
-  if (input.previousAggregate === null) {
-    return null;
+function newlyTerminalRows(
+  previousAggregate: RelayAgentActivityAggregateState | null,
+  nextAggregate: RelayAgentActivityAggregateState,
+): ReadonlyArray<RelayAgentActivityAggregateState["activities"][number]> {
+  if (previousAggregate === null) {
+    return [];
   }
   const previousPhases = new Map(
-    input.previousAggregate.activities.map((row) => [row.threadId, row.phase]),
+    previousAggregate.activities.map((row) => [row.threadId, row.phase]),
   );
-  const newlyTerminal = input.nextAggregate.activities.filter((row) => {
+  return nextAggregate.activities.filter((row) => {
     if (row.phase !== "completed" && row.phase !== "failed") {
       return false;
     }
     const previousPhase = previousPhases.get(row.threadId);
     return (
-      previousPhase !== undefined &&
-      previousPhase !== "completed" &&
-      previousPhase !== "failed" &&
-      alertAllowedForPhase(input.preferences, row.phase)
+      previousPhase !== undefined && previousPhase !== "completed" && previousPhase !== "failed"
     );
   });
+}
+
+function isFreshTerminalRow(
+  row: RelayAgentActivityAggregateState["activities"][number],
+  nowMs: number,
+): boolean {
+  const updatedAtMs = Option.match(DateTime.make(row.updatedAt), {
+    onNone: () => null,
+    onSome: (dt) => dt.epochMilliseconds,
+  });
+  return updatedAtMs !== null && nowMs - updatedAtMs <= TERMINAL_NOTIFICATION_FRESHNESS_MS;
+}
+
+export function alertForNewlyTerminal(input: {
+  readonly previousAggregate: RelayAgentActivityAggregateState | null;
+  readonly nextAggregate: RelayAgentActivityAggregateState;
+  readonly preferences: RelayAgentAwarenessPreferences | null;
+  readonly nowMs: number;
+}): ApnsLiveActivityAlert | null {
+  const newlyTerminal = newlyTerminalRows(input.previousAggregate, input.nextAggregate).filter(
+    (row) =>
+      alertAllowedForPhase(input.preferences, row.phase) &&
+      // Replays of old aggregates (server restarts, redeliveries) repaint
+      // state without ringing; only fresh completions buzz.
+      isFreshTerminalRow(row, input.nowMs),
+  );
   const first = newlyTerminal[0];
   if (!first) {
     return null;
@@ -282,6 +304,12 @@ function shouldUpdateLiveActivity(input: {
     return true;
   }
   if (aggregateNeedsAttention(input.nextAggregate)) {
+    return true;
+  }
+  // A thread finishing must never be throttled away: when a completion and a
+  // new start land in the same window, activeCount is unchanged and the Done
+  // transition (and its alert) would otherwise be suppressed.
+  if (newlyTerminalRows(input.previousAggregate, input.nextAggregate).length > 0) {
     return true;
   }
   const lastDeliveryAtMs =
@@ -419,6 +447,7 @@ function chooseLiveActivityDelivery(input: {
             previousAggregate,
             nextAggregate,
             preferences,
+            nowMs: input.nowMs,
           }),
       }
     : "suppressed";
