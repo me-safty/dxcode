@@ -73,33 +73,33 @@ describe("branding logic", () => {
   it("updates the display name for nightly primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
-        baseName: "T3 Code",
-        fallbackDisplayName: "T3 Code (Alpha)",
+        baseName: "Neuropharm Research",
+        fallbackDisplayName: "Neuropharm Research (Alpha)",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616.12",
       }),
-    ).toBe("T3 Code (Nightly)");
+    ).toBe("Neuropharm Research (Nightly)");
   });
 
   it("keeps the fallback display name for stable primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
-        baseName: "T3 Code",
-        fallbackDisplayName: "T3 Code (Alpha)",
+        baseName: "Neuropharm Research",
+        fallbackDisplayName: "Neuropharm Research (Alpha)",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.27",
       }),
-    ).toBe("T3 Code (Alpha)");
+    ).toBe("Neuropharm Research (Alpha)");
   });
 
   it("keeps the fallback display name for malformed nightly primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
-        baseName: "T3 Code",
-        fallbackDisplayName: "T3 Code (Alpha)",
+        baseName: "Neuropharm Research",
+        fallbackDisplayName: "Neuropharm Research (Alpha)",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616",
       }),
-    ).toBe("T3 Code (Alpha)");
+    ).toBe("Neuropharm Research (Alpha)");
   });
 });
