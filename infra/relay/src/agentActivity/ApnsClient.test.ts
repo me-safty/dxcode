@@ -14,11 +14,13 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
 import type { ApnsCredentials } from "../Config.ts";
 import * as ApnsClient from "./ApnsClient.ts";
+import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
 
 const isApnsJwtSigningError = Schema.is(ApnsClient.ApnsJwtSigningError);
 const isApnsHttpRequestError = Schema.is(ApnsClient.ApnsHttpRequestError);
 
 const TestLayer = ApnsClient.layer.pipe(
+  Layer.provide(ApnsProviderTokens.layerInMemory),
   Layer.provide(
     Layer.succeed(
       HttpClient.HttpClient,
@@ -237,6 +239,7 @@ describe("ApnsClient", () => {
       ),
     );
     const layer = ApnsClient.layer.pipe(
+      Layer.provide(ApnsProviderTokens.layerInMemory),
       Layer.provide(Layer.succeed(HttpClient.HttpClient, failingHttpClient)),
     );
 
@@ -283,7 +286,7 @@ describe("ApnsClient", () => {
   });
 
   it.effect("reuses the signed provider JWT across pushes within the reuse window", () => {
-    ApnsClient.__resetApnsJwtCacheForTest();
+    ApnsProviderTokens.__resetApnsProviderTokenCacheForTest();
     const { privateKey } = NodeCrypto.generateKeyPairSync("ec", {
       namedCurve: "prime256v1",
       privateKeyEncoding: { type: "pkcs8", format: "pem" },
@@ -307,6 +310,7 @@ describe("ApnsClient", () => {
       );
     });
     const layer = ApnsClient.layer.pipe(
+      Layer.provide(ApnsProviderTokens.layerInMemory),
       Layer.provide(Layer.succeed(HttpClient.HttpClient, capturingHttpClient)),
     );
 
@@ -334,7 +338,7 @@ describe("ApnsClient", () => {
       // refreshing it per push trips TooManyProviderTokenUpdates.
       expect(authorizations[1]).toBe(authorizations[0]);
       expect(authorizations[2]).not.toBe(authorizations[0]);
-      ApnsClient.__resetApnsJwtCacheForTest();
+      ApnsProviderTokens.__resetApnsProviderTokenCacheForTest();
     }).pipe(Effect.provide(layer));
   });
 });

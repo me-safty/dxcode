@@ -20,6 +20,7 @@ import * as RelayConfiguration from "../Config.ts";
 import * as AgentActivityPublisher from "./AgentActivityPublisher.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import * as ApnsClient from "./ApnsClient.ts";
+import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
 import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
 import * as MobileRegistrations from "./MobileRegistrations.ts";
 
@@ -147,7 +148,11 @@ function makeRegistrationReplayLayer(input: {
 }) {
   return MobileRegistrations.layer.pipe(
     Layer.provide(AgentActivityPublisher.layer),
-    Layer.provide(ApnsDeliveries.layer.pipe(Layer.provide(ApnsClient.layer))),
+    Layer.provide(
+      ApnsDeliveries.layer.pipe(
+        Layer.provide(ApnsClient.layer.pipe(Layer.provide(ApnsProviderTokens.layerInMemory))),
+      ),
+    ),
     Layer.provide(ApnsDeliveryQueue.layer.pipe(Layer.provide(NodeCryptoLayer.layer))),
     Layer.provide(
       Layer.mergeAll(
