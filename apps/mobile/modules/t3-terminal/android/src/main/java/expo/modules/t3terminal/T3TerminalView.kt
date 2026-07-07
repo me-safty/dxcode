@@ -106,6 +106,39 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
       }
     }
     terminalCanvas.onCellMetricsChanged = { emitResize() }
+    terminalCanvas.selectionDelegate = object : TerminalSelectionDelegate {
+      override fun selectWordAt(col: Int, row: Int): Boolean {
+        if (terminalHandle == 0L) return false
+        val selected = GhosttyBridge.nativeSelectWordAt(terminalHandle, col, row)
+        if (selected) renderSnapshot()
+        return selected
+      }
+
+      override fun extendSelection(anchorCol: Int, anchorRow: Int, col: Int, row: Int) {
+        if (terminalHandle == 0L) return
+        GhosttyBridge.nativeExtendSelection(terminalHandle, anchorCol, anchorRow, col, row)
+        renderSnapshot()
+      }
+
+      override fun selectAll(): Boolean {
+        if (terminalHandle == 0L) return false
+        val selected = GhosttyBridge.nativeSelectAll(terminalHandle)
+        if (selected) renderSnapshot()
+        return selected
+      }
+
+      override fun clearSelection() {
+        if (terminalHandle == 0L) return
+        GhosttyBridge.nativeClearSelection(terminalHandle)
+        renderSnapshot()
+      }
+
+      override fun selectionText(): String? {
+        if (terminalHandle == 0L) return null
+        val bytes = GhosttyBridge.nativeGetSelectionText(terminalHandle) ?: return null
+        return String(bytes, Charsets.UTF_8)
+      }
+    }
 
     configureInputView()
     container.addView(
@@ -147,6 +180,7 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
     terminalCanvas.onScrollRows = null
     terminalCanvas.onRequestKeyboard = null
     terminalCanvas.onCellMetricsChanged = null
+    terminalCanvas.selectionDelegate = null
     destroyTerminal()
   }
 
@@ -289,6 +323,7 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
     GhosttyBridge.nativeDestroy(terminalHandle)
     terminalHandle = 0L
     fedBuffer = ""
+    terminalCanvas.resetSelectionState()
   }
 
   private fun feedPendingBuffer() {

@@ -1,16 +1,40 @@
 package expo.modules.t3terminal
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Typeface
+import android.view.ActionMode
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.widget.OverScroller
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * Selection operations backed by the native terminal. The terminal owns the
+ * selection state; the canvas only drives gestures and renders the result.
+ */
+internal interface TerminalSelectionDelegate {
+  fun selectWordAt(col: Int, row: Int): Boolean
+
+  fun extendSelection(anchorCol: Int, anchorRow: Int, col: Int, row: Int)
+
+  fun selectAll(): Boolean
+
+  fun clearSelection()
+
+  fun selectionText(): String?
+}
 
 internal class TerminalCanvasView(context: Context) : View(context) {
   companion object {
@@ -21,6 +45,10 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     const val FLAG_OVERLINE = 1 shl 6
     const val FLAG_UNDERLINE = 1 shl 7
     const val FLAG_SELECTED = 1 shl 8
+
+    private const val MENU_COPY = 1
+    private const val MENU_SELECT_ALL = 2
+    private const val HANDLE_COLOR = 0xFF7AA2F7.toInt()
   }
 
   private val density = resources.displayMetrics.density
@@ -65,6 +93,25 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   var onScrollRows: ((Int) -> Unit)? = null
   var onRequestKeyboard: (() -> Unit)? = null
   var onCellMetricsChanged: (() -> Unit)? = null
+  var selectionDelegate: TerminalSelectionDelegate? = null
+
+  private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+  private var selectionActive = false
+  private var dragSelecting = false
+  private var anchorCol = 0
+  private var anchorRow = 0
+  private var extentCol = 0
+  private var extentRow = 0
+  private var actionMode: ActionMode? = null
+
+  // Actual selection endpoints in viewport cells, derived from the decoded
+  // frame (word-snap can extend past the pressed cell). Drive handle
+  // placement and hit testing.
+  private var selectionEndpointsValid = false
+  private var selectionStartCol = 0
+  private var selectionStartRow = 0
+  private var selectionEndCol = 0
+  private var selectionEndRow = 0
 
   var fontSizeSp: Float = 10f
     set(value) {
@@ -90,9 +137,17 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   fun setFrame(value: TerminalFrame) {
     frame = value
     cursorOn = true
+    updateSelectionEndpoints()
     removeCallbacks(cursorBlink)
     if (value.cursorBlinking && value.cursorVisible) postDelayed(cursorBlink, 500)
     invalidate()
+  }
+
+  fun resetSelectionState() {
+    selectionActive = false
+    dragSelecting = false
+    selectionEndpointsValid = false
+    actionMode?.finish()
   }
 
   fun usableWidth(): Float = max(width - contentPadding * 2f, 1f)
@@ -152,6 +207,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
       drawCursor(canvas, currentFrame)
     }
     canvas.restore()
+    drawSelectionHandles(canvas)
   }
 
   override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -162,12 +218,26 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     ) {
       parent?.requestDisallowInterceptTouchEvent(false)
     }
+    if (dragSelecting) {
+      when (event.actionMasked) {
+        MotionEvent.ACTION_MOVE -> extendSelectionTo(event.x, event.y)
+        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+          dragSelecting = false
+          showSelectionActions()
+        }
+      }
+      return true
+    }
+    if (event.actionMasked == MotionEvent.ACTION_DOWN && grabHandleAt(event.x, event.y)) {
+      return true
+    }
     return gestureDetector.onTouchEvent(event) || super.onTouchEvent(event)
   }
 
   override fun onDetachedFromWindow() {
     removeCallbacks(cursorBlink)
     removeCallbacks(flingRunnable)
+    actionMode?.finish()
     super.onDetachedFromWindow()
   }
 
@@ -228,6 +298,191 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     }
   }
 
+  private fun columnAt(px: Float): Int {
+    val cols = frame?.cols ?: return 0
+    return ((px - contentPadding) / cellWidthPx).toInt().coerceIn(0, max(cols - 1, 0))
+  }
+
+  private fun rowAt(py: Float): Int {
+    val rows = frame?.rows ?: return 0
+    return ((py - contentPadding) / cellHeightPx).toInt().coerceIn(0, max(rows - 1, 0))
+  }
+
+  private fun startWordSelection(px: Float, py: Float) {
+    val delegate = selectionDelegate ?: return
+    val col = columnAt(px)
+    val row = rowAt(py)
+    if (!delegate.selectWordAt(col, row)) return
+    selectionActive = true
+    dragSelecting = true
+    anchorCol = col
+    anchorRow = row
+    extentCol = col
+    extentRow = row
+    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+  }
+
+  private fun extendSelectionTo(px: Float, py: Float) {
+    if (!selectionActive) return
+    val col = columnAt(px)
+    val row = rowAt(py)
+    if (col == extentCol && row == extentRow) return
+    extentCol = col
+    extentRow = row
+    selectionDelegate?.extendSelection(anchorCol, anchorRow, col, row)
+  }
+
+  private fun clearSelection() {
+    if (!selectionActive) return
+    selectionActive = false
+    dragSelecting = false
+    selectionEndpointsValid = false
+    actionMode?.finish()
+    selectionDelegate?.clearSelection()
+  }
+
+  private fun copySelection() {
+    val text = selectionDelegate?.selectionText() ?: return
+    if (text.isEmpty()) return
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    clipboard?.setPrimaryClip(ClipData.newPlainText("Terminal", text))
+  }
+
+  private fun handleCenterX(col: Int, leadingEdge: Boolean): Float =
+    contentPadding + (col + if (leadingEdge) 0 else 1) * cellWidthPx
+
+  private fun handleCenterY(row: Int): Float =
+    contentPadding + (row + 1) * cellHeightPx + handleRadius()
+
+  private fun handleRadius(): Float = max(cellHeightPx * 0.45f, 12f)
+
+  /**
+   * Begin dragging when the touch lands on a selection handle. The opposite
+   * endpoint becomes the drag anchor so the grabbed end follows the finger.
+   */
+  private fun grabHandleAt(px: Float, py: Float): Boolean {
+    if (!selectionActive || !selectionEndpointsValid) return false
+    val slop = max(handleRadius() * 2f, 24 * density)
+
+    fun near(cx: Float, cy: Float): Boolean {
+      val dx = px - cx
+      val dy = py - cy
+      return dx * dx + dy * dy <= slop * slop
+    }
+
+    val startGrabbed =
+      near(handleCenterX(selectionStartCol, true), handleCenterY(selectionStartRow))
+    val endGrabbed =
+      !startGrabbed && near(handleCenterX(selectionEndCol, false), handleCenterY(selectionEndRow))
+    if (!startGrabbed && !endGrabbed) return false
+
+    if (startGrabbed) {
+      anchorCol = selectionEndCol
+      anchorRow = selectionEndRow
+      extentCol = selectionStartCol
+      extentRow = selectionStartRow
+    } else {
+      anchorCol = selectionStartCol
+      anchorRow = selectionStartRow
+      extentCol = selectionEndCol
+      extentRow = selectionEndRow
+    }
+    dragSelecting = true
+    actionMode?.finish()
+    return true
+  }
+
+  /** Scan the decoded frame for the first/last selected cells. */
+  private fun updateSelectionEndpoints() {
+    selectionEndpointsValid = false
+    if (!selectionActive) return
+    val currentFrame = frame ?: return
+    val totalCells = currentFrame.cols * currentFrame.rows
+    var first = -1
+    var last = -1
+    for (index in 0 until totalCells) {
+      if (currentFrame.cellFlags[index] and FLAG_SELECTED != 0) {
+        if (first < 0) first = index
+        last = index
+      }
+    }
+    if (first < 0 || currentFrame.cols == 0) return
+    selectionStartCol = first % currentFrame.cols
+    selectionStartRow = first / currentFrame.cols
+    selectionEndCol = last % currentFrame.cols
+    selectionEndRow = last / currentFrame.cols
+    selectionEndpointsValid = true
+  }
+
+  private fun selectionBounds(): Rect {
+    val left = contentPadding + min(anchorCol, extentCol) * cellWidthPx
+    val right = contentPadding + (max(anchorCol, extentCol) + 1) * cellWidthPx
+    val top = contentPadding + min(anchorRow, extentRow) * cellHeightPx
+    val bottom = contentPadding + (max(anchorRow, extentRow) + 1) * cellHeightPx
+    return Rect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
+  }
+
+  private fun showSelectionActions() {
+    if (actionMode != null || !selectionActive) return
+    actionMode = startActionMode(
+      object : ActionMode.Callback2() {
+        override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+          menu.add(Menu.NONE, MENU_COPY, 0, android.R.string.copy)
+          menu.add(Menu.NONE, MENU_SELECT_ALL, 1, android.R.string.selectAll)
+          return true
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+
+        override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean =
+          when (item.itemId) {
+            MENU_COPY -> {
+              copySelection()
+              clearSelection()
+              true
+            }
+            MENU_SELECT_ALL -> {
+              val currentFrame = frame
+              if (currentFrame != null && selectionDelegate?.selectAll() == true) {
+                anchorCol = 0
+                anchorRow = 0
+                extentCol = max(currentFrame.cols - 1, 0)
+                extentRow = max(currentFrame.rows - 1, 0)
+              }
+              true
+            }
+            else -> false
+          }
+
+        override fun onDestroyActionMode(mode: ActionMode) {
+          actionMode = null
+        }
+
+        override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
+          outRect.set(selectionBounds())
+        }
+      },
+      ActionMode.TYPE_FLOATING,
+    )
+  }
+
+  private fun drawSelectionHandles(canvas: Canvas) {
+    if (!selectionActive || !selectionEndpointsValid) return
+    val radius = handleRadius()
+    handlePaint.color = HANDLE_COLOR
+    val stemWidth = max(radius / 4f, 2f)
+
+    fun drawHandle(cx: Float, row: Int) {
+      val cornerY = contentPadding + (row + 1) * cellHeightPx
+      val cy = handleCenterY(row)
+      canvas.drawRect(cx - stemWidth / 2f, cornerY, cx + stemWidth / 2f, cy, handlePaint)
+      canvas.drawCircle(cx, cy, radius, handlePaint)
+    }
+
+    drawHandle(handleCenterX(selectionStartCol, true), selectionStartRow)
+    drawHandle(handleCenterX(selectionEndCol, false), selectionEndRow)
+  }
+
   private fun blend(foreground: Int, background: Int, amount: Float): Int {
     val inverseAmount = 1f - amount
     return Color.rgb(
@@ -246,8 +501,16 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     }
 
     override fun onSingleTapUp(event: MotionEvent): Boolean {
-      performClick()
+      if (selectionActive) {
+        clearSelection()
+      } else {
+        performClick()
+      }
       return true
+    }
+
+    override fun onLongPress(event: MotionEvent) {
+      startWordSelection(event.x, event.y)
     }
 
     override fun onScroll(
