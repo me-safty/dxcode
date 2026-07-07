@@ -127,10 +127,18 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
   private var selectionActive = false
   private var dragSelecting = false
+  private var draggingHandle = false
   private var anchorCol = 0
   private var anchorRow = 0
   private var extentCol = 0
   private var extentRow = 0
+
+  // Word-snapped span from the initial long-press; extending anchors to the
+  // far word edge so the word never shrinks mid-drag.
+  private var wordStartCol = 0
+  private var wordStartRow = 0
+  private var wordEndCol = 0
+  private var wordEndRow = 0
   private var actionMode: ActionMode? = null
 
   // Actual selection endpoints in viewport cells, derived from the decoded
@@ -175,6 +183,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   fun resetSelectionState() {
     selectionActive = false
     dragSelecting = false
+    draggingHandle = false
     selectionEndpointsValid = false
     actionMode?.finish()
   }
@@ -341,11 +350,28 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     val delegate = selectionDelegate ?: return
     val col = columnAt(px)
     val row = rowAt(py)
-    if (!delegate.selectWordAt(col, row)) return
+    // Set before selectWordAt: the delegate re-renders synchronously and
+    // updateSelectionEndpoints only scans while a selection is active.
     selectionActive = true
+    if (!delegate.selectWordAt(col, row)) {
+      selectionActive = false
+      return
+    }
     dragSelecting = true
-    anchorCol = col
-    anchorRow = row
+    draggingHandle = false
+    if (selectionEndpointsValid) {
+      wordStartCol = selectionStartCol
+      wordStartRow = selectionStartRow
+      wordEndCol = selectionEndCol
+      wordEndRow = selectionEndRow
+    } else {
+      wordStartCol = col
+      wordStartRow = row
+      wordEndCol = col
+      wordEndRow = row
+    }
+    anchorCol = wordStartCol
+    anchorRow = wordStartRow
     extentCol = col
     extentRow = row
     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -358,6 +384,16 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     if (col == extentCol && row == extentRow) return
     extentCol = col
     extentRow = row
+    if (!draggingHandle) {
+      val beforeWord = row < wordStartRow || (row == wordStartRow && col < wordStartCol)
+      if (beforeWord) {
+        anchorCol = wordEndCol
+        anchorRow = wordEndRow
+      } else {
+        anchorCol = wordStartCol
+        anchorRow = wordStartRow
+      }
+    }
     selectionDelegate?.extendSelection(anchorCol, anchorRow, col, row)
   }
 
@@ -365,6 +401,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     if (!selectionActive) return
     selectionActive = false
     dragSelecting = false
+    draggingHandle = false
     selectionEndpointsValid = false
     actionMode?.finish()
     selectionDelegate?.clearSelection()
@@ -417,6 +454,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
       extentRow = selectionEndRow
     }
     dragSelecting = true
+    draggingHandle = true
     actionMode?.finish()
     return true
   }
@@ -443,11 +481,17 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     selectionEndpointsValid = true
   }
 
+  // Anchor the toolbar to the actual word-snapped endpoints when known;
+  // gesture cells can lag behind what the terminal selected.
   private fun selectionBounds(): Rect {
-    val left = contentPadding + min(anchorCol, extentCol) * cellWidthPx
-    val right = contentPadding + (max(anchorCol, extentCol) + 1) * cellWidthPx
-    val top = contentPadding + min(anchorRow, extentRow) * cellHeightPx
-    val bottom = contentPadding + (max(anchorRow, extentRow) + 1) * cellHeightPx
+    val startCol = if (selectionEndpointsValid) selectionStartCol else min(anchorCol, extentCol)
+    val endCol = if (selectionEndpointsValid) selectionEndCol else max(anchorCol, extentCol)
+    val startRow = if (selectionEndpointsValid) selectionStartRow else min(anchorRow, extentRow)
+    val endRow = if (selectionEndpointsValid) selectionEndRow else max(anchorRow, extentRow)
+    val left = contentPadding + min(startCol, endCol) * cellWidthPx
+    val right = contentPadding + (max(startCol, endCol) + 1) * cellWidthPx
+    val top = contentPadding + startRow * cellHeightPx
+    val bottom = contentPadding + (endRow + 1) * cellHeightPx
     return Rect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
   }
 
