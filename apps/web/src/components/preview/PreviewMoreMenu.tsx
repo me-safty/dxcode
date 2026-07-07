@@ -147,7 +147,7 @@ export function PreviewMoreMenu({
             toastManager.add(
               stackedThreadToast({
                 type: "info",
-                title: enabled ? "Web security disabled" : "Web security enabled",
+                title: enabled ? "Browser WebSecurity disabled" : "Browser WebSecurity enabled",
                 description: enabled
                   ? "CORS is off for preview tabs opened from now on. Reopen this tab to apply."
                   : "Applies to preview tabs opened from now on. Reopen this tab to apply.",
@@ -155,7 +155,7 @@ export function PreviewMoreMenu({
             );
           }}
         >
-          Disable web security (CORS)
+          Disable browser WebSecurity
         </MenuCheckboxItem>
       </MenuPopup>
     </Menu>
