@@ -410,6 +410,11 @@ export const make = Effect.gen(function* () {
     const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
     const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
     if (publishedStateByThread.get(threadId) === publishIdentity) {
+      // The projection is back at (or never left) the last published state, so
+      // any pending deferred confirmation is moot. Leaving the deadline in
+      // place would let a much later transient null find it already expired
+      // and publish a tombstone immediately, skipping the deferral window.
+      publishConfirmDeadlines.delete(threadId);
       yield* Effect.logDebug("agent activity publish skipped; projected state unchanged", {
         environmentId,
         threadId,
