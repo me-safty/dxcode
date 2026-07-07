@@ -174,7 +174,8 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
         event.action == KeyEvent.ACTION_DOWN
       val isEnter = isImeSend || isHardwareEnter
       if (isEnter) {
-        onInput(mapOf("data" to "\n"))
+        // Enter must send CR: raw-mode TUIs treat LF as Ctrl+J (insert newline).
+        onInput(mapOf("data" to "\r"))
         true
       } else {
         false
