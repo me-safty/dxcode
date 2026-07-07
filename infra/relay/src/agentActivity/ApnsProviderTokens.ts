@@ -45,7 +45,7 @@ export function quantizedApnsJwtIssuedAt(nowUnixSeconds: number): number {
   return Math.floor(nowUnixSeconds / APNS_JWT_REUSE_SECONDS) * APNS_JWT_REUSE_SECONDS;
 }
 
-export const make = Effect.sync(() =>
+export const make = () =>
   ApnsProviderTokens.of({
     getJwt: Effect.fnUntraced(function* (input) {
       const issuedAtUnixSeconds = quantizedApnsJwtIssuedAt(input.issuedAtUnixSeconds);
@@ -58,7 +58,6 @@ export const make = Effect.sync(() =>
       isolateTokenCache.set(cacheKey, { jwt, issuedAtUnixSeconds });
       return jwt;
     }),
-  }),
-);
+  });
 
-export const layer = Layer.effect(ApnsProviderTokens, make);
+export const layer = Layer.succeed(ApnsProviderTokens, make());
