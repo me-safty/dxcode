@@ -980,6 +980,17 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
       ),
     );
 
+    // The relay tracks exactly one card per device; if concurrent arming ever
+    // produced extras, end them so only one keeps receiving updates.
+    if (activities.length > 1) {
+      for (const extra of activities.slice(1)) {
+        extra.end("immediate").catch((error: unknown) => {
+          logRegistrationError("duplicate live activity cleanup failed", error);
+        });
+      }
+      activities = activities.slice(0, 1);
+    }
+
     // Activities are only ever created here, in the foreground, where the
     // update token can be observed and registered immediately — the relay
     // never remote-starts one (background push-to-start wakes proved too
@@ -998,7 +1009,15 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
       }).pipe(Effect.orElseSucceed(() => null));
       if (preferences?.liveActivitiesEnabled) {
         const snapshot = yield* readAgentActivitySnapshot();
-        if (snapshot?.aggregate && snapshot.aggregate.activeCount > 0) {
+        // The snapshot request yields; an arm-on-send may have created the
+        // card in the meantime. Re-check so two cards are never started.
+        const armedMeanwhile = yield* Effect.try({
+          try: () => AgentActivity.getInstances(),
+          catch: () => [] as ReadonlyArray<LiveActivity<AgentActivityProps>>,
+        }).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<LiveActivity<AgentActivityProps>>));
+        if (armedMeanwhile.length > 0) {
+          activities = [...armedMeanwhile];
+        } else if (snapshot?.aggregate && snapshot.aggregate.activeCount > 0) {
           const aggregate = snapshot.aggregate;
           const primed = yield* Effect.try({
             try: () =>

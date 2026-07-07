@@ -526,6 +526,14 @@ export function NewTaskDraftScreen(props: {
     }
 
     flow.setSubmitting(true);
+    // Arm the lock-screen card before the async thread creation: backgrounding
+    // the app right after tapping submit would otherwise reject the foreground
+    // -only Activity start. If creation fails, the token registration's replay
+    // finds no work and ends the card within seconds.
+    armAgentAwarenessLiveActivityForLocalWork({
+      threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
+      projectTitle: selectedProject.title,
+    });
     const result = await createProjectThread({
       project: selectedProject,
       modelSelection,
@@ -550,12 +558,6 @@ export function NewTaskDraftScreen(props: {
     });
     flow.setSubmitting(false);
 
-    if (result._tag !== "Failure") {
-      armAgentAwarenessLiveActivityForLocalWork({
-        threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
-        projectTitle: selectedProject.title,
-      });
-    }
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
