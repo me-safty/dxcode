@@ -150,7 +150,7 @@ function makeRegistrationReplayLayer(input: {
     Layer.provide(AgentActivityPublisher.layer),
     Layer.provide(
       ApnsDeliveries.layer.pipe(
-        Layer.provide(ApnsClient.layer.pipe(Layer.provide(ApnsProviderTokens.layerInMemory))),
+        Layer.provide(ApnsClient.layer.pipe(Layer.provide(ApnsProviderTokens.layer))),
       ),
     ),
     Layer.provide(ApnsDeliveryQueue.layer.pipe(Layer.provide(NodeCryptoLayer.layer))),

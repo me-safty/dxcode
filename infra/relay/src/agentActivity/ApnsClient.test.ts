@@ -20,7 +20,7 @@ const isApnsJwtSigningError = Schema.is(ApnsClient.ApnsJwtSigningError);
 const isApnsHttpRequestError = Schema.is(ApnsClient.ApnsHttpRequestError);
 
 const TestLayer = ApnsClient.layer.pipe(
-  Layer.provide(ApnsProviderTokens.layerInMemory),
+  Layer.provide(ApnsProviderTokens.layer),
   Layer.provide(
     Layer.succeed(
       HttpClient.HttpClient,
@@ -210,7 +210,10 @@ describe("ApnsClient", () => {
       expect(error).toMatchObject({
         teamId: "team-1",
         keyId: "key-1",
-        issuedAtUnixSeconds: 123,
+        // The provider-token service quantizes iat to the reuse window, so
+        // the signing context carries the window start rather than the raw
+        // request time.
+        issuedAtUnixSeconds: 0,
         cause: expect.any(Error),
         message: "Failed to sign APNs JWT for key key-1.",
       });
@@ -239,7 +242,7 @@ describe("ApnsClient", () => {
       ),
     );
     const layer = ApnsClient.layer.pipe(
-      Layer.provide(ApnsProviderTokens.layerInMemory),
+      Layer.provide(ApnsProviderTokens.layer),
       Layer.provide(Layer.succeed(HttpClient.HttpClient, failingHttpClient)),
     );
 
@@ -310,7 +313,7 @@ describe("ApnsClient", () => {
       );
     });
     const layer = ApnsClient.layer.pipe(
-      Layer.provide(ApnsProviderTokens.layerInMemory),
+      Layer.provide(ApnsProviderTokens.layer),
       Layer.provide(Layer.succeed(HttpClient.HttpClient, capturingHttpClient)),
     );
 
@@ -329,9 +332,10 @@ describe("ApnsClient", () => {
       const send = (issuedAtUnixSeconds: number) =>
         apns.sendPushNotificationRequest({ credentials, request, issuedAtUnixSeconds });
 
-      yield* send(1_000);
-      yield* send(1_000 + 44 * 60);
-      yield* send(1_000 + 46 * 60);
+      const window = ApnsProviderTokens.APNS_JWT_REUSE_SECONDS;
+      yield* send(window + 10);
+      yield* send(window * 2 - 1);
+      yield* send(window * 2);
 
       expect(authorizations).toHaveLength(3);
       // Within the 45-minute window APNs must see the byte-identical token;

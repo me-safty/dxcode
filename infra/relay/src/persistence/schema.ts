@@ -170,18 +170,6 @@ export const relayDeliveryAttempts = pgTable(
   ],
 );
 
-// One row per APNs signing key: the shared provider JWT every worker isolate
-// reuses so APNs sees a stable token (refreshing more than ~once per 20
-// minutes returns 429 TooManyProviderTokenUpdates and drops the push). The
-// JWT is a short-lived (60 min) bearer credential derived from the APNs key
-// the worker already holds in its environment.
-export const relayApnsProviderTokens = pgTable("relay_apns_provider_tokens", {
-  cacheKey: varchar("cache_key", { length: 191 }).primaryKey(),
-  jwt: text("jwt").notNull(),
-  issuedAt: integer("issued_at").notNull(),
-  updatedAt: varchar("updated_at", { length: 64 }).notNull(),
-});
-
 export const relayDpopProofs = pgTable(
   "relay_dpop_proofs",
   {
