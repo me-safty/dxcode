@@ -125,6 +125,55 @@ describe("planThreadSync", () => {
     expect(plan.kind).toBe("skip-deleted");
   });
 
+  it("skips (tombstone) when the projection row is gone but the thread stream ever existed", () => {
+    const s = session([message("u-1")]);
+    const plan = planThreadSync({
+      session: s,
+      existingThread: null,
+      threadStreamEverExisted: true,
+    });
+    expect(plan.kind).toBe("skip-deleted");
+  });
+
+  it("still creates when the thread stream never existed", () => {
+    const s = session([message("u-1")]);
+    const plan = planThreadSync({
+      session: s,
+      existingThread: null,
+      threadStreamEverExisted: false,
+    });
+    expect(plan.kind).toBe("create");
+  });
+
+  it("tombstone flag does not disturb incremental sync of a live thread", () => {
+    const s = session([message("u-1"), message("u-2")]);
+    const plan = planThreadSync({
+      session: s,
+      existingThread: {
+        deletedAt: null,
+        hasTurns: false,
+        messages: [imported("u-1")],
+      },
+      // A live imported thread's stream trivially exists in the event log.
+      threadStreamEverExisted: true,
+    });
+    expect(plan.kind).toBe("append");
+  });
+
+  it("skips a soft-deleted thread even without the tombstone flag", () => {
+    const s = session([message("u-1"), message("u-2")]);
+    const plan = planThreadSync({
+      session: s,
+      existingThread: {
+        deletedAt: "2026-07-02T00:00:00.000Z",
+        hasTurns: false,
+        messages: [imported("u-1")],
+      },
+      threadStreamEverExisted: true,
+    });
+    expect(plan.kind).toBe("skip-deleted");
+  });
+
   it("prefers skip-forked over unchanged/append when both would match", () => {
     const s = session([message("u-1"), message("u-2")]);
     const plan = planThreadSync({

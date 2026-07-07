@@ -13,6 +13,11 @@
  *    original-session messages onto a forked thread would corrupt it, so the
  *    importer must permanently leave it alone.
  *  - `skip-deleted`: the thread was deleted in T3 — do not resurrect it.
+ *    This covers BOTH a projection row with `deletedAt` set (the normal
+ *    `thread.delete` soft delete) and a thread stream that EVER existed in
+ *    `orchestration_events` but has no projection row anymore
+ *    (`threadStreamEverExisted` tombstone — e.g. a purged or rebuilt
+ *    projection). A deleted imported thread must stay deleted forever.
  *
  * Dedup strategy: imported messages use the transcript entry `uuid` as their
  * T3 message id (see `runImport` in `cli/import.ts`), so "already imported"
@@ -53,10 +58,20 @@ export type ThreadSyncPlan =
 export function planThreadSync(input: {
   readonly session: ParsedClaudeSession;
   readonly existingThread: ExistingThreadView | null;
+  /**
+   * Tombstone guard: true when the thread stream for this session has ANY
+   * event in `orchestration_events`, regardless of the current projection.
+   * When the projection row is gone (or was never rebuilt) but the stream
+   * existed, the thread was deleted — creating it again would resurrect it.
+   */
+  readonly threadStreamEverExisted?: boolean;
 }): ThreadSyncPlan {
   const { session, existingThread } = input;
 
   if (existingThread === null) {
+    if (input.threadStreamEverExisted === true) {
+      return { kind: "skip-deleted" };
+    }
     return { kind: "create", messages: session.messages };
   }
 
