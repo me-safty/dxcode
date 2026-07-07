@@ -51,10 +51,31 @@ const requireWorktreeCapability = Effect.fn("mcp.requireWorktreeCapability")(fun
   return invocation;
 });
 
+// Serializes handoffs per thread: two concurrent calls could otherwise both
+// pass the worktreePath === null check and each create a worktree, leaving
+// one untracked on disk. Module-level state is safe here for the same reason
+// it is in McpProviderSession: the server process hosts a single MCP server.
+const handoffThreadsInFlight = new Set<string>();
+
 const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
   input: WorktreeHandoffInput,
 ) {
   const invocation = yield* requireWorktreeCapability();
+  if (handoffThreadsInFlight.has(invocation.threadId)) {
+    return yield* new WorktreeHandoffInvalidRequestError({
+      detail: `A worktree handoff is already in progress for thread '${invocation.threadId}'.`,
+    });
+  }
+  handoffThreadsInFlight.add(invocation.threadId);
+  return yield* performWorktreeHandoff(invocation, input).pipe(
+    Effect.ensuring(Effect.sync(() => handoffThreadsInFlight.delete(invocation.threadId))),
+  );
+});
+
+const performWorktreeHandoff = Effect.fn("WorktreeToolkit.performWorktreeHandoff")(function* (
+  invocation: McpInvocationContext.McpInvocationScope,
+  input: WorktreeHandoffInput,
+) {
   const crypto = yield* Crypto.Crypto;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -160,7 +181,16 @@ const worktreeHandoff = Effect.fn("WorktreeToolkit.worktreeHandoff")(function* (
       branch: worktree.worktree.refName,
       worktreePath,
     })
-    .pipe(Effect.mapError(asOperationError("updateThreadMetadata")));
+    .pipe(
+      Effect.mapError(asOperationError("updateThreadMetadata")),
+      // The worktree was already created; if the thread cannot be re-pointed
+      // at it, remove it again so a failed handoff leaves nothing behind.
+      Effect.catch((error) =>
+        gitWorkflow
+          .removeWorktree({ cwd: projectCwd, path: worktreePath, force: true })
+          .pipe(Effect.ignoreCause({ log: true }), Effect.andThen(Effect.fail(error))),
+      ),
+    );
 
   yield* vcsStatusBroadcaster
     .refreshStatus(worktreePath)

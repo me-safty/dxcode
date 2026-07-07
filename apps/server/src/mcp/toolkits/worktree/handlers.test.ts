@@ -8,8 +8,10 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
@@ -81,23 +83,34 @@ interface HarnessOptions {
   readonly currentBranch?: string | null;
   readonly newWorktreesStartFromOrigin?: boolean;
   readonly setupScript?: "started" | "no-script" | "fails";
+  readonly dispatchFails?: boolean;
+  readonly createWorktreeGate?: Effect.Effect<void>;
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
   const thread = options.thread === undefined ? makeThread() : options.thread;
-  const dispatch = vi.fn((_: unknown) => Effect.succeed({ sequence: 1 }));
+  const dispatch = vi.fn((_: unknown) =>
+    options.dispatchFails
+      ? (Effect.fail("simulated dispatch failure") as never)
+      : Effect.succeed({ sequence: 1 }),
+  );
+  const removeWorktree = vi.fn((_: unknown) => Effect.void);
   const fetchRemote = vi.fn((_: unknown) => Effect.void);
   const resolveRemoteTrackingCommit = vi.fn((_: unknown) =>
     Effect.succeed({ commitSha: "abc123", remoteRefName: "origin/dev" }),
   );
   const createWorktree = vi.fn(
     (input: { readonly newRefName?: string | undefined; readonly path: string | null }) =>
-      Effect.succeed({
-        worktree: {
-          path: input.path ?? `/worktrees/project/${input.newRefName}`,
-          refName: input.newRefName ?? "detached",
-        },
-      }),
+      (options.createWorktreeGate ?? Effect.void).pipe(
+        Effect.andThen(
+          Effect.succeed({
+            worktree: {
+              path: input.path ?? `/worktrees/project/${input.newRefName}`,
+              refName: input.newRefName ?? "detached",
+            },
+          }),
+        ),
+      ),
   );
   const localStatus = vi.fn((_: unknown) =>
     Effect.succeed({
@@ -151,6 +164,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
       fetchRemote,
       resolveRemoteTrackingCommit,
       createWorktree,
+      removeWorktree,
     } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
     Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
       runForThread,
@@ -166,6 +180,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     fetchRemote,
     resolveRemoteTrackingCommit,
     createWorktree,
+    removeWorktree,
     localStatus,
     runForThread,
   };
@@ -287,6 +302,46 @@ describe("worktree_handoff", () => {
     return Effect.gen(function* () {
       const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/no-capability" }));
       expectTypedFailure(exit, { _tag: "WorktreeCapabilityUnavailableError" });
+    });
+  });
+
+  it.effect("serializes concurrent handoffs for the same thread", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const harness = makeHarness({ createWorktreeGate: Deferred.await(gate) });
+
+      // First handoff acquires the per-thread guard and blocks on the gate.
+      const first = yield* Effect.forkChild(
+        Effect.exit(runHandoff(harness, { branch: "feature/race-1" })),
+      );
+      yield* Effect.yieldNow;
+
+      // Second handoff for the same thread must be refused while the first
+      // is still in flight.
+      const second = yield* Effect.exit(runHandoff(harness, { branch: "feature/race-2" }));
+      expectTypedFailure(second, { _tag: "WorktreeHandoffInvalidRequestError" });
+
+      yield* Deferred.succeed(gate, undefined);
+      const firstExit = yield* Fiber.join(first);
+      expect(Exit.isSuccess(firstExit)).toBe(true);
+      expect(harness.createWorktree).toHaveBeenCalledTimes(1);
+    }),
+  );
+
+  it.effect("removes the created worktree when the thread update fails", () => {
+    const harness = makeHarness({ dispatchFails: true });
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(runHandoff(harness, { branch: "feature/dispatch-fails" }));
+      expectTypedFailure(exit, {
+        _tag: "WorktreeOperationError",
+        operation: "updateThreadMetadata",
+      });
+      expect(harness.createWorktree).toHaveBeenCalledTimes(1);
+      expect(harness.removeWorktree).toHaveBeenCalledWith({
+        cwd: workspaceRoot,
+        path: "/worktrees/project/feature/dispatch-fails",
+        force: true,
+      });
     });
   });
 

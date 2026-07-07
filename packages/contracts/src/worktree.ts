@@ -27,9 +27,12 @@ export const WorktreeHandoffInput = Schema.Struct({
     }),
   ),
   path: Schema.optional(
-    TrimmedNonEmptyString.annotate({
+    TrimmedNonEmptyString.check(
+      // Absolute POSIX (/...), Windows drive (C:\ or C:/), or UNC (\\host).
+      Schema.isPattern(/^(?:[A-Za-z]:[\\/]|[\\/])/),
+    ).annotate({
       description:
-        "Absolute filesystem path for the new worktree. Defaults to the server-managed worktrees directory.",
+        "Absolute filesystem path for the new worktree. Relative paths are rejected. Defaults to the server-managed worktrees directory.",
     }),
   ),
   runSetupScript: Schema.optional(
