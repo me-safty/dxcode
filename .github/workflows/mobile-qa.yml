@@ -9,6 +9,10 @@ on:
       - "packages/client-runtime/**"
       - ".github/workflows/mobile-qa.yml"
       - "scripts/android-parity/**"
+  schedule:
+    # Nightly Maestro smoke on fork main (QA-004).
+    - cron: "0 6 * * *"
+  workflow_dispatch:
 
 jobs:
   mobile_expo_doctor:
@@ -57,8 +61,51 @@ jobs:
   mobile_maestro_android:
     name: Mobile Maestro Android
     runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 20
-    if: false
+    timeout-minutes: 45
+    # Bootstrap week: collect signal without blocking merges (FAULT-TOLERANCE §Maestro).
+    continue-on-error: true
     steps:
-      - name: Disabled until s16 enables Maestro CI
-        run: echo "Enable by setting if:true after dev client artifact + emulator wired (step s16)"
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Maestro smoke on API 34 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          EXPO_PUBLIC_MAESTRO_AUTH_BYPASS: "1"
+          RELAY_STAGING_URL: ${{ secrets.RELAY_STAGING_URL }}
+          RELAY_STAGING_TEST_SECRET: ${{ secrets.RELAY_STAGING_TEST_SECRET }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_8
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: ./scripts/android-parity/run-maestro-android.sh
+
+      - name: Upload Maestro artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-android-debug
+          path: |
+            maestro-logcat.txt
+            ~/.maestro/tests/**
+          if-no-files-found: ignore
