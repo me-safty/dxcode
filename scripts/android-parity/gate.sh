@@ -53,8 +53,9 @@ fi
 
 if echo "$CHANGED" | grep -qE '^apps/mobile/|app\.config|modules/'; then
   if [[ -d apps/mobile ]]; then
-    echo "==> npx expo-doctor (apps/mobile)"
-    (cd apps/mobile && npx expo-doctor)
+    echo "==> expo-doctor (apps/mobile)"
+    # bunx avoids npm EOVERRIDE failures in the pnpm/bun monorepo root.
+    (cd apps/mobile && bunx expo-doctor)
   fi
 fi
 

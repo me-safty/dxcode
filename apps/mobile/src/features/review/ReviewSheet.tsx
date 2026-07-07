@@ -51,7 +51,12 @@ import { useThreadSelection } from "../../state/use-thread-selection";
 import { vcsEnvironment } from "../../state/vcs";
 import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { ThreadGitMenu } from "../threads/ThreadGitControls";
-import { useReviewCacheForThread } from "./reviewState";
+import {
+  JavaScriptReviewDiffList,
+  type JavaScriptReviewDiffListHandle,
+} from "./JavaScriptReviewDiffList";
+import { toggleReviewFileId } from "./reviewFileVisibility";
+import { updateReviewRevealedLargeFileIds, useReviewCacheForThread } from "./reviewState";
 import { type NativeReviewDiffViewHandle } from "../diffs/nativeReviewDiffSurface";
 import { resolveCapabilityGatedReviewDiffView } from "../../platform/capabilities";
 import { NATIVE_REVIEW_DIFF_CONTENT_WIDTH } from "./nativeReviewDiffAdapter";
@@ -386,6 +391,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     });
   const NativeReviewDiffView = resolveCapabilityGatedReviewDiffView();
   const nativeReviewDiffViewRef = useRef<NativeReviewDiffViewHandle>(null);
+  const jsReviewDiffListRef = useRef<JavaScriptReviewDiffListHandle>(null);
   // Native pull-to-refresh on the diff surface (replaces the old Refresh menu item).
   const [isPullRefreshing, setIsPullRefreshing] = useState(false);
   const handlePullToRefresh = useCallback(async () => {
@@ -409,7 +415,12 @@ export function ReviewSheet(props: ReviewSheetProps) {
       ? reviewCache.viewedFileIdsBySection[selectedSection.id]
       : undefined,
   });
-  const { collapsedFileIds, toggleExpandedFile, toggleViewedFile, viewedFileIds } = fileVisibility;
+  const { collapsedFileIds, expandedFileIds, toggleExpandedFile, toggleViewedFile, viewedFileIds } =
+    fileVisibility;
+  const revealedLargeFileIds =
+    selectedSection?.id && reviewCache.threadKey
+      ? (reviewCache.revealedLargeFileIdsBySection[selectedSection.id] ?? [])
+      : [];
   const commentSelection = useReviewCommentSelectionController({
     environmentId,
     threadId,
@@ -434,15 +445,30 @@ export function ReviewSheet(props: ReviewSheetProps) {
       if (fileId !== null && collapsedFileIds.includes(fileId)) {
         toggleExpandedFile(fileId);
       }
+      const navigator = NativeReviewDiffView
+        ? nativeReviewDiffViewRef.current
+        : jsReviewDiffListRef.current;
       const navigation =
-        fileId === null
-          ? nativeReviewDiffViewRef.current?.scrollToTop(true)
-          : nativeReviewDiffViewRef.current?.scrollToFile(fileId, true);
+        fileId === null ? navigator?.scrollToTop(true) : navigator?.scrollToFile(fileId, true);
       void navigation?.catch((error: unknown) => {
         console.error("[review] Failed to navigate to diff file", error);
       });
     },
-    [collapsedFileIds, commentSelection, toggleExpandedFile],
+    [NativeReviewDiffView, collapsedFileIds, commentSelection, toggleExpandedFile],
+  );
+  const handleJsVisibleFileChange = useCallback((fileId: string | null) => {
+    reviewFileNavigatorRef.current?.setVisibleFile(fileId);
+  }, []);
+  const handleRevealLargeFile = useCallback(
+    (fileId: string) => {
+      if (!reviewCache.threadKey || !selectedSection?.id) {
+        return;
+      }
+      updateReviewRevealedLargeFileIds(reviewCache.threadKey, selectedSection.id, (existing) =>
+        toggleReviewFileId(existing ?? [], fileId),
+      );
+    },
+    [reviewCache.threadKey, selectedSection?.id],
   );
   const handleVisibleFileChange = useCallback(
     (event: NativeSyntheticEvent<{ readonly fileId?: string | null }>) => {
@@ -711,26 +737,35 @@ export function ReviewSheet(props: ReviewSheetProps) {
             </View>
           </View>
         ) : selectedSection && parsedDiff.kind === "files" ? (
-          <ScrollView
-            contentInsetAdjustmentBehavior="never"
-            contentInset={{ top: topContentInset, bottom: Math.max(insets.bottom, 18) + 18 }}
-            contentOffset={{ x: 0, y: -topContentInset }}
-            scrollIndicatorInsets={{
-              top: topContentInset,
-              bottom: Math.max(insets.bottom, 18) + 18,
+          <View
+            className="flex-1"
+            style={{
+              backgroundColor: nativeBridge.theme.background,
+              paddingTop: topContentInset + REVIEW_HEADER_SPACING,
             }}
-            showsVerticalScrollIndicator={false}
-            style={{ flex: 1 }}
           >
-            {listHeader}
-            <View className="border-b border-border bg-card px-4 py-5">
-              <Text className="text-sm font-t3-bold text-foreground">Review diff (JavaScript)</Text>
-              <Text className="text-xs leading-normal text-foreground-muted">
-                Native review is unavailable on this platform. The JavaScript diff list loads in the
-                next milestone step.
-              </Text>
-            </View>
-          </ScrollView>
+            <JavaScriptReviewDiffList
+              ref={jsReviewDiffListRef}
+              backgroundColor={nativeBridge.theme.background}
+              contentResetKey={`${reviewCache.threadKey}:${selectedSection.id}`}
+              expandedFileIds={expandedFileIds}
+              files={reviewFiles}
+              ListHeaderComponent={listHeader}
+              nativeData={nativeReviewDiffData}
+              onPressLine={commentSelection.onPressLine}
+              onPullToRefresh={() => void handlePullToRefresh()}
+              onRevealLargeFile={handleRevealLargeFile}
+              onToggleFile={toggleExpandedFile}
+              onToggleViewedFile={toggleViewedFile}
+              onUpdateVisibleRange={nativeBridge.updateVisibleRange}
+              onVisibleFileChange={handleJsVisibleFileChange}
+              refreshing={isPullRefreshing}
+              revealedLargeFileIds={revealedLargeFileIds}
+              selectedRowIds={commentSelection.selectedRowIds}
+              tokensPatchJson={nativeBridge.tokensPatchJson}
+              viewedFileIds={viewedFileIds}
+            />
+          </View>
         ) : (
           <ScrollView
             contentInsetAdjustmentBehavior="never"

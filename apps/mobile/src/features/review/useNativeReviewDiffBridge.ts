@@ -118,5 +118,6 @@ export function useNativeReviewDiffBridge(input: {
     tokensResetKey,
     onDebug,
     onToggleComment,
+    updateVisibleRange,
   };
 }
