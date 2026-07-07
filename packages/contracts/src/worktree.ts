@@ -99,6 +99,18 @@ export class WorktreeThreadNotFoundError extends Schema.TaggedErrorClass<Worktre
   }
 }
 
+export class WorktreeProjectNotFoundError extends Schema.TaggedErrorClass<WorktreeProjectNotFoundError>()(
+  "WorktreeProjectNotFoundError",
+  {
+    threadId: ThreadId,
+    projectId: TrimmedNonEmptyString,
+  },
+) {
+  override get message(): string {
+    return `Project '${this.projectId}' was not found for thread '${this.threadId}'.`;
+  }
+}
+
 export class WorktreeHandoffAlreadyInWorktreeError extends Schema.TaggedErrorClass<WorktreeHandoffAlreadyInWorktreeError>()(
   "WorktreeHandoffAlreadyInWorktreeError",
   {
@@ -146,6 +158,7 @@ export class WorktreeOperationError extends Schema.TaggedErrorClass<WorktreeOper
 export const WorktreeHandoffError = Schema.Union([
   WorktreeCapabilityUnavailableError,
   WorktreeThreadNotFoundError,
+  WorktreeProjectNotFoundError,
   WorktreeHandoffAlreadyInWorktreeError,
   WorktreeHandoffInvalidRequestError,
   WorktreeOperationError,
@@ -170,6 +183,7 @@ export type WorktreeStatusResult = typeof WorktreeStatusResult.Type;
 export const WorktreeStatusError = Schema.Union([
   WorktreeCapabilityUnavailableError,
   WorktreeThreadNotFoundError,
+  WorktreeProjectNotFoundError,
   WorktreeOperationError,
 ]);
 export type WorktreeStatusError = typeof WorktreeStatusError.Type;

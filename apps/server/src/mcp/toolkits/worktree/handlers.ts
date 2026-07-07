@@ -7,6 +7,7 @@ import {
   type WorktreeHandoffResult,
   type WorktreeHandoffSetupScriptStatus,
   WorktreeOperationError,
+  WorktreeProjectNotFoundError,
   type WorktreeStatusResult,
   WorktreeThreadNotFoundError,
 } from "@t3tools/contracts";
@@ -101,11 +102,9 @@ const performWorktreeHandoff = Effect.fn("WorktreeToolkit.performWorktreeHandoff
     .getProjectShellById(thread.projectId)
     .pipe(Effect.map(Option.getOrUndefined), Effect.mapError(asOperationError("resolveProject")));
   if (!project) {
-    return yield* new WorktreeOperationError({
-      operation: "resolveProject",
-      cause: new Error(
-        `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
-      ),
+    return yield* new WorktreeProjectNotFoundError({
+      threadId: invocation.threadId,
+      projectId: thread.projectId,
     });
   }
   const projectCwd = project.workspaceRoot;
@@ -254,11 +253,9 @@ const worktreeStatus = Effect.fn("WorktreeToolkit.worktreeStatus")(function* () 
     .getProjectShellById(thread.projectId)
     .pipe(Effect.map(Option.getOrUndefined), Effect.mapError(asOperationError("resolveProject")));
   if (!project) {
-    return yield* new WorktreeOperationError({
-      operation: "resolveProject",
-      cause: new Error(
-        `Project '${thread.projectId}' was not found for thread '${invocation.threadId}'.`,
-      ),
+    return yield* new WorktreeProjectNotFoundError({
+      threadId: invocation.threadId,
+      projectId: thread.projectId,
     });
   }
 
