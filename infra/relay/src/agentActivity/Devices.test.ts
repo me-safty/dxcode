@@ -1,4 +1,7 @@
-import type { RelayIosDeviceRegistrationRequest } from "@t3tools/contracts/relay";
+import type {
+  RelayAndroidDeviceRegistrationRequest,
+  RelayIosDeviceRegistrationRequest,
+} from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -275,6 +278,148 @@ describe("Devices", () => {
       expect(error.message).toBe(
         "Failed to unregister mobile device user-2/device-1 during delete-live-activity.",
       );
+    }).pipe(
+      Effect.provide(Devices.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb)))),
+    );
+  });
+
+  it.effect("persists Android rows with android_sdk_version and coerced live activities", () => {
+    const calls: Array<string> = [];
+    const insertedValues: Array<Record<string, unknown>> = [];
+    const androidRegistration: RelayAndroidDeviceRegistrationRequest = {
+      deviceId: "pixel-1" as RelayAndroidDeviceRegistrationRequest["deviceId"],
+      label: "Pixel 9",
+      platform: "android",
+      androidSdkVersion: 35,
+      appVersion: "1.0.0" as RelayAndroidDeviceRegistrationRequest["appVersion"],
+      pushToken: "fcm-device-token" as RelayAndroidDeviceRegistrationRequest["pushToken"],
+      preferences: {
+        notificationsEnabled: true,
+        liveActivitiesEnabled: true,
+        notifyOnApproval: true,
+        notifyOnInput: true,
+        notifyOnCompletion: true,
+        notifyOnFailure: true,
+      },
+    };
+
+    const fakeDb = {
+      update: (table: unknown) => {
+        expect(table).toBe(relayMobileDevices);
+        calls.push("update");
+        return {
+          set: () => ({
+            where: () => {
+              calls.push("update.where");
+              return Effect.void;
+            },
+          }),
+        };
+      },
+      insert: (table: unknown) => {
+        expect(table).toBe(relayMobileDevices);
+        calls.push("insert");
+        return {
+          values: (values: Record<string, unknown>) => {
+            insertedValues.push(values);
+            calls.push("insert.values");
+            return {
+              onConflictDoUpdate: () => {
+                calls.push("insert.onConflictDoUpdate");
+                return Effect.void;
+              },
+            };
+          },
+        };
+      },
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const devices = yield* Devices.Devices;
+      yield* devices.register({ userId: "user-2", registration: androidRegistration });
+
+      expect(calls).toEqual([
+        "update",
+        "update.where",
+        "insert",
+        "insert.values",
+        "insert.onConflictDoUpdate",
+      ]);
+      expect(insertedValues).toEqual([
+        expect.objectContaining({
+          userId: "user-2",
+          deviceId: "pixel-1",
+          platform: "android",
+          iosMajorVersion: null,
+          androidSdkVersion: 35,
+          pushToken: "fcm-device-token",
+          pushToStartToken: null,
+          preferencesJson: expect.objectContaining({
+            liveActivitiesEnabled: false,
+            notificationsEnabled: true,
+          }),
+        }),
+      ]);
+    }).pipe(
+      Effect.provide(Devices.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb)))),
+    );
+  });
+
+  it.effect("lists Android devices without exposing push tokens", () => {
+    const fakeDb = {
+      select: () => ({
+        from: (table: unknown) => {
+          expect(table).toBe(relayMobileDevices);
+          return {
+            where: () =>
+              Effect.succeed([
+                {
+                  deviceId: "pixel-1",
+                  label: "Pixel 9",
+                  platform: "android" as const,
+                  iosMajorVersion: null,
+                  androidSdkVersion: 35,
+                  appVersion: "1.0.0",
+                  preferences: {
+                    notificationsEnabled: true,
+                    liveActivitiesEnabled: false,
+                    notifyOnApproval: true,
+                    notifyOnInput: true,
+                    notifyOnCompletion: true,
+                    notifyOnFailure: true,
+                  },
+                  updatedAt: "2026-06-01T00:00:00.000Z",
+                },
+              ]),
+          };
+        },
+      }),
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const devices = yield* Devices.Devices;
+      const listed = yield* devices.listForUser({ userId: "user-2" });
+
+      expect(listed).toEqual([
+        {
+          deviceId: "pixel-1",
+          label: "Pixel 9",
+          platform: "android",
+          androidSdkVersion: 35,
+          appVersion: "1.0.0",
+          notifications: {
+            enabled: true,
+            notifyOnApproval: true,
+            notifyOnInput: true,
+            notifyOnCompletion: true,
+            notifyOnFailure: true,
+          },
+          liveActivities: {
+            enabled: false,
+          },
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        },
+      ]);
     }).pipe(
       Effect.provide(Devices.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb)))),
     );

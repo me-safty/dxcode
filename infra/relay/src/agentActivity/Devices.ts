@@ -1,4 +1,5 @@
 import type {
+  RelayAgentAwarenessPreferences,
   RelayClientDeviceRecord,
   RelayDeviceRegistrationRequest,
 } from "@t3tools/contracts/relay";
@@ -53,6 +54,13 @@ export class DeviceListPersistenceError extends Schema.TaggedErrorClass<DeviceLi
   }
 }
 
+const androidPreferences = (
+  preferences: RelayAgentAwarenessPreferences,
+): RelayAgentAwarenessPreferences => ({
+  ...preferences,
+  liveActivitiesEnabled: false,
+});
+
 export class Devices extends Context.Service<
   Devices,
   {
@@ -80,16 +88,6 @@ export const make = Effect.gen(function* () {
       });
       const updatedAt = DateTime.formatIso(yield* DateTime.now);
       const registration = input.registration;
-      if (registration.platform === "android") {
-        return yield* new DeviceRegistrationPersistenceError({
-          userId: input.userId,
-          deviceId: registration.deviceId,
-          stage: "upsert-device",
-          cause: new Error(
-            "Android device registration persistence is enabled in step s03 (relay DB migration).",
-          ),
-        });
-      }
 
       yield* Effect.all(
         [
@@ -110,7 +108,7 @@ export const make = Effect.gen(function* () {
                   ),
                 )
             : Effect.void,
-          registration.pushToStartToken
+          registration.platform === "ios" && registration.pushToStartToken
             ? db
                 .update(relayMobileDevices)
                 .set({ pushToStartToken: null, updatedAt })
@@ -131,36 +129,73 @@ export const make = Effect.gen(function* () {
         { discard: true },
       );
 
+      const preferencesJson =
+        registration.platform === "android"
+          ? androidPreferences(registration.preferences)
+          : registration.preferences;
+
       yield* db
         .insert(relayMobileDevices)
-        .values({
-          userId: input.userId,
-          deviceId: registration.deviceId,
-          label: registration.label,
-          platform: registration.platform,
-          iosMajorVersion: registration.iosMajorVersion,
-          appVersion: registration.appVersion ?? null,
-          pushToken: registration.pushToken ?? null,
-          pushToStartToken: registration.pushToStartToken ?? null,
-          preferencesJson: registration.preferences,
-          createdAt: updatedAt,
-          updatedAt,
-        })
+        .values(
+          registration.platform === "android"
+            ? {
+                userId: input.userId,
+                deviceId: registration.deviceId,
+                label: registration.label,
+                platform: registration.platform,
+                iosMajorVersion: null,
+                androidSdkVersion: registration.androidSdkVersion,
+                appVersion: registration.appVersion ?? null,
+                pushToken: registration.pushToken ?? null,
+                pushToStartToken: null,
+                preferencesJson,
+                createdAt: updatedAt,
+                updatedAt,
+              }
+            : {
+                userId: input.userId,
+                deviceId: registration.deviceId,
+                label: registration.label,
+                platform: registration.platform,
+                iosMajorVersion: registration.iosMajorVersion,
+                androidSdkVersion: null,
+                appVersion: registration.appVersion ?? null,
+                pushToken: registration.pushToken ?? null,
+                pushToStartToken: registration.pushToStartToken ?? null,
+                preferencesJson,
+                createdAt: updatedAt,
+                updatedAt,
+              },
+        )
         .onConflictDoUpdate({
           target: [relayMobileDevices.userId, relayMobileDevices.deviceId],
-          set: {
-            platform: registration.platform,
-            label: registration.label,
-            iosMajorVersion: registration.iosMajorVersion,
-            appVersion: registration.appVersion ?? null,
-            pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
-            pushToStartToken: sql`coalesce(
-                excluded.push_to_start_token,
-                ${relayMobileDevices.pushToStartToken}
-              )`,
-            preferencesJson: registration.preferences,
-            updatedAt,
-          },
+          set:
+            registration.platform === "android"
+              ? {
+                  platform: registration.platform,
+                  label: registration.label,
+                  iosMajorVersion: null,
+                  androidSdkVersion: registration.androidSdkVersion,
+                  appVersion: registration.appVersion ?? null,
+                  pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
+                  pushToStartToken: null,
+                  preferencesJson,
+                  updatedAt,
+                }
+              : {
+                  platform: registration.platform,
+                  label: registration.label,
+                  iosMajorVersion: registration.iosMajorVersion,
+                  androidSdkVersion: null,
+                  appVersion: registration.appVersion ?? null,
+                  pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
+                  pushToStartToken: sql`coalesce(
+                      excluded.push_to_start_token,
+                      ${relayMobileDevices.pushToStartToken}
+                    )`,
+                  preferencesJson,
+                  updatedAt,
+                },
         })
         .pipe(
           Effect.mapError(
@@ -229,6 +264,7 @@ export const make = Effect.gen(function* () {
           label: relayMobileDevices.label,
           platform: relayMobileDevices.platform,
           iosMajorVersion: relayMobileDevices.iosMajorVersion,
+          androidSdkVersion: relayMobileDevices.androidSdkVersion,
           appVersion: relayMobileDevices.appVersion,
           preferences: relayMobileDevices.preferencesJson,
           updatedAt: relayMobileDevices.updatedAt,
@@ -240,24 +276,41 @@ export const make = Effect.gen(function* () {
             (cause) => new DeviceListPersistenceError({ userId: input.userId, cause }),
           ),
         );
-      return rows.map((row) => ({
-        deviceId: row.deviceId,
-        label: row.label,
-        platform: row.platform,
-        iosMajorVersion: row.iosMajorVersion,
-        appVersion: row.appVersion,
-        notifications: {
+      return rows.map((row) => {
+        const notifications = {
           enabled: row.preferences.notificationsEnabled,
           notifyOnApproval: row.preferences.notifyOnApproval,
           notifyOnInput: row.preferences.notifyOnInput,
           notifyOnCompletion: row.preferences.notifyOnCompletion,
           notifyOnFailure: row.preferences.notifyOnFailure,
-        },
-        liveActivities: {
-          enabled: row.preferences.liveActivitiesEnabled,
-        },
-        updatedAt: row.updatedAt,
-      }));
+        };
+        if (row.platform === "android") {
+          return {
+            deviceId: row.deviceId,
+            label: row.label,
+            platform: "android" as const,
+            androidSdkVersion: row.androidSdkVersion!,
+            appVersion: row.appVersion,
+            notifications,
+            liveActivities: {
+              enabled: false as const,
+            },
+            updatedAt: row.updatedAt,
+          };
+        }
+        return {
+          deviceId: row.deviceId,
+          label: row.label,
+          platform: "ios" as const,
+          iosMajorVersion: row.iosMajorVersion!,
+          appVersion: row.appVersion,
+          notifications,
+          liveActivities: {
+            enabled: row.preferences.liveActivitiesEnabled,
+          },
+          updatedAt: row.updatedAt,
+        };
+      });
     }),
   });
 });
