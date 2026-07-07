@@ -873,6 +873,24 @@ export const RelayRegisterLiveActivityEndpoint = HttpApiEndpoint.post(
   },
 ).annotate(OpenApi.Summary, "Register a Live Activity push token");
 
+export const RelayAgentActivitySnapshotResponse = Schema.Struct({
+  aggregate: Schema.NullOr(RelayAgentActivityAggregateState),
+});
+export type RelayAgentActivitySnapshotResponse = typeof RelayAgentActivitySnapshotResponse.Type;
+
+// Lets the app decide whether arming a Live Activity is worthwhile before
+// creating one (no empty lock-screen card when nothing is running) and seed
+// the card with the real aggregate instead of a placeholder.
+export const RelayAgentActivitySnapshotEndpoint = HttpApiEndpoint.get(
+  "getAgentActivitySnapshot",
+  "/v1/mobile/agent-activity",
+  {
+    headers: RelayDpopRequestHeaders,
+    success: RelayAgentActivitySnapshotResponse,
+    error: RelayAuthAndInternalErrors,
+  },
+).annotate(OpenApi.Summary, "Read the current Live Activity aggregate");
+
 export const RelayUnregisterDeviceEndpoint = HttpApiEndpoint.delete(
   "unregisterDevice",
   "/v1/mobile/devices/:deviceId",
@@ -888,6 +906,7 @@ export const RelayMobileGroup = HttpApiGroup.make("mobile")
   .add(
     RelayRegisterDeviceEndpoint,
     RelayRegisterLiveActivityEndpoint,
+    RelayAgentActivitySnapshotEndpoint,
     RelayUnregisterDeviceEndpoint,
   )
   .annotate(OpenApi.Description, "Mobile push-notification and Live Activity registration.")

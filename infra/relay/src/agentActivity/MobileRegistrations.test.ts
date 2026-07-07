@@ -213,6 +213,7 @@ describe("MobileRegistrations", () => {
                   }),
                 ),
                 Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
+                Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
                 Layer.succeed(
                   AgentActivityPublisher.AgentActivityPublisher,
                   makeAgentActivityPublisher({
@@ -255,6 +256,7 @@ describe("MobileRegistrations", () => {
               Layer.mergeAll(
                 Layer.succeed(Devices.Devices, makeDevices()),
                 Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
+                Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
                 Layer.succeed(
                   AgentActivityPublisher.AgentActivityPublisher,
                   makeAgentActivityPublisher({
@@ -306,6 +308,7 @@ describe("MobileRegistrations", () => {
                   }),
                 ),
                 Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
+                Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
                 Layer.succeed(
                   AgentActivityPublisher.AgentActivityPublisher,
                   makeAgentActivityPublisher(),
@@ -350,6 +353,7 @@ describe("MobileRegistrations", () => {
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(Devices.Devices, makeDevices()),
+                Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
                 Layer.succeed(
                   LiveActivities.LiveActivities,
                   makeLiveActivities({
@@ -385,6 +389,34 @@ describe("MobileRegistrations", () => {
         deviceId: "device-1",
       });
     });
+  });
+
+  it.effect("returns the current aggregate for the app's arming decision", () => {
+    return Effect.gen(function* () {
+      const registrations = yield* MobileRegistrations.MobileRegistrations;
+      const snapshot = yield* registrations.getAgentActivitySnapshot({ userId: "dev:julius" });
+
+      expect(snapshot.aggregate).toMatchObject({
+        activeCount: 1,
+        activities: [{ threadId: "thread-1", phase: "running" }],
+      });
+    }).pipe(
+      Effect.provide(
+        MobileRegistrations.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(Devices.Devices, makeDevices()),
+              Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
+              Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
+              Layer.succeed(
+                AgentActivityPublisher.AgentActivityPublisher,
+                makeAgentActivityPublisher(),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   });
 
   it.effect(

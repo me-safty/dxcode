@@ -434,6 +434,17 @@ export const mobileApi = HttpApiBuilder.group(
         }, mapRelayCommonApiErrors("invalid_dpop")),
       )
       .handle(
+        "getAgentActivitySnapshot",
+        Effect.fn("relay.api.mobile.getAgentActivitySnapshot")(function* () {
+          const { userId, token } = yield* RelayClientPrincipal;
+          const proofKeyThumbprint = yield* requireDpopPrincipalScope("mobile:registration");
+          yield* requireDpopThumbprint(proofKeyThumbprint, {
+            expectedAccessToken: token,
+          }).pipe(Effect.provideService(DpopProofs.DpopProofReplay, dpopProofs));
+          return yield* registrations.getAgentActivitySnapshot({ userId });
+        }, mapRelayCommonApiErrors("invalid_dpop")),
+      )
+      .handle(
         "unregisterDevice",
         Effect.fn("relay.api.mobile.unregisterDevice")(function* (args) {
           const { params } = args;

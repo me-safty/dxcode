@@ -7,6 +7,7 @@ import { AppState, Platform } from "react-native";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   type RelayDeviceRegistrationRequest,
+  type RelayAgentActivitySnapshotResponse,
   type RelayLiveActivityRegistrationRequest,
 } from "@t3tools/contracts/relay";
 import { findErrorTraceId } from "@t3tools/client-runtime/errors";
@@ -432,6 +433,29 @@ function unregisterDeviceWithRelay(input: {
       deviceId: input.deviceId,
     });
   });
+}
+
+function readAgentActivitySnapshot(): Effect.Effect<
+  RelayAgentActivitySnapshotResponse | null,
+  never,
+  ManagedRelay.ManagedRelayClient
+> {
+  return Effect.gen(function* () {
+    if (!readRelayConfig()) return null;
+    const token = yield* relayToken("read-live-activity-registration-relay-token");
+    if (!token) {
+      return null;
+    }
+    const client = yield* ManagedRelay.ManagedRelayClient;
+    return yield* client.getAgentActivitySnapshot({ clerkToken: token });
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        logRegistrationError("agent activity snapshot read failed", error);
+        return null;
+      }),
+    ),
+  );
 }
 
 function registerLiveActivityWithRelay(
@@ -911,9 +935,10 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
     // Activities are only ever created here, in the foreground, where the
     // update token can be observed and registered immediately — the relay
     // never remote-starts one (background push-to-start wakes proved too
-    // unreliable to hand the token over). Opening the app arms the card; the
-    // relay then drives its content, including agents started from other
-    // machines while the phone stays locked.
+    // unreliable to hand the token over). Arming is conditional: the relay is
+    // asked what the card would show first, so an idle open never creates an
+    // empty lock-screen card, and an armed card is born with the real
+    // aggregate instead of a placeholder.
     if (activities.length === 0) {
       const preferences = yield* Effect.tryPromise({
         try: () => loadPreferences(),
@@ -924,31 +949,37 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
           }),
       }).pipe(Effect.orElseSucceed(() => null));
       if (preferences?.liveActivitiesEnabled) {
-        const primed = yield* Effect.try({
-          try: () =>
-            AgentActivity.start({
-              title: "T3 Code",
-              subtitle: "Waiting for agents",
-              activeCount: 0,
-              updatedAt: new Date(Date.now()).toISOString(),
-              activities: [],
-            }),
-          catch: (cause) =>
-            new AgentAwarenessOperationError({
-              operation: "prime-live-activity",
-              cause,
-            }),
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.sync(() => {
-              logRegistrationError("live activity priming failed", error);
-              return null;
-            }),
-          ),
-        );
-        if (primed) {
-          logRegistrationDebug("live activity card primed", {});
-          activities = [primed];
+        const snapshot = yield* readAgentActivitySnapshot();
+        if (snapshot?.aggregate && snapshot.aggregate.activeCount > 0) {
+          const aggregate = snapshot.aggregate;
+          const primed = yield* Effect.try({
+            try: () =>
+              AgentActivity.start({
+                title: aggregate.title,
+                subtitle: aggregate.subtitle,
+                activeCount: aggregate.activeCount,
+                updatedAt: aggregate.updatedAt,
+                activities: aggregate.activities,
+              }),
+            catch: (cause) =>
+              new AgentAwarenessOperationError({
+                operation: "prime-live-activity",
+                cause,
+              }),
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.sync(() => {
+                logRegistrationError("live activity priming failed", error);
+                return null;
+              }),
+            ),
+          );
+          if (primed) {
+            logRegistrationDebug("live activity card primed", {
+              activeCount: aggregate.activeCount,
+            });
+            activities = [primed];
+          }
         }
       }
     }
