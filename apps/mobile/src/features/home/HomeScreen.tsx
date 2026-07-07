@@ -22,6 +22,7 @@ import {
 } from "../../lib/nativeStackInsets";
 import { useThemeColor } from "../../lib/useThemeColor";
 
+import { BuildVariantBanner } from "../../components/BuildVariantBanner";
 import { EmptyState } from "../../components/EmptyState";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import type { SavedRemoteConnection } from "../../lib/connection";
@@ -47,6 +48,7 @@ import { buildHomeThreadGroups, type HomeProjectSortOrder } from "./homeThreadLi
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { WorkspaceConnectionStatus } from "./WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "./workspace-connection-status";
+import { deriveWorkspaceEmptyStateAction } from "./workspace-empty-state-action";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -343,6 +345,7 @@ export function HomeScreen(props: HomeScreenProps) {
     catalogState: props.catalogState,
     projectCount: props.projects.length,
   });
+  const emptyStateAction = deriveWorkspaceEmptyStateAction(props.catalogState);
   const connectionStatus =
     shouldShowConnectionStatus && Platform.OS !== "ios" ? (
       <View
@@ -363,11 +366,18 @@ export function HomeScreen(props: HomeScreenProps) {
         }}
       >
         <View className="w-full max-w-[430px]">
+          <BuildVariantBanner />
           <EmptyState
             title={emptyState.title}
             detail={emptyState.detail}
-            actionLabel={!props.catalogState.hasReadyEnvironment ? "Add environment" : undefined}
-            onAction={!props.catalogState.hasReadyEnvironment ? props.onAddConnection : undefined}
+            actionLabel={emptyStateAction?.label}
+            onAction={
+              emptyStateAction?.kind === "add-connection"
+                ? props.onAddConnection
+                : emptyStateAction?.kind === "open-environments"
+                  ? props.onOpenEnvironments
+                  : undefined
+            }
             variant="plain"
           />
           {emptyState.loading ? (
@@ -383,6 +393,7 @@ export function HomeScreen(props: HomeScreenProps) {
 
   const listHeader = (
     <>
+      <BuildVariantBanner />
       {Platform.OS === "ios" ? null : <HomeTopContentSpacer topInset={insets.top} />}
 
       {shouldShowConnectionStatus && Platform.OS === "ios" ? (

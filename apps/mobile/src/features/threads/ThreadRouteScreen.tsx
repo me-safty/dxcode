@@ -1,4 +1,4 @@
-import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
   useFocusEffect,
@@ -18,6 +18,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { dismissGitActionResult, useGitActionProgress } from "../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../state/vcs";
 
+import { BuildVariantBanner } from "../../components/BuildVariantBanner";
 import { EmptyState } from "../../components/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -63,8 +64,9 @@ import { useSelectedThreadGitState } from "../../state/use-selected-thread-git-s
 import { useSelectedThreadRequests } from "../../state/use-selected-thread-requests";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
-import { threadEnvironment } from "../../state/threads";
+import { threadEnvironment, useEnvironmentThread } from "../../state/threads";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
+import { projectThreadRoutePresentation } from "./projectThreadRoutePresentation";
 import {
   useAdaptiveWorkspaceLayout,
   useAdaptiveWorkspacePaneRole,
@@ -140,18 +142,27 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const threadIdRaw = firstRouteParam(params.threadId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
+  const routeThreadId = threadIdRaw ? ThreadId.make(threadIdRaw) : null;
+  const routeThreadState = useEnvironmentThread(environmentId, routeThreadId);
   const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeThreadKey =
-    environmentId !== null && threadIdRaw !== null
-      ? scopedThreadKey(environmentId, ThreadId.make(threadIdRaw))
+    environmentId !== null && routeThreadId !== null
+      ? scopedThreadKey(environmentId, routeThreadId)
       : null;
   const selectedThreadKey =
     selectedThread === null
       ? null
       : scopedThreadKey(selectedThread.environmentId, selectedThread.id);
   const selectedThreadDetailState = useSelectedThreadDetailState();
+  const routePresentation = projectThreadRoutePresentation({
+    hasSelectedThread: selectedThread !== null && selectedThreadKey === routeThreadKey,
+    isLoadingConnections: workspaceState.isLoadingConnections,
+    connectionState: routeConnectionState,
+    routeThreadStatus: routeThreadState.status,
+    routeThreadError: Option.getOrNull(routeThreadState.error),
+  });
 
   if (environmentId === null || threadIdRaw === null) {
     return <OpeningThreadLoadingScreen />;
@@ -161,16 +172,11 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
   // thread SHELL is known — no blocking on message detail. The feed shows a
   // loading placeholder while messages fetch, and the composer's connection
   // pill reports connecting/reconnecting/syncing status.
-  if (selectedThread !== null && selectedThreadKey === routeThreadKey) {
+  if (routePresentation === "content") {
     return <ThreadRouteContent {...props} selectedThreadDetailState={selectedThreadDetailState} />;
   }
 
-  const stillHydrating =
-    workspaceState.isLoadingConnections ||
-    routeConnectionState === "connecting" ||
-    routeConnectionState === "reconnecting";
-
-  if (stillHydrating) {
+  if (routePresentation === "loading") {
     return <OpeningThreadLoadingScreen />;
   }
 
@@ -449,6 +455,9 @@ function ThreadRouteContent(
   const handleOpenConnectionEditor = useCallback(() => {
     void navigation.navigate("Connections");
   }, [navigation]);
+  const handleOpenSettings = useCallback(() => {
+    navigation.navigate("SettingsSheet", { screen: "Settings" });
+  }, [navigation]);
   const handleStopThread = useCallback(() => {
     if (
       !selectedThread ||
@@ -608,7 +617,21 @@ function ThreadRouteContent(
   };
   const threadGitModel = useThreadGitControlModel(threadGitControlProps);
   const threadCenterHeaderItems = useThreadGitCenterHeaderItems(threadGitControlProps);
-  const compactRightHeaderItems = useThreadGitRightHeaderItems(threadGitControlProps);
+  const threadRightHeaderItems = useThreadGitRightHeaderItems(threadGitControlProps);
+  const compactRightHeaderItems = useMemo<NativeHeaderItems>(
+    () => [
+      ...threadRightHeaderItems,
+      withNativeGlassHeaderItem({
+        accessibilityLabel: "Open settings",
+        icon: { name: "gearshape", type: "sfSymbol" as const },
+        identifier: "thread-settings",
+        label: "",
+        onPress: handleOpenSettings,
+        type: "button" as const,
+      }),
+    ],
+    [handleOpenSettings, threadRightHeaderItems],
+  );
   const usesAndroidAccessoryBar = Platform.OS === "android";
   const accessoryBarLayout = layout.usesSplitView ? ("rail" as const) : ("phone" as const);
   const accessoryBarActiveItem = resolveThreadAccessoryActiveItem({
@@ -814,13 +837,26 @@ function ThreadRouteContent(
   );
   const renderThreadRouteBody = (showActionControls: boolean) => (
     <>
+      {usesAndroidAccessoryBar ? (
+        <NativeHeaderToolbar placement="right">
+          <NativeHeaderToolbar.Button
+            accessibilityLabel="Open settings"
+            icon="gearshape"
+            onPress={handleOpenSettings}
+            separateBackground
+          />
+        </NativeHeaderToolbar>
+      ) : null}
       <ThreadGitControls {...threadGitControlProps} showActionControls={showActionControls} />
 
       <GitActionProgressOverlay progress={gitActionProgress} onDismiss={dismissGitActionResult} />
 
       <View className="flex-1 flex-row bg-screen" testID="thread-screen">
         {accessoryBarLayout === "rail" ? accessoryBar : null}
-        <View className="flex-1">{threadDetailScreen}</View>
+        <View className="flex-1">
+          <BuildVariantBanner />
+          {threadDetailScreen}
+        </View>
       </View>
     </>
   );

@@ -10,10 +10,10 @@
     "start:dev": "APP_VARIANT=development expo start",
     "start:preview": "APP_VARIANT=preview expo start",
     "start:prod": "APP_VARIANT=production expo start",
-    "android": "EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform android && expo run:android",
-    "android:dev": "APP_VARIANT=development EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform android && expo run:android",
-    "android:preview": "APP_VARIANT=preview EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform android && expo run:android",
-    "android:prod": "APP_VARIANT=production EXPO_NO_GIT_STATUS=1 expo prebuild --clean --platform android && expo run:android",
+    "android": "EXPO_NO_GIT_STATUS=1 node scripts/with-android-env.mjs bunx expo prebuild --clean --platform android && node scripts/with-android-env.mjs bunx expo run:android",
+    "android:dev": "APP_VARIANT=development EXPO_NO_GIT_STATUS=1 node scripts/with-android-env.mjs bunx expo prebuild --clean --platform android && node scripts/with-android-env.mjs bunx expo run:android",
+    "android:preview": "APP_VARIANT=preview EXPO_NO_GIT_STATUS=1 node scripts/with-android-env.mjs bunx expo prebuild --clean --platform android && node scripts/with-android-env.mjs bunx expo run:android",
+    "android:prod": "APP_VARIANT=production EXPO_NO_GIT_STATUS=1 node scripts/with-android-env.mjs bunx expo prebuild --clean --platform android && node scripts/with-android-env.mjs bunx expo run:android",
     "eas:android:dev": "eas build --profile development -p android",
     "eas:android:preview": "eas build --profile preview -p android",
     "eas:android:preview:dev": "eas build --profile preview:dev -p android",
@@ -129,7 +129,9 @@
     "autolinking": {
       "buildFromSource": [
         "react-native-screens",
-        "@react-native-menu/menu"
+        "@react-native-menu/menu",
+        "expo-dev-menu",
+        "expo-dev-launcher"
       ]
     }
   }

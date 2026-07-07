@@ -15,6 +15,8 @@ const VARIANT_CONFIG: Record<
     readonly appName: string;
     readonly scheme: string;
     readonly iosIcon: string;
+    readonly androidIcon: string;
+    readonly androidAdaptiveBackgroundColor: string;
     readonly iosBundleIdentifier: string;
     readonly androidPackage: string;
     readonly relyingParty?: string;
@@ -24,6 +26,8 @@ const VARIANT_CONFIG: Record<
     appName: "T3 Code Dev",
     scheme: "t3code-dev",
     iosIcon: "./assets/icon-composer-dev.icon",
+    androidIcon: "./assets/icon.png",
+    androidAdaptiveBackgroundColor: "#F59E0B",
     iosBundleIdentifier: "com.t3tools.t3code.dev",
     androidPackage: "com.t3tools.t3code.dev",
     relyingParty: "clerk.t3.codes",
@@ -31,7 +35,9 @@ const VARIANT_CONFIG: Record<
   preview: {
     appName: "T3 Code Preview",
     scheme: "t3code-preview",
-    iosIcon: "./assets/icon-composer-prod.icon",
+    iosIcon: "./assets/icon-composer-dev.icon",
+    androidIcon: "./assets/icon.png",
+    androidAdaptiveBackgroundColor: "#8B5CF6",
     iosBundleIdentifier: "com.t3tools.t3code.preview",
     androidPackage: "com.t3tools.t3code.preview",
     relyingParty: "clerk.t3.codes",
@@ -40,6 +46,8 @@ const VARIANT_CONFIG: Record<
     appName: "T3 Code",
     scheme: "t3code",
     iosIcon: "./assets/icon-composer-prod.icon",
+    androidIcon: "./assets/icon.png",
+    androidAdaptiveBackgroundColor: "#E6F4FE",
     iosBundleIdentifier: "com.t3tools.t3code",
     androidPackage: "com.t3tools.t3code",
     relyingParty: "clerk.t3.codes",
@@ -112,11 +120,11 @@ const config: ExpoConfig = {
     },
   },
   android: {
-    icon: "./assets/icon.png",
+    icon: variant.androidIcon,
     package: variant.androidPackage,
     googleServicesFile: resolveGoogleServicesFile(APP_VARIANT),
     adaptiveIcon: {
-      backgroundColor: "#E6F4FE",
+      backgroundColor: variant.androidAdaptiveBackgroundColor,
       foregroundImage: "./assets/android-icon-foreground.png",
       backgroundImage: "./assets/android-icon-background.png",
       monochromeImage: "./assets/android-icon-monochrome.png",
@@ -188,6 +196,7 @@ const config: ExpoConfig = {
     ],
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
+    "./plugins/withAndroidBuildFixes.cjs",
     "./plugins/withAndroidGoogleServices.cjs",
   ],
   extra: {

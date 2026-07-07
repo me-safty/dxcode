@@ -70,14 +70,13 @@ build_dev_client_apk() {
   log "Prebuild Android (development)"
   (
     cd apps/mobile
-    bunx expo prebuild --platform android --clean
+    node scripts/with-android-env.mjs bunx expo prebuild --platform android --clean
   )
 
   log "Assemble debug APK"
   (
-    cd apps/mobile/android
-    chmod +x gradlew
-    ./gradlew assembleDebug -x lint --no-daemon
+    cd apps/mobile
+    node scripts/with-android-env.mjs sh -c 'chmod +x android/gradlew && cd android && ./gradlew assembleDebug -x lint --no-daemon'
   )
 
   local apk=""

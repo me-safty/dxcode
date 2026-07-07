@@ -14,6 +14,7 @@ import type { WorkspaceState } from "../../state/workspaceModel";
 import { useWorkspaceState } from "../../state/workspace";
 import { groupProjectsByRepository } from "../../lib/repositoryGroups";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { deriveWorkspaceEmptyStateAction } from "../home/workspace-empty-state-action";
 
 function deriveProjectEmptyState(catalogState: WorkspaceState): {
   readonly title: string;
@@ -108,6 +109,7 @@ export function NewTaskRouteScreen() {
     return nextItems;
   }, [repositoryGroups]);
   const projectEmptyState = deriveProjectEmptyState(catalogState);
+  const emptyStateAction = deriveWorkspaceEmptyStateAction(catalogState);
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -146,16 +148,20 @@ export function NewTaskRouteScreen() {
             <Text className="text-center text-sm leading-normal text-foreground-muted">
               {projectEmptyState.detail}
             </Text>
-            {!catalogState.hasReadyEnvironment ? (
+            {emptyStateAction ? (
               <Pressable
                 className="mt-1 rounded-full bg-primary px-4 py-2.5 active:opacity-70"
-                onPress={() => navigation.navigate("ConnectionsNew")}
+                onPress={() =>
+                  emptyStateAction.kind === "add-connection"
+                    ? navigation.navigate("ConnectionsNew")
+                    : navigation.navigate("SettingsSheet", { screen: "SettingsEnvironments" })
+                }
               >
                 <Text className="text-sm font-t3-bold text-primary-foreground">
-                  Add environment
+                  {emptyStateAction.label}
                 </Text>
               </Pressable>
-            ) : (
+            ) : catalogState.hasReadyEnvironment ? (
               <Pressable
                 className="mt-1 rounded-full bg-primary px-4 py-2.5 active:opacity-70"
                 onPress={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
@@ -164,7 +170,7 @@ export function NewTaskRouteScreen() {
                   Add new project
                 </Text>
               </Pressable>
-            )}
+            ) : null}
           </View>
         ) : (
           <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">

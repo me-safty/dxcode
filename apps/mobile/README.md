@@ -40,6 +40,53 @@ Build and run the local iOS preview app:
 vp run ios:preview
 ```
 
+### Android
+
+Local Android builds need **JDK 17+** and the **Android SDK** (`platform-tools`, build-tools, and at
+least one platform image). The `android:*` scripts resolve `JAVA_HOME` and `ANDROID_HOME` via
+[`scripts/with-android-env.mjs`](scripts/with-android-env.mjs) when they are unset — typical
+locations are `/usr/lib/jvm/java-21-openjdk` and `~/Android/Sdk`.
+
+FCM push requires a dev-client binary signed with Firebase config. Before the first prebuild, place
+`google-services.json` for your variant (or use the CI stub for builds that do not exercise push):
+
+```bash
+mkdir -p apps/mobile/secrets
+cp ~/Downloads/google-services.json apps/mobile/secrets/google-services.development.json
+```
+
+See [`docs/FIREBASE-ANDROID.md`](docs/FIREBASE-ANDROID.md) for variant package names and EAS secrets.
+
+Build and run the local Android dev client (prebuilds `android/`, then installs on a connected device
+or booted emulator):
+
+```bash
+vp run android:dev
+```
+
+Other local variants:
+
+```bash
+vp run android:preview
+vp run android:prod
+```
+
+Start Metro for an already-installed dev client:
+
+```bash
+APP_VARIANT=development vp run dev:client
+```
+
+Run Maestro smoke flows on a booted emulator (builds, installs, and drives the dev client):
+
+```bash
+./scripts/android-parity/run-maestro-android.sh
+```
+
+The harness uses a stub `google-services.json` when `apps/mobile/secrets/google-services.development.json`
+is missing. Set `GOOGLE_SERVICES_JSON` to override. Optional `smoke-agent-push` runs when
+`RELAY_STAGING_URL` and `RELAY_STAGING_TEST_SECRET` are set.
+
 Force the review diff highlighter engine:
 
 ```bash
