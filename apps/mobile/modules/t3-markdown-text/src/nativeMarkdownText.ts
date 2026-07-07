@@ -2,6 +2,7 @@ import type { MarkdownNode } from "react-native-nitro-markdown/headless";
 
 import type { SelectableMarkdownSkill } from "./SelectableMarkdownText.types";
 import { resolveMarkdownLinkPresentation, type MarkdownFileIcon } from "./markdownLinks";
+import { formatSkillLabel, SKILL_TOKEN_REGEX } from "./skillTokens";
 
 export interface NativeMarkdownTextRun {
   readonly text: string;
@@ -182,20 +183,6 @@ function appendRun(
 
   runs.push(run);
   return runs;
-}
-
-const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
-
-function formatSkillLabel(skill: SelectableMarkdownSkill): string {
-  const displayName = skill.displayName?.trim();
-  if (displayName) {
-    return displayName;
-  }
-  return skill.name
-    .split(/[\s:_-]+/)
-    .filter(Boolean)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
 }
 
 function decorateSkillRuns(

@@ -1,11 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   Markdown,
-  type CustomRenderers,
   type NodeStyleOverrides,
   type PartialMarkdownTheme,
 } from "react-native-nitro-markdown";
-import { RefreshControl, ScrollView, Text as NativeText, View } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import {
@@ -19,15 +18,17 @@ import {
   SelectableMarkdownText,
   type NativeMarkdownTextStyle,
 } from "../../native/SelectableMarkdownText";
+import { shouldUseNitroMarkdown } from "../../platform/capabilities";
+import { createNitroMarkdownRenderers } from "@t3tools/mobile-markdown-text";
 
 interface MarkdownPreviewStyles {
   readonly theme: PartialMarkdownTheme;
   readonly styles: NodeStyleOverrides;
-  readonly renderers: CustomRenderers;
+  readonly renderers: ReturnType<typeof createNitroMarkdownRenderers>;
   readonly nativeTextStyle: NativeMarkdownTextStyle;
 }
 
-function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
+function useMarkdownPreviewStyles(onLinkPress: (href: string) => void): MarkdownPreviewStyles {
   const { appearance } = useAppearancePreferences();
   const markdownFontSizes = useMemo(
     () => resolveMarkdownFontSizes(appearance.baseFontSize),
@@ -45,26 +46,21 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
   const codeBackground = String(useThemeColor("--color-md-code-bg"));
   const codeText = String(useThemeColor("--color-md-code-text"));
   const horizontalRule = String(useThemeColor("--color-md-hr"));
+  const skillText = String(useThemeColor("--color-inline-skill-foreground"));
 
   return useMemo(() => {
-    const renderers: CustomRenderers = {
-      link: ({ href, children }) => (
-        <NativeText
-          onPress={() => {
-            if (href) {
-              void tryOpenExternalUrl(href, "markdown-link");
-            }
-          }}
-          style={{
-            color: link,
-            fontFamily: "DMSans_500Medium",
-            textDecorationLine: "none",
-          }}
-        >
-          {children}
-        </NativeText>
-      ),
-    };
+    const renderers = createNitroMarkdownRenderers({
+      onLinkPress,
+      inlineTextColor: body,
+      inlineCodeTextColor: codeText,
+      blockBackgroundColor: codeBackground,
+      blockTextColor: codeText,
+      markdownLinkColor: link,
+      markdownBodyColor: body,
+      markdownHrColor: horizontalRule,
+      skillTextColor: skillText,
+      markdownFontSizes,
+    });
 
     return {
       theme: {
@@ -135,7 +131,7 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
         codeBackgroundColor: codeBackground,
         codeBlockBackgroundColor: codeBackground,
         fileTextColor: codeText,
-        skillTextColor: codeText,
+        skillTextColor: skillText,
         quoteMarkerColor: blockquoteBorder,
         dividerColor: horizontalRule,
         fontSize: nativeMarkdownTypography.fontSize,
@@ -156,6 +152,8 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
     link,
     markdownFontSizes,
     nativeMarkdownTypography,
+    onLinkPress,
+    skillText,
     strong,
   ]);
 }
@@ -176,10 +174,10 @@ export function FileMarkdownPreview(props: {
       setIsPullRefreshing(false);
     }
   }, [props.onRefresh]);
-  const styles = useMarkdownPreviewStyles();
   const onLinkPress = useCallback((href: string) => {
     void tryOpenExternalUrl(href, "markdown-link");
   }, []);
+  const styles = useMarkdownPreviewStyles(onLinkPress);
 
   return (
     <ScrollView
@@ -201,7 +199,7 @@ export function FileMarkdownPreview(props: {
             onLinkPress={onLinkPress}
             textStyle={styles.nativeTextStyle}
           />
-        ) : (
+        ) : shouldUseNitroMarkdown() ? (
           <Markdown
             options={{ gfm: true }}
             renderers={styles.renderers}
@@ -210,7 +208,7 @@ export function FileMarkdownPreview(props: {
           >
             {props.markdown}
           </Markdown>
-        )}
+        ) : null}
       </View>
     </ScrollView>
   );

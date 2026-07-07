@@ -15,7 +15,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   type RefObject,
 } from "react";
 import {
@@ -61,6 +60,7 @@ import {
 import {
   resolveCapabilityGatedReviewDiffView,
   shouldUseNativeSelectableMarkdown,
+  shouldUseNitroMarkdown,
 } from "../../platform/capabilities";
 
 import { AppText as Text } from "../../components/AppText";
@@ -83,7 +83,10 @@ import {
 } from "../../lib/appearancePreferences";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
-import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons";
+import {
+  createNitroMarkdownRenderers,
+  decorateNitroMarkdownWithSkills,
+} from "@t3tools/mobile-markdown-text";
 import { resolveMarkdownLinkPresentation } from "@t3tools/mobile-markdown-text/links";
 import {
   deriveThreadFeedPresentation,
@@ -94,6 +97,13 @@ import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { ThreadWorkGroupToggle, ThreadWorkLog } from "./thread-work-log";
 import { useAssetUrl } from "../../state/assets";
 import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
+
+function nitroMarkdownContent(
+  markdown: string,
+  skills: ReadonlyArray<SelectableMarkdownSkill> | undefined,
+): string {
+  return decorateNitroMarkdownWithSkills(markdown, skills ?? []);
+}
 
 const MESSAGE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
@@ -224,61 +234,6 @@ interface ReviewCommentColors {
   readonly mutedText: ColorValue;
   readonly codeBackground: ColorValue;
 }
-
-const failedMarkdownFaviconHosts = new Set<string>();
-const markdownLinkStyles = StyleSheet.create({
-  inlineIcon: {
-    width: 14,
-    height: 14,
-    marginHorizontal: 3,
-    transform: [{ translateY: 2 }],
-  },
-  favicon: {
-    borderRadius: 3,
-  },
-  file: {
-    fontFamily: "DMSans_700Bold",
-    fontWeight: "700",
-  },
-});
-
-const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
-  readonly children: ReactNode;
-  readonly color: string;
-  readonly host: string;
-  readonly href: string;
-}) {
-  const [failed, setFailed] = useState(() => failedMarkdownFaviconHosts.has(props.host));
-
-  return (
-    <NativeText
-      onPress={() => {
-        void Linking.openURL(props.href);
-      }}
-      style={{
-        color: props.color,
-        fontFamily: "DMSans_400Regular",
-        textDecorationLine: "none",
-      }}
-    >
-      {!failed ? (
-        <Image
-          source={{
-            uri: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(props.host)}&sz=32`,
-          }}
-          style={[markdownLinkStyles.inlineIcon, markdownLinkStyles.favicon]}
-          onError={() => {
-            failedMarkdownFaviconHosts.add(props.host);
-            setFailed(true);
-          }}
-        />
-      ) : (
-        <NativeText style={{ color: props.color }}>{" ◉ "}</NativeText>
-      )}
-      {props.children}
-    </NativeText>
-  );
-});
 
 function useReviewCommentColors(): ReviewCommentColors {
   const colorScheme = useColorScheme();
@@ -423,167 +378,22 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       inlineCodeTextColor: string,
       blockBackgroundColor: string,
       blockTextColor: string,
+      skillTextColor: string,
       preserveSoftBreaks: boolean,
-    ): CustomRenderers => ({
-      link: ({ children, href = "" }) => {
-        const presentation = resolveMarkdownLinkPresentation(href);
-        if (presentation.kind === "file") {
-          return (
-            <NativeText
-              onPress={() => onLinkPress(href)}
-              style={[markdownLinkStyles.file, { color: inlineTextColor }]}
-            >
-              <Image
-                source={markdownFileIconSource(presentation.icon)}
-                style={markdownLinkStyles.inlineIcon}
-              />
-              {presentation.label}
-            </NativeText>
-          );
-        }
-        if (presentation.kind === "external") {
-          return (
-            <MarkdownExternalLink
-              href={presentation.href}
-              host={presentation.host}
-              color={markdownLinkColor}
-            >
-              {children}
-            </MarkdownExternalLink>
-          );
-        }
-        const linkHref = presentation.href;
-        return (
-          <NativeText
-            onPress={
-              linkHref
-                ? () => {
-                    void Linking.openURL(linkHref);
-                  }
-                : undefined
-            }
-            style={{
-              color: markdownLinkColor,
-              textDecorationLine: "underline",
-            }}
-          >
-            {children}
-          </NativeText>
-        );
-      },
-      list: ({ node, Renderer, ordered = false, start = 1 }) => (
-        <View style={{ marginTop: 2, marginBottom: 8 }}>
-          {node.children?.map((child, index) => {
-            const childKey = `${child.type}:${child.beg ?? "unknown"}:${child.end ?? "unknown"}`;
-            if (child.type === "task_list_item") {
-              return (
-                <Renderer key={childKey} node={child} depth={1} inListItem parentIsText={false} />
-              );
-            }
-            return (
-              <View
-                key={childKey}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "flex-start",
-                  marginBottom: 3,
-                }}
-              >
-                <NativeText
-                  style={{
-                    width: ordered ? 22 : 12,
-                    marginRight: 5,
-                    color: inlineTextColor,
-                    fontFamily: "DMSans_400Regular",
-                    fontSize: markdownFontSizes.m,
-                    lineHeight: markdownFontSizes.bodyLineHeight,
-                    textAlign: ordered ? "right" : "center",
-                  }}
-                >
-                  {ordered ? `${start + index}.` : "•"}
-                </NativeText>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Renderer node={child} depth={1} inListItem parentIsText={false} />
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      ),
-      code_inline: ({ content }) => {
-        const value = content ?? "";
-        return (
-          <NativeText
-            style={{
-              color: inlineCodeTextColor,
-              fontFamily: "ui-monospace",
-              fontSize: markdownFontSizes.codeBlockFontSize,
-              lineHeight: markdownFontSizes.bodyLineHeight,
-            }}
-          >
-            {value}
-          </NativeText>
-        );
-      },
-      ...(preserveSoftBreaks
-        ? {
-            soft_break: () => <NativeText>{"\n"}</NativeText>,
-          }
-        : {}),
-      code_block: ({ content, language }) => (
-        <View
-          style={{
-            backgroundColor: blockBackgroundColor,
-            borderRadius: 10,
-            borderWidth: 1,
-            borderColor: markdownHrColor,
-            marginVertical: 12,
-            overflow: "hidden",
-          }}
-        >
-          {language ? (
-            <View
-              style={{
-                borderBottomWidth: 1,
-                borderBottomColor: markdownHrColor,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-              }}
-            >
-              <NativeText
-                style={{
-                  color: markdownBodyColor,
-                  fontFamily: "ui-monospace",
-                  fontSize: markdownFontSizes.codeBlockFontSize,
-                  opacity: 0.7,
-                  textTransform: "uppercase",
-                }}
-              >
-                {language}
-              </NativeText>
-            </View>
-          ) : null}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            bounces={false}
-            contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12 }}
-          >
-            <NativeText
-              selectable
-              style={{
-                color: blockTextColor,
-                fontFamily: "ui-monospace",
-                fontSize: markdownFontSizes.codeBlockFontSize,
-                lineHeight: markdownFontSizes.codeBlockLineHeight,
-              }}
-            >
-              {content}
-            </NativeText>
-          </ScrollView>
-        </View>
-      ),
-    });
+    ): CustomRenderers =>
+      createNitroMarkdownRenderers({
+        onLinkPress,
+        inlineTextColor,
+        inlineCodeTextColor,
+        blockBackgroundColor,
+        blockTextColor,
+        markdownLinkColor,
+        markdownBodyColor,
+        markdownHrColor,
+        skillTextColor,
+        markdownFontSizes,
+        preserveSoftBreaks,
+      });
 
     const userTheme: PartialMarkdownTheme = {
       ...baseTheme,
@@ -639,6 +449,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           markdownUserInlineCodeText,
           markdownUserFenceBg,
           markdownUserFenceText,
+          "#f0abfc",
           true,
         ),
         nativeTextStyle: {
@@ -670,6 +481,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           markdownInlineCodeText,
           markdownCodeBg,
           markdownCodeText,
+          inlineSkillForeground,
           false,
         ),
         nativeTextStyle: {
@@ -846,16 +658,16 @@ function renderFeedEntry(
               textStyle={styles.nativeTextStyle}
               onLinkPress={props.onMarkdownLinkPress}
             />
-          ) : (
+          ) : shouldUseNitroMarkdown() ? (
             <Markdown
               options={{ gfm: true }}
               renderers={styles.renderers}
               styles={styles.styles}
               theme={styles.theme}
             >
-              {message.text}
+              {nitroMarkdownContent(message.text, props.skills)}
             </Markdown>
-          )
+          ) : null
         ) : null}
         {attachments.map((attachment) => {
           return (
@@ -919,6 +731,9 @@ function UserMessageContent(props: {
         />
       );
     }
+    if (!shouldUseNitroMarkdown()) {
+      return null;
+    }
     return (
       <Markdown
         options={{ gfm: true }}
@@ -926,7 +741,7 @@ function UserMessageContent(props: {
         styles={props.markdownStyles.styles}
         theme={props.markdownStyles.theme}
       >
-        {props.text}
+        {nitroMarkdownContent(props.text, props.skills)}
       </Markdown>
     );
   }
@@ -958,7 +773,7 @@ function UserMessageContent(props: {
             preserveSoftBreaks
             onLinkPress={props.onLinkPress}
           />
-        ) : (
+        ) : shouldUseNitroMarkdown() ? (
           <Markdown
             key={segment.id}
             options={{ gfm: true }}
@@ -966,9 +781,9 @@ function UserMessageContent(props: {
             styles={props.markdownStyles.styles}
             theme={props.markdownStyles.theme}
           >
-            {text}
+            {nitroMarkdownContent(text, props.skills)}
           </Markdown>
-        );
+        ) : null;
       })}
     </View>
   );

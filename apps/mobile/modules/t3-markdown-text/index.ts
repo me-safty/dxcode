@@ -25,3 +25,5 @@ export type {
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,
 } from "./src/SelectableMarkdownText.types";
+export { createNitroMarkdownRenderers } from "./src/nitroMarkdownRenderers";
+export { decorateNitroMarkdownWithSkills } from "./src/nitroSkillMarkdown";
