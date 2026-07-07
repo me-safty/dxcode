@@ -435,6 +435,54 @@ function unregisterDeviceWithRelay(input: {
   });
 }
 
+// Arms the lock-screen card the moment the user starts agent work from this
+// phone, while the app is still foregrounded and the fresh activity's token
+// can be registered immediately. The seeded row is a best-effort placeholder;
+// the relay's registration replay repaints it with the authoritative
+// aggregate within seconds. No-ops when a card is already armed.
+export function armAgentAwarenessLiveActivityForLocalWork(input: {
+  readonly threadTitle: string;
+  readonly projectTitle: string;
+}): void {
+  if (!canRegisterRemoteLiveActivities() || !relayTokenProvider) {
+    return;
+  }
+  try {
+    if (AgentActivity.getInstances().length > 0) {
+      return;
+    }
+    const nowIso = new Date(Date.now()).toISOString();
+    const activity = AgentActivity.start({
+      title: "T3 Code",
+      subtitle: "Agent work in progress",
+      activeCount: 1,
+      updatedAt: nowIso,
+      activities: [
+        {
+          environmentId: "",
+          threadId: "",
+          projectTitle: input.projectTitle,
+          threadTitle: input.threadTitle,
+          modelTitle: "",
+          phase: "starting",
+          status: "Connecting",
+          updatedAt: nowIso,
+          deepLink: "/",
+        },
+      ],
+    });
+    logRegistrationDebug("live activity card armed for local work", {
+      threadTitle: input.threadTitle,
+    });
+    runRegistrationInBackground(
+      registerLiveActivityPushToken({ activity }).pipe(Effect.asVoid),
+      "live activity arming after local task start failed",
+    );
+  } catch (error) {
+    logRegistrationError("live activity arming failed", error);
+  }
+}
+
 function readAgentActivitySnapshot(): Effect.Effect<
   RelayAgentActivitySnapshotResponse | null,
   never,

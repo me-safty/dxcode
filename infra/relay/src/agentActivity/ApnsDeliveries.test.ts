@@ -277,7 +277,7 @@ describe("ApnsDeliveries", () => {
     }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs, queuedStarts })));
   });
 
-  it.effect("updates an armed card to the idle state when nothing is running", () => {
+  it.effect("ends the armed card when nothing remains to show", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const queuedJobs: Array<SignedApnsDeliveryJob> = [];
 
@@ -289,22 +289,17 @@ describe("ApnsDeliveries", () => {
         nowMs: 5_000,
       });
 
-      // The card is user-armed: tearing it down on an empty aggregate would
-      // force a remote start (which no longer exists) the next time work
-      // begins, so it idles instead.
-      expect(result?.kind).toBe("live_activity_update");
+      // An armed card always shows content (live or recently finished work);
+      // once the aggregate is empty the card ends rather than rendering an
+      // empty state. The app re-arms on the next open with content.
+      expect(result?.kind).toBe("live_activity_end");
       expect(result?.ok).toBe(true);
       expect(queuedJobs).toMatchObject([
         {
           payload: {
-            kind: "live_activity_update",
+            kind: "live_activity_end",
             target: {
               token: "activity-token",
-            },
-            aggregate: {
-              activeCount: 0,
-              subtitle: "Waiting for agents",
-              activities: [],
             },
           },
         },

@@ -747,15 +747,29 @@ describe("makeAggregateState", () => {
     expect(aggregate?.activities).toMatchObject([{ threadId: "thread-active" }]);
   });
 
-  it("never resurrects lingering terminal rows once nothing is active", () => {
+  it("keeps showing recently finished work when nothing is active", () => {
     const lingeringCompleted: RelayAgentActivityState = {
       ...state,
       phase: "completed",
       updatedAt: "1970-01-01T00:59:00.000Z",
     };
+    const aggregate = AgentActivityPublisher.makeAggregateState({
+      activeStates: [lingeringCompleted],
+      terminalState: null,
+      nowMs: hourMs,
+    });
+
+    // An armed card never renders an empty state: recently finished threads
+    // keep Done content on it, and once they age out the aggregate becomes
+    // null and the delivery layer ends the card.
+    expect(aggregate).toMatchObject({
+      activeCount: 0,
+      subtitle: "Agent work completed",
+      activities: [{ phase: "completed", status: "Done" }],
+    });
     expect(
       AgentActivityPublisher.makeAggregateState({
-        activeStates: [lingeringCompleted],
+        activeStates: [{ ...lingeringCompleted, updatedAt: "1970-01-01T00:50:00.000Z" }],
         terminalState: null,
         nowMs: hourMs,
       }),

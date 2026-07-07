@@ -253,10 +253,28 @@ export function makeAggregateState(input: {
     (state) => !isTerminalPhase(state) && !isExpiredAgentActivityState(state, input.nowMs),
   );
   if (activeStates.length === 0) {
-    // Only the just-published terminal event ends the activity with a Done
-    // aggregate; lingering terminal rows alone never do, so a replay after a
-    // fresh registration doesn't resurrect a finished thread.
-    return input.terminalState === null ? null : terminalAggregateState(input.terminalState);
+    if (input.terminalState !== null) {
+      return terminalAggregateState(input.terminalState);
+    }
+    // With no live work, recently finished threads keep the card showing
+    // Done/Failed content (an armed card never renders an empty state). The
+    // newly-terminal alert rules key off the previously delivered aggregate,
+    // so replays repaint this without buzzing. Once the terminal rows age
+    // out, the aggregate is null and the delivery layer ends the card.
+    const recentTerminal = input.activeStates
+      .filter((state) => isRecentTerminalState(state, input.nowMs))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const newest = recentTerminal[0];
+    if (!newest) {
+      return null;
+    }
+    return sanitizeAgentActivityAggregateState({
+      title: "T3 Code",
+      subtitle: newest.phase === "failed" ? "Agent work failed" : "Agent work completed",
+      activeCount: 0,
+      updatedAt: newest.updatedAt,
+      activities: recentTerminal.slice(0, 3).map(aggregateRowForState),
+    });
   }
   // Recently finished threads ride along after the active ones (display slots
   // permitting) so a completion is visible as Done/Failed instead of the row

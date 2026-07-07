@@ -329,25 +329,6 @@ function notificationForAggregate(input: {
 // "suppressed" means a Live Activity owns this state but no update is due
 // (unchanged or throttled); callers must not fall back to an alert push, or
 // every republish of a waiting aggregate would ring the device.
-// The lock-screen card shown when the user's card is armed but nothing is
-// running: activities are created only by the app in the foreground (never
-// remotely), so an empty aggregate means "show idle", not "tear the card
-// down" — ending it would force an unreliable background token handoff the
-// next time work starts.
-export function idleAggregateState(nowMs: number): RelayAgentActivityAggregateState {
-  return {
-    title: "T3 Code",
-    subtitle: "Waiting for agents",
-    activeCount: 0,
-    updatedAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs)),
-    activities: [],
-  };
-}
-
-function isIdleAggregate(aggregate: RelayAgentActivityAggregateState): boolean {
-  return aggregate.activeCount === 0 && aggregate.activities.length === 0;
-}
-
 function chooseLiveActivityDelivery(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
@@ -371,17 +352,21 @@ function chooseLiveActivityDelivery(input: {
   if (!input.target.activity_push_token) {
     return null;
   }
-  const nextAggregate = input.aggregate ?? idleAggregateState(input.nowMs);
-  const previousAggregate = parseAggregate(input.target.last_aggregate_json);
-  // An idle card that is already idle needs no redraw; updatedAt alone would
-  // otherwise defeat the equality check inside shouldUpdateLiveActivity.
-  if (
-    isIdleAggregate(nextAggregate) &&
-    previousAggregate !== null &&
-    isIdleAggregate(previousAggregate)
-  ) {
-    return "suppressed";
+  // An armed card always shows content: live agents, or recently finished
+  // ones (the publisher keeps Done/Failed rows in the aggregate for a
+  // while). A null aggregate means there is truly nothing left to show, so
+  // the card ends — arming is cheap now that the app re-arms on any open
+  // with content.
+  if (input.aggregate === null) {
+    return {
+      kind: "live_activity_end",
+      token: input.target.activity_push_token,
+      aggregate: null,
+      alert: null,
+    };
   }
+  const nextAggregate = input.aggregate;
+  const previousAggregate = parseAggregate(input.target.last_aggregate_json);
   return shouldUpdateLiveActivity({
     previousAggregate,
     nextAggregate,
