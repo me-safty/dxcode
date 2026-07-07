@@ -72,6 +72,7 @@ export function ThreadFileNavigatorPane(props: {
     <FileTreeBrowser
       entries={entriesData?.entries ?? []}
       error={entriesQuery.error}
+      includesNativeStackHeader={false}
       isPending={entriesQuery.isPending}
       searchQuery={searchQuery}
       selectedPath={props.selectedPath}

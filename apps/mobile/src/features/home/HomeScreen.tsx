@@ -16,6 +16,10 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  nativeStackBottomScrollInset,
+  usesNativeStackAutomaticScrollInsets,
+} from "../../lib/nativeStackInsets";
 import { useThemeColor } from "../../lib/useThemeColor";
 
 import { EmptyState } from "../../components/EmptyState";
@@ -427,8 +431,10 @@ export function HomeScreen(props: HomeScreenProps) {
           ListHeaderComponent={listHeader}
           ListEmptyComponent={listEmpty}
           style={{ flex: 1 }}
-          automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
-          contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+          automaticallyAdjustsScrollIndicatorInsets={usesNativeStackAutomaticScrollInsets()}
+          contentInsetAdjustmentBehavior={
+            usesNativeStackAutomaticScrollInsets() ? "automatic" : "never"
+          }
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
@@ -436,7 +442,7 @@ export function HomeScreen(props: HomeScreenProps) {
           recycleItems
           scrollEventThrottle={16}
           contentContainerStyle={{
-            paddingBottom: Platform.OS === "ios" ? Math.max(insets.bottom, 24) + 24 : 24,
+            paddingBottom: nativeStackBottomScrollInset(insets, 24) + 24,
           }}
           scrollIndicatorInsets={
             Platform.OS === "ios"

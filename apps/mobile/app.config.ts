@@ -80,7 +80,8 @@ const config: ExpoConfig = {
     // could land on a binary missing the native changes it needs and crash.
     policy: process.env.MOBILE_VERSION_POLICY ?? "fingerprint",
   },
-  orientation: "portrait",
+  // Allow tablet/DeX rotation; compact phones still use portrait-first layouts.
+  orientation: "default",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
   updates: {
@@ -120,7 +121,7 @@ const config: ExpoConfig = {
       backgroundImage: "./assets/android-icon-background.png",
       monochromeImage: "./assets/android-icon-monochrome.png",
     },
-    predictiveBackGestureEnabled: false,
+    predictiveBackGestureEnabled: true,
   },
   web: {
     favicon: "./assets/favicon.png",
@@ -160,6 +161,11 @@ const config: ExpoConfig = {
             { name: "GoogleUtilities", modular_headers: true },
             { name: "RecaptchaInterop", modular_headers: true },
           ],
+        },
+        android: {
+          // targetSdk 35+ renders edge-to-edge; SafeAreaProvider + screen inset helpers
+          // keep primary content out of the status/navigation bars.
+          edgeToEdgeEnabled: true,
         },
       },
     ],

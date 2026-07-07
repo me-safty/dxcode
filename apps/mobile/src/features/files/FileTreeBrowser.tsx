@@ -14,6 +14,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText as Text } from "../../components/AppText";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 import { cn } from "../../lib/cn";
+import {
+  nativeStackScrollIndicatorTopInset,
+  nativeStackTopScrollInset,
+  usesNativeStackAutomaticScrollInsets,
+} from "../../lib/nativeStackInsets";
 import { useThemeColor } from "../../lib/useThemeColor";
 import {
   buildFileTree,
@@ -114,6 +119,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
 export function FileTreeBrowser(props: {
   readonly entries: ReadonlyArray<ProjectEntry>;
   readonly error: string | null;
+  readonly includesNativeStackHeader?: boolean;
   readonly isPending: boolean;
   readonly searchQuery: string;
   readonly selectedPath: string | null;
@@ -127,9 +133,12 @@ export function FileTreeBrowser(props: {
     readonly selectedPathAtPress: string | null;
   } | null>(null);
   const insets = useSafeAreaInsets();
-  // Native transparent-header height ≈ safe-area top + nav bar (~44). Matches the
-  // observed adjustedContentInset bottom (~102) seen in the native trace.
-  const headerInset = Platform.OS === "ios" ? insets.top + 44 : 0;
+  const includesNativeStackHeader = props.includesNativeStackHeader ?? true;
+  const usesAutomaticInsets = usesNativeStackAutomaticScrollInsets();
+  const headerInset = nativeStackScrollIndicatorTopInset(insets, includesNativeStackHeader);
+  const scrollTopPadding = usesAutomaticInsets
+    ? 8
+    : nativeStackTopScrollInset(insets, { extra: 8, includeHeader: includesNativeStackHeader });
   const iconColor = String(useThemeColor("--color-icon-muted"));
   const { onPreviewFile, onSelectFile, selectedPath: controlledSelectedPath } = props;
   const controlledSelectedPathRef = useRef(controlledSelectedPath);
@@ -249,9 +258,9 @@ export function FileTreeBrowser(props: {
       style={{ flex: 1 }}
       data={visibleNodes}
       keyExtractor={(item) => item.node.path}
-      contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+      contentInsetAdjustmentBehavior={usesAutomaticInsets ? "automatic" : "never"}
       scrollIndicatorInsets={
-        Platform.OS === "ios" ? { top: headerInset, left: 0, right: 0, bottom: 0 } : undefined
+        usesAutomaticInsets ? { top: headerInset, left: 0, right: 0, bottom: 0 } : undefined
       }
       keyboardDismissMode="on-drag"
       keyboardShouldPersistTaps="handled"
@@ -259,7 +268,7 @@ export function FileTreeBrowser(props: {
       maxToRenderPerBatch={FILE_TREE_RENDER_BATCH_SIZE}
       updateCellsBatchingPeriod={16}
       windowSize={5}
-      contentContainerStyle={{ paddingTop: 8, paddingBottom: 8 }}
+      contentContainerStyle={{ paddingTop: scrollTopPadding, paddingBottom: 8 }}
       refreshControl={<RefreshControl refreshing={props.isPending} onRefresh={props.onRefresh} />}
       renderItem={renderItem}
       ListEmptyComponent={

@@ -35,6 +35,11 @@ import { AppText as Text } from "../../components/AppText";
 import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { useAtomCommand } from "../../state/use-atom-command";
+import {
+  nativeStackScrollIndicatorTopInset,
+  nativeStackTopScrollInset,
+  usesNativeStackAutomaticScrollInsets,
+} from "../../lib/nativeStackInsets";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useThreadDraftForThread } from "../../state/use-thread-composer-state";
 import { EnvironmentConnectionNotice } from "../connection/EnvironmentConnectionNotice";
@@ -273,9 +278,13 @@ function ReviewFileNavigator({
         // The nested native header is translucent; start the list below it so
         // the scroll-edge effect can sample the content (same treatment as
         // FileTreeBrowser in the Files pane).
-        paddingTop: Platform.OS === "ios" ? insets.top + 44 + 8 : 8,
+        paddingTop: nativeStackTopScrollInset(insets, { extra: 8 }),
       }}
-      scrollIndicatorInsets={Platform.OS === "ios" ? { top: insets.top + 44 } : undefined}
+      scrollIndicatorInsets={
+        usesNativeStackAutomaticScrollInsets()
+          ? { top: nativeStackScrollIndicatorTopInset(insets) }
+          : undefined
+      }
       renderItem={renderFile}
     />
   );

@@ -50,6 +50,7 @@ import Animated, {
   LinearTransition,
   type SharedValue,
 } from "react-native-reanimated";
+import { usesNativeStackAutomaticScrollInsets } from "../../lib/nativeStackInsets";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
@@ -1024,7 +1025,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const topContentInset = props.contentTopInset ?? insets.top + 44;
   const bottomContentInset = props.contentBottomInset ?? 18;
   const usesNativeAutomaticInsets =
-    props.usesAutomaticContentInsets === true && Platform.OS === "ios";
+    props.usesAutomaticContentInsets === true && usesNativeStackAutomaticScrollInsets();
   // With automatic insets the header inset lives in UIKit's adjustedContentInset,
   // which LegendList's JS anchoring math cannot see — it measures the anchored
   // end space from the scroll view's frame top. Fold the header height back into
