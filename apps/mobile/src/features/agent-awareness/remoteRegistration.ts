@@ -98,6 +98,10 @@ function readRelayConfig(): { readonly url: string } | null {
   return { url: relayUrl };
 }
 
+export function canRegisterRemotePush(): boolean {
+  return Platform.OS === "ios" || Platform.OS === "android";
+}
+
 function canRegisterRemoteLiveActivities(): boolean {
   return Platform.OS === "ios";
 }
@@ -134,12 +138,14 @@ export function setAgentAwarenessRelayTokenProvider(
     }
     return;
   }
-  ensurePushToStartListener();
+  if (canRegisterRemoteLiveActivities()) {
+    ensurePushToStartListener();
+    runRegistrationInBackground(
+      refreshActiveLiveActivityRemoteRegistration(),
+      "active live activity registration after cloud sign-in failed",
+    );
+  }
   ensurePushTokenListener();
-  runRegistrationInBackground(
-    refreshActiveLiveActivityRemoteRegistration(),
-    "active live activity registration after cloud sign-in failed",
-  );
   if (isExistingIdentity) {
     return;
   }
@@ -155,9 +161,35 @@ function iosMajorVersion(): number {
   return Number.isFinite(major) ? major : 18;
 }
 
+function androidSdkVersion(): number {
+  const version = Platform.Version;
+  if (typeof version === "number") {
+    return Math.floor(version);
+  }
+  const parsed = Number.parseInt(version, 10);
+  return Number.isFinite(parsed) ? parsed : 26;
+}
+
+function deviceRegistrationLabel(): string {
+  if (Platform.OS === "android") {
+    return Constants.deviceName?.trim() || "Android device";
+  }
+  return Constants.deviceName?.trim() || "iOS device";
+}
+
+function normalizeObservedPushToken(
+  token: Notifications.DevicePushToken | null | undefined,
+): string | null {
+  if (token?.type !== Platform.OS || typeof token.data !== "string") {
+    return null;
+  }
+  const normalized = token.data.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function nativePushTokenRegistration(observedPushToken?: string) {
   return Effect.gen(function* () {
-    if (!canRegisterRemoteLiveActivities()) {
+    if (!canRegisterRemotePush()) {
       return { notificationsEnabled: false, pushToken: null };
     }
     if (observedPushToken) {
@@ -189,10 +221,7 @@ function nativePushTokenRegistration(observedPushToken?: string) {
       ),
       Effect.orElseSucceed(() => null),
     );
-    const pushToken =
-      token?.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0
-        ? token.data.trim()
-        : null;
+    const pushToken = normalizeObservedPushToken(token);
     return { notificationsEnabled: pushToken !== null, pushToken };
   });
 }
@@ -415,7 +444,7 @@ function registerDevice(
   expectedGeneration = deviceRegistrationGeneration,
 ): Effect.Effect<void, unknown, ManagedRelay.ManagedRelayClient> {
   return Effect.gen(function* () {
-    if (!canRegisterRemoteLiveActivities()) {
+    if (!canRegisterRemotePush()) {
       logRegistrationDebug("device registration skipped; platform does not support it");
       return;
     }
@@ -444,19 +473,34 @@ function registerDevice(
       expectedGeneration,
       notificationsEnabled: pushTokenRegistration.notificationsEnabled,
     });
-    yield* registerDeviceWithRelay(
-      makeRelayDeviceRegistrationRequest({
-        deviceId,
-        label: Constants.deviceName?.trim() || "iOS device",
-        iosMajorVersion: iosMajorVersion(),
-        appVersion: Constants.expoConfig?.version,
-        ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
-        ...(input?.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
-        notificationsEnabled: pushTokenRegistration.notificationsEnabled,
-        preferences,
-      }),
-      expectedGeneration,
-    );
+    const registrationRequest =
+      Platform.OS === "android"
+        ? makeRelayDeviceRegistrationRequest({
+            deviceId,
+            label: deviceRegistrationLabel(),
+            platform: "android",
+            androidSdkVersion: androidSdkVersion(),
+            appVersion: Constants.expoConfig?.version,
+            ...(pushTokenRegistration.pushToken
+              ? { pushToken: pushTokenRegistration.pushToken }
+              : {}),
+            notificationsEnabled: pushTokenRegistration.notificationsEnabled,
+            preferences,
+          })
+        : makeRelayDeviceRegistrationRequest({
+            deviceId,
+            label: deviceRegistrationLabel(),
+            platform: "ios",
+            iosMajorVersion: iosMajorVersion(),
+            appVersion: Constants.expoConfig?.version,
+            ...(pushTokenRegistration.pushToken
+              ? { pushToken: pushTokenRegistration.pushToken }
+              : {}),
+            ...(input?.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
+            notificationsEnabled: pushTokenRegistration.notificationsEnabled,
+            preferences,
+          });
+    yield* registerDeviceWithRelay(registrationRequest, expectedGeneration);
   });
 }
 
@@ -484,33 +528,39 @@ function ensurePushToStartListener(): void {
 }
 
 function ensurePushTokenListener(): void {
-  if (pushTokenSubscription || !canRegisterRemoteLiveActivities()) {
+  if (pushTokenSubscription || !canRegisterRemotePush()) {
     return;
   }
 
   pushTokenSubscription = Notifications.addPushTokenListener((token) => {
-    if (token.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0) {
-      enqueueDeviceRegistration(
-        { observedPushToken: token.data.trim() },
-        "native APNs token rotation registration failed",
-      );
+    const observedPushToken = normalizeObservedPushToken(token);
+    if (!observedPushToken) {
+      return;
     }
+    enqueueDeviceRegistration(
+      { observedPushToken },
+      Platform.OS === "android"
+        ? "native FCM token rotation registration failed"
+        : "native APNs token rotation registration failed",
+    );
   });
 }
 
 export function registerAgentAwarenessConnection(connection: SavedRemoteConnection): void {
-  if (!canRegisterRemoteLiveActivities()) {
+  if (!canRegisterRemotePush()) {
     return;
   }
 
   environmentConnections.set(connection.environmentId, connection);
-  ensurePushToStartListener();
+  if (canRegisterRemoteLiveActivities()) {
+    ensurePushToStartListener();
+    runRegistrationInBackground(
+      refreshActiveLiveActivityRemoteRegistration(),
+      "active live activity registration after environment connection failed",
+    );
+  }
   ensurePushTokenListener();
   enqueueDeviceRegistration({}, "device registration failed");
-  runRegistrationInBackground(
-    refreshActiveLiveActivityRemoteRegistration(),
-    "active live activity registration after environment connection failed",
-  );
 }
 
 function removeAgentAwarenessConnection(environmentId: EnvironmentId): void {

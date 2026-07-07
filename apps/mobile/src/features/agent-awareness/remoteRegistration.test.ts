@@ -20,6 +20,7 @@ import { makeRelayDeviceRegistrationRequest } from "./registrationPayload";
 import {
   AgentAwarenessOperationError,
   __resetAgentAwarenessRemoteRegistrationForTest,
+  canRegisterRemotePush,
   refreshActiveLiveActivityRemoteRegistration,
   refreshAgentAwarenessRegistration,
   normalizeAgentAwarenessRelayBaseUrl,
@@ -31,6 +32,10 @@ import {
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
 
+const platformState = vi.hoisted(() => ({
+  OS: "ios" as "ios" | "android",
+  Version: "18.0" as string | number,
+}));
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const widgetMocks = vi.hoisted(() => ({
   getInstances: vi.fn(() => []),
@@ -97,8 +102,12 @@ vi.mock("expo-secure-store", () => ({
 
 vi.mock("react-native", () => ({
   Platform: {
-    OS: "ios",
-    Version: "18.0",
+    get OS() {
+      return platformState.OS;
+    },
+    get Version() {
+      return platformState.Version;
+    },
   },
 }));
 
@@ -172,6 +181,8 @@ describe("makeRelayDeviceRegistrationRequest", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
     vi.stubGlobal("__DEV__", false);
+    platformState.OS = "ios";
+    platformState.Version = "18.0";
     secureStore.clear();
     backgroundRuntime.pending.length = 0;
     Constants.expoConfig!.extra = {};
@@ -185,6 +196,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       makeRelayDeviceRegistrationRequest({
         deviceId: "device-1",
         label: "Julius's iPhone",
+        platform: "ios",
         iosMajorVersion: 18,
         appVersion: "1.0.0",
         pushToken: "apns-token",
@@ -218,6 +230,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       makeRelayDeviceRegistrationRequest({
         deviceId: "device-1",
         label: "Julius's iPhone",
+        platform: "ios",
         iosMajorVersion: 18,
         appVersion: "1.0.0",
         pushToStartToken: "push-to-start-token",
@@ -454,6 +467,13 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       expect(backgroundRuntime.pending).toHaveLength(0);
       expect(tokenProvider).toHaveBeenCalledTimes(2);
     }).pipe(Effect.provide(relayTestLayer));
+  });
+
+  it("enables remote push registration on iOS and Android", () => {
+    platformState.OS = "ios";
+    expect(canRegisterRemotePush()).toBe(true);
+    platformState.OS = "android";
+    expect(canRegisterRemotePush()).toBe(true);
   });
 
   it("only registers again when the authenticated identity changes", () => {
