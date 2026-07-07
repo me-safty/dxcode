@@ -1,7 +1,6 @@
 import {
   EventId,
   MessageId,
-  ProviderDriverKind,
   ThreadId,
   TurnId,
   type OrchestrationThreadActivity,
@@ -53,11 +52,12 @@ function makeActivity(overrides: {
 
 function makeSession(overrides: Partial<ThreadSession> = {}): ThreadSession {
   return {
-    provider: ProviderDriverKind.make("codex"),
+    threadId: ThreadId.make("thread-1"),
     status: "ready",
-    orchestrationStatus: "ready",
-    activeTurnId: undefined,
-    createdAt: "2026-02-23T00:00:00.000Z",
+    providerName: null,
+    runtimeMode: "full-access",
+    activeTurnId: null,
+    lastError: null,
     updatedAt: "2026-02-23T00:00:00.000Z",
     ...overrides,
   };
@@ -1707,23 +1707,21 @@ describe("derivePhase", () => {
     expect(
       derivePhase(
         makeSession({
-          status: "running",
-          orchestrationStatus: "interrupted",
-          activeTurnId: undefined,
+          status: "interrupted",
+          activeTurnId: null,
         }),
       ),
-    ).toBe("ready");
+    ).toBe("disconnected");
   });
 
   it("does not leave the composer stuck running after provider errors", () => {
     expect(
       derivePhase(
         makeSession({
-          status: "running",
-          orchestrationStatus: "error",
-          activeTurnId: undefined,
+          status: "error",
+          activeTurnId: null,
         }),
       ),
-    ).toBe("ready");
+    ).toBe("disconnected");
   });
 });
