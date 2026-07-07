@@ -61,8 +61,16 @@ function firstRecord(value: unknown): Record<string, unknown> | undefined {
   return Array.isArray(value) && isRecord(value[0]) ? value[0] : undefined;
 }
 
+function runtimeFetch(): typeof fetch {
+  const fetchImplementation = Reflect.get(globalThis, "fetch");
+  if (typeof fetchImplementation !== "function") {
+    throw new Error("fetch is not available in this runtime.");
+  }
+  return fetchImplementation.bind(globalThis) as typeof fetch;
+}
+
 async function fetchJson(url: string): Promise<unknown> {
-  const response = await globalThis.fetch(url, {
+  const response = await runtimeFetch()(url, {
     headers: { accept: "application/json" },
   });
   if (!response.ok) {

@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import * as NodeCrypto from "node:crypto";
+import * as NodeStream from "node:stream";
+import * as NodeStreamPromises from "node:stream/promises";
 
 import type {
   NeuropharmCompoundIdentity,
@@ -161,6 +161,14 @@ export interface LocalDatabaseDownloadOutcome {
   readonly interactions: ReadonlyArray<NeuropharmInteractionRecord>;
 }
 
+function runtimeFetch(): typeof fetch {
+  const fetchImplementation = Reflect.get(globalThis, "fetch");
+  if (typeof fetchImplementation !== "function") {
+    throw new Error("fetch is not available in this runtime.");
+  }
+  return fetchImplementation.bind(globalThis) as typeof fetch;
+}
+
 function stableId(prefix: string, parts: ReadonlyArray<string>): string {
   let hash = 2166136261;
   for (const char of parts.join("|")) {
@@ -245,17 +253,17 @@ async function streamDownloadToFile(input: {
   }
 
   const tempPath = `${input.filePath}.download`;
-  const hash = createHash("sha256");
+  const hash = NodeCrypto.createHash("sha256");
   let bytes = 0;
   const { createWriteStream } = await import("node:fs");
-  const nodeStream = Readable.fromWeb(input.response.body as never);
+  const nodeStream = NodeStream.Readable.fromWeb(input.response.body as never);
   nodeStream.on("data", (chunk: Buffer | Uint8Array) => {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.byteLength;
     hash.update(buffer);
   });
 
-  await pipeline(nodeStream, createWriteStream(tempPath));
+  await NodeStreamPromises.pipeline(nodeStream, createWriteStream(tempPath));
 
   const fs = await import("node:fs/promises");
   await fs.rename(tempPath, input.filePath);
@@ -418,7 +426,7 @@ export async function downloadLocalDatabase(input: {
     }
   }
 
-  const response = await globalThis.fetch(manifest.downloadUrl, {
+  const response = await runtimeFetch()(manifest.downloadUrl, {
     headers: { accept: "*/*" },
   });
   if (!response.ok) {
