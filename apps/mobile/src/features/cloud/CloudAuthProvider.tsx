@@ -18,7 +18,7 @@ import {
   setAgentAwarenessRelayTokenProvider,
   unregisterAgentAwarenessDeviceForCurrentUser,
 } from "../agent-awareness/remoteRegistration";
-import { requestConnectOnboarding } from "./connectOnboarding";
+import { clearConnectOnboardingRequest, requestConnectOnboarding } from "./connectOnboarding";
 import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "./publicConfig";
 
 function resetManagedRelayTokenCache() {
@@ -68,12 +68,17 @@ function CloudAuthBridge(props: { readonly children: ReactNode }) {
     const nextAccount = isSignedIn && userId ? userId : null;
     observedAccountRef.current = nextAccount;
 
-    // Every sign-in that completes during this session (a cold start observes
-    // undefined → account and must not re-prompt) requests the T3 Connect
-    // onboarding sheet — sign-out clears the connected environments, so each
-    // new session starts with no devices to reach.
-    if (previousObservedAccount === null && nextAccount !== null) {
-      requestConnectOnboarding(nextAccount);
+    // Every sign-in or account switch that completes during this session (a
+    // cold start observes undefined → account and must not re-prompt) requests
+    // the T3 Connect onboarding sheet — account transitions clear the
+    // connected environments, so each new session starts with no devices to
+    // reach. Sign-out drops any not-yet-presented request instead.
+    if (previousObservedAccount !== undefined && previousObservedAccount !== nextAccount) {
+      if (nextAccount !== null) {
+        requestConnectOnboarding(nextAccount);
+      } else {
+        clearConnectOnboardingRequest();
+      }
     }
 
     const queueAccountCleanup = (

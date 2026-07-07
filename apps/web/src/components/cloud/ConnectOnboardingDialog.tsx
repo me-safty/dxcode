@@ -89,15 +89,16 @@ function ConfiguredConnectOnboardingDialog() {
 
   const optOutAccounts = optOutState.optOutAccounts;
 
-  // Every sign-in that completes during this session requests the wizard. A
-  // cold load observes undefined → account and must not re-prompt — only a
-  // null → account transition is a sign-in.
+  // Every sign-in or account switch that completes during this session
+  // requests the wizard — account transitions clear the connected relay
+  // environments, so each new session starts with no devices to reach. A cold
+  // load observes undefined → account and must not re-prompt.
   useEffect(() => {
     if (!isLoaded) return;
     const previousAccount = observedAccountRef.current;
     const nextAccount = isSignedIn && userId ? userId : null;
     observedAccountRef.current = nextAccount;
-    if (previousAccount === null && nextAccount !== null) {
+    if (previousAccount !== undefined && previousAccount !== nextAccount && nextAccount !== null) {
       setRequestedAccount(nextAccount);
     }
   }, [isLoaded, isSignedIn, userId]);
@@ -192,7 +193,9 @@ function ConfiguredConnectOnboardingDialog() {
     <Dialog
       open={openForAccount !== null}
       onOpenChange={(open) => {
-        if (!open) complete();
+        // Keep the dialog up while a link request is in flight so its outcome
+        // (and any failure) stays visible.
+        if (!open && !isApplying) complete();
       }}
     >
       <DialogPopup className="max-w-xl">

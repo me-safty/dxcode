@@ -133,6 +133,16 @@ export function CloudEnvironmentRows(props: {
           {controller.relayDiscovery.errorTraceId ? (
             <CopyTraceIdButton traceId={controller.relayDiscovery.errorTraceId} />
           ) : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={controller.relayDiscovery.isRefreshing}
+            onPress={() => {
+              void controller.refreshRelayEnvironments();
+            }}
+            className="self-start rounded-full bg-subtle px-3.5 py-2 active:opacity-70 disabled:opacity-50"
+          >
+            <Text className="text-xs font-t3-bold text-foreground">Try again</Text>
+          </Pressable>
         </View>
       ) : (
         <View collapsable={false} className="rounded-[24px] bg-card p-5">

@@ -199,14 +199,28 @@ export async function loadPreferences(): Promise<Preferences> {
   return preferences;
 }
 
+// Preference writes are read-modify-write over one JSON blob; concurrent
+// writers would drop each other's fields, so all writes are serialized here.
+let preferencesWriteQueue: Promise<unknown> = Promise.resolve();
+
+export async function updatePreferences(
+  update: (current: Preferences) => Partial<Preferences>,
+): Promise<Preferences> {
+  const task = preferencesWriteQueue.then(async () => {
+    const current = await loadPreferences();
+    const next: Preferences = {
+      ...current,
+      ...update(current),
+    };
+    await writeJsonStorageItem(PREFERENCES_KEY, next);
+    return next;
+  });
+  preferencesWriteQueue = task.catch(() => undefined);
+  return task;
+}
+
 export async function savePreferencesPatch(patch: Partial<Preferences>): Promise<Preferences> {
-  const current = await loadPreferences();
-  const next: Preferences = {
-    ...current,
-    ...patch,
-  };
-  await writeJsonStorageItem(PREFERENCES_KEY, next);
-  return next;
+  return updatePreferences(() => patch);
 }
 
 export async function loadOrCreateAgentAwarenessDeviceId(): Promise<string> {
