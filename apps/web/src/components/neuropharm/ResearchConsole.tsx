@@ -1,9 +1,11 @@
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { NeuropharmAnalysisMode, NeuropharmAnalysisResult } from "@t3tools/contracts";
 import { ActivityIcon, FileTextIcon, NetworkIcon, ShieldAlertIcon } from "lucide-react";
 import { useState } from "react";
 
-import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { readEnvironmentApi } from "../../environmentApi";
+import { usePrimaryEnvironmentId } from "../../state/environments";
+import { neuropharmEnvironment } from "../../state/neuropharm";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import {
@@ -24,8 +26,13 @@ const modes = [
   { value: "stack_checker", label: "Interaction check" },
 ] satisfies ReadonlyArray<{ value: NeuropharmAnalysisMode; label: string }>;
 
+function errorMessageFromUnknown(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function ResearchConsole() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const analyze = useAtomCommand(neuropharmEnvironment.analyze, { reportFailure: false });
   const [mode, setMode] = useState<NeuropharmAnalysisMode>("compound_profile");
   const [query, setQuery] = useState("modafinil DAT cognition");
   const [powerUser, setPowerUser] = useState(true);
@@ -37,20 +44,25 @@ export function ResearchConsole() {
     setRunning(true);
     setError(null);
     try {
-      const api = primaryEnvironmentId ? readEnvironmentApi(primaryEnvironmentId) : undefined;
-      if (!api) {
+      if (primaryEnvironmentId === null) {
         throw new Error("Neuropharm database not connected.");
       }
-      const analysis = await api.neuropharm.analyze({
-        mode,
-        query,
-        includeLatex: true,
-        includeDiagrams: true,
-        powerUser,
+      const analysis = await analyze({
+        environmentId: primaryEnvironmentId,
+        input: {
+          mode,
+          query,
+          includeLatex: true,
+          includeDiagrams: true,
+          powerUser,
+        },
       });
-      setResult(analysis);
+      if (analysis._tag === "Failure") {
+        throw squashAtomCommandFailure(analysis);
+      }
+      setResult(analysis.value);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Analysis failed.");
+      setError(errorMessageFromUnknown(cause, "Analysis failed."));
     } finally {
       setRunning(false);
     }
@@ -89,7 +101,10 @@ export function ResearchConsole() {
             placeholder="Enter compound name or receptor (e.g., modafinil, DAT, 5-HT2A)"
           />
         </div>
-        <label className="flex items-center gap-2.5 text-xs text-muted-foreground" title="Enables extrapolation with confidence labels">
+        <label
+          className="flex items-center gap-2.5 text-xs text-muted-foreground"
+          title="Enables extrapolation with confidence labels"
+        >
           <Switch checked={powerUser} onCheckedChange={setPowerUser} />
           Research mode
         </label>
