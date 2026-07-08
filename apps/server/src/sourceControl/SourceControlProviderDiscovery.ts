@@ -39,6 +39,17 @@ export type SourceControlCliDiscoverySpec = SourceControlDiscoverySpecBase & {
   readonly versionArgs: ReadonlyArray<string>;
   readonly authArgs: ReadonlyArray<string>;
   readonly parseAuth: (input: SourceControlAuthProbeInput) => SourceControlProviderAuth;
+  /**
+   * Only consulted when `parseAuth` returns `outdated`: probe the host for how
+   * the CLI was actually installed and return the exact upgrade command (or
+   * `null` to keep `parseAuth`'s platform default). Any process error must
+   * resolve to `null` — this can never fail discovery.
+   */
+  readonly resolveUpgradeCommand?: (input: {
+    readonly process: VcsProcess.VcsProcess["Service"];
+    readonly cwd: string;
+    readonly platform: NodeJS.Platform;
+  }) => Effect.Effect<string | null>;
   readonly refineUnknownRemote?: (
     input: SourceControlUnknownRemoteRefinementInput,
   ) => SourceControlProviderInfo | null;
@@ -257,16 +268,30 @@ export function probeSourceControlProvider(input: {
           Effect.flatMap((result) =>
             Effect.gen(function* () {
               const platform = yield* HostProcessPlatform;
-              return {
-                ...item,
-                auth: spec.parseAuth({
-                  stdout: result.stdout,
-                  stderr: result.stderr,
-                  exitCode: result.exitCode,
-                  version: item.version,
-                  platform,
-                }),
-              } satisfies SourceControlProviderDiscoveryItem;
+              const auth = spec.parseAuth({
+                stdout: result.stdout,
+                stderr: result.stderr,
+                exitCode: result.exitCode,
+                version: item.version,
+                platform,
+              });
+
+              // When the CLI is outdated, let the provider probe how it was
+              // installed and refine the upgrade command. Failures fall back to
+              // the platform default already carried on `auth.detail`.
+              if (auth.status === "outdated" && spec.resolveUpgradeCommand !== undefined) {
+                const resolved = yield* spec
+                  .resolveUpgradeCommand({ process: input.process, cwd: input.cwd, platform })
+                  .pipe(Effect.orElseSucceed(() => null));
+                if (resolved !== null && resolved.trim().length > 0) {
+                  return {
+                    ...item,
+                    auth: providerAuth({ status: "outdated", detail: resolved }),
+                  } satisfies SourceControlProviderDiscoveryItem;
+                }
+              }
+
+              return { ...item, auth } satisfies SourceControlProviderDiscoveryItem;
             }),
           ),
           Effect.catch((cause) =>

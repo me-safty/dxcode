@@ -10,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as GitHubCli from "./GitHubCli.ts";
+import type * as VcsProcess from "../vcs/VcsProcess.ts";
 import { findAuthenticatedGitHubAccount, parseGitHubAuthStatus } from "./gitHubAuthStatus.ts";
 import { decodeGitHubPullRequestListJson } from "./gitHubPullRequests.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
@@ -76,13 +77,92 @@ function gitHubCliUpgradeCommand(platform: NodeJS.Platform | undefined): string 
     case "win32":
       return "winget upgrade --id GitHub.cli";
     case "linux":
-      // Debian/Ubuntu default. Detecting the actual package manager is a follow-up.
+      // Debian/Ubuntu default, used when `resolveGitHubUpgradeCommand` can't
+      // identify the actual package manager.
       return "sudo apt update && sudo apt install gh";
     default:
       // BSDs, illumos, AIX, etc.: no safe single command. Return null so we show
       // the generic "update it" guidance instead of a command that can't run.
       return null;
   }
+}
+
+function ghUpgradeProbe(
+  process: VcsProcess.VcsProcess["Service"],
+  cwd: string,
+  command: string,
+  args: ReadonlyArray<string>,
+): Effect.Effect<boolean> {
+  return process
+    .run({
+      operation: "source-control.discovery.upgrade-probe",
+      command,
+      args,
+      cwd,
+      allowNonZeroExit: true,
+      timeoutMs: 5_000,
+      maxOutputBytes: 8_000,
+      appendTruncationMarker: true,
+    })
+    .pipe(
+      Effect.map((result) => Number(result.exitCode) === 0),
+      Effect.orElseSucceed(() => false),
+    );
+}
+
+/**
+ * When `gh` is outdated, figure out which package manager installed it so we can
+ * suggest the exact upgrade command. Returns `null` when nothing matches, so the
+ * caller keeps the platform default from `gitHubCliUpgradeCommand`.
+ *
+ * These are best-effort heuristics; some managers (scoop, choco) are shims whose
+ * spawnability varies by host, so a miss simply falls back to the default.
+ */
+function resolveGitHubUpgradeCommand(input: {
+  readonly process: VcsProcess.VcsProcess["Service"];
+  readonly cwd: string;
+  readonly platform: NodeJS.Platform;
+}): Effect.Effect<string | null> {
+  const probe = (command: string, args: ReadonlyArray<string>) =>
+    ghUpgradeProbe(input.process, input.cwd, command, args);
+
+  return Effect.gen(function* () {
+    switch (input.platform) {
+      case "win32": {
+        if (yield* probe("winget", ["list", "--id", "GitHub.cli", "-e"])) {
+          return "winget upgrade --id GitHub.cli -e";
+        }
+        if (yield* probe("scoop", ["list", "gh"])) {
+          return "scoop update gh";
+        }
+        if (yield* probe("choco", ["list", "--local-only", "gh"])) {
+          return "choco upgrade gh";
+        }
+        return null;
+      }
+      case "darwin": {
+        if (yield* probe("brew", ["list", "--versions", "gh"])) {
+          return "brew upgrade gh";
+        }
+        if (yield* probe("port", ["installed", "gh"])) {
+          return "sudo port upgrade gh";
+        }
+        return null;
+      }
+      default: {
+        if (yield* probe("dpkg", ["-s", "gh"])) {
+          return "sudo apt update && sudo apt install gh";
+        }
+        if (yield* probe("rpm", ["-q", "gh"])) {
+          return "sudo dnf upgrade gh";
+        }
+        if (yield* probe("pacman", ["-Q", "github-cli"])) {
+          return "sudo pacman -S github-cli";
+        }
+        return null;
+      }
+    }
+  });
 }
 
 function parseGitHubAuth(input: SourceControlAuthProbeInput) {
@@ -143,6 +223,7 @@ export const discovery = {
   versionArgs: ["--version"],
   authArgs: ["auth", "status", "--json", "hosts"],
   parseAuth: parseGitHubAuth,
+  resolveUpgradeCommand: resolveGitHubUpgradeCommand,
   installHint:
     "Install the GitHub command-line tool (`gh`) via https://cli.github.com/ or your package manager (for example `brew install gh`).",
 } satisfies SourceControlCliDiscoverySpec;
