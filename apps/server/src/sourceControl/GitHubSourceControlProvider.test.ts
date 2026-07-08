@@ -411,3 +411,18 @@ it("detects an outdated gh by version and suggests the platform upgrade command"
     { status: "outdated", detail: Option.some("winget upgrade --id GitHub.cli") },
   );
 });
+
+it("omits the upgrade command on platforms without a known package manager", () => {
+  const auth = GitHubSourceControlProvider.discovery.parseAuth({
+    stdout: "",
+    stderr: "unknown flag: --json",
+    exitCode: ChildProcessSpawner.ExitCode(1),
+    version: Option.some("gh version 2.74.2 (2025-06-18)"),
+    platform: "freebsd",
+  });
+
+  assert.deepStrictEqual(
+    { status: auth.status, detail: auth.detail },
+    { status: "outdated", detail: Option.none() },
+  );
+});

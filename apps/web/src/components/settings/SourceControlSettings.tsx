@@ -202,9 +202,9 @@ function itemSummary({
     if (auth.status === "outdated") {
       return (
         <span>
-          Your <code className="rounded bg-muted px-1 py-px text-[11px]">{item.executable}</code> CLI
-          is too old for {item.label} sign-in to be detected here — you may already be authenticated.
-          Update it on the server host, then Rescan.
+          Your <code className="rounded bg-muted px-1 py-px text-[11px]">{item.executable}</code>{" "}
+          CLI is too old for {item.label} sign-in to be detected here — you may already be
+          authenticated. Update it on the server host, then Rescan.
         </span>
       );
     }
@@ -253,6 +253,38 @@ function CliVersion({
   );
 }
 
+/**
+ * Copy helper that works outside secure contexts / embedded webviews, where
+ * `navigator.clipboard` is undefined. Falls back to a hidden-textarea +
+ * `execCommand("copy")`. Returns whether the copy succeeded.
+ */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the execCommand fallback below.
+    }
+  }
+  if (typeof document === "undefined") return false;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(textarea);
+  return ok;
+}
+
 function UpgradeCommandLine({ command }: { readonly command: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -264,7 +296,8 @@ function UpgradeCommandLine({ command }: { readonly command: string }) {
         variant="ghost"
         className="h-6 shrink-0 gap-1 px-1.5 text-xs text-primary hover:text-primary"
         onClick={() => {
-          void navigator.clipboard.writeText(command).then(() => {
+          void copyTextToClipboard(command).then((ok) => {
+            if (!ok) return;
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
           });

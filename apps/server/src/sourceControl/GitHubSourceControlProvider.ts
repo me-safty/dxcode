@@ -69,15 +69,19 @@ function isOutdatedGitHubCli(input: SourceControlAuthProbeInput): boolean {
   return version !== null && compareSemverVersions(version, GITHUB_CLI_MIN_VERSION) < 0;
 }
 
-function gitHubCliUpgradeCommand(platform: NodeJS.Platform | undefined): string {
+function gitHubCliUpgradeCommand(platform: NodeJS.Platform | undefined): string | null {
   switch (platform) {
     case "darwin":
       return "brew upgrade gh";
     case "win32":
       return "winget upgrade --id GitHub.cli";
-    default:
+    case "linux":
       // Debian/Ubuntu default. Detecting the actual package manager is a follow-up.
       return "sudo apt update && sudo apt install gh";
+    default:
+      // BSDs, illumos, AIX, etc.: no safe single command. Return null so we show
+      // the generic "update it" guidance instead of a command that can't run.
+      return null;
   }
 }
 
@@ -101,7 +105,7 @@ function parseGitHubAuth(input: SourceControlAuthProbeInput) {
   if (!authStatus.parsed && isOutdatedGitHubCli(input)) {
     return providerAuth({
       status: "outdated",
-      detail: gitHubCliUpgradeCommand(input.platform),
+      detail: gitHubCliUpgradeCommand(input.platform) ?? undefined,
     });
   }
 
