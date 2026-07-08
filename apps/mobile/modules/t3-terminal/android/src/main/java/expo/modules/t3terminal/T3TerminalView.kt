@@ -133,11 +133,12 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
         renderSnapshot()
       }
 
-      override fun selectionText(): String? {
-        if (terminalHandle == 0L) return null
-        val bytes = GhosttyBridge.nativeGetSelectionText(terminalHandle) ?: return null
-        return String(bytes, Charsets.UTF_8)
-      }
+      override fun selectionText(): String? =
+        if (terminalHandle == 0L) {
+          null
+        } else {
+          GhosttyBridge.nativeGetSelectionText(terminalHandle)?.let { String(it, Charsets.UTF_8) }
+        }
     }
 
     configureInputView()

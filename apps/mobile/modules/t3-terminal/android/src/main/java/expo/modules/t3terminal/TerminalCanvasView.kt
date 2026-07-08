@@ -32,6 +32,7 @@ internal object TerminalTypefaces {
   var bold: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
     private set
 
+  @Suppress("TooGenericExceptionCaught") // Typeface.createFromAsset exposes RuntimeException.
   fun ensureLoaded(context: Context) {
     if (loaded) return
     loaded = true
@@ -258,20 +259,20 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     ) {
       parent?.requestDisallowInterceptTouchEvent(false)
     }
-    if (dragSelecting) {
-      when (event.actionMasked) {
-        MotionEvent.ACTION_MOVE -> extendSelectionTo(event.x, event.y)
-        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-          dragSelecting = false
-          showSelectionActions()
+    return when {
+      dragSelecting -> {
+        when (event.actionMasked) {
+          MotionEvent.ACTION_MOVE -> extendSelectionTo(event.x, event.y)
+          MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            dragSelecting = false
+            showSelectionActions()
+          }
         }
+        true
       }
-      return true
+      event.actionMasked == MotionEvent.ACTION_DOWN && grabHandleAt(event.x, event.y) -> true
+      else -> gestureDetector.onTouchEvent(event) || super.onTouchEvent(event)
     }
-    if (event.actionMasked == MotionEvent.ACTION_DOWN && grabHandleAt(event.x, event.y)) {
-      return true
-    }
-    return gestureDetector.onTouchEvent(event) || super.onTouchEvent(event)
   }
 
   override fun onDetachedFromWindow() {
@@ -442,30 +443,31 @@ internal class TerminalCanvasView(context: Context) : View(context) {
       near(handleCenterX(selectionStartCol, true), handleCenterY(selectionStartRow))
     val endGrabbed =
       !startGrabbed && near(handleCenterX(selectionEndCol, false), handleCenterY(selectionEndRow))
-    if (!startGrabbed && !endGrabbed) return false
-
-    if (startGrabbed) {
-      anchorCol = selectionEndCol
-      anchorRow = selectionEndRow
-      extentCol = selectionStartCol
-      extentRow = selectionStartRow
-    } else {
-      anchorCol = selectionStartCol
-      anchorRow = selectionStartRow
-      extentCol = selectionEndCol
-      extentRow = selectionEndRow
+    val handleGrabbed = startGrabbed || endGrabbed
+    if (handleGrabbed) {
+      if (startGrabbed) {
+        anchorCol = selectionEndCol
+        anchorRow = selectionEndRow
+        extentCol = selectionStartCol
+        extentRow = selectionStartRow
+      } else {
+        anchorCol = selectionStartCol
+        anchorRow = selectionStartRow
+        extentCol = selectionEndCol
+        extentRow = selectionEndRow
+      }
+      dragSelecting = true
+      draggingHandle = true
+      actionMode?.finish()
     }
-    dragSelecting = true
-    draggingHandle = true
-    actionMode?.finish()
-    return true
+    return handleGrabbed
   }
 
   /** Scan the decoded frame for the first/last selected cells. */
   private fun updateSelectionEndpoints() {
     selectionEndpointsValid = false
-    if (!selectionActive) return
-    val currentFrame = frame ?: return
+    val currentFrame = frame
+    if (!selectionActive || currentFrame == null) return
     val totalCells = currentFrame.cols * currentFrame.rows
     var first = -1
     var last = -1
@@ -475,12 +477,13 @@ internal class TerminalCanvasView(context: Context) : View(context) {
         last = index
       }
     }
-    if (first < 0 || currentFrame.cols == 0) return
-    selectionStartCol = first % currentFrame.cols
-    selectionStartRow = first / currentFrame.cols
-    selectionEndCol = last % currentFrame.cols
-    selectionEndRow = last / currentFrame.cols
-    selectionEndpointsValid = true
+    if (first >= 0 && currentFrame.cols > 0) {
+      selectionStartCol = first % currentFrame.cols
+      selectionStartRow = first / currentFrame.cols
+      selectionEndCol = last % currentFrame.cols
+      selectionEndRow = last / currentFrame.cols
+      selectionEndpointsValid = true
+    }
   }
 
   // Anchor the toolbar to the actual word-snapped endpoints when known;
