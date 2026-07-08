@@ -1,6 +1,19 @@
-import type { EnvironmentId, OrchestrationThread, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationThread,
+  ProviderInstanceId,
+  ServerProvider,
+  ServerProviderSlashCommand,
+  ServerProviderSkill,
+  ThreadId,
+} from "@t3tools/contracts";
+import {
+  buildProviderProjectCapabilitiesQueryTarget,
+  buildProviderProjectCapabilitiesTargetKey,
+  isProviderProjectCapabilitiesProviderQueryable,
+} from "@t3tools/client-runtime/state/provider-capabilities";
 import * as Option from "effect/Option";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { orchestrationEnvironment } from "./orchestration";
 import { projectEnvironment } from "./projects";
@@ -16,6 +29,8 @@ import {
 const COMPOSER_PATH_SEARCH_DEBOUNCE_MS = 200;
 const COMPOSER_PATH_SEARCH_LIMIT = 20;
 const VCS_REF_LIST_LIMIT = 100;
+const EMPTY_PROVIDER_SKILLS: ReadonlyArray<ServerProviderSkill> = [];
+const EMPTY_PROVIDER_SLASH_COMMANDS: ReadonlyArray<ServerProviderSlashCommand> = [];
 
 export interface ThreadDetailView {
   readonly data: OrchestrationThread | null;
@@ -108,6 +123,71 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
     error: result.error,
     isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
     refresh: result.refresh,
+  };
+}
+
+export function useProviderProjectCapabilities(target: {
+  readonly environmentId: EnvironmentId | null;
+  readonly providerInstanceId: ProviderInstanceId | null | undefined;
+  readonly cwd: string | null | undefined;
+  readonly providers: ReadonlyArray<ServerProvider> | null;
+}) {
+  const targetKey = useMemo(
+    () => buildProviderProjectCapabilitiesTargetKey(target),
+    [target.cwd, target.environmentId, target.providerInstanceId],
+  );
+  const [forceReloadTargetKey, setForceReloadTargetKey] = useState<string | null>(null);
+  const forceReload = targetKey !== null && forceReloadTargetKey === targetKey;
+  const queryTarget = useMemo(
+    () =>
+      buildProviderProjectCapabilitiesQueryTarget({
+        ...target,
+        ...(forceReload ? { forceReload: true } : {}),
+      }),
+    [forceReload, target.cwd, target.environmentId, target.providerInstanceId, target.providers],
+  );
+  const result = useEnvironmentQuery(
+    queryTarget === null ? null : projectEnvironment.projectCapabilities(queryTarget),
+  );
+  const snapshotCapabilities = useMemo(() => {
+    const provider =
+      target.providers?.find((candidate) => candidate.instanceId === target.providerInstanceId) ??
+      null;
+    return queryTarget === null &&
+      provider !== null &&
+      isProviderProjectCapabilitiesProviderQueryable(provider)
+      ? provider
+      : null;
+  }, [queryTarget, target.providerInstanceId, target.providers]);
+  useEffect(() => {
+    if (
+      forceReloadTargetKey !== null &&
+      (forceReloadTargetKey !== targetKey || queryTarget === null)
+    ) {
+      setForceReloadTargetKey(null);
+    }
+  }, [forceReloadTargetKey, queryTarget, targetKey]);
+  const refresh = useCallback(() => {
+    if (forceReload) {
+      result.refresh();
+      return;
+    }
+    if (targetKey === null) {
+      result.refresh();
+      return;
+    }
+    setForceReloadTargetKey(targetKey);
+  }, [forceReload, result.refresh, targetKey]);
+
+  return {
+    skills: result.data?.skills ?? snapshotCapabilities?.skills ?? EMPTY_PROVIDER_SKILLS,
+    slashCommands:
+      result.data?.slashCommands ??
+      snapshotCapabilities?.slashCommands ??
+      EMPTY_PROVIDER_SLASH_COMMANDS,
+    error: result.error,
+    isPending: result.isPending,
+    refresh,
   };
 }
 
