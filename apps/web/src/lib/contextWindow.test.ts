@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EventId, type OrchestrationThreadActivity, TurnId } from "@t3tools/contracts";
 
-import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "./contextWindow";
+import {
+  deriveLatestContextWindowSnapshot,
+  formatContextWindowTokens,
+  isSameContextWindowSnapshot,
+} from "./contextWindow";
 
 function makeActivity(id: string, kind: string, payload: unknown): OrchestrationThreadActivity {
   return {
@@ -80,5 +84,87 @@ describe("contextWindow", () => {
 
     expect(snapshot?.usedTokens).toBe(81_659);
     expect(snapshot?.totalProcessedTokens).toBe(748_126);
+  });
+
+  it("prefers total processed tokens for thread totals, falling back to context usage", () => {
+    const withTotals = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 81_659,
+        totalProcessedTokens: 748_126,
+      }),
+    ]);
+    expect(withTotals?.threadTotalTokens).toBe(748_126);
+
+    const withoutTotals = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 27_000,
+      }),
+    ]);
+    expect(withoutTotals?.threadTotalTokens).toBe(27_000);
+  });
+
+  it("keeps the thread total when a later snapshot omits totalProcessedTokens", () => {
+    // Claude only attaches totals at turn end; mid-turn snapshots carry bare
+    // context sizes and must not regress the thread total.
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 81_659,
+        totalProcessedTokens: 748_126,
+      }),
+      makeActivity("activity-2", "context-window.updated", {
+        usedTokens: 82_000,
+      }),
+    ]);
+
+    expect(snapshot?.usedTokens).toBe(82_000);
+    expect(snapshot?.threadTotalTokens).toBe(748_126);
+  });
+
+  it("sums totals across provider accumulator resets", () => {
+    // A restarted CLI session restarts its cumulative counter; earlier totals
+    // are still spent tokens and must stay counted.
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 400_000,
+        totalProcessedTokens: 1_789_632,
+      }),
+      makeActivity("activity-2", "context-window.updated", {
+        usedTokens: 300_000,
+        totalProcessedTokens: 1_461_021,
+      }),
+    ]);
+
+    expect(snapshot?.threadTotalTokens).toBe(1_789_632 + 1_461_021);
+  });
+
+  it("uses peak context usage as the total when totals are never reported", () => {
+    const snapshot = deriveLatestContextWindowSnapshot([
+      makeActivity("activity-1", "context-window.updated", { usedTokens: 900_000 }),
+      makeActivity("activity-2", "context-window.updated", { usedTokens: 94_000 }),
+    ]);
+
+    expect(snapshot?.usedTokens).toBe(94_000);
+    expect(snapshot?.threadTotalTokens).toBe(900_000);
+  });
+
+  it("treats snapshots as identical only for the same activity and total", () => {
+    const base = [
+      makeActivity("activity-1", "context-window.updated", {
+        usedTokens: 10_000,
+        totalProcessedTokens: 50_000,
+      }),
+    ];
+    const a = deriveLatestContextWindowSnapshot(base);
+    const b = deriveLatestContextWindowSnapshot([...base]);
+    const c = deriveLatestContextWindowSnapshot([
+      ...base,
+      makeActivity("activity-2", "context-window.updated", {
+        usedTokens: 11_000,
+        totalProcessedTokens: 60_000,
+      }),
+    ]);
+
+    expect(a && b && isSameContextWindowSnapshot(a, b)).toBe(true);
+    expect(a && c && isSameContextWindowSnapshot(a, c)).toBe(false);
   });
 });

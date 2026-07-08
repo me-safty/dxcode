@@ -22,6 +22,8 @@ export type ContextWindowSnapshot = NullableContextWindowUsage & {
   readonly remainingTokens: number | null;
   readonly usedPercentage: number | null;
   readonly remainingPercentage: number | null;
+  readonly threadTotalTokens: number;
+  readonly activityId: string;
   readonly updatedAt: string;
 };
 
@@ -50,49 +52,94 @@ export function formatProviderDisplayName(provider: string | null | undefined): 
 export function deriveLatestContextWindowSnapshot(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ContextWindowSnapshot | null {
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
+  // Providers report cumulative totals unevenly: Codex sends a genuine
+  // thread-cumulative total on every update, while Claude only attaches one at
+  // turn end and its accumulator restarts with the CLI process. Track the
+  // total across ALL snapshots — summing across accumulator resets — so the
+  // thread total never regresses when the latest snapshot lacks it.
+  let committedTotal = 0;
+  let runningTotal: number | null = null;
+  let peakUsedTokens = 0;
+  let latest: { activity: OrchestrationThreadActivity; usedTokens: number } | null = null;
+
+  for (const activity of activities) {
     if (!activity || activity.kind !== "context-window.updated") {
       continue;
     }
-
     const payload = asRecord(activity.payload);
     const usedTokens = asFiniteNumber(payload?.usedTokens);
     if (usedTokens === null || usedTokens < 0) {
       continue;
     }
-
-    const maxTokens = asFiniteNumber(payload?.maxTokens);
-    const usedPercentage =
-      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
-    const remainingTokens =
-      maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
-    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
-
-    return {
-      usedTokens,
-      totalProcessedTokens: asFiniteNumber(payload?.totalProcessedTokens),
-      maxTokens,
-      remainingTokens,
-      usedPercentage,
-      remainingPercentage,
-      inputTokens: asFiniteNumber(payload?.inputTokens),
-      cachedInputTokens: asFiniteNumber(payload?.cachedInputTokens),
-      outputTokens: asFiniteNumber(payload?.outputTokens),
-      reasoningOutputTokens: asFiniteNumber(payload?.reasoningOutputTokens),
-      lastUsedTokens: asFiniteNumber(payload?.lastUsedTokens),
-      lastInputTokens: asFiniteNumber(payload?.lastInputTokens),
-      lastCachedInputTokens: asFiniteNumber(payload?.lastCachedInputTokens),
-      lastOutputTokens: asFiniteNumber(payload?.lastOutputTokens),
-      lastReasoningOutputTokens: asFiniteNumber(payload?.lastReasoningOutputTokens),
-      toolUses: asFiniteNumber(payload?.toolUses),
-      durationMs: asFiniteNumber(payload?.durationMs),
-      compactsAutomatically: asBoolean(payload?.compactsAutomatically) ?? false,
-      updatedAt: activity.createdAt,
-    };
+    const totalProcessedTokens = asFiniteNumber(payload?.totalProcessedTokens);
+    if (totalProcessedTokens !== null && totalProcessedTokens > 0) {
+      if (runningTotal !== null && totalProcessedTokens < runningTotal) {
+        committedTotal += runningTotal;
+      }
+      runningTotal = totalProcessedTokens;
+    }
+    peakUsedTokens = Math.max(peakUsedTokens, usedTokens);
+    latest = { activity, usedTokens };
   }
 
-  return null;
+  if (!latest) {
+    return null;
+  }
+
+  const payload = asRecord(latest.activity.payload);
+  const usedTokens = latest.usedTokens;
+  const maxTokens = asFiniteNumber(payload?.maxTokens);
+  const usedPercentage =
+    maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
+  const remainingTokens =
+    maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
+  const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
+  const threadTotalTokens = Math.max(committedTotal + (runningTotal ?? 0), peakUsedTokens);
+
+  return {
+    usedTokens,
+    totalProcessedTokens: asFiniteNumber(payload?.totalProcessedTokens),
+    maxTokens,
+    remainingTokens,
+    usedPercentage,
+    remainingPercentage,
+    threadTotalTokens,
+    inputTokens: asFiniteNumber(payload?.inputTokens),
+    cachedInputTokens: asFiniteNumber(payload?.cachedInputTokens),
+    outputTokens: asFiniteNumber(payload?.outputTokens),
+    reasoningOutputTokens: asFiniteNumber(payload?.reasoningOutputTokens),
+    lastUsedTokens: asFiniteNumber(payload?.lastUsedTokens),
+    lastInputTokens: asFiniteNumber(payload?.lastInputTokens),
+    lastCachedInputTokens: asFiniteNumber(payload?.lastCachedInputTokens),
+    lastOutputTokens: asFiniteNumber(payload?.lastOutputTokens),
+    lastReasoningOutputTokens: asFiniteNumber(payload?.lastReasoningOutputTokens),
+    toolUses: asFiniteNumber(payload?.toolUses),
+    durationMs: asFiniteNumber(payload?.durationMs),
+    compactsAutomatically: asBoolean(payload?.compactsAutomatically) ?? false,
+    activityId: String(latest.activity.id),
+    updatedAt: latest.activity.createdAt,
+  };
+}
+
+// A snapshot only changes when a new context-window activity lands (new
+// activityId) or an earlier activity adjusts the accumulated total. Callers
+// can use this to keep a stable object identity across unrelated activity
+// appends (e.g. streaming tool events) so memoized consumers don't re-render.
+export function isSameContextWindowSnapshot(
+  a: ContextWindowSnapshot,
+  b: ContextWindowSnapshot,
+): boolean {
+  return a.activityId === b.activityId && a.threadTotalTokens === b.threadTotalTokens;
+}
+
+export function formatPercentage(value: number | null): string | null {
+  if (value === null || !Number.isFinite(value)) {
+    return null;
+  }
+  if (value < 10) {
+    return `${value.toFixed(1).replace(/\.0$/, "")}%`;
+  }
+  return `${Math.round(value)}%`;
 }
 
 export function formatContextWindowTokens(value: number | null): string {

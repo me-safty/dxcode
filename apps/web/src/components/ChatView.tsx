@@ -206,6 +206,11 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
+import {
+  type ContextWindowSnapshot,
+  deriveLatestContextWindowSnapshot,
+  isSameContextWindowSnapshot,
+} from "~/lib/contextWindow";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode } from "./BranchToolbar.logic";
@@ -1338,6 +1343,17 @@ function ChatViewContent(props: ChatViewProps) {
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys]);
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  const activeThreadActivities = activeThread?.activities;
+  const contextWindowSnapshotRef = useRef<ContextWindowSnapshot | null>(null);
+  const activeContextWindow = useMemo(() => {
+    const next = deriveLatestContextWindowSnapshot(activeThreadActivities ?? []);
+    const previous = contextWindowSnapshotRef.current;
+    if (next && previous && isSameContextWindowSnapshot(next, previous)) {
+      return previous;
+    }
+    contextWindowSnapshotRef.current = next;
+    return next;
+  }, [activeThreadActivities]);
   const sourcePlanThreadRef = useMemo(() => {
     const sourceThreadId = activeLatestTurn?.sourceProposedPlan?.threadId;
     if (!activeThread || !sourceThreadId || sourceThreadId === activeThread.id) {
@@ -5040,6 +5056,7 @@ function ChatViewContent(props: ChatViewProps) {
             {...(routeKind === "draft" && draftId ? { draftId } : {})}
             activeThreadTitle={activeThread.title}
             activeProjectName={activeProject?.title}
+            contextWindow={activeContextWindow}
             openInCwd={gitCwd}
             activeProjectScripts={activeProject?.scripts}
             preferredScriptId={

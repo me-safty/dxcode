@@ -20,6 +20,10 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useClientSettings } from "../../hooks/useSettings";
+import { ClaudeAccountUsageBadge } from "./ClaudeAccountUsageBadge";
+import { TokenUsageBadge } from "./TokenUsageBadge";
+import type { ContextWindowSnapshot } from "~/lib/contextWindow";
+import { useClaudeAccountUsage } from "../../hooks/useClaudeAccountUsage";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -27,6 +31,7 @@ interface ChatHeaderProps {
   draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
+  contextWindow: ContextWindowSnapshot | null;
   openInCwd: string | null;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
@@ -71,6 +76,7 @@ export const ChatHeader = memo(function ChatHeader({
   draftId,
   activeThreadTitle,
   activeProjectName,
+  contextWindow,
   openInCwd,
   activeProjectScripts,
   preferredScriptId,
@@ -84,6 +90,7 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const claudeAccountUsage = useClaudeAccountUsage();
   const isMobile = useIsMobile();
   const headerControlVisibility = useClientSettings((settings) => ({
     gitActions: settings.headerGitActionsVisibility,
@@ -133,6 +140,12 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        {contextWindow && <TokenUsageBadge usage={contextWindow} />}
+        {/* The usage RPC reads the primary server's host credentials, so only
+            show it for threads that actually run there. */}
+        {claudeAccountUsage && activeThreadEnvironmentId === primaryEnvironmentId && (
+          <ClaudeAccountUsageBadge usage={claudeAccountUsage} />
+        )}
         {showProjectScripts && activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
