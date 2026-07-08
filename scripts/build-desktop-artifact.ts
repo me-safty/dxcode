@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+// @effect-diagnostics nodeBuiltinImport:off - Desktop packaging resolves installed pnpm package symlinks directly.
+import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
 
 import { fromYaml } from "@t3tools/shared/schemaYaml";
@@ -570,7 +572,25 @@ interface StagePackageJson {
 }
 
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
-export const DESKTOP_ASAR_UNPACK = ["node_modules/@ff-labs/fff-bin-*/**/*"] as const;
+export const DESKTOP_ASAR_UNPACK = [
+  "node_modules/@ff-labs/fff-bin-*/**/*",
+  "node_modules/@yuuang/ffi-rs-*/**/*",
+] as const;
+
+interface InstalledDependencyPackageManifest {
+  readonly version?: string;
+  readonly dependencies?: Record<string, string>;
+}
+
+interface ResolvedInstalledDependencyPackage {
+  readonly packageJsonPath: string;
+  readonly manifest: InstalledDependencyPackageManifest;
+}
+
+type InstalledDependencyPackageResolver = (
+  packageName: string,
+  packageJsonPaths: readonly string[],
+) => ResolvedInstalledDependencyPackage | undefined;
 
 export interface MacPasskeySigningConfiguration {
   readonly appId: string;
@@ -808,9 +828,53 @@ export function resolveFffNativeDependencies(
     );
   }
 
+  return resolveFffLinuxNativeDependencies(arch, version, ["gnu", "musl"]);
+}
+
+export function resolveFfiRsNativeDependencies(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+  version: string,
+): Record<string, string> {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+
+  if (platform === "mac") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-darwin-${architecture}`, version]),
+    );
+  }
+
+  if (platform === "win") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-win32-${architecture}-msvc`, version]),
+    );
+  }
+
+  return resolveFfiRsLinuxNativeDependencies(arch, version, ["gnu", "musl"]);
+}
+
+function resolveFffLinuxNativeDependencies(
+  arch: typeof BuildArch.Type,
+  version: string,
+  libcs: readonly ["gnu", ...Array<"gnu" | "musl">],
+): Record<string, string> {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
   return Object.fromEntries(
     architectures.flatMap((architecture) =>
-      ["gnu", "musl"].map((libc) => [`@ff-labs/fff-bin-linux-${architecture}-${libc}`, version]),
+      libcs.map((libc) => [`@ff-labs/fff-bin-linux-${architecture}-${libc}`, version]),
+    ),
+  );
+}
+
+function resolveFfiRsLinuxNativeDependencies(
+  arch: typeof BuildArch.Type,
+  version: string,
+  libcs: readonly ["gnu", ...Array<"gnu" | "musl">],
+): Record<string, string> {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+  return Object.fromEntries(
+    architectures.flatMap((architecture) =>
+      libcs.map((libc) => [`@yuuang/ffi-rs-linux-${architecture}-${libc}`, version]),
     ),
   );
 }
@@ -1280,6 +1344,174 @@ export function resolveDesktopRuntimeDependencies(
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
 }
 
+export function resolveStagedDependencyClosure(
+  dependencies: Record<string, string>,
+  packageJsonPaths: readonly string[],
+  resolvePackage: InstalledDependencyPackageResolver = resolveInstalledDependencyPackage,
+): Record<string, string> {
+  const resolvedDependencies = { ...dependencies };
+  const visitedPackages = new Set<string>();
+  const packageQueue = Object.keys(dependencies).map((packageName) => ({
+    packageName,
+    packageJsonPaths,
+  }));
+
+  for (let index = 0; index < packageQueue.length; index++) {
+    const { packageName, packageJsonPaths: issuerPackageJsonPaths } = packageQueue[index]!;
+
+    const resolvedPackage = resolvePackage(packageName, issuerPackageJsonPaths);
+    if (!resolvedPackage) continue;
+    if (visitedPackages.has(resolvedPackage.packageJsonPath)) continue;
+    visitedPackages.add(resolvedPackage.packageJsonPath);
+
+    const childPackageJsonPaths = [resolvedPackage.packageJsonPath, ...issuerPackageJsonPaths];
+    for (const [dependencyName, dependencySpec] of Object.entries(
+      resolvedPackage.manifest.dependencies ?? {},
+    )) {
+      const resolvedDependency = resolvePackage(dependencyName, childPackageJsonPaths);
+      if (!Object.hasOwn(resolvedDependencies, dependencyName)) {
+        resolvedDependencies[dependencyName] =
+          resolvedDependency?.manifest.version ?? dependencySpec;
+      }
+      packageQueue.push({
+        packageName: dependencyName,
+        packageJsonPaths: childPackageJsonPaths,
+      });
+    }
+  }
+
+  return resolvedDependencies;
+}
+
+export function resolveDesktopStageDependencies(input: {
+  readonly dependencies: Record<string, string>;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly packageJsonPaths: readonly string[];
+  readonly resolvePackage?: InstalledDependencyPackageResolver;
+}): Record<string, string> {
+  const dependencyClosureBeforeFfiRsNatives = resolveStagedDependencyClosure(
+    input.dependencies,
+    input.packageJsonPaths,
+    input.resolvePackage,
+  );
+  const ffiRsVersion = dependencyClosureBeforeFfiRsNatives["ffi-rs"];
+  const knownRuntimeDependencies = resolveKnownStagedRuntimeDependencies(
+    dependencyClosureBeforeFfiRsNatives,
+  );
+  if (typeof ffiRsVersion !== "string" && Object.keys(knownRuntimeDependencies).length === 0) {
+    return dependencyClosureBeforeFfiRsNatives;
+  }
+
+  // ffi-rs loads its platform native package at runtime from optionalDependencies.
+  // Promote those packages explicitly because the staged production install only
+  // retains packages reachable from the top-level desktop package dependencies.
+  return resolveStagedDependencyClosure(
+    {
+      ...dependencyClosureBeforeFfiRsNatives,
+      ...knownRuntimeDependencies,
+      ...(typeof ffiRsVersion === "string"
+        ? resolveFfiRsNativeDependencies(input.platform, input.arch, ffiRsVersion)
+        : {}),
+      ...(input.platform === "win" && typeof ffiRsVersion === "string"
+        ? resolveFfiRsLinuxNativeDependencies(input.arch, ffiRsVersion, ["gnu"])
+        : {}),
+    },
+    input.packageJsonPaths,
+    input.resolvePackage,
+  );
+}
+
+export function resolveKnownStagedRuntimeDependencies(
+  dependencies: Record<string, string>,
+): Record<string, string> {
+  const crossSpawnVersion = dependencies["cross-spawn"];
+  if (crossSpawnVersion === undefined || !isCrossSpawnV7DependencySpec(crossSpawnVersion)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(CROSS_SPAWN_V7_RUNTIME_DEPENDENCIES).filter(
+      ([dependencyName]) => !Object.hasOwn(dependencies, dependencyName),
+    ),
+  );
+}
+
+function isCrossSpawnV7DependencySpec(versionOrRange: string): boolean {
+  return /^(?:[~^]?7(?:\.|$)|>=7(?:\.|$))/u.test(versionOrRange);
+}
+
+const CROSS_SPAWN_V7_RUNTIME_DEPENDENCIES = {
+  isexe: "2.0.0",
+  "path-key": "3.1.1",
+  "shebang-command": "2.0.0",
+  "shebang-regex": "3.0.0",
+  which: "2.0.2",
+} as const;
+
+function resolveInstalledDependencyPackage(
+  packageName: string,
+  packageJsonPaths: readonly string[],
+): ResolvedInstalledDependencyPackage | undefined {
+  for (const packageJsonPath of packageJsonPaths) {
+    const packageRequire = NodeModule.createRequire(packageJsonPath);
+    const resolvedPackage = resolveInstalledDependencyPackageFromRequire(
+      packageName,
+      packageRequire,
+    );
+    if (resolvedPackage) return resolvedPackage;
+  }
+
+  return undefined;
+}
+
+function resolveInstalledDependencyPackageFromRequire(
+  packageName: string,
+  packageRequire: NodeJS.Require,
+): ResolvedInstalledDependencyPackage | undefined {
+  try {
+    const resolvedPackageJsonPath = packageRequire.resolve(`${packageName}/package.json`);
+    return readInstalledDependencyPackageManifest(packageRequire, resolvedPackageJsonPath);
+  } catch {
+    for (const candidatePackageJsonPath of resolvePackageJsonPathCandidates(
+      packageName,
+      packageRequire,
+    )) {
+      const resolvedPackage = readInstalledDependencyPackageManifest(
+        packageRequire,
+        candidatePackageJsonPath,
+      );
+      if (resolvedPackage) return resolvedPackage;
+    }
+  }
+
+  return undefined;
+}
+
+function resolvePackageJsonPathCandidates(
+  packageName: string,
+  packageRequire: NodeJS.Require,
+): string[] {
+  return (packageRequire.resolve.paths(packageName) ?? []).map(
+    (searchPath) => `${searchPath.replace(/[\\/]+$/u, "")}/${packageName}/package.json`,
+  );
+}
+
+function readInstalledDependencyPackageManifest(
+  packageRequire: NodeJS.Require,
+  packageJsonPath: string,
+): ResolvedInstalledDependencyPackage | undefined {
+  try {
+    const realPackageJsonPath = NodeFS.realpathSync(packageJsonPath);
+    return {
+      packageJsonPath: realPackageJsonPath,
+      manifest: packageRequire(realPackageJsonPath) as InstalledDependencyPackageManifest,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig")(function* (
   updateChannel: "latest" | "nightly",
 ) {
@@ -1689,7 +1921,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     yield* fs.writeFileString(macEntitlementsPath, renderMacPasskeyEntitlements(macPasskeySigning));
   }
 
-  const stageDependencies = {
+  const dependencyPackageJsonPaths = [
+    path.join(repoRoot, "apps/server/package.json"),
+    path.join(repoRoot, "apps/desktop/package.json"),
+  ];
+  const directStageDependencies = {
     ...resolvedServerDependencies,
     ...resolvedDesktopRuntimeDependencies,
     ...resolveFffNativeDependencies(
@@ -1702,13 +1938,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     // host's (win32), so promote the matching Linux fff binaries too; without
     // them file-finding in WSL fails to load its Linux native package.
     ...(options.platform === "win"
-      ? resolveFffNativeDependencies(
-          "linux",
+      ? resolveFffLinuxNativeDependencies(
           options.arch,
           serverPackageJson.dependencies["@ff-labs/fff-node"],
+          ["gnu"],
         )
       : {}),
   };
+  const stageDependencies = resolveDesktopStageDependencies({
+    dependencies: directStageDependencies,
+    platform: options.platform,
+    arch: options.arch,
+    packageJsonPaths: dependencyPackageJsonPaths,
+  });
   const stagePnpmConfig = createStagePnpmConfig(workspacePatchedDependencies, stageDependencies);
   const stagePackageJson: StagePackageJson = {
     name: "t3code",

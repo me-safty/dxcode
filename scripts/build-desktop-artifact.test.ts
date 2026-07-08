@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off - Test creates a pnpm-style symlink layout.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -23,16 +28,20 @@ import {
   MissingMacPasskeyProvisioningProfileError,
   renderMacPasskeyEntitlements,
   resolveClerkPasskeyNativeArtifacts,
+  resolveDesktopStageDependencies,
   resolveMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
+  resolveFfiRsNativeDependencies,
   resolveFffNativeDependencies,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
   resolveGitHubPublishConfig,
+  resolveKnownStagedRuntimeDependencies,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
+  resolveStagedDependencyClosure,
   stageLinuxIconSize,
   STAGE_INSTALL_ARGS,
 } from "./build-desktop-artifact.ts";
@@ -166,6 +175,461 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
   });
 
+  it("promotes installed production dependency closure into staged desktop dependencies", () => {
+    const packages = new Map([
+      [
+        "effect",
+        {
+          packageJsonPath: "/store/effect/package.json",
+          manifest: {
+            version: "4.0.0-beta.78",
+            dependencies: {
+              "find-my-way-ts": "^0.1.6",
+              "fast-check": "^4.8.0",
+            },
+          },
+        },
+      ],
+      [
+        "fast-check",
+        {
+          packageJsonPath: "/store/fast-check/package.json",
+          manifest: {
+            version: "4.8.0",
+            dependencies: {
+              "pure-rand": "^8.0.0",
+            },
+          },
+        },
+      ],
+      [
+        "find-my-way-ts",
+        {
+          packageJsonPath: "/store/find-my-way-ts/package.json",
+          manifest: {
+            version: "0.1.6",
+          },
+        },
+      ],
+      [
+        "pure-rand",
+        {
+          packageJsonPath: "/store/pure-rand/package.json",
+          manifest: {
+            version: "8.4.0",
+          },
+        },
+      ],
+    ]);
+
+    assert.deepStrictEqual(
+      resolveStagedDependencyClosure(
+        {
+          effect: "4.0.0-beta.78",
+        },
+        ["/repo/apps/server/package.json"],
+        (packageName) => packages.get(packageName),
+      ),
+      {
+        effect: "4.0.0-beta.78",
+        "fast-check": "4.8.0",
+        "find-my-way-ts": "0.1.6",
+        "pure-rand": "8.4.0",
+      },
+    );
+  });
+
+  it("preserves issuer package paths while walking staged dependency closure", () => {
+    const packages = new Map([
+      [
+        "@malept/cross-spawn-promise",
+        {
+          packageJsonPath: "/store/cross-spawn-promise/package.json",
+          manifest: {
+            version: "2.0.0",
+            dependencies: {
+              "cross-spawn": "^7.0.1",
+            },
+          },
+        },
+      ],
+      [
+        "cross-spawn",
+        {
+          packageJsonPath: "/store/cross-spawn/package.json",
+          manifest: {
+            version: "7.0.6",
+            dependencies: {
+              which: "^2.0.1",
+            },
+          },
+        },
+      ],
+      [
+        "which",
+        {
+          packageJsonPath: "/store/which/package.json",
+          manifest: {
+            version: "2.0.2",
+          },
+        },
+      ],
+    ]);
+
+    assert.deepStrictEqual(
+      resolveStagedDependencyClosure(
+        {
+          "@malept/cross-spawn-promise": "2.0.0",
+        },
+        ["/repo/apps/server/package.json"],
+        (packageName, packageJsonPaths) => {
+          if (packageName === "@malept/cross-spawn-promise") {
+            return packages.get(packageName);
+          }
+          if (
+            packageName === "cross-spawn" &&
+            packageJsonPaths.includes("/store/cross-spawn-promise/package.json")
+          ) {
+            return packages.get(packageName);
+          }
+          if (
+            packageName === "which" &&
+            packageJsonPaths.includes("/store/cross-spawn/package.json")
+          ) {
+            return packages.get(packageName);
+          }
+          return undefined;
+        },
+      ),
+      {
+        "@malept/cross-spawn-promise": "2.0.0",
+        "cross-spawn": "7.0.6",
+        which: "2.0.2",
+      },
+    );
+  });
+
+  it("walks each installed copy when issuers resolve the same dependency name differently", () => {
+    const packages = new Map([
+      [
+        "parent-a",
+        {
+          packageJsonPath: "/store/parent-a/package.json",
+          manifest: {
+            version: "1.0.0",
+            dependencies: {
+              debug: "^2.0.0",
+            },
+          },
+        },
+      ],
+      [
+        "parent-b",
+        {
+          packageJsonPath: "/store/parent-b/package.json",
+          manifest: {
+            version: "1.0.0",
+            dependencies: {
+              debug: "^4.0.0",
+            },
+          },
+        },
+      ],
+      [
+        "debug-a",
+        {
+          packageJsonPath: "/store/debug-a/package.json",
+          manifest: {
+            version: "2.6.9",
+            dependencies: {
+              "child-a": "^1.0.0",
+            },
+          },
+        },
+      ],
+      [
+        "debug-b",
+        {
+          packageJsonPath: "/store/debug-b/package.json",
+          manifest: {
+            version: "4.4.3",
+            dependencies: {
+              "child-b": "^1.0.0",
+            },
+          },
+        },
+      ],
+      [
+        "child-a",
+        {
+          packageJsonPath: "/store/child-a/package.json",
+          manifest: {
+            version: "1.0.0",
+          },
+        },
+      ],
+      [
+        "child-b",
+        {
+          packageJsonPath: "/store/child-b/package.json",
+          manifest: {
+            version: "1.0.0",
+          },
+        },
+      ],
+    ]);
+
+    assert.deepStrictEqual(
+      resolveStagedDependencyClosure(
+        {
+          "parent-a": "1.0.0",
+          "parent-b": "1.0.0",
+        },
+        ["/repo/apps/server/package.json"],
+        (packageName, packageJsonPaths) => {
+          if (packageName === "parent-a" || packageName === "parent-b") {
+            return packages.get(packageName);
+          }
+          if (
+            packageName === "debug" &&
+            packageJsonPaths.includes("/store/parent-a/package.json")
+          ) {
+            return packages.get("debug-a");
+          }
+          if (
+            packageName === "debug" &&
+            packageJsonPaths.includes("/store/parent-b/package.json")
+          ) {
+            return packages.get("debug-b");
+          }
+          return packages.get(packageName);
+        },
+      ),
+      {
+        "child-a": "1.0.0",
+        "child-b": "1.0.0",
+        debug: "2.6.9",
+        "parent-a": "1.0.0",
+        "parent-b": "1.0.0",
+      },
+    );
+  });
+
+  it("realpaths fallback package manifests before walking pnpm child dependencies", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-stage-deps-"));
+    try {
+      const appDir = NodePath.join(tempDir, "apps", "server");
+      const appNodeModulesDir = NodePath.join(appDir, "node_modules");
+      const parentStoreNodeModulesDir = NodePath.join(
+        tempDir,
+        "node_modules",
+        ".pnpm",
+        "@scope+parent@1.0.0",
+        "node_modules",
+      );
+      const parentStoreDir = NodePath.join(parentStoreNodeModulesDir, "@scope", "parent");
+      const childStoreDir = NodePath.join(
+        tempDir,
+        "node_modules",
+        ".pnpm",
+        "child@1.0.0",
+        "node_modules",
+        "child",
+      );
+
+      NodeFS.mkdirSync(NodePath.join(appNodeModulesDir, "@scope"), { recursive: true });
+      NodeFS.mkdirSync(parentStoreDir, { recursive: true });
+      NodeFS.mkdirSync(childStoreDir, { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(appDir, "package.json"),
+        JSON.stringify({ name: "server", version: "1.0.0" }),
+      );
+      NodeFS.writeFileSync(
+        NodePath.join(parentStoreDir, "package.json"),
+        JSON.stringify({
+          name: "@scope/parent",
+          version: "1.0.0",
+          exports: {
+            ".": "./index.js",
+          },
+          dependencies: {
+            child: "^1.0.0",
+          },
+        }),
+      );
+      NodeFS.writeFileSync(
+        NodePath.join(childStoreDir, "package.json"),
+        JSON.stringify({ name: "child", version: "1.0.0" }),
+      );
+      NodeFS.symlinkSync(
+        parentStoreDir,
+        NodePath.join(appNodeModulesDir, "@scope", "parent"),
+        "dir",
+      );
+      NodeFS.symlinkSync(childStoreDir, NodePath.join(parentStoreNodeModulesDir, "child"), "dir");
+
+      assert.deepStrictEqual(
+        resolveStagedDependencyClosure(
+          {
+            "@scope/parent": "1.0.0",
+          },
+          [NodePath.join(appDir, "package.json")],
+        ),
+        {
+          "@scope/parent": "1.0.0",
+          child: "1.0.0",
+        },
+      );
+    } finally {
+      NodeFS.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("promotes known runtime dependencies for staged packages unresolved before install", () => {
+    assert.deepStrictEqual(
+      resolveKnownStagedRuntimeDependencies({
+        "cross-spawn": "7.0.6",
+      }),
+      {
+        isexe: "2.0.0",
+        "path-key": "3.1.1",
+        "shebang-command": "2.0.0",
+        "shebang-regex": "3.0.0",
+        which: "2.0.2",
+      },
+    );
+    assert.deepStrictEqual(
+      resolveKnownStagedRuntimeDependencies({
+        "cross-spawn": "^7.0.1",
+      }),
+      {
+        isexe: "2.0.0",
+        "path-key": "3.1.1",
+        "shebang-command": "2.0.0",
+        "shebang-regex": "3.0.0",
+        which: "2.0.2",
+      },
+    );
+    assert.deepStrictEqual(resolveKnownStagedRuntimeDependencies({ effect: "4.0.0-beta.78" }), {});
+    assert.deepStrictEqual(
+      resolveKnownStagedRuntimeDependencies({
+        "cross-spawn": "6.0.6",
+      }),
+      {},
+    );
+    assert.deepStrictEqual(
+      resolveKnownStagedRuntimeDependencies({
+        "cross-spawn": "7.0.6",
+        which: "2.0.3",
+      }),
+      {
+        isexe: "2.0.0",
+        "path-key": "3.1.1",
+        "shebang-command": "2.0.0",
+        "shebang-regex": "3.0.0",
+      },
+    );
+  });
+
+  it("carries known runtime dependencies into desktop stage dependencies", () => {
+    const packages = new Map([
+      [
+        "@opencode-ai/sdk",
+        {
+          packageJsonPath: "/store/opencode/package.json",
+          manifest: {
+            version: "1.15.13",
+            dependencies: {
+              "cross-spawn": "7.0.6",
+            },
+          },
+        },
+      ],
+    ]);
+
+    assert.deepStrictEqual(
+      resolveDesktopStageDependencies({
+        dependencies: {
+          "@opencode-ai/sdk": "^1.3.15",
+        },
+        platform: "mac",
+        arch: "arm64",
+        packageJsonPaths: ["/repo/apps/server/package.json"],
+        resolvePackage: (packageName) => packages.get(packageName),
+      }),
+      {
+        "@opencode-ai/sdk": "^1.3.15",
+        "cross-spawn": "7.0.6",
+        isexe: "2.0.0",
+        "path-key": "3.1.1",
+        "shebang-command": "2.0.0",
+        "shebang-regex": "3.0.0",
+        which: "2.0.2",
+      },
+    );
+  });
+
+  it("promotes ffi-rs optional native packages after resolving staged dependencies", () => {
+    const packages = new Map([
+      [
+        "@ff-labs/fff-node",
+        {
+          packageJsonPath: "/store/fff-node/package.json",
+          manifest: {
+            version: "0.9.4",
+            dependencies: {
+              "ffi-rs": "^1.0.0",
+            },
+          },
+        },
+      ],
+      [
+        "ffi-rs",
+        {
+          packageJsonPath: "/store/ffi-rs/package.json",
+          manifest: {
+            version: "1.3.2",
+          },
+        },
+      ],
+    ]);
+
+    assert.deepStrictEqual(
+      resolveDesktopStageDependencies({
+        dependencies: {
+          "@ff-labs/fff-node": "0.9.4",
+        },
+        platform: "mac",
+        arch: "arm64",
+        packageJsonPaths: ["/repo/apps/server/package.json"],
+        resolvePackage: (packageName) => packages.get(packageName),
+      }),
+      {
+        "@ff-labs/fff-node": "0.9.4",
+        "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
+        "ffi-rs": "1.3.2",
+      },
+    );
+
+    assert.deepStrictEqual(
+      resolveDesktopStageDependencies({
+        dependencies: {
+          "@ff-labs/fff-node": "0.9.4",
+        },
+        platform: "win",
+        arch: "x64",
+        packageJsonPaths: ["/repo/apps/server/package.json"],
+        resolvePackage: (packageName) => packages.get(packageName),
+      }),
+      {
+        "@ff-labs/fff-node": "0.9.4",
+        "@yuuang/ffi-rs-linux-x64-gnu": "1.3.2",
+        "@yuuang/ffi-rs-win32-x64-msvc": "1.3.2",
+        "ffi-rs": "1.3.2",
+      },
+    );
+  });
+
   it("carries only staged dependency patch metadata into staged desktop installs", () => {
     assert.deepStrictEqual(
       createStagePnpmConfig(
@@ -235,7 +699,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("unpacks the fff shared library for filesystem and FFI access", () => {
-    assert.deepStrictEqual(DESKTOP_ASAR_UNPACK, ["node_modules/@ff-labs/fff-bin-*/**/*"]);
+    assert.deepStrictEqual(DESKTOP_ASAR_UNPACK, [
+      "node_modules/@ff-labs/fff-bin-*/**/*",
+      "node_modules/@yuuang/ffi-rs-*/**/*",
+    ]);
   });
 
   it.effect("preserves both Linux icon resize failures with structural context", () => {
@@ -447,6 +914,30 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(resolveFffNativeDependencies("linux", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.4",
       "@ff-labs/fff-bin-linux-arm64-musl": "0.9.4",
+    });
+  });
+
+  it("promotes target ffi-rs binaries to direct staged dependencies", () => {
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("mac", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("mac", "universal", "1.3.2"), {
+      "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
+      "@yuuang/ffi-rs-darwin-x64": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("win", "x64", "1.3.2"), {
+      "@yuuang/ffi-rs-win32-x64-msvc": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("win", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-win32-arm64-msvc": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("linux", "x64", "1.3.2"), {
+      "@yuuang/ffi-rs-linux-x64-gnu": "1.3.2",
+      "@yuuang/ffi-rs-linux-x64-musl": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiRsNativeDependencies("linux", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-linux-arm64-gnu": "1.3.2",
+      "@yuuang/ffi-rs-linux-arm64-musl": "1.3.2",
     });
   });
 
