@@ -7,11 +7,12 @@ import {
   type ErrorComponentProps,
   useLocation,
   useNavigate,
+  useParams,
 } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "../branding";
-import { resolveServerBackedAppDisplayName } from "../branding.logic";
+import { formatWorkspaceDocumentTitle, resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
@@ -47,7 +48,14 @@ import {
   primaryServerConfigEventAtom,
   primaryServerWelcomeAtom,
 } from "../state/server";
-import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from "../state/entities";
+import {
+  readProject,
+  setActiveEnvironmentId,
+  useActiveEnvironmentId,
+  useProject,
+  useThreadShell,
+} from "../state/entities";
+import { resolveThreadRouteRef } from "../threadRoutes";
 import {
   createKeybindingsUpdateToastController,
   type KeybindingsUpdateToastController,
@@ -144,11 +152,26 @@ function RootRouteView() {
 function DocumentTitleSync() {
   const primaryServerVersion =
     useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
-  const title = resolveServerBackedAppDisplayName({
+  const appName = resolveServerBackedAppDisplayName({
     baseName: APP_BASE_NAME,
     fallbackDisplayName: APP_DISPLAY_NAME,
     fallbackStageLabel: APP_STAGE_LABEL,
     primaryServerVersion,
+  });
+
+  // Params are read non-strictly because DocumentTitleSync renders above the
+  // matched route; only thread routes expose environmentId/threadId.
+  const params = useParams({ strict: false });
+  const threadRef = resolveThreadRouteRef(params);
+  const thread = useThreadShell(threadRef);
+  const projectRef =
+    thread === null ? null : scopeProjectRef(thread.environmentId, thread.projectId);
+  const project = useProject(projectRef);
+
+  const title = formatWorkspaceDocumentTitle({
+    appName,
+    projectTitle: project?.title,
+    threadTitle: thread?.title,
   });
 
   useEffect(() => {

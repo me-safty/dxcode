@@ -360,9 +360,12 @@ export const make = Effect.gen(function* () {
       }
     });
 
-    window.on("page-title-updated", (event) => {
+    window.on("page-title-updated", (event, title) => {
       event.preventDefault();
-      window.setTitle(environment.displayName);
+      // Mirror the renderer's document.title (project/thread context) so external
+      // window-title scanners can see the active workspace; fall back to the app name.
+      const pageTitle = title?.trim();
+      window.setTitle(pageTitle ? pageTitle : environment.displayName);
     });
 
     let developmentLoadRetryIndex = 0;
