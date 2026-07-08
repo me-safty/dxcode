@@ -32,6 +32,19 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `packages/shared`: Shared runtime utilities consumed by both server and client applications. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 - `packages/client-runtime`: Shared runtime package for sharing client code across web and mobile.
 
+## Claude Transcript Import (15-minute timer on the dancode host)
+
+A systemd **user** timer, `t3-claude-import.timer`, runs every 15 minutes on the host that serves
+T3 (`journalctl --user -u t3-claude-import.service` for logs). It executes
+`~/projects/meta/t3-ops/import-all-claude.sh`, which runs `t3 import sync` from the deployed
+checkout at `~/projects/meta/t3code-v2` to mirror every Claude Code transcript under
+`~/.claude/projects` into T3 as backdated, resumable threads (thread id `claude-import-<sessionId>`).
+The sweep logic lives in `apps/server/src/cli/import.ts` and `apps/server/src/import/syncPlan.ts`.
+When debugging duplicate or missing conversations, look here first. Key invariants: transcripts of
+sessions T3 itself spawned are skipped (`skipped-owned` — session id found in another thread's
+`provider_session_runtime` resume cursor — and `skipped-worktree` — transcript cwd inside the T3
+worktrees dir), and deleted imported threads stay deleted via the event-log tombstone.
+
 ## Reference Repos
 
 - Open-source Codex repo: https://github.com/openai/codex

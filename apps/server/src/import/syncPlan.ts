@@ -111,6 +111,45 @@ export function planThreadSync(input: {
   return { kind: "append", newMessages };
 }
 
+/** Thread id prefix used for threads created by the Claude transcript import. */
+export const IMPORT_THREAD_ID_PREFIX = "claude-import-";
+
+/** Minimal view of a provider session runtime binding (resume cursor owner). */
+export interface ResumeBindingView {
+  readonly threadId: string;
+  /** Claude session id the binding's resume cursor points at, if any. */
+  readonly resumeSessionId: string | null;
+}
+
+/**
+ * Map of Claude session ids that are already owned by another T3 thread's
+ * resume binding: sessionId -> owning threadId.
+ *
+ * A transcript whose session id appears here must NOT be imported as its own
+ * thread — the conversation already exists in T3. Two ways this happens:
+ *
+ *  - Native sessions: T3 spawns `claude` for a regular thread, and the CLI
+ *    writes a transcript under `~/.claude/projects` like any other session.
+ *  - forkSession continuations: continuing an imported thread forks to a NEW
+ *    Claude session id (whose transcript contains the full copied history);
+ *    the imported thread's cursor advances to that fork id.
+ *
+ * A binding whose thread IS `claude-import-<sessionId>` does not own the
+ * session in this sense — that is the import mirror itself.
+ */
+export function buildOwnedSessionIdMap(
+  bindings: Iterable<ResumeBindingView>,
+): ReadonlyMap<string, string> {
+  const owned = new Map<string, string>();
+  for (const binding of bindings) {
+    const sessionId = binding.resumeSessionId;
+    if (sessionId === null || sessionId.trim().length === 0) continue;
+    if (binding.threadId === `${IMPORT_THREAD_ID_PREFIX}${sessionId}`) continue;
+    owned.set(sessionId, binding.threadId);
+  }
+  return owned;
+}
+
 /**
  * Prefixes of the first user prompt that identify "ralph" harness transcripts
  * (generator/evaluator/rescue loops) which should not be mirrored into T3.

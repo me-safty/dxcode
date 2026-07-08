@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import type { ParsedClaudeMessage, ParsedClaudeSession } from "./claudeTranscript.ts";
-import { isRalphSession, planThreadSync } from "./syncPlan.ts";
+import { buildOwnedSessionIdMap, isRalphSession, planThreadSync } from "./syncPlan.ts";
 
 const message = (
   uuid: string,
@@ -225,5 +225,42 @@ describe("isRalphSession", () => {
   it("does not flag sessions without user messages", () => {
     const s = session([message("a-1", "assistant", "You are the generator agent")]);
     expect(isRalphSession(s)).toBe(false);
+  });
+});
+
+describe("buildOwnedSessionIdMap", () => {
+  const SID = "11111111-2222-4333-8444-555555555555";
+  const FORK_SID = "99999999-8888-4777-8666-555555555555";
+
+  it("marks a session owned when a native thread's cursor points at it", () => {
+    const owned = buildOwnedSessionIdMap([
+      { threadId: "f60fe000-c2c7-447a-92de-61e0c372208b", resumeSessionId: SID },
+    ]);
+    expect(owned.get(SID)).toBe("f60fe000-c2c7-447a-92de-61e0c372208b");
+  });
+
+  it("does not mark a session owned by its own import mirror thread", () => {
+    const owned = buildOwnedSessionIdMap([
+      { threadId: `claude-import-${SID}`, resumeSessionId: SID },
+    ]);
+    expect(owned.has(SID)).toBe(false);
+  });
+
+  it("marks a forkSession target owned by the continued import thread", () => {
+    // Continuing claude-import-<SID> forked to FORK_SID; the fork transcript
+    // must not be imported as its own thread.
+    const owned = buildOwnedSessionIdMap([
+      { threadId: `claude-import-${SID}`, resumeSessionId: FORK_SID },
+    ]);
+    expect(owned.has(SID)).toBe(false);
+    expect(owned.get(FORK_SID)).toBe(`claude-import-${SID}`);
+  });
+
+  it("ignores bindings without a resume session id", () => {
+    const owned = buildOwnedSessionIdMap([
+      { threadId: "some-thread", resumeSessionId: null },
+      { threadId: "other-thread", resumeSessionId: "  " },
+    ]);
+    expect(owned.size).toBe(0);
   });
 });

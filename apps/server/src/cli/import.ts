@@ -16,12 +16,14 @@ import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as References from "effect/References";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
 
@@ -32,7 +34,12 @@ import {
   parseClaudeTranscript,
   type ParsedClaudeSession,
 } from "../import/claudeTranscript.ts";
-import { isRalphSession, planThreadSync } from "../import/syncPlan.ts";
+import {
+  buildOwnedSessionIdMap,
+  isRalphSession,
+  planThreadSync,
+  type ResumeBindingView,
+} from "../import/syncPlan.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationLayerLive } from "../orchestration/runtimeLayer.ts";
@@ -48,6 +55,8 @@ import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CLAUDE_ADAPTER_KEY = "claudeAgent";
+
+const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
 
 class ImportCommandError extends Data.TaggedError("ImportCommandError")<{
   readonly message: string;
@@ -219,6 +228,47 @@ const loadEverExistingThreadStreamIds = Effect.gen(function* () {
   return ids as ReadonlySet<string>;
 });
 
+/**
+ * Owned-session guard source: every resume binding in
+ * `provider_session_runtime`, so the importer can skip transcripts whose
+ * session id is already owned by another thread — see `buildOwnedSessionIdMap`
+ * for why importing those would duplicate conversations T3 already has.
+ */
+const loadOwnedSessionIds = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql`
+    SELECT thread_id AS threadId, resume_cursor_json AS resumeCursorJson
+    FROM provider_session_runtime
+  `.pipe(
+    Effect.mapError(
+      (cause) =>
+        new ImportCommandError({
+          message: `Failed to read provider session bindings: ${String(cause)}.`,
+        }),
+    ),
+  );
+  const bindings: Array<ResumeBindingView> = [];
+  for (const row of rows) {
+    const record = row as Record<string, unknown>;
+    const threadId = record["threadId"];
+    if (typeof threadId !== "string") continue;
+    const cursorJson = record["resumeCursorJson"];
+    let resumeSessionId: string | null = null;
+    if (typeof cursorJson === "string") {
+      // An unparseable cursor owns nothing.
+      const decoded = decodeUnknownJsonStringExit(cursorJson);
+      const cursor = Exit.isSuccess(decoded) ? decoded.value : null;
+      if (cursor !== null && typeof cursor === "object" && !Array.isArray(cursor)) {
+        const { resume, sessionId } = cursor as { resume?: unknown; sessionId?: unknown };
+        resumeSessionId =
+          typeof resume === "string" ? resume : typeof sessionId === "string" ? sessionId : null;
+      }
+    }
+    bindings.push({ threadId, resumeSessionId });
+  }
+  return buildOwnedSessionIdMap(bindings);
+});
+
 /** Outcome of a create-or-incremental-update pass for one session. */
 type SyncOutcome =
   | {
@@ -232,7 +282,8 @@ type SyncOutcome =
   | { readonly kind: "updated"; readonly threadId: ThreadId; readonly appended: number }
   | { readonly kind: "unchanged"; readonly threadId: ThreadId }
   | { readonly kind: "skipped-deleted"; readonly threadId: ThreadId }
-  | { readonly kind: "skipped-forked"; readonly threadId: ThreadId; readonly reason: string };
+  | { readonly kind: "skipped-forked"; readonly threadId: ThreadId; readonly reason: string }
+  | { readonly kind: "skipped-owned"; readonly ownerThreadId: string };
 
 /**
  * Create-or-incrementally-update the T3 thread mirroring a Claude session.
@@ -254,9 +305,18 @@ const syncSession = Effect.fn("syncSession")(function* (input: {
   readonly snapshot: OrchestrationReadModel;
   /** Thread stream ids that ever existed in the event log (tombstones). */
   readonly everExistingThreadStreamIds: ReadonlySet<string>;
+  /** Session ids owned by another thread's resume binding: sessionId -> threadId. */
+  readonly ownedSessionIds: ReadonlyMap<string, string>;
   readonly projectOverlay?: Map<string, ProjectId>;
 }) {
-  const { session, instanceId, snapshot, everExistingThreadStreamIds, projectOverlay } = input;
+  const {
+    session,
+    instanceId,
+    snapshot,
+    everExistingThreadStreamIds,
+    ownedSessionIds,
+    projectOverlay,
+  } = input;
   const path = yield* Path.Path;
 
   const cwd = session.cwd;
@@ -274,6 +334,14 @@ const syncSession = Effect.fn("syncSession")(function* (input: {
     });
   }
   const sessionId = session.sessionId.trim();
+
+  // Owned-session guard: this transcript belongs to a session T3 itself
+  // produced (a native thread's session, or the forkSession target of a
+  // continued import). Importing it would duplicate an existing conversation.
+  const ownerThreadId = ownedSessionIds.get(sessionId);
+  if (ownerThreadId !== undefined) {
+    return { kind: "skipped-owned", ownerThreadId } satisfies SyncOutcome;
+  }
 
   const modelSelection: ModelSelection = {
     instanceId,
@@ -494,7 +562,14 @@ const importClaudeCommand = Command.make("claude", {
           ),
         );
         const everExistingThreadStreamIds = yield* loadEverExistingThreadStreamIds;
-        return yield* syncSession({ session, instanceId, snapshot, everExistingThreadStreamIds });
+        const ownedSessionIds = yield* loadOwnedSessionIds;
+        return yield* syncSession({
+          session,
+          instanceId,
+          snapshot,
+          everExistingThreadStreamIds,
+          ownedSessionIds,
+        });
       }).pipe(
         Effect.provide(
           ImportCliRuntimeLive.pipe(
@@ -541,6 +616,12 @@ const importClaudeCommand = Command.make("claude", {
               `Incremental updates are permanently disabled for this thread to avoid corrupting it.`,
           );
           break;
+        case "skipped-owned":
+          yield* Console.log(
+            `Skipped Claude session ${session.sessionId}: it already belongs to T3 thread ${result.ownerThreadId} ` +
+              `(the session was produced by T3 itself; importing it would duplicate that conversation).`,
+          );
+          break;
       }
     }),
   ),
@@ -568,6 +649,8 @@ interface SyncCounters {
   skippedRalph: number;
   skippedEmpty: number;
   skippedDeleted: number;
+  skippedOwned: number;
+  skippedWorktree: number;
   failed: number;
   total: number;
 }
@@ -593,6 +676,10 @@ const importSyncCommand = Command.make("sync", {
       const projectsRoot = Option.isSome(flags.projectsDir)
         ? flags.projectsDir.value
         : yield* expandHomePath("~/.claude/projects");
+
+      const worktreesRootPrefix = config.worktreesDir.endsWith(path.sep)
+        ? config.worktreesDir
+        : `${config.worktreesDir}${path.sep}`;
 
       const projectDirs = yield* fs
         .readDirectory(projectsRoot)
@@ -621,6 +708,8 @@ const importSyncCommand = Command.make("sync", {
         skippedRalph: 0,
         skippedEmpty: 0,
         skippedDeleted: 0,
+        skippedOwned: 0,
+        skippedWorktree: 0,
         failed: 0,
         total: 0,
       };
@@ -638,6 +727,7 @@ const importSyncCommand = Command.make("sync", {
         );
 
         const everExistingThreadStreamIds = yield* loadEverExistingThreadStreamIds;
+        const ownedSessionIds = yield* loadOwnedSessionIds;
         const projectOverlay = new Map<string, ProjectId>();
         const seenSessionIds = new Set<string>();
 
@@ -678,6 +768,17 @@ const importSyncCommand = Command.make("sync", {
           }
           seenSessionIds.add(sessionId);
 
+          // Sessions running inside a T3-managed worktree can only have been
+          // spawned by T3 itself; importing them would duplicate native
+          // threads. This also covers T3 sessions whose resume cursor has
+          // moved past this session id (so the owned-session guard misses).
+          const cwdTrimmed = session.cwd!.trim();
+          if (cwdTrimmed === config.worktreesDir || cwdTrimmed.startsWith(worktreesRootPrefix)) {
+            counters.skippedWorktree += 1;
+            yield* Console.log(`skipped-worktree sessionId=${sessionId} cwd=${cwdTrimmed}`);
+            continue;
+          }
+
           if (!flags.includeRalph && isRalphSession(session)) {
             counters.skippedRalph += 1;
             yield* Console.log(`skipped-ralph sessionId=${sessionId}`);
@@ -690,6 +791,7 @@ const importSyncCommand = Command.make("sync", {
               instanceId,
               snapshot,
               everExistingThreadStreamIds,
+              ownedSessionIds,
               projectOverlay,
             }),
           );
@@ -723,6 +825,12 @@ const importSyncCommand = Command.make("sync", {
               counters.skippedForked += 1;
               yield* Console.log(`skipped-forked sessionId=${sessionId} reason=${result.reason}`);
               break;
+            case "skipped-owned":
+              counters.skippedOwned += 1;
+              yield* Console.log(
+                `skipped-owned sessionId=${sessionId} ownerThreadId=${result.ownerThreadId}`,
+              );
+              break;
           }
         }
       }).pipe(
@@ -738,7 +846,8 @@ const importSyncCommand = Command.make("sync", {
         `summary created=${counters.created} updated=${counters.updated} appended=${counters.appended} ` +
           `unchanged=${counters.unchanged} skipped-forked=${counters.skippedForked} ` +
           `skipped-ralph=${counters.skippedRalph} skipped-empty=${counters.skippedEmpty} ` +
-          `skipped-deleted=${counters.skippedDeleted} failed=${counters.failed} total=${counters.total}`,
+          `skipped-deleted=${counters.skippedDeleted} skipped-owned=${counters.skippedOwned} ` +
+          `skipped-worktree=${counters.skippedWorktree} failed=${counters.failed} total=${counters.total}`,
       );
     }),
   ),
