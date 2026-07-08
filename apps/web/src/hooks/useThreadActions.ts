@@ -140,18 +140,16 @@ export function useThreadActions() {
   const attemptArchiveThread = useCallback(
     async (target: ScopedThreadRef) => {
       const result = await archiveThread(target);
-      if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
-        return;
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to archive thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
       }
-
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Failed to archive thread",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
     },
     [archiveThread],
   );

@@ -131,10 +131,11 @@ function ChatRouteGlobalShortcuts() {
       }
 
       if (command === "thread.archiveCurrent") {
-        if (!routeThreadRef) return;
         event.preventDefault();
         event.stopPropagation();
+        if (!routeThreadRef) return;
         void attemptArchiveThread(routeThreadRef);
+        return;
       }
     };
 

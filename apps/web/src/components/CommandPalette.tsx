@@ -21,10 +21,10 @@ import {
 import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
+  ArchiveIcon,
   ArrowDownIcon,
   ArrowLeftIcon,
   ArrowUpIcon,
-  ArchiveIcon,
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
