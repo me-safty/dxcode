@@ -360,12 +360,17 @@ export const make = Effect.gen(function* () {
       }
     });
 
+    // Mirror the renderer's document.title (project/thread context) onto the native
+    // window title so external window-title scanners can see the active workspace;
+    // fall back to the app name when the renderer has no title yet.
+    const applyWorkspaceTitle = (rawTitle: string | null | undefined) => {
+      const pageTitle = rawTitle?.trim();
+      window.setTitle(pageTitle ? pageTitle : environment.displayName);
+    };
+
     window.on("page-title-updated", (event, title) => {
       event.preventDefault();
-      // Mirror the renderer's document.title (project/thread context) so external
-      // window-title scanners can see the active workspace; fall back to the app name.
-      const pageTitle = title?.trim();
-      window.setTitle(pageTitle ? pageTitle : environment.displayName);
+      applyWorkspaceTitle(title);
     });
 
     let developmentLoadRetryIndex = 0;
@@ -422,7 +427,9 @@ export const make = Effect.gen(function* () {
       }
       clearDevelopmentLoadRetry();
       developmentLoadRetryIndex = 0;
-      window.setTitle(environment.displayName);
+      // Re-apply the renderer's current document.title rather than forcing the app
+      // name, so a finished load doesn't clobber the active workspace title.
+      applyWorkspaceTitle(window.webContents.getTitle());
     });
     window.webContents.on(
       "did-fail-load",

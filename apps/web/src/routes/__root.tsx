@@ -55,7 +55,8 @@ import {
   useProject,
   useThreadShell,
 } from "../state/entities";
-import { resolveThreadRouteRef } from "../threadRoutes";
+import { useComposerDraftStore } from "../composerDraftStore";
+import { resolveThreadRouteTarget } from "../threadRoutes";
 import {
   createKeybindingsUpdateToastController,
   type KeybindingsUpdateToastController,
@@ -160,12 +161,24 @@ function DocumentTitleSync() {
   });
 
   // Params are read non-strictly because DocumentTitleSync renders above the
-  // matched route; only thread routes expose environmentId/threadId.
+  // matched route; only thread/draft routes expose environmentId/threadId/draftId.
   const params = useParams({ strict: false });
-  const threadRef = resolveThreadRouteRef(params);
-  const thread = useThreadShell(threadRef);
+  const target = resolveThreadRouteTarget(params);
+
+  const thread = useThreadShell(target?.kind === "server" ? target.threadRef : null);
+  const draftId = target?.kind === "draft" ? target.draftId : null;
+  // Drafts have no thread title yet, but they still belong to a project, so the
+  // window title can reflect the active project while a new chat is being composed.
+  const draftSession = useComposerDraftStore((store) =>
+    draftId === null ? null : store.getDraftSession(draftId),
+  );
+
   const projectRef =
-    thread === null ? null : scopeProjectRef(thread.environmentId, thread.projectId);
+    thread !== null
+      ? scopeProjectRef(thread.environmentId, thread.projectId)
+      : draftSession !== null
+        ? scopeProjectRef(draftSession.environmentId, draftSession.projectId)
+        : null;
   const project = useProject(projectRef);
 
   const title = formatWorkspaceDocumentTitle({
