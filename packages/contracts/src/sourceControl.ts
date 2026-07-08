@@ -109,6 +109,11 @@ export type SourceControlDiscoveryStatus = typeof SourceControlDiscoveryStatus.T
 export const SourceControlProviderAuthStatus = Schema.Literals([
   "authenticated",
   "unauthenticated",
+  // The provider CLI is installed but too old to report auth status in the
+  // format the server needs (e.g. `gh` predating `auth status --json`). The
+  // user may well be signed in — we just can't read it. `detail` carries the
+  // platform-appropriate upgrade command.
+  "outdated",
   "unknown",
 ]);
 export type SourceControlProviderAuthStatus = typeof SourceControlProviderAuthStatus.Type;

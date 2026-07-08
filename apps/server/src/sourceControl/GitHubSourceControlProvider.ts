@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   SourceControlProviderError,
   type ChangeRequest,
@@ -42,6 +43,44 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
   };
 }
 
+/**
+ * Minimum `gh` version that supports `gh auth status --json`, which the server
+ * relies on to read authentication state. Shipped in gh v2.81.0 (cli/cli#11544).
+ */
+const GITHUB_CLI_MIN_VERSION = "2.81.0";
+
+function parseGitHubCliVersion(version: Option.Option<string> | undefined): string | null {
+  const raw = version === undefined ? undefined : Option.getOrUndefined(version);
+  if (raw === undefined) return null;
+  const match = raw.match(/\bversion\s+(\d+\.\d+\.\d+)/iu) ?? raw.match(/(\d+\.\d+\.\d+)/u);
+  return match?.[1] ?? null;
+}
+
+/**
+ * True when the failed auth probe is explained by an outdated `gh` rather than a
+ * missing login. The definitive signal is gh rejecting `--json`; the parsed
+ * version is a fallback should the flag surface differently in future releases.
+ */
+function isOutdatedGitHubCli(input: SourceControlAuthProbeInput): boolean {
+  if (/unknown flag:\s*--json/iu.test(`${input.stdout}\n${input.stderr}`)) {
+    return true;
+  }
+  const version = parseGitHubCliVersion(input.version);
+  return version !== null && compareSemverVersions(version, GITHUB_CLI_MIN_VERSION) < 0;
+}
+
+function gitHubCliUpgradeCommand(platform: NodeJS.Platform | undefined): string {
+  switch (platform) {
+    case "darwin":
+      return "brew upgrade gh";
+    case "win32":
+      return "winget upgrade --id GitHub.cli";
+    default:
+      // Debian/Ubuntu default. Detecting the actual package manager is a follow-up.
+      return "sudo apt update && sudo apt install gh";
+  }
+}
+
 function parseGitHubAuth(input: SourceControlAuthProbeInput) {
   const output = combinedAuthOutput(input);
   const authStatus = parseGitHubAuthStatus(input.stdout);
@@ -53,6 +92,16 @@ function parseGitHubAuth(input: SourceControlAuthProbeInput) {
       status: "authenticated",
       account: authenticatedAccount.account,
       host,
+    });
+  }
+
+  // A `gh` too old for `auth status --json` can't be parsed here, so the probe
+  // looks like a sign-out even when the user is authenticated. Surface it as an
+  // outdated CLI, with the platform-appropriate upgrade command in `detail`.
+  if (!authStatus.parsed && isOutdatedGitHubCli(input)) {
+    return providerAuth({
+      status: "outdated",
+      detail: gitHubCliUpgradeCommand(input.platform),
     });
   }
 

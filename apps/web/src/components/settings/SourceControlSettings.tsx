@@ -1,4 +1,10 @@
-import { ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  CopyIcon,
+  GitPullRequestIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
@@ -105,6 +111,9 @@ function authPresentation(auth: SourceControlProviderAuth): {
   if (auth.status === "unauthenticated") {
     return { label: "Not authenticated", badge: "warning" };
   }
+  if (auth.status === "outdated") {
+    return { label: "Outdated CLI", badge: "warning" };
+  }
   return { label: "Status unknown", badge: null };
 }
 
@@ -190,6 +199,16 @@ function itemSummary({
       return <span>Available. {item.installHint}</span>;
     }
 
+    if (auth.status === "outdated") {
+      return (
+        <span>
+          Your <code className="rounded bg-muted px-1 py-px text-[11px]">{item.executable}</code> CLI
+          is too old for {item.label} sign-in to be detected here — you may already be authenticated.
+          Update it on the server host, then Rescan.
+        </span>
+      );
+    }
+
     if (auth.status === "unauthenticated") {
       return (
         <span>
@@ -207,6 +226,56 @@ function itemSummary({
   }
 
   return <span>Available</span>;
+}
+
+function CliVersion({
+  version,
+  outdated,
+}: {
+  readonly version: string;
+  readonly outdated: boolean;
+}) {
+  if (!outdated) {
+    return <code className="text-xs text-muted-foreground">{version}</code>;
+  }
+  const match = version.match(/\d+\.\d+\.\d+/);
+  if (!match) {
+    return <code className="text-xs font-semibold text-destructive-foreground">{version}</code>;
+  }
+  const number = match[0];
+  const start = version.indexOf(number);
+  return (
+    <code className="text-xs text-muted-foreground">
+      {version.slice(0, start)}
+      <span className="font-semibold text-destructive-foreground">{number}</span>
+      {version.slice(start + number.length)}
+    </code>
+  );
+}
+
+function UpgradeCommandLine({ command }: { readonly command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-1.5 flex items-center gap-2 rounded-md border border-border bg-muted/60 px-2.5 py-1.5">
+      <span className="select-none font-mono text-xs text-muted-foreground">$</span>
+      <code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{command}</code>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-6 shrink-0 gap-1 px-1.5 text-xs text-primary hover:text-primary"
+        onClick={() => {
+          void navigator.clipboard.writeText(command).then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          });
+        }}
+        aria-label="Copy upgrade command"
+      >
+        {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        {copied ? "Copied" : "Copy"}
+      </Button>
+    </div>
+  );
 }
 
 function DiscoveryItemRow({
@@ -241,7 +310,9 @@ function DiscoveryItemRow({
               <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-foreground">
                 {item.label}
               </span>
-              {version ? <code className="text-xs text-muted-foreground">{version}</code> : null}
+              {version ? (
+                <CliVersion version={version} outdated={auth?.status === "outdated"} />
+              ) : null}
               {isVcsNotReady(item) ? (
                 <Badge variant="warning" size="sm">
                   Coming Soon
@@ -256,6 +327,9 @@ function DiscoveryItemRow({
             <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground/80">
               {itemSummary({ item, auth, authAccount })}
             </p>
+            {auth?.status === "outdated" && optionLabel(auth.detail) ? (
+              <UpgradeCommandLine command={optionLabel(auth.detail) as string} />
+            ) : null}
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
             {hasDetails ? (

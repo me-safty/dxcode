@@ -4,6 +4,7 @@ import type {
   SourceControlProviderInfo,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -14,6 +15,10 @@ export interface SourceControlAuthProbeInput {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: VcsProcess.VcsProcessOutput["exitCode"];
+  /** First line of the CLI `--version` probe, when it was available. */
+  readonly version?: Option.Option<string>;
+  /** Host platform, so `parseAuth` can suggest an OS-appropriate upgrade command. */
+  readonly platform?: NodeJS.Platform;
 }
 
 export interface SourceControlUnknownRemoteRefinementInput {
@@ -249,12 +254,20 @@ export function probeSourceControlProvider(input: {
           appendTruncationMarker: true,
         })
         .pipe(
-          Effect.map(
-            (result) =>
-              ({
+          Effect.flatMap((result) =>
+            Effect.gen(function* () {
+              const platform = yield* HostProcessPlatform;
+              return {
                 ...item,
-                auth: spec.parseAuth(result),
-              }) satisfies SourceControlProviderDiscoveryItem,
+                auth: spec.parseAuth({
+                  stdout: result.stdout,
+                  stderr: result.stderr,
+                  exitCode: result.exitCode,
+                  version: item.version,
+                  platform,
+                }),
+              } satisfies SourceControlProviderDiscoveryItem;
+            }),
           ),
           Effect.catch((cause) =>
             Effect.succeed({

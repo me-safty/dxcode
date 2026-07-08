@@ -381,3 +381,33 @@ it("reports unauthenticated when GitHub JSON has accounts but none are valid", (
     },
   );
 });
+
+it("reports an outdated CLI when gh rejects the --json flag", () => {
+  const auth = GitHubSourceControlProvider.discovery.parseAuth({
+    stdout: "",
+    stderr: "unknown flag: --json\n\nUsage:  gh auth status [flags]",
+    exitCode: ChildProcessSpawner.ExitCode(1),
+    version: Option.some("gh version 2.74.2 (2025-06-18)"),
+    platform: "darwin",
+  });
+
+  assert.deepStrictEqual(
+    { status: auth.status, detail: auth.detail },
+    { status: "outdated", detail: Option.some("brew upgrade gh") },
+  );
+});
+
+it("detects an outdated gh by version and suggests the platform upgrade command", () => {
+  const auth = GitHubSourceControlProvider.discovery.parseAuth({
+    stdout: "",
+    stderr: "",
+    exitCode: ChildProcessSpawner.ExitCode(1),
+    version: Option.some("gh version 2.40.0 (2023-11-01)"),
+    platform: "win32",
+  });
+
+  assert.deepStrictEqual(
+    { status: auth.status, detail: auth.detail },
+    { status: "outdated", detail: Option.some("winget upgrade --id GitHub.cli") },
+  );
+});
