@@ -71,6 +71,8 @@ export interface Preferences {
   readonly codeWordBreak?: boolean;
   /** Cloud account ids that opted out of the T3 Connect onboarding sheet. */
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
+  /** Home-screen project groups the user collapsed, by group key. */
+  readonly collapsedProjectGroups?: readonly string[];
 }
 
 async function readStorageItem(key: MobileStorageKeyValue): Promise<string | null> {
@@ -170,6 +172,7 @@ export async function loadPreferences(): Promise<Preferences> {
     codeFontSize?: number | null;
     codeWordBreak?: boolean;
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
+    collapsedProjectGroups?: readonly string[];
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -193,6 +196,11 @@ export async function loadPreferences(): Promise<Preferences> {
   if (Array.isArray(parsed.connectOnboardingOptOutAccounts)) {
     preferences.connectOnboardingOptOutAccounts = parsed.connectOnboardingOptOutAccounts.filter(
       (account): account is string => typeof account === "string",
+    );
+  }
+  if (Array.isArray(parsed.collapsedProjectGroups)) {
+    preferences.collapsedProjectGroups = parsed.collapsedProjectGroups.filter(
+      (key): key is string => typeof key === "string",
     );
   }
 
