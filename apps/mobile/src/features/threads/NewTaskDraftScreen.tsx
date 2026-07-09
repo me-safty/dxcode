@@ -613,10 +613,9 @@ export function NewTaskDraftScreen(props: {
 
   const isAndroid = Platform.OS === "android";
   const isDarkMode = colorScheme === "dark";
-  // Mirrors ThreadComposer: collapsed pill until focused, and typed content
-  // keeps it expanded after blur.
-  const hasContent = flow.prompt.trim().length > 0 || flow.attachments.length > 0;
-  const isExpanded = !isAndroid || isComposerFocused || hasContent;
+  // Android expansion follows native editor focus so relayout cannot race
+  // the touch gesture that opens the keyboard.
+  const isExpanded = !isAndroid || isComposerFocused;
   const canStart =
     Boolean(flow.selectedProject) &&
     Boolean(flow.selectedModel) &&
