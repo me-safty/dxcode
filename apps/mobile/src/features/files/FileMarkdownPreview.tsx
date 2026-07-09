@@ -8,6 +8,7 @@ import {
 import { RefreshControl, ScrollView, Text as NativeText, View } from "react-native";
 
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { useFontFamily } from "../../lib/useFontFamily";
 import {
   resolveMarkdownFontSizes,
   resolveNativeMarkdownTypography,
@@ -45,6 +46,9 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
   const codeBackground = String(useThemeColor("--color-md-code-bg"));
   const codeText = String(useThemeColor("--color-md-code-text"));
   const horizontalRule = String(useThemeColor("--color-md-hr"));
+  const regularFontFamily = useFontFamily("regular");
+  const mediumFontFamily = useFontFamily("medium");
+  const boldFontFamily = useFontFamily("bold");
 
   return useMemo(() => {
     const renderers: CustomRenderers = {
@@ -86,21 +90,21 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
       styles: {
         text: {
           color: body,
-          fontFamily: "DMSans-Regular",
+          fontFamily: regularFontFamily,
           fontSize: markdownFontSizes.m,
           lineHeight: markdownFontSizes.bodyLineHeight,
         },
         heading: {
           color: strong,
-          fontFamily: "DMSans-Bold",
+          fontFamily: boldFontFamily,
         },
         strong: {
           color: strong,
-          fontFamily: "DMSans-Bold",
+          fontFamily: boldFontFamily,
         },
         link: {
           color: link,
-          fontFamily: "DMSans-Medium",
+          fontFamily: mediumFontFamily,
         },
         blockquote: {
           backgroundColor: blockquoteBackground,
@@ -141,9 +145,9 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
         fontSize: nativeMarkdownTypography.fontSize,
         lineHeight: nativeMarkdownTypography.lineHeight,
         headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-        fontFamily: "DMSans-Regular",
-        headingFontFamily: "DMSans-Bold",
-        boldFontFamily: "DMSans-Bold",
+        fontFamily: regularFontFamily,
+        headingFontFamily: boldFontFamily,
+        boldFontFamily,
       },
     };
   }, [
@@ -155,8 +159,11 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
     horizontalRule,
     link,
     markdownFontSizes,
+    mediumFontFamily,
     nativeMarkdownTypography,
+    regularFontFamily,
     strong,
+    boldFontFamily,
   ]);
 }
 

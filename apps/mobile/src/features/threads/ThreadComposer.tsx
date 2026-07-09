@@ -797,7 +797,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               textStyle={{
                 ...bodyText,
                 color: foregroundColor,
-                fontFamily: "DMSans-Regular",
               }}
             />
           </View>

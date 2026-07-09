@@ -52,6 +52,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { useFontFamily } from "../../lib/useFontFamily";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
   hasNativeSelectableMarkdownText,
@@ -310,6 +311,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
   );
   const colors = MARKDOWN_COLORS[colorScheme === "dark" ? "dark" : "light"];
   const inlineSkillForeground = String(useThemeColor("--color-inline-skill-foreground"));
+  const regularFontFamily = useFontFamily("regular");
+  const boldFontFamily = useFontFamily("bold");
 
   return useMemo(() => {
     const markdownBodyColor = colors.body;
@@ -361,8 +364,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         h6: markdownFontSizes.h6,
       },
       fontFamilies: {
-        regular: "DMSans-Regular",
-        heading: "DMSans-Bold",
+        regular: regularFontFamily,
+        heading: boldFontFamily,
         mono: "ui-monospace",
       },
       headingWeight: "700",
@@ -384,7 +387,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownStrongColor,
-        fontFamily: "DMSans-Bold",
+        fontFamily: boldFontFamily,
       },
       italic: { fontStyle: "italic" },
       link: {
@@ -400,7 +403,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         marginVertical: 10,
       },
       heading: {
-        fontFamily: "DMSans-Bold",
+        fontFamily: boldFontFamily,
         color: markdownStrongColor,
         marginTop: 18,
         marginBottom: 8,
@@ -598,7 +601,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownUserBodyColor,
-        fontFamily: "DMSans-Bold",
+        fontFamily: boldFontFamily,
       },
       heading: {
         ...baseStyles.heading,
@@ -652,9 +655,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans-Regular",
-          headingFontFamily: "DMSans-Bold",
-          boldFontFamily: "DMSans-Bold",
+          fontFamily: regularFontFamily,
+          headingFontFamily: boldFontFamily,
+          boldFontFamily,
         },
       },
       assistant: {
@@ -683,13 +686,21 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans-Regular",
-          headingFontFamily: "DMSans-Bold",
-          boldFontFamily: "DMSans-Bold",
+          fontFamily: regularFontFamily,
+          headingFontFamily: boldFontFamily,
+          boldFontFamily,
         },
       },
     };
-  }, [colors, inlineSkillForeground, markdownFontSizes, nativeMarkdownTypography, onLinkPress]);
+  }, [
+    boldFontFamily,
+    colors,
+    inlineSkillForeground,
+    markdownFontSizes,
+    nativeMarkdownTypography,
+    onLinkPress,
+    regularFontFamily,
+  ]);
 }
 
 function renderFeedEntry(

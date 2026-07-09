@@ -222,14 +222,14 @@
 
 /* ─── Custom utilities ──────────────────────────────────────────────── */
 @utility font-t3-medium {
-  font-family: "DMSans-Medium";
+  font-family: var(--font-medium);
 }
 
 @utility font-t3-bold {
-  font-family: "DMSans-Bold";
+  font-family: var(--font-bold);
 }
 
 @utility font-t3-extrabold {
-  font-family: "DMSans-Bold";
+  font-family: var(--font-bold);
   font-weight: 800;
 }
