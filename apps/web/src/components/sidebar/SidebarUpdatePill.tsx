@@ -34,7 +34,7 @@ function SidebarUpdateReleaseNotesTooltip({
       <div className="px-1">
         <div className="text-sm leading-5 font-medium">{tooltip}</div>
       </div>
-      <div className="max-h-[min(28rem,calc(100vh-6rem))] overflow-y-auto px-1 pt-4 pb-1">
+      <div className="pointer-events-auto max-h-[min(28rem,calc(100vh-6rem))] overflow-y-auto px-1 pt-4 pb-1">
         {state.releaseNotes.map((releaseNote, index) => (
           <div key={releaseNote.version}>
             {index > 0 && <Separator className="my-3 bg-border/60" />}
