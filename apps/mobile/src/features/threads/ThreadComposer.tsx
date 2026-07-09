@@ -68,7 +68,7 @@ import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerComm
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
  * Exported so the parent can compute feed overlap / content insets.
  */
-export const COMPOSER_COLLAPSED_CHROME = Platform.OS === "android" ? 120 : 60;
+export const COMPOSER_COLLAPSED_CHROME = 60;
 
 /**
  * Height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
@@ -856,44 +856,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           ) : null}
         </ComposerSurface>
 
-        {Platform.OS === "android" && !isExpanded ? (
-          // Collapsed Android toolbar shows exactly three controls, so skip
-          // the scroller and let the two selector pills flex to fill the row.
-          <ComposerToolbarRow paddingBottom={8} paddingHorizontal={0} paddingTop={8}>
-            <ComposerToolbarButton
-              accessibilityLabel="Add attachment"
-              icon="plus"
-              onPress={() => void props.onPickDraftImages()}
-              showChevron={false}
-            />
-            <ControlPillMenu
-              className="min-w-0 flex-1"
-              actions={modelMenuActions}
-              onPressAction={({ nativeEvent }) => handleModelMenuAction(nativeEvent.event)}
-            >
-              <ComposerToolbarTrigger
-                accessibilityLabel="Model"
-                iconNode={<ProviderIcon provider={currentModelOption?.providerDriver} size={16} />}
-                label={currentModelOption?.label ?? currentModelSelection.model}
-                className="w-full max-w-full"
-              />
-            </ControlPillMenu>
-            <ControlPillMenu
-              // The reasoning/config label runs longer than most model names,
-              // so it gets a larger share of the row.
-              className="min-w-0 flex-[1.4]"
-              actions={optionsMenuActions}
-              onPressAction={({ nativeEvent }) => handleOptionsMenuAction(nativeEvent.event)}
-            >
-              <ComposerToolbarTrigger
-                accessibilityLabel="Configuration"
-                icon="slider.horizontal.3"
-                label={configurationLabel}
-                className="w-full max-w-full"
-              />
-            </ControlPillMenu>
-          </ComposerToolbarRow>
-        ) : isExpanded ? (
+        {isExpanded ? (
           // Toolbar row — matches draft page layout (expanded only)
           <Animated.View entering={FadeIn.duration(160)} exiting={FadeOut.duration(120)}>
             <ComposerToolbarRow paddingBottom={8} paddingHorizontal={0} paddingTop={8}>

@@ -779,15 +779,17 @@ export function NewTaskDraftScreen(props: {
               ) : null}
             </ComposerSurface>
 
-            <ComposerToolbarRow paddingBottom={8} paddingHorizontal={0} paddingTop={8}>
-              <ComposerToolbarScroller
-                fadeOpaque={isDarkMode ? "rgba(0,0,0,0.95)" : "rgba(255,255,255,0.95)"}
-                fadeTransparent={isDarkMode ? "rgba(0,0,0,0)" : "rgba(255,255,255,0)"}
-              >
-                {toolbarPills}
-              </ComposerToolbarScroller>
-              {isExpanded ? startButton : null}
-            </ComposerToolbarRow>
+            {isExpanded ? (
+              <ComposerToolbarRow paddingBottom={8} paddingHorizontal={0} paddingTop={8}>
+                <ComposerToolbarScroller
+                  fadeOpaque={isDarkMode ? "rgba(0,0,0,0.95)" : "rgba(255,255,255,0.95)"}
+                  fadeTransparent={isDarkMode ? "rgba(0,0,0,0)" : "rgba(255,255,255,0)"}
+                >
+                  {toolbarPills}
+                </ComposerToolbarScroller>
+                {startButton}
+              </ComposerToolbarRow>
+            ) : null}
           </View>
         </KeyboardAvoidingView>
       </View>
