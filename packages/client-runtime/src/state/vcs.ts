@@ -108,7 +108,29 @@ export const makeCachedVcsRefsChanges = Effect.fn("CachedVcsRefsState.makeChange
       generation === null
         ? Stream.empty
         : Stream.tick(VCS_REFS_REVALIDATE_INTERVAL).pipe(
-            Stream.mapEffect(refresh, { concurrency: 1 }),
+            Stream.mapEffect(
+              () =>
+                refresh().pipe(
+                  Effect.map(Option.some),
+                  Effect.catch((error) =>
+                    Effect.logWarning("Could not refresh Git refs.").pipe(
+                      Effect.annotateLogs({
+                        environmentId,
+                        cwd: input.cwd,
+                        ...safeErrorLogAttributes(error),
+                      }),
+                      Effect.as(Option.none<VcsListRefsResult>()),
+                    ),
+                  ),
+                ),
+              { concurrency: 1 },
+            ),
+            Stream.filterMap((refs) =>
+              Option.match(refs, {
+                onNone: () => Result.failVoid,
+                onSome: Result.succeed,
+              }),
+            ),
           ),
     ),
   );

@@ -116,12 +116,18 @@ describe("cached VCS refs", () => {
     ),
   );
 
-  it.effect("propagates a live failure instead of reusing cached refs", () =>
+  it.effect("continues polling after a transient live failure", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const expectedError = new Error("Could not list Git refs.");
+        const calls = yield* Ref.make(0);
         const client = {
-          [WS_METHODS.vcsListRefs]: () => Effect.fail(expectedError),
+          [WS_METHODS.vcsListRefs]: () =>
+            Ref.updateAndGet(calls, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === 1 ? Effect.fail(expectedError) : Effect.succeed(LIVE_REFS),
+              ),
+            ),
         } as unknown as WsRpcProtocolClient;
         const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
           target: TARGET,
@@ -133,7 +139,7 @@ describe("cached VCS refs", () => {
           retryNow: Effect.void,
         } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
 
-        const error = yield* Stream.unwrap(
+        const result = Stream.unwrap(
           makeCachedVcsRefsChanges({ cwd: "/repo", limit: 100 }).pipe(
             Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
             Effect.provideService(
@@ -141,10 +147,17 @@ describe("cached VCS refs", () => {
               cacheWithRefs(Option.some(CACHED_REFS)),
             ),
           ),
-        ).pipe(Stream.runHead, Effect.flip);
+        ).pipe(Stream.runHead);
+        const fiber = yield* Effect.forkChild(result);
 
-        expect(error).toBe(expectedError);
-      }),
+        for (let attempt = 0; attempt < 100 && (yield* Ref.get(calls)) < 1; attempt += 1) {
+          yield* Effect.yieldNow;
+        }
+        expect(yield* Ref.get(calls)).toBe(1);
+
+        yield* TestClock.adjust("5 seconds");
+        expect(Option.getOrThrow(yield* Fiber.join(fiber))).toEqual(LIVE_REFS);
+      }).pipe(Effect.provide(TestClock.layer())),
     ),
   );
 
