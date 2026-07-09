@@ -14,9 +14,13 @@ vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
 }));
 
-vi.mock("../lib/runtime", () => ({
-  runtime: { runPromise: vi.fn() },
-}));
+vi.mock("../lib/runtime", async () => {
+  const Layer = await import("effect/Layer");
+  return {
+    runtime: { runPromise: vi.fn() },
+    runtimeContextLayer: Layer.empty,
+  };
+});
 
 import type { Preferences } from "../persistence/mobile-preferences";
 import {

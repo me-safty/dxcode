@@ -80,6 +80,14 @@ vi.mock("expo-sqlite", () => ({
   openDatabaseAsync: vi.fn(() => Promise.resolve(mocks.database)),
 }));
 
+vi.mock("expo-crypto", () => ({
+  getRandomBytes: vi.fn(() => new Uint8Array(16)),
+}));
+
+vi.mock("expo-constants", () => ({
+  default: { expoConfig: { extra: {} } },
+}));
+
 vi.mock("react-native", () => ({
   Platform: {
     OS: "ios",

@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { MobilePreferencesStore, type Preferences } from "../persistence/mobile-preferences";
-import * as PersistenceRuntime from "../persistence/runtime";
+import * as Runtime from "../lib/runtime";
 
 export {
   MobilePreferencesLoadError,
@@ -117,7 +117,7 @@ export function createMobilePreferencesState(runtime: Atom.AtomRuntime<MobilePre
   return { preferencesAtom, updatePreferencesAtom } as const;
 }
 
-const mobilePreferencesRuntime = Atom.runtime(PersistenceRuntime.contextLayer);
+const mobilePreferencesRuntime = Atom.runtime(Runtime.runtimeContextLayer);
 export const mobilePreferencesState = createMobilePreferencesState(mobilePreferencesRuntime);
 
 export const mobilePreferencesAtom = mobilePreferencesState.preferencesAtom;

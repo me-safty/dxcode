@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import { Atom } from "effect/unstable/reactivity";
 
 import { type ClientCacheKind, MobileDatabase } from "../persistence/mobile-database";
-import * as PersistenceRuntime from "../persistence/runtime";
+import * as Runtime from "../lib/runtime";
 
 export interface EnvironmentClientCacheSummary {
   readonly environmentId: EnvironmentId;
@@ -58,7 +58,7 @@ function aggregateCacheSummary(
   };
 }
 
-const clientCacheRuntime = Atom.runtime(PersistenceRuntime.contextLayer);
+const clientCacheRuntime = Atom.runtime(Runtime.runtimeContextLayer);
 
 export const clientCacheSummaryAtom = clientCacheRuntime
   .atom(

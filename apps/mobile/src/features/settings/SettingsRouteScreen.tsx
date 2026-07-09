@@ -1,4 +1,5 @@
 import { useAuth, useUser } from "@clerk/expo";
+import { useAtomValue } from "@effect/atom-react";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as Updates from "expo-updates";
@@ -6,6 +7,7 @@ import { useNavigation } from "@react-navigation/native";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SymbolView } from "expo-symbols";
 import * as Effect from "effect/Effect";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Alert, Linking, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -31,8 +33,8 @@ import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/pu
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
-import { loadPreferences } from "../../persistence/imperative";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { mobilePreferencesAtom } from "../../state/preferences";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -122,6 +124,7 @@ function LocalSettingsRouteScreen() {
 }
 
 function ConfiguredSettingsRouteScreen() {
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { expand: expandClerkSheet } = useClerkSettingsSheetDetent();
@@ -167,16 +170,19 @@ function ConfiguredSettingsRouteScreen() {
       setLiveActivityStatus("signed-out");
       return;
     }
-    void (async () => {
-      const result = await settlePromise(() => loadPreferences());
-      if (result._tag === "Failure") {
-        reportAtomCommandResult(result, { label: "live activity preference load" });
+    if (!AsyncResult.isSuccess(preferencesResult)) {
+      if (AsyncResult.isFailure(preferencesResult)) {
+        reportAtomCommandResult(preferencesResult, { label: "live activity preference load" });
         setLiveActivityStatus("enabled");
-        return;
+      } else {
+        setLiveActivityStatus("checking");
       }
-      setLiveActivityStatus(result.value.liveActivitiesEnabled === false ? "disabled" : "enabled");
-    })();
-  }, [isLoaded, isSignedIn]);
+      return;
+    }
+    setLiveActivityStatus(
+      preferencesResult.value.liveActivitiesEnabled === false ? "disabled" : "enabled",
+    );
+  }, [isLoaded, isSignedIn, preferencesResult]);
 
   const requestNotifications = useCallback(async () => {
     const result = await settleAsyncResult(() =>

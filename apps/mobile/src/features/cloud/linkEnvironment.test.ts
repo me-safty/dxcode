@@ -7,6 +7,8 @@ import { RelayMobileClientId } from "@t3tools/contracts/relay";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import { HttpClient } from "effect/unstable/http";
+import { MobilePreferencesStore } from "../../persistence/mobile-preferences";
+import { MobileStorage } from "../../persistence/mobile-storage";
 
 import {
   cloudEnvironmentsPendingStatus,
@@ -36,10 +38,13 @@ vi.mock("react-native", () => ({
   },
 }));
 
-vi.mock("../../persistence/imperative", () => ({
-  loadOrCreateAgentAwarenessDeviceId: vi.fn(() => Promise.resolve("device-1")),
-  loadPreferences: vi.fn(() => Promise.resolve({})),
+vi.mock("expo-secure-store", () => ({
+  deleteItemAsync: vi.fn(),
+  getItemAsync: vi.fn(),
+  setItemAsync: vi.fn(),
 }));
+
+const loadPreferences = vi.fn(() => Effect.succeed({}));
 
 const savedConnection = {
   environmentId: EnvironmentId.make("env-1"),
@@ -69,6 +74,27 @@ function cloudClientLayer() {
   const httpClientLayer = remoteHttpClientLayer((input, init) => globalThis.fetch(input, init));
   return Layer.mergeAll(
     httpClientLayer,
+    Layer.succeed(
+      MobilePreferencesStore,
+      MobilePreferencesStore.of({
+        load: loadPreferences(),
+        savePatch: (patch) => Effect.succeed(patch),
+        update: () => Effect.succeed({}),
+      }),
+    ),
+    Layer.succeed(
+      MobileStorage,
+      MobileStorage.of({
+        loadSavedConnections: Effect.succeed([]),
+        saveConnection: () => Effect.void,
+        clearSavedConnection: () => Effect.void,
+        loadOrCreateAgentAwarenessDeviceId: Effect.succeed("device-1"),
+        loadAgentAwarenessDeviceId: Effect.succeed("device-1"),
+        loadAgentAwarenessRegistrationRecord: Effect.succeed(null),
+        saveAgentAwarenessRegistrationRecord: () => Effect.void,
+        clearAgentAwarenessRegistrationRecord: Effect.void,
+      }),
+    ),
     ManagedRelay.layer({
       relayUrl: "https://relay.example.test",
       clientId: RelayMobileClientId,
@@ -80,7 +106,11 @@ const withCloudServices = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    HttpClient.HttpClient | ManagedRelay.ManagedRelayClient | ManagedRelay.ManagedRelayDpopSigner
+    | HttpClient.HttpClient
+    | ManagedRelay.ManagedRelayClient
+    | ManagedRelay.ManagedRelayDpopSigner
+    | MobilePreferencesStore
+    | MobileStorage
   >,
 ) => effect.pipe(Effect.provide(cloudClientLayer()));
 
@@ -705,10 +735,7 @@ describe("mobile cloud link environment client", () => {
 
   it.effect("preserves disabled Live Activity preferences when linking an environment", () =>
     Effect.gen(function* () {
-      const storage = yield* Effect.promise(() => import("../../persistence/imperative"));
-      vi.mocked(storage.loadPreferences).mockResolvedValueOnce({
-        liveActivitiesEnabled: false,
-      });
+      loadPreferences.mockReturnValueOnce(Effect.succeed({ liveActivitiesEnabled: false }));
       const bodies: Array<unknown> = [];
       const fetchMock = vi.fn((url: string | URL, init?: RequestInit) => {
         if (init?.body) {

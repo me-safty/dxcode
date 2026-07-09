@@ -7,14 +7,23 @@ import * as Layer from "effect/Layer";
 import { HttpClient } from "effect/unstable/http";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
-import { savePreferencesPatch } from "../../persistence/imperative";
+import { MobilePreferencesStore } from "../../persistence/mobile-preferences";
+import { MobileStorage } from "../../persistence/mobile-storage";
 import { linkEnvironmentToCloud } from "../cloud/linkEnvironment";
 import { setLiveActivityUpdatesEnabled } from "./liveActivityPreferences";
 import { refreshAgentAwarenessRegistration } from "./remoteRegistration";
 
-vi.mock("../../persistence/imperative", () => ({
-  savePreferencesPatch: vi.fn(() => Promise.resolve()),
+vi.mock("expo-secure-store", () => ({
+  deleteItemAsync: vi.fn(),
+  getItemAsync: vi.fn(),
+  setItemAsync: vi.fn(),
 }));
+
+vi.mock("react-native", () => ({
+  Platform: { OS: "ios" },
+}));
+
+const savePreferencesPatch = vi.fn((patch: Record<string, unknown>) => Effect.succeed(patch));
 
 vi.mock("../cloud/linkEnvironment", () => ({
   linkEnvironmentToCloud: vi.fn(() => Effect.void),
@@ -39,6 +48,27 @@ const testLayer = Layer.mergeAll(
   Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make(() => Effect.die("unexpected HTTP request")),
+  ),
+  Layer.succeed(
+    MobilePreferencesStore,
+    MobilePreferencesStore.of({
+      load: Effect.succeed({}),
+      savePatch: savePreferencesPatch,
+      update: () => Effect.succeed({}),
+    }),
+  ),
+  Layer.succeed(
+    MobileStorage,
+    MobileStorage.of({
+      loadSavedConnections: Effect.succeed([]),
+      saveConnection: () => Effect.void,
+      clearSavedConnection: () => Effect.void,
+      loadOrCreateAgentAwarenessDeviceId: Effect.succeed("device-1"),
+      loadAgentAwarenessDeviceId: Effect.succeed("device-1"),
+      loadAgentAwarenessRegistrationRecord: Effect.succeed(null),
+      saveAgentAwarenessRegistrationRecord: () => Effect.void,
+      clearAgentAwarenessRegistrationRecord: Effect.void,
+    }),
   ),
 );
 

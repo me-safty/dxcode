@@ -4,7 +4,8 @@ import { HttpClient } from "effect/unstable/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
-import { savePreferencesPatch } from "../../persistence/imperative";
+import * as MobilePreferences from "../../persistence/mobile-preferences";
+import * as MobileStorage from "../../persistence/mobile-storage";
 import { linkEnvironmentToCloud } from "../cloud/linkEnvironment";
 import { refreshAgentAwarenessRegistration } from "./remoteRegistration";
 
@@ -24,12 +25,23 @@ export function setLiveActivityUpdatesEnabled(input: {
   readonly enabled: boolean;
   readonly clerkToken: string | null;
   readonly connections: ReadonlyArray<SavedRemoteConnection>;
-}): Effect.Effect<void, unknown, HttpClient.HttpClient | ManagedRelay.ManagedRelayClient> {
+}): Effect.Effect<
+  void,
+  unknown,
+  | HttpClient.HttpClient
+  | ManagedRelay.ManagedRelayClient
+  | MobilePreferences.MobilePreferencesStore
+  | MobileStorage.MobileStorage
+> {
   return Effect.gen(function* () {
-    yield* Effect.tryPromise({
-      try: () => savePreferencesPatch({ liveActivitiesEnabled: input.enabled }),
-      catch: (cause) => new LiveActivityPreferenceSaveError({ enabled: input.enabled, cause }),
-    });
+    const preferences = yield* MobilePreferences.MobilePreferencesStore;
+    yield* preferences
+      .savePatch({ liveActivitiesEnabled: input.enabled })
+      .pipe(
+        Effect.mapError(
+          (cause) => new LiveActivityPreferenceSaveError({ enabled: input.enabled, cause }),
+        ),
+      );
 
     yield* refreshAgentAwarenessRegistration();
 

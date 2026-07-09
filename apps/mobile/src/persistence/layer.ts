@@ -1,5 +1,4 @@
 import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
 
 import * as EnvironmentCacheStore from "../connection/environment-cache-store";
 import * as MobileDatabase from "./mobile-database";
@@ -15,8 +14,3 @@ const dependentLayer = Layer.mergeAll(
 ).pipe(Layer.provide(baseLayer));
 
 export const layer = Layer.merge(baseLayer, dependentLayer);
-
-export const runtime = ManagedRuntime.make(layer);
-
-/** Provides the app-owned persistence services to framework integration layers. */
-export const contextLayer = Layer.effectContext(runtime.contextEffect);

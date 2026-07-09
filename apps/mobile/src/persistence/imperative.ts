@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 
+import { runtime } from "../lib/runtime";
 import * as MobilePreferences from "./mobile-preferences";
-import { runtime } from "./runtime";
 import * as MobileStorage from "./mobile-storage";
 
 export type { Preferences } from "./mobile-preferences";
@@ -26,9 +26,6 @@ export const loadSavedConnections = () => runStorage((storage) => storage.loadSa
 export const saveConnection = (
   connection: Parameters<MobileStorage.MobileStorage["Service"]["saveConnection"]>[0],
 ) => runStorage((storage) => storage.saveConnection(connection));
-export const clearSavedConnection = (
-  environmentId: Parameters<MobileStorage.MobileStorage["Service"]["clearSavedConnection"]>[0],
-) => runStorage((storage) => storage.clearSavedConnection(environmentId));
 
 export const loadPreferences = () => runPreferences((store) => store.load);
 export const savePreferencesPatch = (patch: Partial<MobilePreferences.Preferences>) =>
