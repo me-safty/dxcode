@@ -211,15 +211,17 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
       return `t3-xai-prompt-${nextPromptFallbackId}`;
     });
 
-    yield* runtime.handleExtNotification(
-      "_x.ai/session/prompt_complete",
-      XAiPromptCompleteNotification,
-      (notification) =>
-        resolveXAiPromptCompletionFallback({
-          pendingRef,
-          completedPromptIdsRef,
-          notification,
-        }),
+    yield* Effect.forEach(
+      ["x.ai/session/prompt_complete", "_x.ai/session/prompt_complete"] as const,
+      (method) =>
+        runtime.handleExtNotification(method, XAiPromptCompleteNotification, (notification) =>
+          resolveXAiPromptCompletionFallback({
+            pendingRef,
+            completedPromptIdsRef,
+            notification,
+          }),
+        ),
+      { discard: true },
     );
 
     return {
@@ -249,11 +251,17 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
               requestId: fallback.promptId,
             },
           } satisfies Omit<EffectAcpSchema.PromptRequest, "sessionId">;
+          const fallbackWon = yield* Ref.make(false);
 
           return yield* Effect.raceFirst(
             runtime.prompt(requestPayload),
-            Deferred.await(fallback.deferred),
+            Deferred.await(fallback.deferred).pipe(Effect.tap(() => Ref.set(fallbackWon, true))),
           ).pipe(
+            Effect.tap(() =>
+              Ref.get(fallbackWon).pipe(
+                Effect.flatMap((won) => (won ? runtime.cancel.pipe(Effect.ignore) : Effect.void)),
+              ),
+            ),
             Effect.tap((response) =>
               rememberCompletedXAiPromptId(completedPromptIdsRef, response, fallback.promptId),
             ),

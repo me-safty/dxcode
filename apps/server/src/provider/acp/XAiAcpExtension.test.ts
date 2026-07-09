@@ -299,6 +299,22 @@ describe("XAiAcpExtension", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("accepts the public xAI prompt-complete notification name", () =>
+    Effect.gen(function* () {
+      const runtime = yield* makePromptCompletionRuntime({
+        T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG: "1",
+        T3_ACP_XAI_PROMPT_COMPLETE_METHOD: "x.ai/session/prompt_complete",
+      });
+      yield* runtime.start();
+
+      const promptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+
+      expect(promptResult.stopReason).toBe("end_turn");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("ignores stale xAI completion from an already settled prompt", () =>
     Effect.gen(function* () {
       const runtime = yield* makePromptCompletionRuntime({
