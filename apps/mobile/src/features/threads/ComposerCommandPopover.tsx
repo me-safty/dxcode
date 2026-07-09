@@ -42,6 +42,7 @@ interface ComposerCommandPopoverProps {
   readonly items: ReadonlyArray<ComposerCommandItem>;
   readonly triggerKind: ComposerTriggerKind | null;
   readonly isLoading: boolean;
+  readonly errorText?: string | null;
   readonly onSelect: (item: ComposerCommandItem) => void;
 }
 
@@ -111,9 +112,16 @@ function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
   }
 }
 
-function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean): string {
+function emptyText(
+  triggerKind: ComposerTriggerKind | null,
+  isLoading: boolean,
+  errorText: string | null | undefined,
+): string {
   if (isLoading) {
     return triggerKind === "path" ? "Searching files…" : "Loading…";
+  }
+  if (errorText) {
+    return errorText;
   }
   switch (triggerKind) {
     case "path":
@@ -202,6 +210,11 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
           keyboardShouldPersistTaps="always"
           showsVerticalScrollIndicator={false}
         >
+          {props.errorText && !props.isLoading ? (
+            <View className="border-border-subtle border-b px-3.5 py-2">
+              <Text className="text-xs text-foreground-tertiary">{props.errorText}</Text>
+            </View>
+          ) : null}
           {props.items.map((item, index) => (
             <CommandRow
               key={item.id}
@@ -214,7 +227,7 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
       ) : (
         <View style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
           <Text className="text-xs text-foreground-tertiary">
-            {emptyText(props.triggerKind, props.isLoading)}
+            {emptyText(props.triggerKind, props.isLoading, props.errorText)}
           </Text>
         </View>
       )}
