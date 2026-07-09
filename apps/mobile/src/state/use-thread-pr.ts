@@ -37,5 +37,5 @@ export function useThreadPr(
   if (!status.pr) {
     return null;
   }
-  return presentThreadPr(status.pr);
+  return presentThreadPr(status.pr, status.sourceControlProvider);
 }
