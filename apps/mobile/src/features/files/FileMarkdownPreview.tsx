@@ -57,7 +57,7 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
           }}
           style={{
             color: link,
-            fontFamily: "DMSans_500Medium",
+            fontFamily: "DMSans-Medium",
             textDecorationLine: "none",
           }}
         >
@@ -86,21 +86,21 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
       styles: {
         text: {
           color: body,
-          fontFamily: "DMSans_400Regular",
+          fontFamily: "DMSans-Regular",
           fontSize: markdownFontSizes.m,
           lineHeight: markdownFontSizes.bodyLineHeight,
         },
         heading: {
           color: strong,
-          fontFamily: "DMSans_700Bold",
+          fontFamily: "DMSans-Bold",
         },
         strong: {
           color: strong,
-          fontFamily: "DMSans_700Bold",
+          fontFamily: "DMSans-Bold",
         },
         link: {
           color: link,
-          fontFamily: "DMSans_500Medium",
+          fontFamily: "DMSans-Medium",
         },
         blockquote: {
           backgroundColor: blockquoteBackground,
@@ -141,9 +141,9 @@ function useMarkdownPreviewStyles(): MarkdownPreviewStyles {
         fontSize: nativeMarkdownTypography.fontSize,
         lineHeight: nativeMarkdownTypography.lineHeight,
         headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-        fontFamily: "DMSans_400Regular",
-        headingFontFamily: "DMSans_700Bold",
-        boldFontFamily: "DMSans_700Bold",
+        fontFamily: "DMSans-Regular",
+        headingFontFamily: "DMSans-Bold",
+        boldFontFamily: "DMSans-Bold",
       },
     };
   }, [

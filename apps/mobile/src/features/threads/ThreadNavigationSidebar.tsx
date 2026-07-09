@@ -819,7 +819,7 @@ const styles = StyleSheet.create({
     height: 34,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    fontFamily: "DMSans_400Regular",
+    fontFamily: "DMSans-Regular",
   },
   threadList: {
     flex: 1,

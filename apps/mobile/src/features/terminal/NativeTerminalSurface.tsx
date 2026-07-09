@@ -169,7 +169,7 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
             className="text-2xs"
             style={{
               color: theme.foreground,
-              fontFamily: "DMSans_700Bold",
+              fontFamily: "DMSans-Bold",
             }}
           >
             Ctrl-C

@@ -235,7 +235,7 @@ const markdownLinkStyles = StyleSheet.create({
     borderRadius: 3,
   },
   file: {
-    fontFamily: "DMSans_700Bold",
+    fontFamily: "DMSans-Bold",
     fontWeight: "700",
   },
 });
@@ -255,7 +255,7 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
       }}
       style={{
         color: props.color,
-        fontFamily: "DMSans_400Regular",
+        fontFamily: "DMSans-Regular",
         textDecorationLine: "none",
       }}
     >
@@ -365,8 +365,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         h6: markdownFontSizes.h6,
       },
       fontFamilies: {
-        regular: "DMSans_400Regular",
-        heading: "DMSans_700Bold",
+        regular: "DMSans-Regular",
+        heading: "DMSans-Bold",
         mono: "ui-monospace",
       },
       headingWeight: "700",
@@ -388,7 +388,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownStrongColor,
-        fontFamily: "DMSans_700Bold",
+        fontFamily: "DMSans-Bold",
       },
       italic: { fontStyle: "italic" },
       link: {
@@ -404,7 +404,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         marginVertical: 10,
       },
       heading: {
-        fontFamily: "DMSans_700Bold",
+        fontFamily: "DMSans-Bold",
         color: markdownStrongColor,
         marginTop: 18,
         marginBottom: 8,
@@ -492,7 +492,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                     width: ordered ? 22 : 12,
                     marginRight: 5,
                     color: inlineTextColor,
-                    fontFamily: "DMSans_400Regular",
+                    fontFamily: "DMSans-Regular",
                     fontSize: markdownFontSizes.m,
                     lineHeight: markdownFontSizes.bodyLineHeight,
                     textAlign: ordered ? "right" : "center",
@@ -601,7 +601,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownUserBodyColor,
-        fontFamily: "DMSans_700Bold",
+        fontFamily: "DMSans-Bold",
       },
       heading: {
         ...baseStyles.heading,
@@ -655,9 +655,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans_400Regular",
-          headingFontFamily: "DMSans_700Bold",
-          boldFontFamily: "DMSans_700Bold",
+          fontFamily: "DMSans-Regular",
+          headingFontFamily: "DMSans-Bold",
+          boldFontFamily: "DMSans-Bold",
         },
       },
       assistant: {
@@ -686,9 +686,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans_400Regular",
-          headingFontFamily: "DMSans_700Bold",
-          boldFontFamily: "DMSans_700Bold",
+          fontFamily: "DMSans-Regular",
+          headingFontFamily: "DMSans-Bold",
+          boldFontFamily: "DMSans-Bold",
         },
       },
     };

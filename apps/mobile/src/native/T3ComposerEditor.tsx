@@ -48,7 +48,7 @@ export function ComposerEditor({
             flex: 1,
             minHeight: 0,
             color: foregroundColor,
-            fontFamily: "DMSans_400Regular",
+            fontFamily: "DMSans-Regular",
             ...bodyText,
             paddingVertical: contentInsetVertical,
           },

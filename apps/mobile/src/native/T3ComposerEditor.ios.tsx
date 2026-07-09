@@ -228,7 +228,7 @@ export function ComposerEditor({
       fontFamily={
         typeof resolvedTextStyle.fontFamily === "string"
           ? resolvedTextStyle.fontFamily
-          : "DMSans_400Regular"
+          : "DMSans-Regular"
       }
       fontSize={
         typeof resolvedTextStyle.fontSize === "number"
