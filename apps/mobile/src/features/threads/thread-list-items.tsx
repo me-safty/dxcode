@@ -450,6 +450,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const timestamp = relativeTime(
     thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
   );
+  const threadAccessibilityLabel = pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title;
   const subtitleParts = [props.environmentLabel, thread.branch].filter((part): part is string =>
     Boolean(part),
   );
@@ -507,12 +508,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           </>
         ) : null}
         {pr !== null ? (
-          <View
-            accessible
-            accessibilityLabel={pr.accessibilityLabel}
-            accessibilityRole="text"
-            className="flex-row items-center gap-0.5"
-          >
+          <View className="flex-row items-center gap-0.5">
             <PullRequestIcon
               size={compact ? 13 : 11}
               color={selected ? "#ffffff" : pullRequestTintColor(pr.state, colorScheme)}
@@ -533,7 +529,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     compact ? (
       <Pressable
         accessibilityHint="Swipe left for archive and delete actions"
-        accessibilityLabel={thread.title}
+        accessibilityLabel={threadAccessibilityLabel}
         accessibilityRole="button"
         className="bg-screen"
         onPress={() => {
@@ -579,7 +575,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     ) : (
       <Pressable
         accessibilityHint="Opens the thread"
-        accessibilityLabel={thread.title}
+        accessibilityLabel={threadAccessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
         onHoverIn={() => setHovered(true)}
