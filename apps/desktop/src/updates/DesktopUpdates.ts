@@ -27,6 +27,7 @@ import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 import {
   createInitialDesktopUpdateState,
@@ -47,8 +48,16 @@ const AUTO_UPDATE_POLL_INTERVAL = "4 minutes";
 const AppUpdateYmlConfig = Schema.Record(Schema.String, Schema.String);
 type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type;
 
+const UpdateReleaseNoteInfo = Schema.Struct({
+  version: Schema.String,
+  note: Schema.NullOr(Schema.String),
+});
+
 const UpdateInfo = Schema.Struct({
   version: Schema.String,
+  releaseNotes: Schema.optional(
+    Schema.NullOr(Schema.Union([Schema.String, Schema.Array(UpdateReleaseNoteInfo)])),
+  ),
 });
 
 const DownloadProgressInfo = Schema.Struct({
@@ -330,10 +339,12 @@ export const make = Effect.gen(function* () {
     yield* electronUpdater.setChannel(channel);
     yield* electronUpdater.setAllowPrerelease(allowsPrerelease);
     yield* electronUpdater.setAllowDowngrade(allowsPrerelease);
+    yield* electronUpdater.setFullChangelog(allowsPrerelease);
     yield* logUpdaterInfo("using update channel", {
       channel,
       allowPrerelease: allowsPrerelease,
       allowDowngrade: allowsPrerelease,
+      fullChangelog: allowsPrerelease,
     });
   });
 
@@ -567,11 +578,15 @@ export const make = Effect.gen(function* () {
           }
 
           const checkedAt = yield* currentIsoTimestamp;
+          const releaseNotes = normalizeDesktopUpdateReleaseNotes(info.releaseNotes, info.version);
           yield* setState(
-            reduceDesktopUpdateStateOnUpdateAvailable(state, info.version, checkedAt),
+            reduceDesktopUpdateStateOnUpdateAvailable(state, info.version, checkedAt, releaseNotes),
           );
           yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
-          yield* logUpdaterInfo("update available", { version: info.version });
+          yield* logUpdaterInfo("update available", {
+            version: info.version,
+            releaseNoteGroups: releaseNotes.length,
+          });
         }),
       ),
       Effect.catchCause((cause) => {
