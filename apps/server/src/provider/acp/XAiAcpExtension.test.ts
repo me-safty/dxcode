@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Deferred from "effect/Deferred";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import { describe, expect } from "vite-plus/test";
 
@@ -23,7 +24,9 @@ const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.
 
 const makePromptCompletionRuntime = (
   env: NodeJS.ProcessEnv,
-  overrides: Partial<Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "cancel">> = {},
+  overrides: Partial<
+    Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "cancel" | "prompt">
+  > = {},
 ) =>
   Effect.gen(function* () {
     const runtime = yield* AcpSessionRuntime.make({
@@ -345,6 +348,44 @@ describe("XAiAcpExtension", () => {
       expect(promptResult.stopReason).toBe("end_turn");
       yield* Deferred.await(cancelStarted).pipe(Effect.timeout("500 millis"));
       yield* Deferred.succeed(cancelGate, undefined);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("does not cancel twice after an explicit cancellation", () =>
+    Effect.gen(function* () {
+      const promptStarted = yield* Deferred.make<void>();
+      const promptGate = yield* Deferred.make<void>();
+      let cancelCalls = 0;
+      const runtime = yield* makeXAiPromptCompletionRuntime({
+        handleExtNotification: () => Effect.void,
+        start: () =>
+          Effect.succeed({
+            sessionId: "mock-session-1",
+          } as AcpSessionRuntime.AcpSessionRuntimeStartResult),
+        prompt: () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(promptStarted, undefined);
+            yield* Deferred.await(promptGate);
+          }),
+        cancel: Effect.sync(() => {
+          cancelCalls += 1;
+        }),
+      } as unknown as AcpSessionRuntime.AcpSessionRuntime["Service"]);
+      yield* runtime.start();
+
+      const promptFiber = yield* runtime
+        .prompt({
+          prompt: [{ type: "text", text: "hi" }],
+        })
+        .pipe(Effect.forkScoped);
+      yield* Deferred.await(promptStarted).pipe(Effect.timeout("500 millis"));
+
+      yield* runtime.cancel.pipe(Effect.timeout("500 millis"));
+      const promptResult = yield* Fiber.join(promptFiber).pipe(Effect.timeout("500 millis"));
+
+      expect(promptResult.stopReason).toBe("cancelled");
+      yield* Effect.yieldNow;
+      expect(cancelCalls).toBe(1);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

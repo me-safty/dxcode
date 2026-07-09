@@ -206,6 +206,7 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
     const activeSessionIdRef = yield* Ref.make<string | undefined>(undefined);
     const pendingRef = yield* Ref.make<ReadonlyArray<PendingXAiPromptCompletion>>([]);
     const completedPromptIdsRef = yield* Ref.make<ReadonlyArray<string>>([]);
+    const explicitlyCancelledPromptIdsRef = yield* Ref.make<ReadonlyArray<string>>([]);
     let nextPromptFallbackId = 0;
     const allocatePromptFallbackId = Effect.sync(() => {
       nextPromptFallbackId += 1;
@@ -259,18 +260,33 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
             Deferred.await(fallback.deferred).pipe(Effect.tap(() => Ref.set(fallbackWon, true))),
           ).pipe(
             Effect.tap(() =>
-              Ref.get(fallbackWon).pipe(
-                Effect.flatMap((won) =>
-                  won
-                    ? runtime.cancel.pipe(
-                        Effect.timeout(xAiPromptCompletionCancelTimeout),
-                        Effect.ignore,
-                        Effect.forkDetach,
-                        Effect.asVoid,
-                      )
-                    : Effect.void,
-                ),
-              ),
+              Effect.gen(function* () {
+                const won = yield* Ref.get(fallbackWon);
+                if (!won) {
+                  return;
+                }
+                const explicitlyCancelled = yield* Ref.modify(
+                  explicitlyCancelledPromptIdsRef,
+                  (promptIds) => {
+                    const wasCancelled = promptIds.includes(fallback.promptId);
+                    return [
+                      wasCancelled,
+                      wasCancelled
+                        ? promptIds.filter((promptId) => promptId !== fallback.promptId)
+                        : promptIds,
+                    ] as const;
+                  },
+                );
+                if (explicitlyCancelled) {
+                  return;
+                }
+                yield* runtime.cancel.pipe(
+                  Effect.timeout(xAiPromptCompletionCancelTimeout),
+                  Effect.ignore,
+                  Effect.forkDetach,
+                  Effect.asVoid,
+                );
+              }),
             ),
             Effect.tap((response) =>
               rememberCompletedXAiPromptId(completedPromptIdsRef, response, fallback.promptId),
@@ -282,9 +298,11 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
         Effect.flatMap((sessionId) =>
           sessionId === undefined
             ? runtime.cancel
-            : abortPendingPromptCompletions(pendingRef, sessionId).pipe(
-                Effect.andThen(runtime.cancel),
-              ),
+            : abortPendingPromptCompletions(
+                pendingRef,
+                explicitlyCancelledPromptIdsRef,
+                sessionId,
+              ).pipe(Effect.andThen(runtime.cancel)),
         ),
       ),
     } satisfies AcpSessionRuntime.AcpSessionRuntime["Service"];
@@ -310,6 +328,7 @@ const unregisterXAiPromptCompletionFallback = (
 
 const abortPendingPromptCompletions = (
   pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>,
+  explicitlyCancelledPromptIdsRef: Ref.Ref<ReadonlyArray<string>>,
   sessionId: string,
 ) =>
   Ref.modify(pendingRef, (pending) => {
@@ -324,20 +343,26 @@ const abortPendingPromptCompletions = (
       return [Effect.void, pending] as const;
     }
     return [
-      Effect.forEach(
-        toAbort,
-        (entry) =>
-          Deferred.succeed(
-            entry.deferred,
-            promptResponseFromXAi({
-              sessionId: entry.sessionId,
-              promptId: entry.promptId,
-              stopReason: "cancelled",
-              agentResult: null,
-            }),
-          ),
-        { concurrency: "unbounded" },
-      ).pipe(Effect.asVoid),
+      Effect.gen(function* () {
+        yield* Ref.update(explicitlyCancelledPromptIdsRef, (promptIds) => [
+          ...promptIds,
+          ...toAbort.map((entry) => entry.promptId),
+        ]);
+        yield* Effect.forEach(
+          toAbort,
+          (entry) =>
+            Deferred.succeed(
+              entry.deferred,
+              promptResponseFromXAi({
+                sessionId: entry.sessionId,
+                promptId: entry.promptId,
+                stopReason: "cancelled",
+                agentResult: null,
+              }),
+            ),
+          { concurrency: "unbounded" },
+        );
+      }),
       remaining,
     ] as const;
   }).pipe(Effect.flatten);
