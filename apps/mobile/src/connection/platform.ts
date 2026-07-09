@@ -29,6 +29,7 @@ import { loadOrCreateAgentAwarenessDeviceId } from "../lib/storage";
 import { appAtomRegistry } from "../state/atom-registry";
 import { clearThreadOutboxEnvironment } from "../state/thread-outbox";
 import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
+import { mobileDatabaseContextLayer } from "../persistence/mobile-database";
 import { connectionStorageLayer } from "./storage";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
@@ -168,6 +169,10 @@ const platformConnectionSourceLayer = Layer.succeed(
   }),
 );
 
+const providedConnectionStorageLayer = connectionStorageLayer.pipe(
+  Layer.provide(mobileDatabaseContextLayer),
+);
+
 const environmentOwnedDataCleanupLayer = Layer.succeed(
   EnvironmentOwnedDataCleanup,
   EnvironmentOwnedDataCleanup.of({
@@ -190,7 +195,7 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
 );
 
 type ConnectionPlatformLayerSource =
-  | typeof connectionStorageLayer
+  | typeof providedConnectionStorageLayer
   | typeof connectivityLayer
   | typeof wakeupsLayer
   | typeof capabilitiesLayer
@@ -202,7 +207,7 @@ export const connectionPlatformLayer: Layer.Layer<
   Layer.Error<ConnectionPlatformLayerSource>,
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
-  connectionStorageLayer,
+  providedConnectionStorageLayer,
   connectivityLayer,
   wakeupsLayer,
   capabilitiesLayer,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
-import { vcsRefsCacheFileName } from "./cache-file-name";
 import {
   CONNECTION_CATALOG_KEY,
   LEGACY_CONNECTIONS_KEY,
@@ -82,14 +81,4 @@ describe("mobile connection catalog storage", () => {
       expect(memory.values.has(LEGACY_CONNECTIONS_KEY)).toBe(false);
     }),
   );
-});
-
-describe("mobile environment cache filenames", () => {
-  it("uses stable, bounded filenames for workspace paths", () => {
-    const longCwd = `/workspace/${"deeply-nested/".repeat(100)}project`;
-
-    expect(vcsRefsCacheFileName(longCwd)).toBe(vcsRefsCacheFileName(longCwd));
-    expect(vcsRefsCacheFileName(longCwd)).not.toBe(vcsRefsCacheFileName(`${longCwd}-other`));
-    expect(vcsRefsCacheFileName(longCwd).length).toBeLessThan(32);
-  });
 });

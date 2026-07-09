@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { createContext, use, useCallback, useEffect, useMemo, type ReactNode } from "react";
 
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -124,7 +124,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
 }
 
 export function useAppearancePreferences(): AppearancePreferencesContextValue {
-  const context = useContext(AppearancePreferencesContext);
+  const context = use(AppearancePreferencesContext);
   if (!context) {
     throw new Error("useAppearancePreferences must be used within AppearancePreferencesProvider");
   }

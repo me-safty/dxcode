@@ -488,6 +488,7 @@ function AppSettingsSection() {
 
   return (
     <SettingsSection title="App">
+      <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
       <View className="flex-row items-center gap-4 p-4">
         <SymbolView
           name="info.circle"

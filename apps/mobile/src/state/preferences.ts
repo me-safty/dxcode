@@ -49,7 +49,7 @@ interface OptimisticPreferences {
 
 /**
  * Owns the device preference blob for the lifetime of the app registry.
- * Optimistic patches are kept separately so writes made while SecureStore is
+ * Optimistic patches are kept separately so writes made while persistence is
  * still loading cannot be replaced by the eventual read result.
  */
 export function createMobilePreferencesState(runtime: Atom.AtomRuntime<MobilePreferencesStore>) {

@@ -1,5 +1,7 @@
 import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
 import { pipe } from "effect/Function";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SecureStore from "expo-secure-store";
 import { EnvironmentId } from "@t3tools/contracts";
@@ -9,6 +11,7 @@ import {
   type SavedRemoteConnection,
   toStableSavedRemoteConnection,
 } from "./connection";
+import { MobileDatabase, mobileDatabaseRuntime } from "../persistence/mobile-database";
 
 const CONNECTIONS_KEY = "t3code.connections";
 const PREFERENCES_KEY = "t3code.preferences";
@@ -25,7 +28,7 @@ type MobileStorageKeyValue = typeof MobileStorageKey.Type;
 export class MobileSecureStorageError extends Schema.TaggedErrorClass<MobileSecureStorageError>()(
   "MobileSecureStorageError",
   {
-    operation: Schema.Literals(["read", "write", "generate-device-id"]),
+    operation: Schema.Literals(["read", "write", "delete", "generate-device-id"]),
     key: MobileStorageKey,
     cause: Schema.Defect(),
   },
@@ -91,8 +94,15 @@ async function writeStorageItem(key: MobileStorageKeyValue, value: string): Prom
   }
 }
 
-async function readJsonStorageItem<T>(key: MobileStorageKeyValue): Promise<T | null> {
-  const raw = (await readStorageItem(key)) ?? "";
+async function deleteStorageItem(key: MobileStorageKeyValue): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch (cause) {
+    throw new MobileSecureStorageError({ operation: "delete", key, cause });
+  }
+}
+
+function parseJsonStorageItem<T>(key: MobileStorageKeyValue, raw: string): T | null {
   if (!raw.trim()) {
     return null;
   }
@@ -106,6 +116,11 @@ async function readJsonStorageItem<T>(key: MobileStorageKeyValue): Promise<T | n
     );
     return null;
   }
+}
+
+async function readJsonStorageItem<T>(key: MobileStorageKeyValue): Promise<T | null> {
+  const raw = (await readStorageItem(key)) ?? "";
+  return parseJsonStorageItem<T>(key, raw);
 }
 
 async function writeJsonStorageItem(key: MobileStorageKeyValue, value: unknown) {
@@ -159,7 +174,29 @@ export async function clearSavedConnection(environmentId: EnvironmentId): Promis
 }
 
 export async function loadPreferences(): Promise<Preferences> {
-  const parsed = await readJsonStorageItem<Preferences>(PREFERENCES_KEY);
+  const storedJson = await mobileDatabaseRuntime.runPromise(
+    MobileDatabase.pipe(Effect.flatMap((database) => database.loadPreferencesJson)),
+  );
+  let parsed = Option.isSome(storedJson)
+    ? parseJsonStorageItem<Preferences>(PREFERENCES_KEY, storedJson.value)
+    : null;
+
+  if (Option.isNone(storedJson)) {
+    const legacyJson = await readStorageItem(PREFERENCES_KEY);
+    parsed =
+      legacyJson === null ? null : parseJsonStorageItem<Preferences>(PREFERENCES_KEY, legacyJson);
+    if (parsed !== null) {
+      await mobileDatabaseRuntime.runPromise(
+        MobileDatabase.pipe(
+          Effect.flatMap((database) => database.savePreferencesJson(JSON.stringify(parsed))),
+        ),
+      );
+      await deleteStorageItem(PREFERENCES_KEY).catch((cause) => {
+        console.warn("[mobile-storage] could not remove migrated preferences", cause);
+      });
+    }
+  }
+
   if (!parsed || typeof parsed !== "object") {
     return {};
   }
@@ -220,7 +257,15 @@ export async function updatePreferences(
       ...current,
       ...update(current),
     };
-    await writeJsonStorageItem(PREFERENCES_KEY, next);
+    let encoded: string;
+    try {
+      encoded = JSON.stringify(next);
+    } catch (cause) {
+      throw new MobileStorageEncodeError({ key: PREFERENCES_KEY, cause });
+    }
+    await mobileDatabaseRuntime.runPromise(
+      MobileDatabase.pipe(Effect.flatMap((database) => database.savePreferencesJson(encoded))),
+    );
     return next;
   });
   preferencesWriteQueue = task.catch(() => undefined);
