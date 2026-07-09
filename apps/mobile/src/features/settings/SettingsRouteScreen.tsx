@@ -1,5 +1,5 @@
 import { useAuth, useUser } from "@clerk/expo";
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as Updates from "expo-updates";
@@ -34,7 +34,7 @@ import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
 import { useThemeColor } from "../../lib/useThemeColor";
-import { mobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -125,6 +125,7 @@ function LocalSettingsRouteScreen() {
 
 function ConfiguredSettingsRouteScreen() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { expand: expandClerkSheet } = useClerkSettingsSheetDetent();
@@ -281,6 +282,7 @@ function ConfiguredSettingsRouteScreen() {
       return;
     }
 
+    savePreferences({ liveActivitiesEnabled: true });
     const updateResult = await settleAsyncResult(() =>
       runtime.runPromiseExit(
         setLiveActivityUpdatesEnabled({
@@ -320,7 +322,7 @@ function ConfiguredSettingsRouteScreen() {
         "This device could not be registered with T3 Connect, so Live Activities won't appear yet. They'll start once registration succeeds.",
       );
     }
-  }, [connections, environmentCount, getToken, isSignedIn, promptSignIn]);
+  }, [connections, environmentCount, getToken, isSignedIn, promptSignIn, savePreferences]);
 
   const handleDeviceNotificationsChange = useCallback(
     (enabled: boolean) => {
@@ -345,6 +347,7 @@ function ConfiguredSettingsRouteScreen() {
     (enabled: boolean) => {
       if (!enabled) {
         setLiveActivityStatus("disabled");
+        savePreferences({ liveActivitiesEnabled: false });
         void (async () => {
           let token: string | null = null;
           if (isSignedIn) {
@@ -387,7 +390,7 @@ function ConfiguredSettingsRouteScreen() {
 
       void linkEnvironments();
     },
-    [connections, getToken, isSignedIn, linkEnvironments, promptSignIn],
+    [connections, getToken, isSignedIn, linkEnvironments, promptSignIn, savePreferences],
   );
 
   const openAccount = useCallback(() => {
