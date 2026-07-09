@@ -1,4 +1,4 @@
-import { FileFinder, type MixedItem, type MixedSearchResult } from "@ff-labs/fff-node";
+import type { FileFinder, MixedItem, MixedSearchResult } from "@ff-labs/fff-node";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -89,6 +89,11 @@ export type WorkspaceSearchIndexError =
   | WorkspaceSearchIndexSearchFailed
   | WorkspaceSearchIndexRefreshFailed;
 
+type FileFinderModule = Pick<typeof import("@ff-labs/fff-node"), "FileFinder">;
+type FileFinderModuleLoader = () => Promise<FileFinderModule>;
+
+const loadFileFinderModule: FileFinderModuleLoader = () => import("@ff-labs/fff-node");
+
 export class WorkspaceSearchIndex extends Context.Service<
   WorkspaceSearchIndex,
   {
@@ -169,7 +174,19 @@ function withDirectoryAncestors(entries: ReadonlyArray<ProjectEntry>): ProjectEn
   return [...entryByPath.values()];
 }
 
-const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (cwd: string) {
+const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (
+  cwd: string,
+  loadModule: FileFinderModuleLoader,
+) {
+  const { FileFinder } = yield* Effect.tryPromise({
+    try: loadModule,
+    catch: (cause) =>
+      new WorkspaceSearchIndexCreateFailed({
+        cwd,
+        reason: "Failed to load @ff-labs/fff-node native search module.",
+        cause,
+      }),
+  });
   const result = yield* Effect.try({
     try: () =>
       FileFinder.create({
@@ -211,8 +228,11 @@ const waitForScan = <E>(cwd: string, finder: FileFinder, onFailure: (cause: unkn
     Effect.withSpan("WorkspaceSearchIndex.waitForScan"),
   );
 
-export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (cwd: string) {
-  const finder = yield* Effect.acquireRelease(createFinder(cwd), (finder) =>
+export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
+  cwd: string,
+  loadModule: FileFinderModuleLoader = loadFileFinderModule,
+) {
+  const finder = yield* Effect.acquireRelease(createFinder(cwd, loadModule), (finder) =>
     Effect.try({
       try: () => finder.destroy(),
       catch: (cause) => new WorkspaceSearchIndexDestroyFailed({ cwd, cause }),

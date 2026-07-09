@@ -1,4 +1,4 @@
-import { FileFinder } from "@ff-labs/fff-node";
+import type { FileFinder } from "@ff-labs/fff-node";
 import { afterEach, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -14,12 +14,20 @@ afterEach(() => {
 it.effect("preserves unexpected FileFinder creation failures", () =>
   Effect.gen(function* () {
     const cause = new Error("native initialization failed");
-    vi.spyOn(FileFinder, "create").mockImplementationOnce(() => {
-      throw cause;
-    });
+    const FileFinder = {
+      create: vi.fn(() => {
+        throw cause;
+      }),
+    };
 
     const error = yield* Effect.flip(
-      Effect.scoped(WorkspaceSearchIndex.make("/workspace/project")),
+      Effect.scoped(
+        WorkspaceSearchIndex.make("/workspace/project", () =>
+          Promise.resolve({
+            FileFinder: FileFinder as never,
+          }),
+        ),
+      ),
     );
 
     expect(error).toMatchObject({
@@ -31,15 +39,42 @@ it.effect("preserves unexpected FileFinder creation failures", () =>
   }),
 );
 
-it.effect("keeps returned FileFinder creation diagnostics out of the cause chain", () =>
+it.effect("preserves native module load failures as index creation failures", () =>
   Effect.gen(function* () {
-    vi.spyOn(FileFinder, "create").mockReturnValueOnce({
-      ok: false,
-      error: "native index rejected the directory",
-    });
+    const cause = new Error("ERR_DLOPEN_FAILED: GLIBC_2.27 not found");
 
     const error = yield* Effect.flip(
-      Effect.scoped(WorkspaceSearchIndex.make("/workspace/project")),
+      Effect.scoped(
+        WorkspaceSearchIndex.make("/workspace/project", () => Promise.reject(cause)),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "WorkspaceSearchIndexCreateFailed",
+      cwd: "/workspace/project",
+      reason: "Failed to load @ff-labs/fff-node native search module.",
+      cause,
+    });
+  }),
+);
+
+it.effect("keeps returned FileFinder creation diagnostics out of the cause chain", () =>
+  Effect.gen(function* () {
+    const FileFinder = {
+      create: vi.fn(() => ({
+        ok: false,
+        error: "native index rejected the directory",
+      })),
+    };
+
+    const error = yield* Effect.flip(
+      Effect.scoped(
+        WorkspaceSearchIndex.make("/workspace/project", () =>
+          Promise.resolve({
+            FileFinder: FileFinder as never,
+          }),
+        ),
+      ),
     );
 
     expect(error).toMatchObject({
@@ -60,11 +95,17 @@ it.effect("preserves FileFinder destroy failures as structured defects", () =>
       }),
       isScanning: vi.fn(() => false),
     } as unknown as FileFinder;
-    vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+    const FileFinderModule = {
+      FileFinder: {
+        create: vi.fn(() => ({ ok: true, value: finder })),
+      },
+    };
 
-    const exit = yield* Effect.scoped(WorkspaceSearchIndex.make("/workspace/project")).pipe(
-      Effect.exit,
-    );
+    const exit = yield* Effect.scoped(
+      WorkspaceSearchIndex.make("/workspace/project", () =>
+        Promise.resolve(FileFinderModule as never),
+      ),
+    ).pipe(Effect.exit);
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
@@ -95,9 +136,15 @@ it.effect("preserves search and refresh failures with operation context", () =>
           throw refreshCause;
         }),
       } as unknown as FileFinder;
-      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+      const FileFinderModule = {
+        FileFinder: {
+          create: vi.fn(() => ({ ok: true, value: finder })),
+        },
+      };
 
-      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
+      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project", () =>
+        Promise.resolve(FileFinderModule as never),
+      );
       const query = "authorization: Bearer secret-token";
       const searchError = yield* Effect.flip(searchIndex.search(query, 3));
       const refreshError = yield* Effect.flip(searchIndex.refresh());
@@ -131,9 +178,15 @@ it.effect("keeps returned search diagnostics out of the cause chain", () =>
         mixedSearch: vi.fn(() => ({ ok: false, error: "native query rejected" })),
         scanFiles: vi.fn(() => ({ ok: false, error: "native refresh rejected" })),
       } as unknown as FileFinder;
-      vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
+      const FileFinderModule = {
+        FileFinder: {
+          create: vi.fn(() => ({ ok: true, value: finder })),
+        },
+      };
 
-      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
+      const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project", () =>
+        Promise.resolve(FileFinderModule as never),
+      );
       const query = "authorization: Bearer secret-token";
       const searchError = yield* Effect.flip(searchIndex.search(query, 3));
       const refreshError = yield* Effect.flip(searchIndex.refresh());
