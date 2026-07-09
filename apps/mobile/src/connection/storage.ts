@@ -29,6 +29,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SecureStore from "expo-secure-store";
 
+import { vcsRefsCacheFileName } from "./cache-file-name";
 import { makeCatalogStore, type SecureCatalogStorage } from "./catalog-store";
 
 const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
@@ -127,10 +128,6 @@ function environmentCacheFileName(environmentId: EnvironmentId): string {
   return `${encodeURIComponent(environmentId)}.json`;
 }
 
-function vcsRefsFileName(cwd: string): string {
-  return `${encodeURIComponent(cwd)}.json`;
-}
-
 const threadSnapshotDirectory = Effect.fn("mobile.connectionStorage.threadSnapshotDirectory")(
   function* (
     environmentId: EnvironmentId,
@@ -159,7 +156,10 @@ const threadSnapshotFile = Effect.fn("mobile.connectionStorage.threadSnapshotFil
   threadId: ThreadId,
   operation: "load-thread" | "save-thread" | "remove-thread",
 ) {
-  const { File } = yield* Effect.promise(() => import("expo-file-system"));
+  const { File } = yield* Effect.tryPromise({
+    try: () => import("expo-file-system"),
+    catch: (cause) => shellPersistenceError(operation, cause),
+  });
   return new File(
     yield* threadSnapshotDirectory(environmentId, operation),
     threadSnapshotFileName(threadId),
@@ -206,7 +206,9 @@ const serverConfigFile = Effect.fn("mobile.connectionStorage.serverConfigFile")(
     try: async () => {
       const { Directory, File, Paths } = await import("expo-file-system");
       const directory = new Directory(Paths.document, SERVER_CONFIG_CACHE_DIRECTORY);
-      directory.create({ idempotent: true, intermediates: true });
+      if (operation !== "clear-environment") {
+        directory.create({ idempotent: true, intermediates: true });
+      }
       return new File(directory, environmentCacheFileName(environmentId));
     },
     catch: (cause) => shellPersistenceError(operation, cause),
@@ -239,8 +241,45 @@ const vcsRefsFile = Effect.fn("mobile.connectionStorage.vcsRefsFile")(function* 
   cwd: string,
   operation: "load-vcs-refs" | "save-vcs-refs",
 ) {
-  const { File } = yield* Effect.promise(() => import("expo-file-system"));
-  return new File(yield* vcsRefsDirectory(environmentId, operation), vcsRefsFileName(cwd));
+  const { File } = yield* Effect.tryPromise({
+    try: () => import("expo-file-system"),
+    catch: (cause) => shellPersistenceError(operation, cause),
+  });
+  return new File(yield* vcsRefsDirectory(environmentId, operation), vcsRefsCacheFileName(cwd));
+});
+
+const decodeCacheOrDiscard = Effect.fn("mobile.connectionStorage.decodeCacheOrDiscard")(function* <
+  A,
+>(input: {
+  readonly decode: Effect.Effect<A, unknown>;
+  readonly file: { readonly delete: () => void };
+  readonly environmentId: EnvironmentId;
+  readonly operation: "load-server-config" | "load-vcs-refs";
+  readonly description: string;
+}) {
+  return yield* input.decode.pipe(
+    Effect.map(Option.some),
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        yield* Effect.logWarning(`Discarding corrupt cached ${input.description}.`, {
+          environmentId: input.environmentId,
+          error: String(error),
+        });
+        yield* Effect.try({
+          try: () => input.file.delete(),
+          catch: (cause) => shellPersistenceError(input.operation, cause),
+        }).pipe(
+          Effect.catch((deleteError) =>
+            Effect.logWarning(`Could not delete corrupt cached ${input.description}.`, {
+              environmentId: input.environmentId,
+              error: String(deleteError),
+            }),
+          ),
+        );
+        return Option.none<A>();
+      }),
+    ),
+  );
 });
 
 const shellSnapshotFileInDirectory = Effect.fn(
@@ -254,7 +293,9 @@ const shellSnapshotFileInDirectory = Effect.fn(
     try: async () => {
       const { Directory, File, Paths } = await import("expo-file-system");
       const directory = new Directory(Paths.document, directoryName);
-      directory.create({ idempotent: true, intermediates: true });
+      if (operation !== "clear-environment") {
+        directory.create({ idempotent: true, intermediates: true });
+      }
       return new File(directory, shellSnapshotFileName(environmentId));
     },
     catch: (cause) => shellPersistenceError(operation, cause),
@@ -423,8 +464,8 @@ export const connectionStorageLayer = Layer.effectContext(
             catch: (cause) => shellPersistenceError("save-shell", cause),
           });
         }),
-      loadServerConfig: (environmentId) =>
-        Effect.gen(function* () {
+      loadServerConfig: Effect.fn("mobile.connectionStorage.loadServerConfig")(
+        function* (environmentId) {
           const file = yield* serverConfigFile(environmentId, "load-server-config");
           if (!file.exists) {
             return Option.none();
@@ -433,35 +474,20 @@ export const connectionStorageLayer = Layer.effectContext(
             try: () => file.text(),
             catch: (cause) => shellPersistenceError("load-server-config", cause),
           });
-          const stored = yield* decodeStoredServerConfig(raw).pipe(
-            Effect.map(Option.some),
-            Effect.catch((error) =>
-              Effect.gen(function* () {
-                yield* Effect.logWarning("Discarding corrupt cached server configuration.", {
-                  environmentId,
-                  error: String(error),
-                });
-                yield* Effect.try({
-                  try: () => file.delete(),
-                  catch: (cause) => shellPersistenceError("load-server-config", cause),
-                }).pipe(
-                  Effect.catch((deleteError) =>
-                    Effect.logWarning("Could not delete corrupt cached server configuration.", {
-                      environmentId,
-                      error: String(deleteError),
-                    }),
-                  ),
-                );
-                return Option.none();
-              }),
-            ),
-          );
+          const stored = yield* decodeCacheOrDiscard({
+            decode: decodeStoredServerConfig(raw),
+            file,
+            environmentId,
+            operation: "load-server-config",
+            description: "server configuration",
+          });
           return Option.flatMap(stored, (value) =>
             value.environmentId === environmentId ? Option.some(value.config) : Option.none(),
           );
-        }),
-      saveServerConfig: (environmentId, config) =>
-        Effect.gen(function* () {
+        },
+      ),
+      saveServerConfig: Effect.fn("mobile.connectionStorage.saveServerConfig")(
+        function* (environmentId, config) {
           const file = yield* serverConfigFile(environmentId, "save-server-config");
           const encoded = yield* encodeStoredServerConfig({
             schemaVersion: SERVER_CONFIG_CACHE_SCHEMA_VERSION,
@@ -477,7 +503,8 @@ export const connectionStorageLayer = Layer.effectContext(
             },
             catch: (cause) => shellPersistenceError("save-server-config", cause),
           });
-        }),
+        },
+      ),
       loadThread: (environmentId, threadId) =>
         Effect.gen(function* () {
           const file = yield* threadSnapshotFile(environmentId, threadId, "load-thread");
@@ -514,8 +541,8 @@ export const connectionStorageLayer = Layer.effectContext(
             catch: (cause) => shellPersistenceError("save-thread", cause),
           });
         }),
-      loadVcsRefs: (environmentId, cwd) =>
-        Effect.gen(function* () {
+      loadVcsRefs: Effect.fn("mobile.connectionStorage.loadVcsRefs")(
+        function* (environmentId, cwd) {
           const file = yield* vcsRefsFile(environmentId, cwd, "load-vcs-refs");
           if (!file.exists) {
             return Option.none();
@@ -524,15 +551,22 @@ export const connectionStorageLayer = Layer.effectContext(
             try: () => file.text(),
             catch: (cause) => shellPersistenceError("load-vcs-refs", cause),
           });
-          const stored = yield* decodeStoredVcsRefs(raw).pipe(
-            Effect.mapError((cause) => shellPersistenceError("load-vcs-refs", cause)),
+          const stored = yield* decodeCacheOrDiscard({
+            decode: decodeStoredVcsRefs(raw),
+            file,
+            environmentId,
+            operation: "load-vcs-refs",
+            description: "Git refs",
+          });
+          return Option.flatMap(stored, (value) =>
+            value.environmentId === environmentId && value.cwd === cwd
+              ? Option.some(value.refs)
+              : Option.none(),
           );
-          return stored.environmentId === environmentId && stored.cwd === cwd
-            ? Option.some(stored.refs)
-            : Option.none();
-        }),
-      saveVcsRefs: (environmentId, cwd, refs) =>
-        Effect.gen(function* () {
+        },
+      ),
+      saveVcsRefs: Effect.fn("mobile.connectionStorage.saveVcsRefs")(
+        function* (environmentId, cwd, refs) {
           const file = yield* vcsRefsFile(environmentId, cwd, "save-vcs-refs");
           const encoded = yield* encodeStoredVcsRefs({
             schemaVersion: VCS_REFS_CACHE_SCHEMA_VERSION,
@@ -549,7 +583,8 @@ export const connectionStorageLayer = Layer.effectContext(
             },
             catch: (cause) => shellPersistenceError("save-vcs-refs", cause),
           });
-        }),
+        },
+      ),
       removeThread: (environmentId, threadId) =>
         Effect.gen(function* () {
           const file = yield* threadSnapshotFile(environmentId, threadId, "remove-thread");

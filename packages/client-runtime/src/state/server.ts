@@ -8,6 +8,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -111,25 +112,39 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
       })),
     );
     const persistence = yield* Queue.sliding<ServerConfig>(1);
+    const pendingPersistence = yield* Ref.make<Option.Option<ServerConfig>>(Option.none());
 
     const persist = Effect.fn("EnvironmentServerConfigState.persist")(function* (
       config: ServerConfig,
     ) {
-      yield* cache.saveServerConfig(environmentId, config).pipe(
+      return yield* cache.saveServerConfig(environmentId, config).pipe(
+        Effect.as(true),
         Effect.catch((error) =>
           Effect.logWarning("Could not persist cached server configuration.").pipe(
             Effect.annotateLogs({
               environmentId,
               ...safeErrorLogAttributes(error),
             }),
+            Effect.as(false),
           ),
         ),
       );
     });
 
+    const persistPending = Effect.fn("EnvironmentServerConfigState.persistPending")(function* (
+      config: ServerConfig,
+    ) {
+      if (!(yield* persist(config))) {
+        return;
+      }
+      yield* Ref.update(pendingPersistence, (pending) =>
+        Option.isSome(pending) && pending.value === config ? Option.none() : pending,
+      );
+    });
+
     yield* Stream.fromQueue(persistence).pipe(
       Stream.debounce("500 millis"),
-      Stream.runForEach(persist),
+      Stream.runForEach(persistPending),
       Effect.forkScoped,
     );
 
@@ -140,6 +155,7 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
           if (Option.isNone(next)) {
             return;
           }
+          yield* Ref.set(pendingPersistence, Option.some(next.value.config));
           yield* SubscriptionRef.set(state, next);
           yield* Queue.offer(persistence, next.value.config);
         }),
@@ -148,11 +164,11 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
     );
 
     yield* Effect.addFinalizer(() =>
-      SubscriptionRef.get(state).pipe(
+      Ref.get(pendingPersistence).pipe(
         Effect.flatMap(
           Option.match({
             onNone: () => Effect.void,
-            onSome: (projection) => persist(projection.config),
+            onSome: (config) => persist(config).pipe(Effect.asVoid),
           }),
         ),
       ),

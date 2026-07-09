@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { vi } from "vite-plus/test";
 
@@ -21,6 +22,7 @@ import type { Preferences } from "../lib/storage";
 import {
   createMobilePreferencesState,
   MobilePreferencesLoadError,
+  MobilePreferencesSaveError,
   MobilePreferencesStore,
 } from "./preferences";
 
@@ -121,6 +123,78 @@ describe("mobile preferences state", () => {
       ).toEqual({});
 
       unmount();
+      registry.dispose();
+    }),
+  );
+
+  it.effect("does not roll back a newer optimistic write with the same value", () =>
+    Effect.gen(function* () {
+      let saveCount = 0;
+      const state = makePreferencesState({
+        load: Effect.succeed({ baseFontSize: 16, codeFontSize: 13 }),
+        savePatch: (patch) => {
+          saveCount += 1;
+          return saveCount === 1
+            ? Effect.fail(new MobilePreferencesSaveError({ cause: new Error("write failed") }))
+            : Effect.succeed(patch);
+        },
+      });
+      const registry = AtomRegistry.make();
+      const unmountPreferences = registry.mount(state.preferencesAtom);
+      const unmountUpdate = registry.mount(state.updatePreferencesAtom);
+
+      yield* AtomRegistry.getResult(registry, state.preferencesAtom, {
+        suspendOnWaiting: true,
+      });
+      registry.set(state.updatePreferencesAtom, { baseFontSize: 18 });
+      registry.set(state.updatePreferencesAtom, { baseFontSize: 18, codeFontSize: 15 });
+
+      yield* Effect.promise(() =>
+        vi.waitFor(() => {
+          expect(AsyncResult.isFailure(registry.get(state.updatePreferencesAtom))).toBe(false);
+          expect(Option.getOrThrow(AsyncResult.value(registry.get(state.preferencesAtom)))).toEqual(
+            {
+              baseFontSize: 18,
+              codeFontSize: 15,
+            },
+          );
+        }),
+      );
+
+      unmountUpdate();
+      unmountPreferences();
+      registry.dispose();
+    }),
+  );
+
+  it.effect("rolls back an optimistic field when its save fails", () =>
+    Effect.gen(function* () {
+      const state = makePreferencesState({
+        load: Effect.succeed({ baseFontSize: 16 }),
+        savePatch: () =>
+          Effect.fail(new MobilePreferencesSaveError({ cause: new Error("write failed") })),
+      });
+      const registry = AtomRegistry.make();
+      const unmountPreferences = registry.mount(state.preferencesAtom);
+      const unmountUpdate = registry.mount(state.updatePreferencesAtom);
+
+      yield* AtomRegistry.getResult(registry, state.preferencesAtom, {
+        suspendOnWaiting: true,
+      });
+      registry.set(state.updatePreferencesAtom, { baseFontSize: 18 });
+
+      yield* Effect.promise(() =>
+        vi.waitFor(() => {
+          expect(Option.getOrThrow(AsyncResult.value(registry.get(state.preferencesAtom)))).toEqual(
+            {
+              baseFontSize: 16,
+            },
+          );
+        }),
+      );
+
+      unmountUpdate();
+      unmountPreferences();
       registry.dispose();
     }),
   );

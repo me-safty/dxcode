@@ -151,4 +151,43 @@ describe("server state projection", () => {
       expect((yield* Queue.take(savedConfigs)).providers).toEqual([]);
     }),
   );
+
+  it.effect("does not rewrite cached configuration when no live update arrives", () =>
+    Effect.gen(function* () {
+      const client = {
+        [WS_METHODS.subscribeServerConfig]: () => Stream.empty,
+      } as unknown as WsRpcProtocolClient;
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(Option.some(session(client))),
+        prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+      const savedConfigs = yield* Queue.unbounded<ServerConfig>();
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.none()),
+        saveShell: () => Effect.void,
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () => Effect.succeed(Option.some(CONFIG)),
+        saveServerConfig: (_environmentId, config) => Queue.offer(savedConfigs, config),
+        loadVcsRefs: () => Effect.succeed(Option.none()),
+        saveVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      });
+
+      yield* Effect.scoped(
+        makeEnvironmentServerConfigState().pipe(
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        ),
+      );
+
+      expect(yield* Queue.poll(savedConfigs)).toEqual(Option.none());
+    }),
+  );
 });

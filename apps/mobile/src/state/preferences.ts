@@ -1,18 +1,20 @@
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { loadPreferences, savePreferencesPatch, type Preferences } from "../lib/storage";
 
-export class MobilePreferencesLoadError extends Data.TaggedError("MobilePreferencesLoadError")<{
-  readonly cause: unknown;
-}> {}
+export class MobilePreferencesLoadError extends Schema.TaggedErrorClass<MobilePreferencesLoadError>()(
+  "MobilePreferencesLoadError",
+  { cause: Schema.Defect() },
+) {}
 
-export class MobilePreferencesSaveError extends Data.TaggedError("MobilePreferencesSaveError")<{
-  readonly cause: unknown;
-}> {}
+export class MobilePreferencesSaveError extends Schema.TaggedErrorClass<MobilePreferencesSaveError>()(
+  "MobilePreferencesSaveError",
+  { cause: Schema.Defect() },
+) {}
 
 export class MobilePreferencesStore extends Context.Service<
   MobilePreferencesStore,
@@ -22,22 +24,28 @@ export class MobilePreferencesStore extends Context.Service<
       patch: Partial<Preferences>,
     ) => Effect.Effect<Preferences, MobilePreferencesSaveError>;
   }
->()("@t3tools/mobile/state/preferences/MobilePreferencesStore") {}
-
-const mobilePreferencesStoreLayer = Layer.succeed(
-  MobilePreferencesStore,
-  MobilePreferencesStore.of({
-    load: Effect.tryPromise({
-      try: loadPreferences,
-      catch: (cause) => new MobilePreferencesLoadError({ cause }),
-    }),
-    savePatch: (patch) =>
-      Effect.tryPromise({
-        try: () => savePreferencesPatch(patch),
-        catch: (cause) => new MobilePreferencesSaveError({ cause }),
+>()("@t3tools/mobile/state/preferences/MobilePreferencesStore") {
+  static readonly layer = Layer.succeed(
+    MobilePreferencesStore,
+    MobilePreferencesStore.of({
+      load: Effect.tryPromise({
+        try: loadPreferences,
+        catch: (cause) => new MobilePreferencesLoadError({ cause }),
       }),
-  }),
-);
+      savePatch: Effect.fn("MobilePreferencesStore.savePatch")((patch) =>
+        Effect.tryPromise({
+          try: () => savePreferencesPatch(patch),
+          catch: (cause) => new MobilePreferencesSaveError({ cause }),
+        }),
+      ),
+    }),
+  );
+}
+
+interface OptimisticPreferences {
+  readonly values: Partial<Preferences>;
+  readonly versions: Partial<Record<keyof Preferences, number>>;
+}
 
 /**
  * Owns the device preference blob for the lifetime of the app registry.
@@ -49,27 +57,60 @@ export function createMobilePreferencesState(runtime: Atom.AtomRuntime<MobilePre
     .atom(
       MobilePreferencesStore.pipe(
         Effect.flatMap((store) => store.load),
-        Effect.catch(() => Effect.succeed<Preferences>({})),
+        Effect.catch((error) =>
+          Effect.logWarning("Could not load mobile preferences.", error).pipe(
+            Effect.as<Preferences>({}),
+          ),
+        ),
       ),
     )
     .pipe(Atom.keepAlive, Atom.withLabel("mobile:preferences:stored"));
 
-  const optimisticPatchAtom = Atom.make<Partial<Preferences>>({}).pipe(
+  const optimisticPatchAtom = Atom.make<OptimisticPreferences>({ values: {}, versions: {} }).pipe(
     Atom.keepAlive,
     Atom.withLabel("mobile:preferences:optimistic-patch"),
   );
+  let nextPatchVersion = 0;
 
   const preferencesAtom = Atom.make((get) => {
     const stored = get(storedPreferencesAtom);
-    const optimisticPatch = get(optimisticPatchAtom);
-    return AsyncResult.map(stored, (preferences) => ({ ...preferences, ...optimisticPatch }));
+    const optimistic = get(optimisticPatchAtom);
+    return AsyncResult.map(stored, (preferences) => ({ ...preferences, ...optimistic.values }));
   }).pipe(Atom.keepAlive, Atom.withLabel("mobile:preferences"));
 
   const updatePreferencesAtom = runtime
     .fn(
       (patch: Partial<Preferences>, get) => {
-        get.set(optimisticPatchAtom, { ...get(optimisticPatchAtom), ...patch });
-        return MobilePreferencesStore.pipe(Effect.flatMap((store) => store.savePatch(patch)));
+        const version = ++nextPatchVersion;
+        const current = get(optimisticPatchAtom);
+        const versions = { ...current.versions };
+        for (const key of Object.keys(patch) as Array<keyof Preferences>) {
+          versions[key] = version;
+        }
+        get.set(optimisticPatchAtom, {
+          values: { ...current.values, ...patch },
+          versions,
+        });
+        return MobilePreferencesStore.pipe(
+          Effect.flatMap((store) => store.savePatch(patch)),
+          Effect.tapError(() =>
+            Effect.sync(() => {
+              const optimistic = get(optimisticPatchAtom);
+              const values = { ...optimistic.values } as Record<string, unknown>;
+              const currentVersions = { ...optimistic.versions } as Record<string, unknown>;
+              for (const key of Object.keys(patch) as Array<keyof Preferences>) {
+                if (optimistic.versions[key] === version) {
+                  delete values[key];
+                  delete currentVersions[key];
+                }
+              }
+              get.set(optimisticPatchAtom, {
+                values: values as Partial<Preferences>,
+                versions: currentVersions as Partial<Record<keyof Preferences, number>>,
+              });
+            }),
+          ),
+        );
       },
       // The storage layer serializes preference read-modify-write operations.
       // Keep every invocation alive so one preference update cannot interrupt
@@ -81,7 +122,7 @@ export function createMobilePreferencesState(runtime: Atom.AtomRuntime<MobilePre
   return { preferencesAtom, updatePreferencesAtom } as const;
 }
 
-const mobilePreferencesRuntime = Atom.runtime(mobilePreferencesStoreLayer);
+const mobilePreferencesRuntime = Atom.runtime(MobilePreferencesStore.layer);
 export const mobilePreferencesState = createMobilePreferencesState(mobilePreferencesRuntime);
 
 export const mobilePreferencesAtom = mobilePreferencesState.preferencesAtom;
