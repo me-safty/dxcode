@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   createThreadJumpHintVisibilityController,
+  flattenSidebarSubagentTree,
   getSidebarThreadIdsToPrewarm,
+  getSidebarSubagentAncestorKeys,
+  getSidebarSubagentTreeRoots,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -19,6 +22,7 @@ import {
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  sidebarThreadKey,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
@@ -109,6 +113,157 @@ describe("sidebar thread lineage helpers", () => {
     expect(getSidebarForkParentThreadId(runFork)).toBe(parentId);
     expect(getSidebarForkParentThreadId(lineageFork)).toBe(fallbackParentId);
     expect(getSidebarForkParentThreadId(makeThreadFixture())).toBeNull();
+  });
+
+  it("renders expanded subagents as an indented direct-child tree", () => {
+    const rootId = ThreadId.make("thread-root");
+    const childId = ThreadId.make("thread-child");
+    const grandchildId = ThreadId.make("thread-grandchild");
+    const siblingId = ThreadId.make("thread-sibling");
+    const forkId = ThreadId.make("thread-fork");
+    const root = makeThreadFixture({ id: rootId, title: "Root" });
+    const child = makeThreadFixture({
+      id: childId,
+      title: "Child",
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: rootId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const grandchild = makeThreadFixture({
+      id: grandchildId,
+      title: "Grandchild",
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: childId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const sibling = makeThreadFixture({
+      id: siblingId,
+      title: "Sibling",
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: rootId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const fork = makeThreadFixture({
+      id: forkId,
+      title: "Fork",
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: rootId,
+        relationshipToParent: "fork",
+      },
+    });
+    const threads = [root, child, grandchild, sibling, fork];
+    const roots = getSidebarSubagentTreeRoots(threads);
+    const rows = flattenSidebarSubagentTree({
+      threads,
+      roots,
+      expandedThreadKeys: new Set([sidebarThreadKey(root), sidebarThreadKey(child)]),
+      threadSortOrder: "created_at",
+    });
+
+    expect(roots.map((thread) => thread.id)).toEqual([rootId, forkId]);
+    expect(rows.map((row) => [row.thread.id, row.depth])).toEqual([
+      [rootId, 0],
+      [siblingId, 1],
+      [childId, 1],
+      [grandchildId, 2],
+      [forkId, 0],
+    ]);
+    expect(rows[0]).toMatchObject({
+      hasSubagentChildren: true,
+      isSubagentBranchExpanded: true,
+    });
+  });
+
+  it("keeps descendants hidden until their branch is expanded", () => {
+    const rootId = ThreadId.make("thread-root");
+    const childId = ThreadId.make("thread-child");
+    const root = makeThreadFixture({ id: rootId });
+    const child = makeThreadFixture({
+      id: childId,
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: rootId,
+        relationshipToParent: "subagent",
+      },
+    });
+
+    const rows = flattenSidebarSubagentTree({
+      threads: [root, child],
+      roots: getSidebarSubagentTreeRoots([root, child]),
+      expandedThreadKeys: new Set(),
+      threadSortOrder: "created_at",
+    });
+
+    expect(rows.map((row) => row.thread.id)).toEqual([rootId]);
+    expect(rows[0]).toMatchObject({
+      hasSubagentChildren: true,
+      isSubagentBranchExpanded: false,
+    });
+  });
+
+  it("returns every malformed lineage thread exactly once", () => {
+    const firstId = ThreadId.make("thread-cycle-a");
+    const secondId = ThreadId.make("thread-cycle-b");
+    const first = makeThreadFixture({
+      id: firstId,
+      lineage: {
+        rootThreadId: firstId,
+        parentThreadId: secondId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const second = makeThreadFixture({
+      id: secondId,
+      lineage: {
+        rootThreadId: firstId,
+        parentThreadId: firstId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const threads = [first, second];
+    const roots = getSidebarSubagentTreeRoots(threads);
+    const rows = flattenSidebarSubagentTree({
+      threads,
+      roots,
+      expandedThreadKeys: new Set([sidebarThreadKey(first), sidebarThreadKey(second)]),
+      threadSortOrder: "created_at",
+    });
+
+    expect(rows.map((row) => row.thread.id)).toEqual([firstId, secondId]);
+  });
+
+  it("returns every ancestor needed to reveal an active nested child", () => {
+    const rootId = ThreadId.make("thread-root");
+    const childId = ThreadId.make("thread-child");
+    const grandchildId = ThreadId.make("thread-grandchild");
+    const root = makeThreadFixture({ id: rootId });
+    const child = makeThreadFixture({
+      id: childId,
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: rootId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const grandchild = makeThreadFixture({
+      id: grandchildId,
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: childId,
+        relationshipToParent: "subagent",
+      },
+    });
+
+    expect(
+      getSidebarSubagentAncestorKeys([root, child, grandchild], sidebarThreadKey(grandchild)),
+    ).toEqual(new Set([sidebarThreadKey(child), sidebarThreadKey(root)]));
   });
 });
 

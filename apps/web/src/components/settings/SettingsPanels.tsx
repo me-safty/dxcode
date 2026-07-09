@@ -393,6 +393,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["Visible threads"]
         : []),
+      ...(settings.sidebarShowSubagentThreads !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarShowSubagentThreads
+        ? ["Nested subagents"]
+        : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
@@ -437,6 +441,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
       settings.sidebarThreadPreviewCount,
+      settings.sidebarShowSubagentThreads,
       settings.timestampFormat,
       settings.wordWrap,
       theme,
@@ -459,6 +464,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
+      sidebarShowSubagentThreads: DEFAULT_UNIFIED_SETTINGS.sidebarShowSubagentThreads,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,

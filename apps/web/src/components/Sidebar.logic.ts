@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -28,6 +29,152 @@ export type ThreadTraversalDirection = "previous" | "next";
 
 export function isSidebarSubagentThread(thread: Pick<SidebarThreadSummary, "lineage">): boolean {
   return thread.lineage.relationshipToParent === "subagent";
+}
+
+export interface SidebarThreadTreeRow {
+  readonly thread: SidebarThreadSummary;
+  readonly depth: number;
+  readonly hasSubagentChildren: boolean;
+  readonly isSubagentBranchExpanded: boolean;
+}
+
+export function sidebarThreadKey(
+  thread: Pick<SidebarThreadSummary, "environmentId" | "id">,
+): string {
+  return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+}
+
+export function sidebarSubagentParentKey(thread: SidebarThreadSummary): string | null {
+  if (thread.lineage.relationshipToParent !== "subagent") {
+    return null;
+  }
+  const parentThreadId = thread.lineage.parentThreadId;
+  return parentThreadId === null
+    ? null
+    : scopedThreadKey(scopeThreadRef(thread.environmentId, parentThreadId));
+}
+
+export function getSidebarSubagentAncestorKeys(
+  threads: readonly SidebarThreadSummary[],
+  threadKey: string | null,
+): ReadonlySet<string> {
+  if (threadKey === null) {
+    return new Set();
+  }
+
+  const threadByKey = new Map(threads.map((thread) => [sidebarThreadKey(thread), thread] as const));
+  const ancestors = new Set<string>();
+  const visited = new Set<string>([threadKey]);
+  let current = threadByKey.get(threadKey);
+
+  while (current !== undefined) {
+    const parentKey = sidebarSubagentParentKey(current);
+    if (parentKey === null || visited.has(parentKey)) {
+      break;
+    }
+    ancestors.add(parentKey);
+    visited.add(parentKey);
+    current = threadByKey.get(parentKey);
+  }
+
+  return ancestors;
+}
+
+export function getSidebarSubagentTreeRoots(
+  threads: readonly SidebarThreadSummary[],
+): readonly SidebarThreadSummary[] {
+  const threadKeys = new Set(threads.map(sidebarThreadKey));
+  const childrenByParentKey = new Map<string, SidebarThreadSummary[]>();
+  for (const thread of threads) {
+    const parentKey = sidebarSubagentParentKey(thread);
+    if (parentKey === null || !threadKeys.has(parentKey)) {
+      continue;
+    }
+    const children = childrenByParentKey.get(parentKey);
+    if (children === undefined) {
+      childrenByParentKey.set(parentKey, [thread]);
+    } else {
+      children.push(thread);
+    }
+  }
+
+  const roots = threads.filter((thread) => {
+    const parentKey = sidebarSubagentParentKey(thread);
+    return parentKey === null || !threadKeys.has(parentKey);
+  });
+  const placedKeys = new Set<string>();
+  const markPlaced = (thread: SidebarThreadSummary) => {
+    const key = sidebarThreadKey(thread);
+    if (placedKeys.has(key)) {
+      return;
+    }
+    placedKeys.add(key);
+    for (const child of childrenByParentKey.get(key) ?? []) {
+      markPlaced(child);
+    }
+  };
+  for (const root of roots) {
+    markPlaced(root);
+  }
+  for (const thread of threads) {
+    if (placedKeys.has(sidebarThreadKey(thread))) {
+      continue;
+    }
+    roots.push(thread);
+    markPlaced(thread);
+  }
+  return roots;
+}
+
+export function flattenSidebarSubagentTree(input: {
+  readonly threads: readonly SidebarThreadSummary[];
+  readonly roots: readonly SidebarThreadSummary[];
+  readonly expandedThreadKeys: ReadonlySet<string>;
+  readonly threadSortOrder: SidebarThreadSortOrder;
+}): readonly SidebarThreadTreeRow[] {
+  const threadKeys = new Set(input.threads.map(sidebarThreadKey));
+  const childrenByParentKey = new Map<string, SidebarThreadSummary[]>();
+  for (const thread of input.threads) {
+    const parentKey = sidebarSubagentParentKey(thread);
+    if (parentKey === null || !threadKeys.has(parentKey)) {
+      continue;
+    }
+    const children = childrenByParentKey.get(parentKey);
+    if (children === undefined) {
+      childrenByParentKey.set(parentKey, [thread]);
+    } else {
+      children.push(thread);
+    }
+  }
+
+  for (const [parentKey, children] of childrenByParentKey) {
+    childrenByParentKey.set(parentKey, sortThreads(children, input.threadSortOrder));
+  }
+
+  const rows: SidebarThreadTreeRow[] = [];
+  const visited = new Set<string>();
+  const visit = (thread: SidebarThreadSummary, depth: number) => {
+    const key = sidebarThreadKey(thread);
+    if (visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+    const children = childrenByParentKey.get(key) ?? [];
+    const hasSubagentChildren = children.length > 0;
+    const isSubagentBranchExpanded = hasSubagentChildren && input.expandedThreadKeys.has(key);
+    rows.push({ thread, depth, hasSubagentChildren, isSubagentBranchExpanded });
+    if (!isSubagentBranchExpanded) {
+      return;
+    }
+    for (const child of children) {
+      visit(child, depth + 1);
+    }
+  };
+
+  for (const root of input.roots) {
+    visit(root, 0);
+  }
+  return rows;
 }
 
 export function getSidebarForkParentThreadId(
