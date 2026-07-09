@@ -8,6 +8,7 @@ import {
   type OrchestrationProposedPlanId,
   CheckpointRef,
   isToolLifecycleItemType,
+  EventId,
   ThreadId,
   type ThreadTokenUsageSnapshot,
   TurnId,
@@ -160,6 +161,20 @@ function maxCheckpointTurnCount(
     }
   }
   return maxTurnCount;
+}
+
+/**
+ * Stable per-task activity ids: workflow snapshot/meta activities are
+ * upserted (one projection row per run), not appended per progress tick.
+ */
+// JSON-encode the (threadId, taskId) tuple: both are free-form strings, so a
+// bare `:`-joined key would let distinct pairs collide on the upsert id.
+function workflowActivityId(threadId: ThreadId, taskId: string): EventId {
+  return EventId.make(`workflow:${JSON.stringify([threadId, taskId])}`);
+}
+
+function workflowMetaActivityId(threadId: ThreadId, taskId: string): EventId {
+  return EventId.make(`workflow-meta:${JSON.stringify([threadId, taskId])}`);
 }
 
 function truncateDetail(value: string, limit = 180): string {
@@ -456,6 +471,8 @@ function runtimeEventToActivities(
           payload: {
             taskId: event.payload.taskId,
             ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
+            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.workflowName ? { workflowName: event.payload.workflowName } : {}),
             ...(event.payload.description
               ? { detail: truncateDetail(event.payload.description) }
               : {}),
@@ -467,20 +484,59 @@ function runtimeEventToActivities(
     }
 
     case "task.progress": {
+      const progressActivity: OrchestrationThreadActivity = {
+        id: event.eventId,
+        createdAt: event.createdAt,
+        tone: "info",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        payload: {
+          taskId: event.payload.taskId,
+          detail: truncateDetail(event.payload.summary ?? event.payload.description),
+          ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
+          ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
+          ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+        },
+        turnId: toTurnId(event.turnId) ?? null,
+        ...maybeSequence,
+      };
+      if (event.payload.workflowProgress === undefined) {
+        return [progressActivity];
+      }
+      // Workflow snapshots are cumulative state, not timeline entries: reuse a
+      // stable activity id per task so the projection and client upsert one
+      // row per run instead of accumulating one per progress tick.
       return [
+        progressActivity,
         {
-          id: event.eventId,
+          id: workflowActivityId(event.threadId, event.payload.taskId),
           createdAt: event.createdAt,
           tone: "info",
-          kind: "task.progress",
-          summary: "Reasoning update",
+          kind: "task.workflow-updated",
+          summary: truncateDetail(event.payload.description),
           payload: {
             taskId: event.payload.taskId,
-            detail: truncateDetail(event.payload.summary ?? event.payload.description),
-            ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
-            ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
+            description: truncateDetail(event.payload.description),
+            workflowProgress: event.payload.workflowProgress,
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
           },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "task.workflowMeta": {
+      return [
+        {
+          id: workflowMetaActivityId(event.threadId, event.payload.taskId),
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "task.workflow-meta",
+          summary: event.payload.workflowName
+            ? `Workflow "${event.payload.workflowName}" launched`
+            : "Workflow launched",
+          payload: { ...event.payload },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
