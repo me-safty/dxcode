@@ -30,6 +30,10 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const SidebarChatListView = Schema.Literals(["grouped", "flat"]);
+export type SidebarChatListView = typeof SidebarChatListView.Type;
+export const DEFAULT_SIDEBAR_CHAT_LIST_VIEW: SidebarChatListView = "grouped";
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -99,6 +103,9 @@ export const ClientSettingsSchema = Schema.Struct({
       modelOrder: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  sidebarChatListView: SidebarChatListView.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_CHAT_LIST_VIEW)),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -594,6 +601,7 @@ export const ClientSettingsPatch = Schema.Struct({
       }),
     ),
   ),
+  sidebarChatListView: Schema.optionalKey(SidebarChatListView),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
