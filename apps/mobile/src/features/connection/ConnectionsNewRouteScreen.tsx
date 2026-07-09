@@ -38,7 +38,6 @@ export function ConnectionsNewRouteScreen({
   const [scannerLocked, setScannerLocked] = useState(false);
 
   const headerIconColor = useThemeColor("--color-icon");
-  const placeholderColor = useThemeColor("--color-placeholder");
 
   const connectDisabled = isSubmitting || hostInput.trim().length === 0;
 
@@ -202,7 +201,6 @@ export function ConnectionsNewRouteScreen({
                   autoCorrect={false}
                   keyboardType="url"
                   placeholder="192.168.1.100:8080"
-                  placeholderTextColor={placeholderColor}
                   value={hostInput}
                   onChangeText={handleHostChange}
                   className="rounded-[14px] border border-input-border bg-input px-4 py-3.5 text-base text-foreground"
@@ -217,7 +215,6 @@ export function ConnectionsNewRouteScreen({
                   autoCapitalize="none"
                   autoCorrect={false}
                   placeholder="abc-123-xyz"
-                  placeholderTextColor={placeholderColor}
                   value={codeInput}
                   onChangeText={handleCodeChange}
                   className="rounded-[14px] border border-input-border bg-input px-4 py-3.5 text-base text-foreground"

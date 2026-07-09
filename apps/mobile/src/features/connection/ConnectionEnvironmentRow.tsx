@@ -38,7 +38,6 @@ export function ConnectionEnvironmentRow(props: {
   const [url, setUrl] = useState(props.environment.displayUrl);
 
   const mutedColor = useThemeColor("--color-icon-subtle");
-  const placeholderColor = useThemeColor("--color-placeholder");
   const primaryFg = useThemeColor("--color-primary-foreground");
   const dangerFg = useThemeColor("--color-danger-foreground");
   const statusLabel = connectionStatusLabel(props.environment);
@@ -146,7 +145,6 @@ export function ConnectionEnvironmentRow(props: {
                   autoCapitalize="words"
                   autoCorrect={false}
                   placeholder="My MacBook"
-                  placeholderTextColor={placeholderColor}
                   value={label}
                   onChangeText={setLabel}
                   className="rounded-[14px] border border-input-border bg-input px-4 py-3 text-base text-foreground"
@@ -162,7 +160,6 @@ export function ConnectionEnvironmentRow(props: {
                   autoCorrect={false}
                   keyboardType="url"
                   placeholder="192.168.1.100:8080"
-                  placeholderTextColor={placeholderColor}
                   value={url}
                   onChangeText={setUrl}
                   className="rounded-[14px] border border-input-border bg-input px-4 py-3 text-base text-foreground"

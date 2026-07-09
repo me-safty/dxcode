@@ -17,7 +17,7 @@ export function AppText({ className, ...props }: AppTextProps) {
   return <RNText className={cn("font-sans text-foreground", className)} {...props} />;
 }
 
-export type AppTextInputProps = RNTextInputProps & {
+export type AppTextInputProps = Omit<RNTextInputProps, "placeholderTextColor"> & {
   readonly className?: string;
   readonly ref?: React.Ref<RNTextInput>;
 };
@@ -26,12 +26,7 @@ export type AppTextInputProps = RNTextInputProps & {
  * Thin wrapper around RN TextInput with default input styling.
  * Uses Uniwind className — no manual style parsing.
  */
-export function AppTextInput({
-  className,
-  placeholderTextColor,
-  ref,
-  ...props
-}: AppTextInputProps) {
+export function AppTextInput({ className, ref, ...props }: AppTextInputProps) {
   return (
     <RNTextInput
       ref={ref}
@@ -39,10 +34,7 @@ export function AppTextInput({
         "min-h-13.5 rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground",
         className,
       )}
-      placeholderTextColor={placeholderTextColor}
-      placeholderTextColorClassName={
-        placeholderTextColor === undefined ? "accent-placeholder" : undefined
-      }
+      placeholderTextColorClassName="accent-placeholder"
       {...props}
     />
   );
