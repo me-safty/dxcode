@@ -27,6 +27,11 @@ export interface ClientCacheSummaryRow {
   readonly payloadBytes: number;
 }
 
+export interface StoredPreferencesJson {
+  readonly payload: string;
+  readonly updatedAt: number;
+}
+
 const ClientCacheSummaryRows = Schema.Array(
   Schema.Struct({
     environmentId: Schema.String,
@@ -207,8 +212,14 @@ export class MobileDatabase extends Context.Service<
       ReadonlyArray<ClientCacheSummaryRow>,
       MobileDatabaseError
     >;
-    readonly loadPreferencesJson: Effect.Effect<Option.Option<string>, MobileDatabaseError>;
-    readonly savePreferencesJson: (payload: string) => Effect.Effect<void, MobileDatabaseError>;
+    readonly loadPreferencesJson: Effect.Effect<
+      Option.Option<StoredPreferencesJson>,
+      MobileDatabaseError
+    >;
+    readonly savePreferencesJson: (
+      payload: string,
+      updatedAt: number,
+    ) => Effect.Effect<void, MobileDatabaseError>;
   }
 >()("@t3tools/mobile/persistence/MobileDatabase") {
   static readonly layer = Layer.effect(
@@ -352,12 +363,14 @@ export class MobileDatabase extends Context.Service<
         ),
         loadPreferencesJson: Effect.tryPromise({
           try: () =>
-            database.getFirstAsync<{ readonly payload: string }>(
-              "SELECT payload FROM client_preferences WHERE singleton = 1",
+            database.getFirstAsync<StoredPreferencesJson>(
+              `SELECT payload, updated_at AS updatedAt
+                 FROM client_preferences
+                 WHERE singleton = 1`,
             ),
           catch: databaseError("load-preferences"),
-        }).pipe(Effect.map((row) => Option.fromNullishOr(row?.payload))),
-        savePreferencesJson: Effect.fn("MobileDatabase.savePreferencesJson")((payload) =>
+        }).pipe(Effect.map(Option.fromNullishOr)),
+        savePreferencesJson: Effect.fn("MobileDatabase.savePreferencesJson")((payload, updatedAt) =>
           Effect.tryPromise({
             try: () =>
               database.runAsync(
@@ -367,7 +380,7 @@ export class MobileDatabase extends Context.Service<
                      payload = excluded.payload,
                      updated_at = excluded.updated_at`,
                 payload,
-                Date.now(),
+                updatedAt,
               ),
             catch: databaseError("save-preferences"),
           }).pipe(Effect.asVoid),

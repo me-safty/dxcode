@@ -11,15 +11,21 @@ import {
   type SavedRemoteConnection,
   toStableSavedRemoteConnection,
 } from "./connection";
-import { MobileDatabase, mobileDatabaseRuntime } from "../persistence/mobile-database";
+import {
+  MobileDatabase,
+  mobileDatabaseRuntime,
+  type StoredPreferencesJson,
+} from "../persistence/mobile-database";
 
 const CONNECTIONS_KEY = "t3code.connections";
 const PREFERENCES_KEY = "t3code.preferences";
+const PREFERENCES_FALLBACK_KEY = "t3code.preferences.fallback";
 const AGENT_AWARENESS_DEVICE_ID_KEY = "t3code.agent-awareness.device-id";
 const AGENT_AWARENESS_REGISTRATION_KEY = "t3code.agent-awareness.registration";
 const MobileStorageKey = Schema.Literals([
   CONNECTIONS_KEY,
   PREFERENCES_KEY,
+  PREFERENCES_FALLBACK_KEY,
   AGENT_AWARENESS_DEVICE_ID_KEY,
   AGENT_AWARENESS_REGISTRATION_KEY,
 ]);
@@ -173,22 +179,56 @@ export async function clearSavedConnection(environmentId: EnvironmentId): Promis
   await writeJsonStorageItem(CONNECTIONS_KEY, { connections: next });
 }
 
-async function savePreferencesJson(encoded: string): Promise<void> {
+interface PreferencesFallback {
+  readonly payload: string;
+  readonly updatedAt: number;
+}
+
+let lastPreferencesUpdatedAt = 0;
+
+function nextPreferencesUpdatedAt(): number {
+  lastPreferencesUpdatedAt = Math.max(Date.now(), lastPreferencesUpdatedAt + 1);
+  return lastPreferencesUpdatedAt;
+}
+
+function parsePreferencesFallback(raw: string | null): PreferencesFallback | null {
+  if (raw === null) return null;
+  const parsed = parseJsonStorageItem<unknown>(PREFERENCES_FALLBACK_KEY, raw);
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("payload" in parsed) ||
+    typeof parsed.payload !== "string" ||
+    !("updatedAt" in parsed) ||
+    typeof parsed.updatedAt !== "number"
+  ) {
+    return null;
+  }
+  return { payload: parsed.payload, updatedAt: parsed.updatedAt };
+}
+
+async function savePreferencesJson(
+  encoded: string,
+  updatedAt = nextPreferencesUpdatedAt(),
+): Promise<void> {
+  lastPreferencesUpdatedAt = Math.max(lastPreferencesUpdatedAt, updatedAt);
   try {
     await mobileDatabaseRuntime.runPromise(
-      MobileDatabase.pipe(Effect.flatMap((database) => database.savePreferencesJson(encoded))),
+      MobileDatabase.pipe(
+        Effect.flatMap((database) => database.savePreferencesJson(encoded, updatedAt)),
+      ),
     );
   } catch (cause) {
     console.warn(
       "[mobile-storage] database unavailable, saving preferences to secure storage",
       cause,
     );
-    await writeStorageItem(PREFERENCES_KEY, encoded);
+    await writeJsonStorageItem(PREFERENCES_FALLBACK_KEY, { payload: encoded, updatedAt });
     return;
   }
 
-  await deleteStorageItem(PREFERENCES_KEY).catch((cause) => {
-    console.warn("[mobile-storage] could not remove migrated preferences", cause);
+  await deleteStorageItem(PREFERENCES_FALLBACK_KEY).catch((cause) => {
+    console.warn("[mobile-storage] could not remove preferences fallback", cause);
   });
 }
 
@@ -199,29 +239,50 @@ export async function loadPreferences(): Promise<Preferences> {
     .catch((cause) => {
       databaseAvailable = false;
       console.warn("[mobile-storage] database unavailable, using legacy preferences", cause);
-      return Option.none<string>();
+      return Option.none<StoredPreferencesJson>();
     });
-  const legacyJson = await readStorageItem(PREFERENCES_KEY).catch((cause) => {
+  const fallbackJson = await readStorageItem(PREFERENCES_FALLBACK_KEY).catch((cause) => {
     if (Option.isNone(storedJson)) {
       throw cause;
     }
-    console.warn("[mobile-storage] could not inspect legacy preferences", cause);
+    console.warn("[mobile-storage] could not inspect preferences fallback", cause);
     return null;
   });
-  const legacyPreferences =
-    legacyJson === null ? null : parseJsonStorageItem<Preferences>(PREFERENCES_KEY, legacyJson);
-  let parsed =
-    legacyPreferences ??
-    (Option.isSome(storedJson)
-      ? parseJsonStorageItem<Preferences>(PREFERENCES_KEY, storedJson.value)
-      : null);
+  const fallback = parsePreferencesFallback(fallbackJson);
+  const fallbackIsNewer =
+    fallback !== null &&
+    (Option.isNone(storedJson) || fallback.updatedAt > storedJson.value.updatedAt);
 
-  // SecureStore is both the legacy location and the durable fallback when
-  // SQLite is temporarily unavailable. Prefer it and reconcile it back into
-  // SQLite so a recovered database cannot revive an older preference value.
-  if (legacyPreferences !== null && databaseAvailable && legacyJson !== null) {
-    await savePreferencesJson(legacyJson);
+  let selectedJson: string | null = null;
+  if (fallbackIsNewer) {
+    selectedJson = fallback.payload;
+    lastPreferencesUpdatedAt = Math.max(lastPreferencesUpdatedAt, fallback.updatedAt);
+    if (databaseAvailable) {
+      await savePreferencesJson(fallback.payload, fallback.updatedAt);
+    }
+  } else if (Option.isSome(storedJson)) {
+    selectedJson = storedJson.value.payload;
+    lastPreferencesUpdatedAt = Math.max(lastPreferencesUpdatedAt, storedJson.value.updatedAt);
+    if (fallback !== null) {
+      await deleteStorageItem(PREFERENCES_FALLBACK_KEY).catch((cause) => {
+        console.warn("[mobile-storage] could not remove stale preferences fallback", cause);
+      });
+    }
   }
+
+  if (selectedJson === null) {
+    const legacyJson = await readStorageItem(PREFERENCES_KEY);
+    selectedJson = legacyJson;
+    if (legacyJson !== null && databaseAvailable) {
+      await savePreferencesJson(legacyJson);
+      await deleteStorageItem(PREFERENCES_KEY).catch((cause) => {
+        console.warn("[mobile-storage] could not remove migrated preferences", cause);
+      });
+    }
+  }
+
+  const parsed =
+    selectedJson === null ? null : parseJsonStorageItem<Preferences>(PREFERENCES_KEY, selectedJson);
 
   if (!parsed || typeof parsed !== "object") {
     return {};

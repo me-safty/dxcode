@@ -4,19 +4,22 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const mocks = vi.hoisted(() => {
   const values = new Map<string, string>();
   let preferencesJson: string | null = null;
+  let preferencesUpdatedAt = 0;
   let loadPreferencesFails = false;
   let savePreferencesFails = false;
   return {
     clear: () => {
       values.clear();
       preferencesJson = null;
+      preferencesUpdatedAt = 0;
       loadPreferencesFails = false;
       savePreferencesFails = false;
     },
     getStoredValue: (key: string) => values.get(key) ?? null,
     getPreferencesJson: () => preferencesJson,
-    setPreferencesJson: (value: string) => {
+    setPreferencesJson: (value: string, updatedAt: number) => {
       preferencesJson = value;
+      preferencesUpdatedAt = updatedAt;
     },
     setDatabaseFailures: (load: boolean, save: boolean) => {
       loadPreferencesFails = load;
@@ -45,14 +48,21 @@ const mocks = vi.hoisted(() => {
         if (loadPreferencesFails) {
           return Promise.reject(new Error("database unavailable"));
         }
-        return Promise.resolve(preferencesJson === null ? null : { payload: preferencesJson });
+        return Promise.resolve(
+          preferencesJson === null
+            ? null
+            : { payload: preferencesJson, updatedAt: preferencesUpdatedAt },
+        );
       }),
-      runAsync: vi.fn((_sql: string, payload?: unknown) => {
+      runAsync: vi.fn((_sql: string, payload?: unknown, updatedAt?: unknown) => {
         if (savePreferencesFails) {
           return Promise.reject(new Error("database unavailable"));
         }
         if (typeof payload === "string") {
           preferencesJson = payload;
+        }
+        if (typeof updatedAt === "number") {
+          preferencesUpdatedAt = updatedAt;
         }
         return Promise.resolve();
       }),
@@ -177,9 +187,12 @@ describe("mobile connection storage", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await expect(savePreferencesPatch({ baseFontSize: 19 })).resolves.toEqual({ baseFontSize: 19 });
-    expect(JSON.parse(mocks.getStoredValue("t3code.preferences") ?? "")).toEqual({
-      baseFontSize: 19,
-    });
+    const fallback = JSON.parse(mocks.getStoredValue("t3code.preferences.fallback") ?? "") as {
+      readonly payload: string;
+      readonly updatedAt: number;
+    };
+    expect(JSON.parse(fallback.payload)).toEqual({ baseFontSize: 19 });
+    expect(fallback.updatedAt).toEqual(expect.any(Number));
     expect(warn).toHaveBeenCalledWith(
       "[mobile-storage] database unavailable, saving preferences to secure storage",
       expect.anything(),
@@ -189,11 +202,32 @@ describe("mobile connection storage", () => {
   });
 
   it("reconciles fallback preferences after SQLite recovers", async () => {
-    mocks.setPreferencesJson(JSON.stringify({ baseFontSize: 15 }));
-    await mocks.setItemAsync("t3code.preferences", JSON.stringify({ baseFontSize: 19 }));
+    mocks.setPreferencesJson(JSON.stringify({ baseFontSize: 15 }), 10);
+    await mocks.setItemAsync(
+      "t3code.preferences.fallback",
+      JSON.stringify({
+        payload: JSON.stringify({ baseFontSize: 19 }),
+        updatedAt: 20,
+      }),
+    );
 
     await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 19 });
     expect(JSON.parse(mocks.getPreferencesJson() ?? "")).toEqual({ baseFontSize: 19 });
-    expect(mocks.getStoredValue("t3code.preferences")).toBeNull();
+    expect(mocks.getStoredValue("t3code.preferences.fallback")).toBeNull();
+  });
+
+  it("ignores a stale fallback when its previous deletion failed", async () => {
+    mocks.setPreferencesJson(JSON.stringify({ baseFontSize: 21 }), 30);
+    await mocks.setItemAsync(
+      "t3code.preferences.fallback",
+      JSON.stringify({
+        payload: JSON.stringify({ baseFontSize: 19 }),
+        updatedAt: 20,
+      }),
+    );
+
+    await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 21 });
+    expect(JSON.parse(mocks.getPreferencesJson() ?? "")).toEqual({ baseFontSize: 21 });
+    expect(mocks.getStoredValue("t3code.preferences.fallback")).toBeNull();
   });
 });
