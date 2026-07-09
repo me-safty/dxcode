@@ -86,18 +86,12 @@ vi.mock("react-native", () => ({
   },
 }));
 
-vi.mock("./runtime", () => ({
-  runtime: {
-    runPromise: vi.fn(),
-  },
-}));
-
 import {
   loadPreferences,
   loadSavedConnections,
   saveConnection,
   savePreferencesPatch,
-} from "./storage";
+} from "../persistence/imperative";
 import { toStableSavedRemoteConnection } from "./connection";
 
 const managedConnection = {
@@ -171,21 +165,12 @@ describe("mobile connection storage", () => {
   it("loads legacy preferences when SQLite is unavailable", async () => {
     mocks.setDatabaseFailures(true, true);
     await mocks.setItemAsync("t3code.preferences", JSON.stringify({ baseFontSize: 17 }));
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 17 });
-    expect(warn).toHaveBeenCalledWith(
-      "[mobile-storage] database unavailable, using legacy preferences",
-      expect.anything(),
-    );
-
-    warn.mockRestore();
   });
 
   it("falls back to secure storage when SQLite cannot save preferences", async () => {
     mocks.setDatabaseFailures(true, true);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
     await expect(savePreferencesPatch({ baseFontSize: 19 })).resolves.toEqual({ baseFontSize: 19 });
     const fallback = JSON.parse(mocks.getStoredValue("t3code.preferences.fallback") ?? "") as {
       readonly payload: string;
@@ -193,12 +178,6 @@ describe("mobile connection storage", () => {
     };
     expect(JSON.parse(fallback.payload)).toEqual({ baseFontSize: 19 });
     expect(fallback.updatedAt).toEqual(expect.any(Number));
-    expect(warn).toHaveBeenCalledWith(
-      "[mobile-storage] database unavailable, saving preferences to secure storage",
-      expect.anything(),
-    );
-
-    warn.mockRestore();
   });
 
   it("reconciles fallback preferences after SQLite recovers", async () => {

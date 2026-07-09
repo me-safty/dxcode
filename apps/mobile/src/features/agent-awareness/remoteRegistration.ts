@@ -27,7 +27,7 @@ import {
   loadOrCreateAgentAwarenessDeviceId,
   loadPreferences,
   saveAgentAwarenessRegistrationRecord,
-} from "../../lib/storage";
+} from "../../persistence/imperative";
 import AgentActivity, { type AgentActivityProps } from "../../widgets/AgentActivity";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";

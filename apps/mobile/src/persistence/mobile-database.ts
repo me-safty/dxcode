@@ -2,7 +2,6 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { SQLiteDatabase } from "expo-sqlite";
@@ -221,29 +220,28 @@ export class MobileDatabase extends Context.Service<
       updatedAt: number,
     ) => Effect.Effect<void, MobileDatabaseError>;
   }
->()("@t3tools/mobile/persistence/MobileDatabase") {
-  static readonly layer = Layer.effect(
-    MobileDatabase,
-    Effect.gen(function* () {
-      const database = yield* Effect.acquireRelease(
-        Effect.tryPromise({
-          try: async () => {
-            const SQLite = await import("expo-sqlite");
-            return SQLite.openDatabaseAsync(DATABASE_NAME);
-          },
-          catch: databaseError("open"),
-        }),
-        (openDatabase) => Effect.promise(() => openDatabase.closeAsync()).pipe(Effect.ignore),
-      );
+>()("@t3tools/mobile/persistence/MobileDatabase") {}
 
-      yield* Effect.tryPromise({
-        try: async () => {
-          await database.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-          const schema = await database.getFirstAsync<{ readonly user_version: number }>(
-            "PRAGMA user_version",
-          );
-          await database.withExclusiveTransactionAsync(async (transaction) => {
-            await transaction.execAsync(`
+const makeAvailable = Effect.gen(function* () {
+  const database = yield* Effect.acquireRelease(
+    Effect.tryPromise({
+      try: async () => {
+        const SQLite = await import("expo-sqlite");
+        return SQLite.openDatabaseAsync(DATABASE_NAME);
+      },
+      catch: databaseError("open"),
+    }),
+    (openDatabase) => Effect.promise(() => openDatabase.closeAsync()).pipe(Effect.ignore),
+  );
+
+  yield* Effect.tryPromise({
+    try: async () => {
+      await database.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+      const schema = await database.getFirstAsync<{ readonly user_version: number }>(
+        "PRAGMA user_version",
+      );
+      await database.withExclusiveTransactionAsync(async (transaction) => {
+        await transaction.execAsync(`
               CREATE TABLE IF NOT EXISTS client_cache (
                 environment_id TEXT NOT NULL,
                 kind TEXT NOT NULL,
@@ -263,81 +261,81 @@ export class MobileDatabase extends Context.Service<
                 updated_at INTEGER NOT NULL
               );
             `);
-          });
-          if ((schema?.user_version ?? 0) < DATABASE_SCHEMA_VERSION) {
-            const migrated = await migrateLegacyFileCaches(database);
-            if (migrated) {
-              await database.execAsync(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION};`);
-            }
-          }
-        },
-        catch: databaseError("migrate"),
       });
+      if ((schema?.user_version ?? 0) < DATABASE_SCHEMA_VERSION) {
+        const migrated = await migrateLegacyFileCaches(database);
+        if (migrated) {
+          await database.execAsync(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION};`);
+        }
+      }
+    },
+    catch: databaseError("migrate"),
+  });
 
-      return MobileDatabase.of({
-        loadCache: Effect.fn("MobileDatabase.loadCache")((environmentId, kind, cacheKey) =>
-          Effect.tryPromise({
-            try: () =>
-              database.getFirstAsync<{ readonly payload: string }>(
-                `SELECT payload
+  return MobileDatabase.of({
+    loadCache: Effect.fn("MobileDatabase.loadCache")((environmentId, kind, cacheKey) =>
+      Effect.tryPromise({
+        try: () =>
+          database.getFirstAsync<{ readonly payload: string }>(
+            `SELECT payload
                      FROM client_cache
                      WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-                environmentId,
-                kind,
-                cacheKey,
-              ),
-            catch: databaseError("load-cache"),
-          }).pipe(Effect.map((row) => Option.fromNullishOr(row?.payload))),
-        ),
-        saveCache: Effect.fn("MobileDatabase.saveCache")(
-          (environmentId, kind, cacheKey, schemaVersion, payload) =>
-            Effect.tryPromise({
-              try: () =>
-                database.runAsync(
-                  `INSERT INTO client_cache
+            environmentId,
+            kind,
+            cacheKey,
+          ),
+        catch: databaseError("load-cache"),
+      }).pipe(Effect.map((row) => Option.fromNullishOr(row?.payload))),
+    ),
+    saveCache: Effect.fn("MobileDatabase.saveCache")(
+      (environmentId, kind, cacheKey, schemaVersion, payload) =>
+        Effect.tryPromise({
+          try: () =>
+            database.runAsync(
+              `INSERT INTO client_cache
                       (environment_id, kind, cache_key, schema_version, payload, updated_at)
                      VALUES (?, ?, ?, ?, ?, ?)
                      ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
                        schema_version = excluded.schema_version,
                        payload = excluded.payload,
                        updated_at = excluded.updated_at`,
-                  environmentId,
-                  kind,
-                  cacheKey,
-                  schemaVersion,
-                  payload,
-                  Date.now(),
-                ),
-              catch: databaseError("save-cache"),
-            }).pipe(Effect.asVoid),
-        ),
-        removeCache: Effect.fn("MobileDatabase.removeCache")((environmentId, kind, cacheKey) =>
-          Effect.tryPromise({
-            try: () =>
-              database.runAsync(
-                `DELETE FROM client_cache
-                     WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-                environmentId,
-                kind,
-                cacheKey,
-              ),
-            catch: databaseError("remove-cache"),
-          }).pipe(Effect.asVoid),
-        ),
-        clearEnvironmentCache: Effect.fn("MobileDatabase.clearEnvironmentCache")((environmentId) =>
-          Effect.tryPromise({
-            try: () =>
-              database.runAsync("DELETE FROM client_cache WHERE environment_id = ?", environmentId),
-            catch: databaseError("clear-environment-cache"),
-          }).pipe(Effect.asVoid),
-        ),
-        clearAllCaches: Effect.tryPromise({
-          try: () => database.runAsync("DELETE FROM client_cache"),
-          catch: databaseError("clear-all-caches"),
+              environmentId,
+              kind,
+              cacheKey,
+              schemaVersion,
+              payload,
+              Date.now(),
+            ),
+          catch: databaseError("save-cache"),
         }).pipe(Effect.asVoid),
-        inspectCaches: Effect.tryPromise({
-          try: () =>
-            database.getAllAsync<unknown>(`
+    ),
+    removeCache: Effect.fn("MobileDatabase.removeCache")((environmentId, kind, cacheKey) =>
+      Effect.tryPromise({
+        try: () =>
+          database.runAsync(
+            `DELETE FROM client_cache
+                     WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+            environmentId,
+            kind,
+            cacheKey,
+          ),
+        catch: databaseError("remove-cache"),
+      }).pipe(Effect.asVoid),
+    ),
+    clearEnvironmentCache: Effect.fn("MobileDatabase.clearEnvironmentCache")((environmentId) =>
+      Effect.tryPromise({
+        try: () =>
+          database.runAsync("DELETE FROM client_cache WHERE environment_id = ?", environmentId),
+        catch: databaseError("clear-environment-cache"),
+      }).pipe(Effect.asVoid),
+    ),
+    clearAllCaches: Effect.tryPromise({
+      try: () => database.runAsync("DELETE FROM client_cache"),
+      catch: databaseError("clear-all-caches"),
+    }).pipe(Effect.asVoid),
+    inspectCaches: Effect.tryPromise({
+      try: () =>
+        database.getAllAsync<unknown>(`
                 SELECT
                   environment_id AS environmentId,
                   kind,
@@ -347,50 +345,65 @@ export class MobileDatabase extends Context.Service<
                 GROUP BY environment_id, kind
                 ORDER BY environment_id, kind
               `),
-          catch: databaseError("inspect-caches"),
-        }).pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(ClientCacheSummaryRows)),
-          Effect.mapError(databaseError("inspect-caches")),
-          Effect.map(
-            (rows): ReadonlyArray<ClientCacheSummaryRow> =>
-              rows.map((row) => ({
-                environmentId: row.environmentId as EnvironmentId,
-                kind: row.kind,
-                recordCount: row.recordCount,
-                payloadBytes: row.payloadBytes,
-              })),
-          ),
-        ),
-        loadPreferencesJson: Effect.tryPromise({
-          try: () =>
-            database.getFirstAsync<StoredPreferencesJson>(
-              `SELECT payload, updated_at AS updatedAt
+      catch: databaseError("inspect-caches"),
+    }).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(ClientCacheSummaryRows)),
+      Effect.mapError(databaseError("inspect-caches")),
+      Effect.map(
+        (rows): ReadonlyArray<ClientCacheSummaryRow> =>
+          rows.map((row) => ({
+            environmentId: row.environmentId as EnvironmentId,
+            kind: row.kind,
+            recordCount: row.recordCount,
+            payloadBytes: row.payloadBytes,
+          })),
+      ),
+    ),
+    loadPreferencesJson: Effect.tryPromise({
+      try: () =>
+        database.getFirstAsync<StoredPreferencesJson>(
+          `SELECT payload, updated_at AS updatedAt
                  FROM client_preferences
                  WHERE singleton = 1`,
-            ),
-          catch: databaseError("load-preferences"),
-        }).pipe(Effect.map(Option.fromNullishOr)),
-        savePreferencesJson: Effect.fn("MobileDatabase.savePreferencesJson")((payload, updatedAt) =>
-          Effect.tryPromise({
-            try: () =>
-              database.runAsync(
-                `INSERT INTO client_preferences (singleton, payload, updated_at)
+        ),
+      catch: databaseError("load-preferences"),
+    }).pipe(Effect.map(Option.fromNullishOr)),
+    savePreferencesJson: Effect.fn("MobileDatabase.savePreferencesJson")((payload, updatedAt) =>
+      Effect.tryPromise({
+        try: () =>
+          database.runAsync(
+            `INSERT INTO client_preferences (singleton, payload, updated_at)
                    VALUES (1, ?, ?)
                    ON CONFLICT (singleton) DO UPDATE SET
                      payload = excluded.payload,
                      updated_at = excluded.updated_at`,
-                payload,
-                updatedAt,
-              ),
-            catch: databaseError("save-preferences"),
-          }).pipe(Effect.asVoid),
-        ),
-      });
-    }),
-  );
+            payload,
+            updatedAt,
+          ),
+        catch: databaseError("save-preferences"),
+      }).pipe(Effect.asVoid),
+    ),
+  });
+});
+
+function makeUnavailable(error: MobileDatabaseError): MobileDatabase["Service"] {
+  const fail = Effect.fail(error);
+  return MobileDatabase.of({
+    loadCache: () => fail,
+    saveCache: () => fail,
+    removeCache: () => fail,
+    clearEnvironmentCache: () => fail,
+    clearAllCaches: fail,
+    inspectCaches: fail,
+    loadPreferencesJson: fail,
+    savePreferencesJson: () => fail,
+  });
 }
 
-export const mobileDatabaseRuntime = ManagedRuntime.make(MobileDatabase.layer);
+export const make = Effect.result(makeAvailable).pipe(
+  Effect.map((result) =>
+    result._tag === "Success" ? result.success : makeUnavailable(result.failure),
+  ),
+);
 
-export const mobileDatabaseContextLayer: Layer.Layer<MobileDatabase, MobileDatabaseError> =
-  Layer.effectContext(mobileDatabaseRuntime.contextEffect);
+export const layer = Layer.effect(MobileDatabase, make);

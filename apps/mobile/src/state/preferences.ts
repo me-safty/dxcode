@@ -1,46 +1,14 @@
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
-import { loadPreferences, savePreferencesPatch, type Preferences } from "../lib/storage";
+import { MobilePreferencesStore, type Preferences } from "../persistence/mobile-preferences";
+import * as PersistenceRuntime from "../persistence/runtime";
 
-export class MobilePreferencesLoadError extends Schema.TaggedErrorClass<MobilePreferencesLoadError>()(
-  "MobilePreferencesLoadError",
-  { cause: Schema.Defect() },
-) {}
-
-export class MobilePreferencesSaveError extends Schema.TaggedErrorClass<MobilePreferencesSaveError>()(
-  "MobilePreferencesSaveError",
-  { cause: Schema.Defect() },
-) {}
-
-export class MobilePreferencesStore extends Context.Service<
+export {
+  MobilePreferencesLoadError,
+  MobilePreferencesSaveError,
   MobilePreferencesStore,
-  {
-    readonly load: Effect.Effect<Preferences, MobilePreferencesLoadError>;
-    readonly savePatch: (
-      patch: Partial<Preferences>,
-    ) => Effect.Effect<Preferences, MobilePreferencesSaveError>;
-  }
->()("@t3tools/mobile/state/preferences/MobilePreferencesStore") {
-  static readonly layer = Layer.succeed(
-    MobilePreferencesStore,
-    MobilePreferencesStore.of({
-      load: Effect.tryPromise({
-        try: loadPreferences,
-        catch: (cause) => new MobilePreferencesLoadError({ cause }),
-      }),
-      savePatch: Effect.fn("MobilePreferencesStore.savePatch")((patch) =>
-        Effect.tryPromise({
-          try: () => savePreferencesPatch(patch),
-          catch: (cause) => new MobilePreferencesSaveError({ cause }),
-        }),
-      ),
-    }),
-  );
-}
+} from "../persistence/mobile-preferences";
 
 interface OptimisticPreferences {
   readonly values: Partial<Preferences>;
@@ -149,7 +117,7 @@ export function createMobilePreferencesState(runtime: Atom.AtomRuntime<MobilePre
   return { preferencesAtom, updatePreferencesAtom } as const;
 }
 
-const mobilePreferencesRuntime = Atom.runtime(MobilePreferencesStore.layer);
+const mobilePreferencesRuntime = Atom.runtime(PersistenceRuntime.contextLayer);
 export const mobilePreferencesState = createMobilePreferencesState(mobilePreferencesRuntime);
 
 export const mobilePreferencesAtom = mobilePreferencesState.preferencesAtom;

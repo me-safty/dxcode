@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
 import { type ClientCacheKind, MobileDatabase } from "../persistence/mobile-database";
-import { makeEnvironmentCacheStore } from "./environment-cache-store";
+import { make } from "./environment-cache-store";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const REFS: VcsListRefsResult = {
@@ -60,7 +60,7 @@ describe("mobile SQLite environment cache store", () => {
   it.effect("round-trips schema-validated VCS refs", () =>
     Effect.gen(function* () {
       const memory = makeDatabase();
-      const store = makeEnvironmentCacheStore(memory.database);
+      const store = yield* make().pipe(Effect.provideService(MobileDatabase, memory.database));
 
       yield* store.saveVcsRefs(ENVIRONMENT_ID, "/repo", REFS);
 
@@ -71,7 +71,7 @@ describe("mobile SQLite environment cache store", () => {
   it.effect("deletes a corrupt cache record and treats it as a miss", () =>
     Effect.gen(function* () {
       const memory = makeDatabase();
-      const store = makeEnvironmentCacheStore(memory.database);
+      const store = yield* make().pipe(Effect.provideService(MobileDatabase, memory.database));
       const id = cacheId(ENVIRONMENT_ID, "vcs-refs", "/repo");
       memory.values.set(id, "{not-json");
 
@@ -83,7 +83,7 @@ describe("mobile SQLite environment cache store", () => {
   it.effect("clears one environment without touching another", () =>
     Effect.gen(function* () {
       const memory = makeDatabase();
-      const store = makeEnvironmentCacheStore(memory.database);
+      const store = yield* make().pipe(Effect.provideService(MobileDatabase, memory.database));
       const otherEnvironmentId = EnvironmentId.make("environment-2");
       yield* store.saveVcsRefs(ENVIRONMENT_ID, "/repo", REFS);
       yield* store.saveVcsRefs(otherEnvironmentId, "/repo", REFS);

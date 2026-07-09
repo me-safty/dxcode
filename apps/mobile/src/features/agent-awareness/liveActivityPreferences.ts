@@ -4,7 +4,7 @@ import { HttpClient } from "effect/unstable/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
-import { savePreferencesPatch } from "../../lib/storage";
+import { savePreferencesPatch } from "../../persistence/imperative";
 import { linkEnvironmentToCloud } from "../cloud/linkEnvironment";
 import { refreshAgentAwarenessRegistration } from "./remoteRegistration";
 

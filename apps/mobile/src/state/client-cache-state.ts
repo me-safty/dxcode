@@ -2,11 +2,8 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { Atom } from "effect/unstable/reactivity";
 
-import {
-  type ClientCacheKind,
-  MobileDatabase,
-  mobileDatabaseContextLayer,
-} from "../persistence/mobile-database";
+import { type ClientCacheKind, MobileDatabase } from "../persistence/mobile-database";
+import * as PersistenceRuntime from "../persistence/runtime";
 
 export interface EnvironmentClientCacheSummary {
   readonly environmentId: EnvironmentId;
@@ -61,7 +58,7 @@ function aggregateCacheSummary(
   };
 }
 
-const clientCacheRuntime = Atom.runtime(mobileDatabaseContextLayer);
+const clientCacheRuntime = Atom.runtime(PersistenceRuntime.contextLayer);
 
 export const clientCacheSummaryAtom = clientCacheRuntime
   .atom(

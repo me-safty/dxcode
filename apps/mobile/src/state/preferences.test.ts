@@ -18,7 +18,7 @@ vi.mock("../lib/runtime", () => ({
   runtime: { runPromise: vi.fn() },
 }));
 
-import type { Preferences } from "../lib/storage";
+import type { Preferences } from "../persistence/mobile-preferences";
 import {
   createMobilePreferencesState,
   MobilePreferencesLoadError,
@@ -34,9 +34,26 @@ function deferred<A>() {
   return { promise, resolve } as const;
 }
 
-function makePreferencesState(service: MobilePreferencesStore["Service"]) {
+function makePreferencesState(
+  service: Omit<MobilePreferencesStore["Service"], "update"> &
+    Partial<Pick<MobilePreferencesStore["Service"], "update">>,
+) {
+  const completeService = MobilePreferencesStore.of({
+    ...service,
+    update:
+      service.update ??
+      ((transform) =>
+        service.load.pipe(
+          Effect.flatMap((current) => service.savePatch(transform(current))),
+          Effect.mapError((cause) =>
+            cause._tag === "MobilePreferencesSaveError"
+              ? cause
+              : new MobilePreferencesSaveError({ cause }),
+          ),
+        )),
+  });
   return createMobilePreferencesState(
-    Atom.runtime(Layer.succeed(MobilePreferencesStore, MobilePreferencesStore.of(service))),
+    Atom.runtime(Layer.succeed(MobilePreferencesStore, completeService)),
   );
 }
 

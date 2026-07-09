@@ -1,8 +1,30 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import { vi } from "vite-plus/test";
 
-import { decodeLegacyCacheRecord } from "./mobile-database";
+const openDatabaseAsync = vi.hoisted(() => vi.fn());
+
+vi.mock("expo-sqlite", () => ({ openDatabaseAsync }));
+
+import { decodeLegacyCacheRecord, make } from "./mobile-database";
 
 describe("mobile database legacy cache migration", () => {
+  it.effect("keeps acquisition failures typed on database operations", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        openDatabaseAsync.mockRejectedValueOnce(new Error("SQLite unavailable"));
+
+        const database = yield* make;
+        const result = yield* Effect.result(database.loadPreferencesJson);
+
+        expect(result).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "MobileDatabaseError", operation: "open" },
+        });
+      }),
+    ),
+  );
+
   it("maps legacy thread records to their SQLite identity", () => {
     const payload = JSON.stringify({
       schemaVersion: 2,

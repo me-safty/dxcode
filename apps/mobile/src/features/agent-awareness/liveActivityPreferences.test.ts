@@ -7,12 +7,12 @@ import * as Layer from "effect/Layer";
 import { HttpClient } from "effect/unstable/http";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
-import { savePreferencesPatch } from "../../lib/storage";
+import { savePreferencesPatch } from "../../persistence/imperative";
 import { linkEnvironmentToCloud } from "../cloud/linkEnvironment";
 import { setLiveActivityUpdatesEnabled } from "./liveActivityPreferences";
 import { refreshAgentAwarenessRegistration } from "./remoteRegistration";
 
-vi.mock("../../lib/storage", () => ({
+vi.mock("../../persistence/imperative", () => ({
   savePreferencesPatch: vi.fn(() => Promise.resolve()),
 }));
 

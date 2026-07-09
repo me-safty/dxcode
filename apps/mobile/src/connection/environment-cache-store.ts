@@ -10,14 +10,11 @@ import {
   VcsListRefsResult,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import {
-  type ClientCacheKind,
-  MobileDatabase,
-  MobileDatabaseError,
-} from "../persistence/mobile-database";
+import * as MobileDatabase from "../persistence/mobile-database";
 
 const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
 const THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION = 2;
@@ -72,13 +69,13 @@ function persistenceError(operation: CacheOperation, cause: unknown) {
 }
 
 function mapDatabaseError(operation: CacheOperation) {
-  return (error: MobileDatabaseError) => persistenceError(operation, error);
+  return (error: MobileDatabase.MobileDatabaseError) => persistenceError(operation, error);
 }
 
 function loadDecodedCache<A, B>(input: {
-  readonly database: MobileDatabase["Service"];
+  readonly database: MobileDatabase.MobileDatabase["Service"];
   readonly environmentId: EnvironmentId;
-  readonly kind: ClientCacheKind;
+  readonly kind: MobileDatabase.ClientCacheKind;
   readonly cacheKey: string;
   readonly operation: CacheOperation;
   readonly decode: (raw: string) => Effect.Effect<A, unknown>;
@@ -113,9 +110,8 @@ function loadDecodedCache<A, B>(input: {
   );
 }
 
-export function makeEnvironmentCacheStore(
-  database: MobileDatabase["Service"],
-): EnvironmentCacheStore["Service"] {
+export const make = Effect.fn("MobileEnvironmentCacheStore.make")(function* () {
+  const database = yield* MobileDatabase.MobileDatabase;
   return EnvironmentCacheStore.of({
     loadShell: Effect.fn("MobileEnvironmentCache.loadShell")((environmentId) =>
       loadDecodedCache({
@@ -233,4 +229,6 @@ export function makeEnvironmentCacheStore(
         .pipe(Effect.mapError(mapDatabaseError("clear-environment"))),
     ),
   });
-}
+});
+
+export const layer = Layer.effect(EnvironmentCacheStore, make());

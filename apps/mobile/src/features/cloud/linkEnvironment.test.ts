@@ -36,7 +36,7 @@ vi.mock("react-native", () => ({
   },
 }));
 
-vi.mock("../../lib/storage", () => ({
+vi.mock("../../persistence/imperative", () => ({
   loadOrCreateAgentAwarenessDeviceId: vi.fn(() => Promise.resolve("device-1")),
   loadPreferences: vi.fn(() => Promise.resolve({})),
 }));
@@ -705,7 +705,7 @@ describe("mobile cloud link environment client", () => {
 
   it.effect("preserves disabled Live Activity preferences when linking an environment", () =>
     Effect.gen(function* () {
-      const storage = yield* Effect.promise(() => import("../../lib/storage"));
+      const storage = yield* Effect.promise(() => import("../../persistence/imperative"));
       vi.mocked(storage.loadPreferences).mockResolvedValueOnce({
         liveActivitiesEnabled: false,
       });

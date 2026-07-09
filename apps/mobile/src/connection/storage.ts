@@ -2,7 +2,6 @@ import {
   ConnectionPersistenceError,
   ConnectionRegistrationStore,
   ConnectionTargetStore,
-  EnvironmentCacheStore,
   registerConnectionInCatalog,
   removeConnectionFromCatalog,
   removeCatalogValue,
@@ -18,18 +17,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as SecureStore from "expo-secure-store";
-
-import { MobileDatabase } from "../persistence/mobile-database";
-import { makeCatalogStore, type SecureCatalogStorage } from "./catalog-store";
-import { makeEnvironmentCacheStore } from "./environment-cache-store";
-
-function catalogError(operation: string, cause: unknown) {
-  return new ConnectionTransientError({
-    reason: "remote-unavailable",
-    detail: `Could not ${operation} the local connection catalog: ${String(cause)}`,
-  });
-}
+import * as CatalogStore from "./catalog-store";
 
 function targetPersistenceError(
   operation: "list-targets" | "register-connection" | "remove-connection",
@@ -41,31 +29,9 @@ function targetPersistenceError(
   });
 }
 
-const secureCatalogStorage: SecureCatalogStorage = {
-  getItem: Effect.fn("MobileConnectionCatalogStorage.getItem")((key) =>
-    Effect.tryPromise({
-      try: () => SecureStore.getItemAsync(key),
-      catch: (cause) => catalogError("load", cause),
-    }),
-  ),
-  setItem: Effect.fn("MobileConnectionCatalogStorage.setItem")((key, value) =>
-    Effect.tryPromise({
-      try: () => SecureStore.setItemAsync(key, value),
-      catch: (cause) => catalogError("save", cause),
-    }),
-  ),
-  deleteItem: Effect.fn("MobileConnectionCatalogStorage.deleteItem")((key) =>
-    Effect.tryPromise({
-      try: () => SecureStore.deleteItemAsync(key),
-      catch: (cause) => catalogError("delete", cause),
-    }),
-  ),
-};
-
 export const connectionStorageLayer = Layer.effectContext(
   Effect.gen(function* () {
-    const database = yield* MobileDatabase;
-    const catalog = yield* makeCatalogStore(secureCatalogStorage);
+    const catalog = yield* CatalogStore.make();
 
     const targetStore = ConnectionTargetStore.of({
       list: catalog.read.pipe(
@@ -162,14 +128,11 @@ export const connectionStorageLayer = Layer.effectContext(
           ),
         })),
     });
-    const cacheStore = makeEnvironmentCacheStore(database);
-
     return Context.make(ConnectionTargetStore, targetStore).pipe(
       Context.add(ConnectionRegistrationStore, registrationStore),
       Context.add(ProfileStore.ConnectionProfileStore, profileStore),
       Context.add(CredentialStore.ConnectionCredentialStore, credentialStore),
       Context.add(TokenStore.RemoteDpopAccessTokenStore, remoteTokenStore),
-      Context.add(EnvironmentCacheStore, cacheStore),
     );
   }),
 );

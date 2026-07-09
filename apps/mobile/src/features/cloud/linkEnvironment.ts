@@ -30,7 +30,7 @@ import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime/rpc";
 
 import { authClientMetadata } from "../../lib/authClientMetadata";
 import type { SavedRemoteConnection } from "../../lib/connection";
-import { loadOrCreateAgentAwarenessDeviceId, loadPreferences } from "../../lib/storage";
+import { loadOrCreateAgentAwarenessDeviceId, loadPreferences } from "../../persistence/imperative";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
 const RELAY_STATUS_AND_CONNECT_SCOPES = [

@@ -25,11 +25,11 @@ import * as Network from "expo-network";
 import { AppState } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
-import { loadOrCreateAgentAwarenessDeviceId } from "../lib/storage";
+import { loadOrCreateAgentAwarenessDeviceId } from "../persistence/imperative";
 import { appAtomRegistry } from "../state/atom-registry";
 import { clearThreadOutboxEnvironment } from "../state/thread-outbox";
 import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
-import { mobileDatabaseContextLayer } from "../persistence/mobile-database";
+import * as PersistenceRuntime from "../persistence/runtime";
 import { connectionStorageLayer } from "./storage";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
@@ -170,7 +170,7 @@ const platformConnectionSourceLayer = Layer.succeed(
 );
 
 const providedConnectionStorageLayer = connectionStorageLayer.pipe(
-  Layer.provide(mobileDatabaseContextLayer),
+  Layer.provide(PersistenceRuntime.contextLayer),
 );
 
 const environmentOwnedDataCleanupLayer = Layer.succeed(
@@ -196,6 +196,7 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
 
 type ConnectionPlatformLayerSource =
   | typeof providedConnectionStorageLayer
+  | typeof PersistenceRuntime.contextLayer
   | typeof connectivityLayer
   | typeof wakeupsLayer
   | typeof capabilitiesLayer
@@ -208,6 +209,7 @@ export const connectionPlatformLayer: Layer.Layer<
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
   providedConnectionStorageLayer,
+  PersistenceRuntime.contextLayer,
   connectivityLayer,
   wakeupsLayer,
   capabilitiesLayer,
