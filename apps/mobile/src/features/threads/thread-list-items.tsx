@@ -441,10 +441,8 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const iconSubtleColor = useThemeColor("--color-icon-subtle");
   const screenColor = useThemeColor("--color-screen");
   const drawerColor = useThemeColor("--color-drawer");
-  const mutedColor = useThemeColor("--color-foreground-muted");
   const pressedBackgroundColor = useThemeColor("--color-subtle");
   const selectedBackgroundColor = useThemeColor("--color-user-bubble");
-  const selectedMutedColor = useThemeColor("--color-user-bubble-foreground-muted");
 
   const { thread, onSelectThread, onArchiveThread, onDeleteThread } = props;
   const status = resolveThreadStatus(thread);
@@ -457,7 +455,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   );
 
   const backgroundColor = compact ? screenColor : drawerColor;
-  const effectiveMuted = selected ? selectedMutedColor : mutedColor;
   const effectivePressedBackground = selected ? "rgba(255,255,255,0.16)" : pressedBackgroundColor;
   const effectiveStatus =
     selected && status
@@ -496,12 +493,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       <View className="mt-px flex-row items-center gap-1.5">
         {subtitleParts.length > 0 ? (
           <>
-            <SymbolView
-              name="arrow.triangle.branch"
-              size={10}
-              tintColor={compact ? iconSubtleColor : effectiveMuted}
-              type="monochrome"
-            />
             <Text
               className={cn(
                 "shrink",
