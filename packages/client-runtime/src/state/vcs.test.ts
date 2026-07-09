@@ -52,8 +52,10 @@ const LIVE_REFS: VcsListRefsResult = {
   ...CACHED_REFS,
   refs: [
     {
-      ...CACHED_REFS.refs[0],
       name: "release",
+      current: true,
+      isDefault: true,
+      worktreePath: "/repo",
     },
   ],
 };
