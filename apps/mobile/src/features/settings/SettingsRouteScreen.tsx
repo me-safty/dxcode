@@ -135,6 +135,9 @@ function ConfiguredSettingsRouteScreen() {
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
   const deviceRegistered = useDeviceRegistered();
+  const liveActivitiesPreferenceEnabled = AsyncResult.isSuccess(preferencesResult)
+    ? preferencesResult.value.liveActivitiesEnabled !== false
+    : true;
 
   const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
   const environmentCount = connections.length;
@@ -286,7 +289,7 @@ function ConfiguredSettingsRouteScreen() {
       runtime.runPromiseExit(
         setLiveActivityUpdatesEnabled({
           enabled: true,
-          previousEnabled: false,
+          previousEnabled: liveActivitiesPreferenceEnabled,
           clerkToken: tokenResult.value,
           connections,
         }),
@@ -323,7 +326,15 @@ function ConfiguredSettingsRouteScreen() {
         "This device could not be registered with T3 Connect, so Live Activities won't appear yet. They'll start once registration succeeds.",
       );
     }
-  }, [connections, environmentCount, getToken, isSignedIn, promptSignIn, savePreferences]);
+  }, [
+    connections,
+    environmentCount,
+    getToken,
+    isSignedIn,
+    liveActivitiesPreferenceEnabled,
+    promptSignIn,
+    savePreferences,
+  ]);
 
   const handleDeviceNotificationsChange = useCallback(
     (enabled: boolean) => {
@@ -367,7 +378,7 @@ function ConfiguredSettingsRouteScreen() {
             runtime.runPromiseExit(
               setLiveActivityUpdatesEnabled({
                 enabled: false,
-                previousEnabled: true,
+                previousEnabled: liveActivitiesPreferenceEnabled,
                 clerkToken: token,
                 connections,
               }),
@@ -393,7 +404,15 @@ function ConfiguredSettingsRouteScreen() {
 
       void linkEnvironments();
     },
-    [connections, getToken, isSignedIn, linkEnvironments, promptSignIn, savePreferences],
+    [
+      connections,
+      getToken,
+      isSignedIn,
+      linkEnvironments,
+      liveActivitiesPreferenceEnabled,
+      promptSignIn,
+      savePreferences,
+    ],
   );
 
   const openAccount = useCallback(() => {
