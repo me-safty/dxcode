@@ -51,6 +51,7 @@
       /* Inputs */
       --color-input: #ffffff;
       --color-input-border: rgba(0, 0, 0, 0.1);
+      --color-sidebar-search: rgba(118, 118, 128, 0.12);
       --color-placeholder: #a3a3a3;
 
       /* Icons */
@@ -144,6 +145,7 @@
       /* Inputs */
       --color-input: #141414;
       --color-input-border: rgba(255, 255, 255, 0.08);
+      --color-sidebar-search: rgba(118, 118, 128, 0.24);
       --color-placeholder: #8e8e93;
 
       /* Icons */

@@ -4,7 +4,6 @@ import {
   type TextInputProps as RNTextInputProps,
   type TextProps as RNTextProps,
 } from "react-native";
-import { useThemeColor } from "../lib/useThemeColor";
 
 import { cn } from "../lib/cn";
 
@@ -33,8 +32,6 @@ export function AppTextInput({
   ref,
   ...props
 }: AppTextInputProps) {
-  const placeholderColor = useThemeColor("--color-placeholder");
-
   return (
     <RNTextInput
       ref={ref}
@@ -42,7 +39,10 @@ export function AppTextInput({
         "min-h-13.5 rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground",
         className,
       )}
-      placeholderTextColor={placeholderTextColor ?? placeholderColor}
+      placeholderTextColor={placeholderTextColor}
+      placeholderTextColorClassName={
+        placeholderTextColor === undefined ? "accent-placeholder" : undefined
+      }
       {...props}
     />
   );

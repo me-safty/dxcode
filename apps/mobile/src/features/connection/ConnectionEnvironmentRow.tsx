@@ -98,7 +98,7 @@ export function ConnectionEnvironmentRow(props: {
                   <Text
                     accessibilityHint="Copies the trace ID"
                     accessibilityRole="button"
-                    className="underline"
+                    className="underline decoration-dotted"
                     onLongPress={(event) => {
                       event.stopPropagation();
                       copyTextWithHaptic(statusTraceId, { target: "connection-trace-id" });
@@ -106,7 +106,6 @@ export function ConnectionEnvironmentRow(props: {
                     onPress={(event) => {
                       event.stopPropagation();
                     }}
-                    style={{ textDecorationStyle: "dotted" }}
                   >
                     {statusTraceId}
                   </Text>
@@ -140,10 +139,7 @@ export function ConnectionEnvironmentRow(props: {
           ) : (
             <>
               <View className="gap-1.5">
-                <Text
-                  className="text-2xs font-t3-bold uppercase text-foreground-muted"
-                  style={{ letterSpacing: 0.8 }}
-                >
+                <Text className="text-2xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
                   Label
                 </Text>
                 <TextInput
@@ -158,10 +154,7 @@ export function ConnectionEnvironmentRow(props: {
               </View>
 
               <View className="gap-1.5">
-                <Text
-                  className="text-2xs font-t3-bold uppercase text-foreground-muted"
-                  style={{ letterSpacing: 0.8 }}
-                >
+                <Text className="text-2xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
                   URL
                 </Text>
                 <TextInput
@@ -185,10 +178,7 @@ export function ConnectionEnvironmentRow(props: {
                 onPress={handleSave}
               >
                 <SymbolView name="checkmark" size={13} tintColor={primaryFg} type="monochrome" />
-                <Text
-                  className="text-xs font-t3-bold uppercase text-primary-foreground"
-                  style={{ letterSpacing: 0.8 }}
-                >
+                <Text className="text-xs font-t3-bold tracking-[0.8px] uppercase text-primary-foreground">
                   Save
                 </Text>
               </Pressable>

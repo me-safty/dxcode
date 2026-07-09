@@ -158,7 +158,7 @@ export function ConnectionsNewRouteScreen({
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        style={{ flex: 1 }}
+        className="flex-1"
         contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
         contentContainerStyle={{
           paddingHorizontal: 20,
@@ -168,10 +168,7 @@ export function ConnectionsNewRouteScreen({
         <View collapsable={false} className="gap-5">
           {showScanner ? (
             cameraPermission?.granted ? (
-              <View
-                className="overflow-hidden rounded-[24px]"
-                style={{ borderCurve: "continuous" }}
-              >
+              <View className="overflow-hidden rounded-[24px] border-continuous">
                 <CameraView
                   barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
                   onBarcodeScanned={handleQrScan}
@@ -179,10 +176,7 @@ export function ConnectionsNewRouteScreen({
                 />
               </View>
             ) : (
-              <View
-                className="items-center gap-3 rounded-[24px] bg-card px-5 py-8"
-                style={{ borderCurve: "continuous" }}
-              >
+              <View className="items-center gap-3 rounded-[24px] border-continuous bg-card px-5 py-8">
                 <Text className="text-center text-sm leading-normal text-foreground-muted">
                   Camera permission is required to scan a QR code.
                 </Text>
@@ -200,10 +194,7 @@ export function ConnectionsNewRouteScreen({
           ) : (
             <View collapsable={false} className="gap-4 rounded-[24px] bg-card p-4">
               <View collapsable={false} className="gap-1.5">
-                <Text
-                  className="text-2xs font-t3-bold uppercase text-foreground-muted"
-                  style={{ letterSpacing: 0.8 }}
-                >
+                <Text className="text-2xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
                   Host
                 </Text>
                 <TextInput
@@ -219,10 +210,7 @@ export function ConnectionsNewRouteScreen({
               </View>
 
               <View collapsable={false} className="gap-1.5">
-                <Text
-                  className="text-2xs font-t3-bold uppercase text-foreground-muted"
-                  style={{ letterSpacing: 0.8 }}
-                >
+                <Text className="text-2xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
                   Pairing code
                 </Text>
                 <TextInput
