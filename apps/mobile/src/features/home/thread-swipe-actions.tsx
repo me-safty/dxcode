@@ -350,24 +350,56 @@ function SwipeActionButton(props: {
 
   return (
     <Animated.View
-      className="h-full w-[50px] items-center justify-center"
-      style={[{ zIndex: props.stretchesOnFullSwipe ? 2 : 1 }, actionStyle]}
+      style={[
+        {
+          alignItems: "center",
+          height: "100%",
+          justifyContent: "center",
+          width: ACTION_ITEM_WIDTH,
+          zIndex: props.stretchesOnFullSwipe ? 2 : 1,
+        },
+        actionStyle,
+      ]}
     >
       <Pressable
-        className="h-full w-full items-center justify-center"
         accessibilityLabel={props.accessibilityLabel}
         accessibilityRole="button"
         onPress={props.onPress}
-        style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
+        style={({ pressed }) => ({
+          alignItems: "center",
+          height: "100%",
+          justifyContent: "center",
+          opacity: pressed ? 0.72 : 1,
+          width: "100%",
+        })}
       >
-        <View className="h-9 w-9">
+        <View style={{ height: ACTION_CIRCLE_SIZE, width: ACTION_CIRCLE_SIZE }}>
           <Animated.View
-            className="absolute left-0 top-0 h-9 w-9 rounded-full"
-            style={[{ backgroundColor: props.backgroundColor }, circleStyle]}
+            style={[
+              {
+                backgroundColor: props.backgroundColor,
+                borderRadius: 999,
+                height: ACTION_CIRCLE_SIZE,
+                left: 0,
+                position: "absolute",
+                top: 0,
+              },
+              circleStyle,
+            ]}
           />
           <Animated.View
-            className="absolute left-0 top-0 h-9 w-9 items-center justify-center"
-            style={iconStyle}
+            style={[
+              {
+                alignItems: "center",
+                height: ACTION_CIRCLE_SIZE,
+                justifyContent: "center",
+                left: 0,
+                position: "absolute",
+                top: 0,
+                width: ACTION_CIRCLE_SIZE,
+              },
+              iconStyle,
+            ]}
           >
             <SymbolView
               name={props.icon}
@@ -377,7 +409,7 @@ function SwipeActionButton(props: {
             />
           </Animated.View>
         </View>
-        <Animated.View className="pt-0.5" style={labelStyle}>
+        <Animated.View style={[{ paddingTop: 2 }, labelStyle]}>
           <Text className="text-3xs font-t3-medium text-foreground-muted">{props.label}</Text>
         </Animated.View>
       </Pressable>
@@ -406,7 +438,14 @@ export function ThreadSwipeActions(props: {
   );
 
   return (
-    <View className="h-full w-[100px] flex-row" style={{ backgroundColor: props.backgroundColor }}>
+    <View
+      style={{
+        backgroundColor: props.backgroundColor,
+        flexDirection: "row",
+        height: "100%",
+        width: THREAD_SWIPE_ACTIONS_WIDTH,
+      }}
+    >
       <SwipeActionButton
         accessibilityLabel={props.primaryAction.accessibilityLabel}
         backgroundColor="#007aff"
