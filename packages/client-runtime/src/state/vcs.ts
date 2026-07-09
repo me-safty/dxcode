@@ -23,6 +23,7 @@ import { followStreamInEnvironment } from "./runtime.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 
 const OFFLINE_BRANCH_LIST_LIMIT = 100;
+const VCS_REFS_REVALIDATE_INTERVAL = "5 seconds";
 
 function canUseVcsRefsCache(input: VcsListRefsInput): boolean {
   return (
@@ -61,14 +62,11 @@ export const makeCachedVcsRefsChanges = Effect.fn("CachedVcsRefsState.makeChange
         ),
       )
     : Option.none<VcsListRefsResult>();
-  const state = yield* SubscriptionRef.make(cached);
-
   const refresh = Effect.fn("CachedVcsRefsState.refresh")(function* () {
     const refs = yield* request(WS_METHODS.vcsListRefs, input).pipe(
       Effect.provideService(EnvironmentSupervisor, supervisor),
     );
     if (useCache) {
-      yield* SubscriptionRef.set(state, Option.some(refs));
       yield* cache.saveVcsRefs(environmentId, input.cwd, refs).pipe(
         Effect.catch((error) =>
           Effect.logWarning("Could not persist cached Git refs.").pipe(
@@ -84,40 +82,12 @@ export const makeCachedVcsRefsChanges = Effect.fn("CachedVcsRefsState.makeChange
     return refs;
   });
 
-  const refreshOrReuseKnownRefs = Effect.fn("CachedVcsRefsState.refreshOrReuseKnownRefs")(
-    function* () {
-      return yield* refresh().pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("Could not refresh Git refs.").pipe(
-            Effect.annotateLogs({
-              environmentId,
-              cwd: input.cwd,
-              ...safeErrorLogAttributes(error),
-            }),
-          ),
-        ),
-        Effect.catch((error) =>
-          useCache
-            ? SubscriptionRef.get(state).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(error),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              )
-            : Effect.fail(error),
-        ),
-      );
-    },
-  );
-
   const cachedRefs = Stream.fromEffect(
     SubscriptionRef.get(supervisor.state).pipe(
       Effect.flatMap((connection) =>
         connection.phase === "connected"
           ? Effect.succeed(Option.none<VcsListRefsResult>())
-          : SubscriptionRef.get(state),
+          : Effect.succeed(cached),
       ),
     ),
   ).pipe(
@@ -132,11 +102,15 @@ export const makeCachedVcsRefsChanges = Effect.fn("CachedVcsRefsState.makeChange
     Stream.fromEffect(SubscriptionRef.get(supervisor.state)),
     SubscriptionRef.changes(supervisor.state),
   ).pipe(
-    Stream.filterMap((connection) =>
-      connection.phase === "connected" ? Result.succeed(connection.generation) : Result.failVoid,
-    ),
+    Stream.map((connection) => (connection.phase === "connected" ? connection.generation : null)),
     Stream.changes,
-    Stream.mapEffect(refreshOrReuseKnownRefs, { concurrency: 1 }),
+    Stream.switchMap((generation) =>
+      generation === null
+        ? Stream.empty
+        : Stream.tick(VCS_REFS_REVALIDATE_INTERVAL).pipe(
+            Stream.mapEffect(refresh, { concurrency: 1 }),
+          ),
+    ),
   );
 
   return Stream.concat(cachedRefs, refreshedRefs);
