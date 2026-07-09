@@ -83,32 +83,6 @@ export function SettingsClientStorageRouteScreen() {
           paddingTop: 16,
         }}
       >
-        <View className="gap-3">
-          <SettingsSection title="Client cache">
-            <View className="flex-row items-center gap-4 p-4">
-              <SymbolView
-                name="internaldrive"
-                size={22}
-                tintColor={iconColor}
-                type="monochrome"
-                weight="regular"
-              />
-              <Text className="min-w-0 flex-1 text-lg text-foreground">Stored offline data</Text>
-              {summary ? (
-                <Text className="shrink-0 text-sm tabular-nums text-foreground-muted">
-                  {formatBytes(summary.payloadBytes)}
-                </Text>
-              ) : (
-                <ActivityIndicator />
-              )}
-            </View>
-          </SettingsSection>
-          <Text className="px-2 text-sm leading-normal text-foreground-muted">
-            Cache data makes threads, models, and branches available while offline. Active
-            environments rebuild their cache as they are used.
-          </Text>
-        </View>
-
         <SettingsSection title="Environment caches">
           {AsyncResult.isFailure(summaryResult) ? (
             <View className="items-center gap-2 px-6 py-8">
@@ -177,7 +151,9 @@ export function SettingsClientStorageRouteScreen() {
                 type="monochrome"
                 weight="regular"
               />
-              <Text className="flex-1 text-lg text-danger-foreground">Clear All Caches</Text>
+              <Text className="flex-1 text-lg tabular-nums text-danger-foreground">
+                {summary ? `Clear ${formatBytes(summary.payloadBytes)}` : "Clear caches"}
+              </Text>
               {isClearing ? <ActivityIndicator color={dangerForegroundColor} /> : null}
             </Pressable>
           </SettingsSection>
