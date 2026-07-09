@@ -18,7 +18,7 @@ import { SettingsSection } from "./components/SettingsSection";
 export function SettingsClientStorageRouteScreen() {
   const insets = useSafeAreaInsets();
   const iconColor = useThemeColor("--color-icon");
-  const destructiveColor = useThemeColor("--color-danger");
+  const dangerForegroundColor = useThemeColor("--color-danger-foreground");
   const summaryResult = useAtomValue(clientCacheSummaryAtom);
   const clearResult = useAtomValue(clearClientCacheAtom);
   const clearCache = useAtomSet(clearClientCacheAtom);
@@ -93,15 +93,14 @@ export function SettingsClientStorageRouteScreen() {
                 type="monochrome"
                 weight="regular"
               />
-              <View className="min-w-0 flex-1">
-                <Text className="text-lg text-foreground">Stored offline data</Text>
-                <Text className="text-sm text-foreground-muted">
-                  {summary
-                    ? `${formatBytes(summary.payloadBytes)} across ${formatRecordCount(summary.recordCount)}`
-                    : "Calculating storage…"}
+              <Text className="min-w-0 flex-1 text-lg text-foreground">Stored offline data</Text>
+              {summary ? (
+                <Text className="shrink-0 text-sm tabular-nums text-foreground-muted">
+                  {formatBytes(summary.payloadBytes)}
                 </Text>
-              </View>
-              {!summary ? <ActivityIndicator /> : null}
+              ) : (
+                <ActivityIndicator />
+              )}
             </View>
           </SettingsSection>
           <Text className="px-2 text-sm leading-normal text-foreground-muted">
@@ -116,7 +115,7 @@ export function SettingsClientStorageRouteScreen() {
               <SymbolView
                 name="exclamationmark.triangle"
                 size={28}
-                tintColor={destructiveColor}
+                tintColor={dangerForegroundColor}
                 type="monochrome"
                 weight="regular"
               />
@@ -174,12 +173,12 @@ export function SettingsClientStorageRouteScreen() {
               <SymbolView
                 name="trash"
                 size={22}
-                tintColor={destructiveColor}
+                tintColor={dangerForegroundColor}
                 type="monochrome"
                 weight="regular"
               />
-              <Text className="flex-1 text-lg text-danger">Clear All Caches</Text>
-              {isClearing ? <ActivityIndicator color={destructiveColor} /> : null}
+              <Text className="flex-1 text-lg text-danger-foreground">Clear All Caches</Text>
+              {isClearing ? <ActivityIndicator color={dangerForegroundColor} /> : null}
             </Pressable>
           </SettingsSection>
           <Text className="px-2 text-sm leading-normal text-foreground-muted">
@@ -187,7 +186,7 @@ export function SettingsClientStorageRouteScreen() {
             appearance preferences.
           </Text>
           {AsyncResult.isFailure(summaryResult) || AsyncResult.isFailure(clearResult) ? (
-            <Text selectable className="px-2 text-sm text-danger">
+            <Text selectable className="px-2 text-sm text-danger-foreground">
               Client storage is temporarily unavailable. Try again after restarting the app.
             </Text>
           ) : null}
@@ -205,9 +204,7 @@ function CacheEnvironmentRow(props: {
   readonly onClear: () => void;
 }) {
   const iconColor = useThemeColor("--color-icon");
-  const destructiveColor = useThemeColor("--color-danger");
-  const kinds = formatKinds(props.environment);
-
+  const dangerForegroundColor = useThemeColor("--color-danger-foreground");
   return (
     <View
       className={
@@ -223,14 +220,12 @@ function CacheEnvironmentRow(props: {
         type="monochrome"
         weight="regular"
       />
-      <View className="min-w-0 flex-1">
-        <Text className="text-base text-foreground" numberOfLines={1}>
-          {props.environmentLabel}
-        </Text>
-        <Text className="text-sm text-foreground-muted" numberOfLines={2}>
-          {formatBytes(props.environment.payloadBytes)} · {kinds}
-        </Text>
-      </View>
+      <Text className="min-w-0 flex-1 text-base text-foreground" numberOfLines={1}>
+        {props.environmentLabel}
+      </Text>
+      <Text className="shrink-0 text-sm tabular-nums text-foreground-muted">
+        {formatBytes(props.environment.payloadBytes)}
+      </Text>
       <Pressable
         accessibilityLabel={`Clear cache for ${props.environmentLabel}`}
         accessibilityRole="button"
@@ -238,27 +233,15 @@ function CacheEnvironmentRow(props: {
         onPress={props.onClear}
         className="rounded-full px-3 py-2 disabled:opacity-40"
       >
-        <Text className="font-t3-medium text-danger" style={{ color: destructiveColor }}>
+        <Text
+          className="font-t3-medium text-danger-foreground"
+          style={{ color: dangerForegroundColor }}
+        >
           Clear
         </Text>
       </Pressable>
     </View>
   );
-}
-
-function formatKinds(summary: EnvironmentClientCacheSummary): string {
-  const labels: Array<string> = [];
-  const threads = summary.kinds.thread ?? 0;
-  const branches = summary.kinds["vcs-refs"] ?? 0;
-  if (threads > 0) labels.push(`${threads} thread${threads === 1 ? "" : "s"}`);
-  if ((summary.kinds.shell ?? 0) > 0) labels.push("projects");
-  if ((summary.kinds["server-config"] ?? 0) > 0) labels.push("models");
-  if (branches > 0) labels.push(`${branches} branch set${branches === 1 ? "" : "s"}`);
-  return labels.length > 0 ? labels.join(" · ") : formatRecordCount(summary.recordCount);
-}
-
-function formatRecordCount(count: number): string {
-  return `${count} record${count === 1 ? "" : "s"}`;
 }
 
 function formatBytes(bytes: number): string {
