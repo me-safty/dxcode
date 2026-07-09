@@ -53,7 +53,12 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
-import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
+import {
+  makeClaudeCapabilitiesCacheKey,
+  makeClaudeContinuationGroupKey,
+  resolveClaudeHomePath,
+} from "./ClaudeHome.ts";
+import { provisionMosaicSkill } from "../MosaicSkill.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -128,6 +133,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
       });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
+
+      // Deliver the Mosaic skill natively into <home>/.claude/skills, where the
+      // Claude Code SDK discovers it (settingSources includes "user"). Best
+      // effort: a skill-write failure must never keep the provider from coming
+      // up.
+      const claudeHome = yield* resolveClaudeHomePath(effectiveConfig);
+      yield* provisionMosaicSkill(path.join(claudeHome, ".claude", "skills")).pipe(
+        Effect.catch((cause) => Effect.logWarning("Failed to provision Mosaic skill.", { cause })),
+      );
+
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,

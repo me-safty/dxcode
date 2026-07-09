@@ -57,6 +57,7 @@ import {
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
+import { provisionMosaicSkill } from "../MosaicSkill.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -139,6 +140,16 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             }),
         ),
       );
+
+      // Deliver the Mosaic skill natively into the Codex home's skills dir,
+      // where Codex's `skills/list` discovers it (KNOWN_SHARED_DIRECTORIES
+      // symlinks it into the shadow home too). Best effort: a skill-write
+      // failure must never keep the provider from coming up.
+      const codexSkillsDir = (yield* Path.Path).join(homeLayout.sharedHomePath, "skills");
+      yield* provisionMosaicSkill(codexSkillsDir).pipe(
+        Effect.catch((cause) => Effect.logWarning("Failed to provision Mosaic skill.", { cause })),
+      );
+
       const effectiveConfig = {
         ...config,
         enabled,

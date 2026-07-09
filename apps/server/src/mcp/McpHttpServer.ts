@@ -22,6 +22,8 @@ import {
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
+import { MosaicToolkitHandlersLive } from "./toolkits/mosaic/handlers.ts";
+import { MosaicToolkit } from "./toolkits/mosaic/tools.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -203,9 +205,14 @@ const PreviewSnapshotRegistrationLive = Layer.effectDiscard(registerPreviewSnaps
   Layer.provide(PreviewSnapshotToolkitHandlersLive),
 );
 
+const MosaicToolkitRegistrationLive = McpServer.toolkit(MosaicToolkit).pipe(
+  Layer.provide(MosaicToolkitHandlersLive),
+);
+
 export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewStandardToolkitRegistrationLive,
   PreviewSnapshotRegistrationLive,
+  MosaicToolkitRegistrationLive,
 );
 
 const McpTransportLive = McpServer.layerHttp({
