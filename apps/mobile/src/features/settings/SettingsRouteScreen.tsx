@@ -282,7 +282,6 @@ function ConfiguredSettingsRouteScreen() {
       return;
     }
 
-    savePreferences({ liveActivitiesEnabled: true });
     const updateResult = await settleAsyncResult(() =>
       runtime.runPromiseExit(
         setLiveActivityUpdatesEnabled({
@@ -304,6 +303,7 @@ function ConfiguredSettingsRouteScreen() {
       return;
     }
 
+    savePreferences({ liveActivitiesEnabled: true });
     refreshManagedRelayEnvironments();
     setLiveActivityStatus("enabled");
     // The environment link can succeed while this device's own registration
@@ -347,7 +347,6 @@ function ConfiguredSettingsRouteScreen() {
     (enabled: boolean) => {
       if (!enabled) {
         setLiveActivityStatus("disabled");
-        savePreferences({ liveActivitiesEnabled: false });
         void (async () => {
           let token: string | null = null;
           if (isSignedIn) {
@@ -373,11 +372,13 @@ function ConfiguredSettingsRouteScreen() {
             ),
           );
           if (updateResult._tag === "Failure") {
+            setLiveActivityStatus("enabled");
             reportAtomCommandResult(updateResult, {
               label: "live activity disable",
             });
             return;
           }
+          savePreferences({ liveActivitiesEnabled: false });
           refreshManagedRelayEnvironments();
         })();
         return;

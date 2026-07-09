@@ -1,25 +1,11 @@
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
-import * as MobilePreferences from "../../persistence/mobile-preferences";
 import * as MobileStorage from "../../persistence/mobile-storage";
-import { linkEnvironmentToCloud } from "../cloud/linkEnvironment";
-import { refreshAgentAwarenessRegistration } from "./remoteRegistration";
-
-export class LiveActivityPreferenceSaveError extends Schema.TaggedErrorClass<LiveActivityPreferenceSaveError>()(
-  "LiveActivityPreferenceSaveError",
-  {
-    enabled: Schema.Boolean,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Failed to save the Live Activity updates setting (enabled: ${this.enabled}).`;
-  }
-}
+import { linkEnvironmentToCloudWithPreference } from "../cloud/linkEnvironment";
+import { updateAgentAwarenessRegistrationPreferences } from "./remoteRegistration";
 
 export function setLiveActivityUpdatesEnabled(input: {
   readonly enabled: boolean;
@@ -28,22 +14,12 @@ export function setLiveActivityUpdatesEnabled(input: {
 }): Effect.Effect<
   void,
   unknown,
-  | HttpClient.HttpClient
-  | ManagedRelay.ManagedRelayClient
-  | MobilePreferences.MobilePreferencesStore
-  | MobileStorage.MobileStorage
+  HttpClient.HttpClient | ManagedRelay.ManagedRelayClient | MobileStorage.MobileStorage
 > {
   return Effect.gen(function* () {
-    const preferences = yield* MobilePreferences.MobilePreferencesStore;
-    yield* preferences
-      .savePatch({ liveActivitiesEnabled: input.enabled })
-      .pipe(
-        Effect.mapError(
-          (cause) => new LiveActivityPreferenceSaveError({ enabled: input.enabled, cause }),
-        ),
-      );
-
-    yield* refreshAgentAwarenessRegistration();
+    yield* updateAgentAwarenessRegistrationPreferences({
+      liveActivitiesEnabled: input.enabled,
+    });
 
     const clerkToken = input.clerkToken;
     if (!clerkToken) {
@@ -52,7 +28,12 @@ export function setLiveActivityUpdatesEnabled(input: {
 
     yield* Effect.forEach(
       input.connections.filter((connection) => connection.bearerToken !== null),
-      (connection) => linkEnvironmentToCloud({ clerkToken, connection }),
+      (connection) =>
+        linkEnvironmentToCloudWithPreference({
+          clerkToken,
+          connection,
+          liveActivitiesEnabled: input.enabled,
+        }),
       { concurrency: "unbounded" },
     );
   });

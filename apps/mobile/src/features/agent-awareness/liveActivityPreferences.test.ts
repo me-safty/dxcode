@@ -7,11 +7,10 @@ import * as Layer from "effect/Layer";
 import { HttpClient } from "effect/unstable/http";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
-import { MobilePreferencesStore } from "../../persistence/mobile-preferences";
 import { MobileStorage } from "../../persistence/mobile-storage";
-import { linkEnvironmentToCloud } from "../cloud/linkEnvironment";
+import { linkEnvironmentToCloudWithPreference } from "../cloud/linkEnvironment";
 import { setLiveActivityUpdatesEnabled } from "./liveActivityPreferences";
-import { refreshAgentAwarenessRegistration } from "./remoteRegistration";
+import { updateAgentAwarenessRegistrationPreferences } from "./remoteRegistration";
 
 vi.mock("expo-secure-store", () => ({
   deleteItemAsync: vi.fn(),
@@ -23,14 +22,12 @@ vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
 }));
 
-const savePreferencesPatch = vi.fn((patch: Record<string, unknown>) => Effect.succeed(patch));
-
 vi.mock("../cloud/linkEnvironment", () => ({
-  linkEnvironmentToCloud: vi.fn(() => Effect.void),
+  linkEnvironmentToCloudWithPreference: vi.fn(() => Effect.void),
 }));
 
 vi.mock("./remoteRegistration", () => ({
-  refreshAgentAwarenessRegistration: vi.fn(() => Effect.void),
+  updateAgentAwarenessRegistrationPreferences: vi.fn(() => Effect.void),
 }));
 
 const connection: SavedRemoteConnection = {
@@ -48,14 +45,6 @@ const testLayer = Layer.mergeAll(
   Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make(() => Effect.die("unexpected HTTP request")),
-  ),
-  Layer.succeed(
-    MobilePreferencesStore,
-    MobilePreferencesStore.of({
-      load: Effect.succeed({}),
-      savePatch: savePreferencesPatch,
-      update: () => Effect.succeed({}),
-    }),
   ),
   Layer.succeed(
     MobileStorage,
@@ -85,11 +74,13 @@ describe("liveActivityPreferences", () => {
         connections: [connection],
       });
 
-      expect(savePreferencesPatch).toHaveBeenCalledWith({ liveActivitiesEnabled: false });
-      expect(refreshAgentAwarenessRegistration).toHaveBeenCalledTimes(1);
-      expect(linkEnvironmentToCloud).toHaveBeenCalledWith({
+      expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
+        liveActivitiesEnabled: false,
+      });
+      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
         clerkToken: "clerk-token",
         connection,
+        liveActivitiesEnabled: false,
       });
     }).pipe(Effect.provide(testLayer)),
   );
@@ -102,11 +93,13 @@ describe("liveActivityPreferences", () => {
         connections: [connection],
       });
 
-      expect(savePreferencesPatch).toHaveBeenCalledWith({ liveActivitiesEnabled: true });
-      expect(refreshAgentAwarenessRegistration).toHaveBeenCalledTimes(1);
-      expect(linkEnvironmentToCloud).toHaveBeenCalledWith({
+      expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
+        liveActivitiesEnabled: true,
+      });
+      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
         clerkToken: "clerk-token",
         connection,
+        liveActivitiesEnabled: true,
       });
     }).pipe(Effect.provide(testLayer)),
   );
@@ -119,9 +112,10 @@ describe("liveActivityPreferences", () => {
         connections: [connection],
       });
 
-      expect(savePreferencesPatch).toHaveBeenCalledWith({ liveActivitiesEnabled: false });
-      expect(refreshAgentAwarenessRegistration).toHaveBeenCalledTimes(1);
-      expect(linkEnvironmentToCloud).not.toHaveBeenCalled();
+      expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
+        liveActivitiesEnabled: false,
+      });
+      expect(linkEnvironmentToCloudWithPreference).not.toHaveBeenCalled();
     }).pipe(Effect.provide(testLayer)),
   );
 
@@ -138,10 +132,11 @@ describe("liveActivityPreferences", () => {
         connections: [connection, managedConnection],
       });
 
-      expect(linkEnvironmentToCloud).toHaveBeenCalledTimes(1);
-      expect(linkEnvironmentToCloud).toHaveBeenCalledWith({
+      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledTimes(1);
+      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
         clerkToken: "clerk-token",
         connection,
+        liveActivitiesEnabled: true,
       });
     }).pipe(Effect.provide(testLayer));
   });

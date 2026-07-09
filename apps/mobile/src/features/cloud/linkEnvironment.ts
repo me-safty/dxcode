@@ -257,17 +257,19 @@ function ensureConnectEndpointMatchesEnvironment(input: {
   return Effect.void;
 }
 
-export function linkEnvironmentToCloud(input: {
+interface LinkEnvironmentToCloudInput {
   readonly connection: SavedRemoteConnection;
   readonly clerkToken: string;
-}): Effect.Effect<
-  void,
-  CloudEnvironmentLinkError,
+}
+
+type LinkEnvironmentToCloudRequirements =
   | HttpClient.HttpClient
   | ManagedRelay.ManagedRelayClient
-  | MobilePreferences.MobilePreferencesStore
-  | MobileStorage.MobileStorage
-> {
+  | MobileStorage.MobileStorage;
+
+export function linkEnvironmentToCloudWithPreference(
+  input: LinkEnvironmentToCloudInput & { readonly liveActivitiesEnabled: boolean },
+): Effect.Effect<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
   return Effect.gen(function* () {
     if (!input.connection.bearerToken) {
       return yield* new CloudEnvironmentLinkError({
@@ -278,14 +280,10 @@ export function linkEnvironmentToCloud(input: {
     const relayUrl = yield* requireRelayUrl();
     const relayClient = yield* ManagedRelay.ManagedRelayClient;
     const storage = yield* MobileStorage.MobileStorage;
-    const preferencesStore = yield* MobilePreferences.MobilePreferencesStore;
     const deviceId = yield* storage.loadOrCreateAgentAwarenessDeviceId.pipe(
       Effect.mapError(cloudEnvironmentLinkError("Could not load the mobile device id.")),
     );
-    const preferences = yield* preferencesStore.load.pipe(
-      Effect.mapError(cloudEnvironmentLinkError("Could not load mobile notification preferences.")),
-    );
-    const liveActivitiesEnabled = preferences.liveActivitiesEnabled !== false;
+    const liveActivitiesEnabled = input.liveActivitiesEnabled;
     const challenge = yield* relayClient
       .createEnvironmentLinkChallenge({
         clerkToken: input.clerkToken,
@@ -352,6 +350,25 @@ export function linkEnvironmentToCloud(input: {
         Effect.mapError(cloudEnvironmentLinkError("Could not configure environment relay access.")),
       );
   });
+}
+
+export function linkEnvironmentToCloud(
+  input: LinkEnvironmentToCloudInput,
+): Effect.Effect<
+  void,
+  CloudEnvironmentLinkError,
+  LinkEnvironmentToCloudRequirements | MobilePreferences.MobilePreferencesStore
+> {
+  return MobilePreferences.MobilePreferencesStore.pipe(
+    Effect.flatMap((preferencesStore) => preferencesStore.load),
+    Effect.mapError(cloudEnvironmentLinkError("Could not load mobile notification preferences.")),
+    Effect.flatMap((preferences) =>
+      linkEnvironmentToCloudWithPreference({
+        ...input,
+        liveActivitiesEnabled: preferences.liveActivitiesEnabled !== false,
+      }),
+    ),
+  );
 }
 
 export function listCloudEnvironments(input: {
