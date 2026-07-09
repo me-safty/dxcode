@@ -2,11 +2,29 @@ import { type ApprovalRequestId } from "@t3tools/contracts";
 import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
+  buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
 import { CheckIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+
+type PendingUserInputResolvedAnswers = Record<string, string | string[]>;
+
+export function buildSingleSelectPendingUserInputAnswers(input: {
+  prompt: PendingUserInput;
+  answers: Record<string, PendingUserInputDraftAnswer>;
+  questionId: string;
+  optionLabel: string;
+}): PendingUserInputResolvedAnswers | null {
+  return buildPendingUserInputAnswers(input.prompt.questions, {
+    ...input.answers,
+    [input.questionId]: {
+      customAnswer: "",
+      selectedOptionLabels: [input.optionLabel],
+    },
+  });
+}
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
@@ -14,7 +32,7 @@ interface PendingUserInputPanelProps {
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
-  onAdvance: () => void;
+  onAdvance: (answersOverride?: PendingUserInputResolvedAnswers) => void;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -55,7 +73,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
-  onAdvance: () => void;
+  onAdvance: (answersOverride?: PendingUserInputResolvedAnswers) => void;
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
@@ -105,6 +123,14 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       onToggleOption(questionId, optionLabel);
       return;
     }
+    const resolvedAnswers = progress.isLastQuestion
+      ? buildSingleSelectPendingUserInputAnswers({
+          prompt,
+          answers,
+          questionId,
+          optionLabel,
+        })
+      : null;
     setOptimisticSingleSelect({ questionId, optionLabel });
     onToggleOption(questionId, optionLabel);
     if (autoAdvanceTimerRef.current !== null) {
@@ -112,7 +138,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     }
     autoAdvanceTimerRef.current = window.setTimeout(() => {
       autoAdvanceTimerRef.current = null;
-      onAdvanceRef.current();
+      onAdvanceRef.current(resolvedAnswers ?? undefined);
     }, 200);
   });
 
