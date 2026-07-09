@@ -34,9 +34,18 @@ function enumOptionMaps(entries: ReadonlyArray<EffectAcpSchema.EnumOption>): {
   const allowedValues = new Set<string>();
   const seenLabels = new Set<string>();
   const options = entries.flatMap((entry) => {
-    const baseLabel = trimmedString(entry.title) ?? trimmedString(entry.const);
     const value = trimmedString(entry.const);
-    if (!baseLabel || !value) {
+    const title = trimmedString(entry.title);
+    if (!value) {
+      return [];
+    }
+    const constLooksLikeDisplayLabel =
+      title !== undefined &&
+      title !== value &&
+      !/^[a-z0-9_.:-]+$/u.test(value) &&
+      (/[.!?]$/u.test(title) || title.length > value.length + 12);
+    const baseLabel = constLooksLikeDisplayLabel ? value : (title ?? value);
+    if (!baseLabel) {
       return [];
     }
     allowedValues.add(value);
@@ -47,7 +56,7 @@ function enumOptionMaps(entries: ReadonlyArray<EffectAcpSchema.EnumOption>): {
     return [
       {
         label,
-        description: optionDescription(label, value),
+        description: optionDescription(label, constLooksLikeDisplayLabel ? title : value),
       },
     ];
   });

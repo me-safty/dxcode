@@ -6,6 +6,7 @@ import {
   makeDevinAskQuestionPrompt,
   methodLooksLikeDevinAskQuestion,
   methodLooksLikeDevinCreatePlan,
+  methodLooksLikeDevinElicitation,
   methodLooksLikeDevinUpdateTodos,
   parseDevinAskQuestionPayload,
 } from "./DevinAcpExtension.ts";
@@ -22,6 +23,12 @@ describe("DevinAcpExtension", () => {
     expect(methodLooksLikeDevinUpdateTodos("devin/update_todos")).toBe(true);
     expect(methodLooksLikeDevinUpdateTodos("_devin/update_plan")).toBe(true);
     expect(methodLooksLikeDevinCreatePlan("devin/ask_question")).toBe(false);
+  });
+
+  it("recognizes Devin private elicitation extension methods", () => {
+    expect(methodLooksLikeDevinElicitation("_session/elicitation")).toBe(true);
+    expect(methodLooksLikeDevinElicitation("_devin/session/elicitation")).toBe(true);
+    expect(methodLooksLikeDevinElicitation("session/elicitation")).toBe(false);
   });
 
   it("parses question-array payloads and maps labels back to option ids", () => {

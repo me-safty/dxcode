@@ -334,6 +334,85 @@ it.layer(devinAdapterTestLayer)("DevinAdapterLive", (it) => {
     }),
   );
 
+  it.effect("handles Devin private elicitation requests", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("devin-private-elicitation");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockDevinWrapper({
+          T3_ACP_EMIT_DEVIN_PRIVATE_ELICITATION: "1",
+        }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const requested =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>>();
+      const resolved =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.resolved" }>>();
+
+      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (String(event.threadId) !== String(threadId)) {
+          return Effect.void;
+        }
+        if (event.type === "user-input.requested") {
+          return Deferred.succeed(requested, event).pipe(Effect.ignore);
+        }
+        if (event.type === "user-input.resolved") {
+          return Deferred.succeed(resolved, event).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("devin"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      const sendTurnFiber = yield* adapter
+        .sendTurn({ threadId, input: "ask one Devin question", attachments: [] })
+        .pipe(Effect.forkChild);
+
+      const requestedEvent = yield* Deferred.await(requested);
+      assert.equal(requestedEvent.raw?.method, "_session/elicitation");
+      assert.deepEqual(
+        requestedEvent.payload.questions.map((question) => ({
+          id: question.id,
+          question: question.question,
+          options: question.options.map((option) => option.label),
+          required: question.required,
+          multiSelect: question.multiSelect,
+        })),
+        [
+          {
+            id: "q0",
+            question: "What would you like Devin to do?",
+            options: ["Build a new feature", "Research or plan only"],
+            required: true,
+            multiSelect: false,
+          },
+        ],
+      );
+
+      yield* adapter.respondToUserInput(
+        threadId,
+        ApprovalRequestId.make(String(requestedEvent.requestId)),
+        {
+          q0: "Research or plan only",
+        },
+      );
+
+      const resolvedEvent = yield* Deferred.await(resolved);
+      assert.deepEqual(resolvedEvent.payload.answers, {
+        q0: "Research or plan only",
+      });
+      assert.equal(String(resolvedEvent.turnId), String(requestedEvent.turnId));
+      yield* Fiber.join(sendTurnFiber);
+
+      yield* Fiber.interrupt(eventsFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("handles Devin ask-question extension requests", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("devin-ask-question-extension");

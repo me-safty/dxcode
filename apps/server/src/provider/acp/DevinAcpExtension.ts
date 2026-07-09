@@ -156,6 +156,14 @@ export function methodLooksLikeDevinUpdateTodos(method: string): boolean {
   );
 }
 
+export function methodLooksLikeDevinElicitation(method: string): boolean {
+  const normalized = method
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, "_");
+  return normalized === "_session/elicitation" || normalized === "_devin/session/elicitation";
+}
+
 export function parseDevinAskQuestionPayload(payload: unknown): ReadonlyArray<DevinAskQuestion> {
   const params = unwrapParams(payload);
   if (!isRecord(params)) {

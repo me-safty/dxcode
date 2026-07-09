@@ -6,10 +6,11 @@ import {
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import * as EffectAcpSchema from "effect-acp/schema";
 
 import { mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import {
@@ -32,6 +33,7 @@ import {
   makeDevinAskQuestionPrompt,
   methodLooksLikeDevinAskQuestion,
   methodLooksLikeDevinCreatePlan,
+  methodLooksLikeDevinElicitation,
   methodLooksLikeDevinUpdateTodos,
   type DevinAskQuestionResponse,
 } from "../acp/DevinAcpExtension.ts";
@@ -41,6 +43,9 @@ import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("devin");
 const DEVIN_RESUME_VERSION = 1 as const;
+const decodeDevinElicitationRequest = Schema.decodeUnknownEffect(
+  EffectAcpSchema.ElicitationRequest,
+);
 type DevinUserInputResponse = EffectAcpSchema.ElicitationResponse | DevinAskQuestionResponse;
 
 export interface DevinAdapterLiveOptions extends AcpAdapterLiveOptions {
@@ -92,7 +97,11 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
             // URL-mode elicitations can be completed out-of-band by the agent
             // (session/elicitation/complete), so track their request ids.
             const urlElicitationRequestIds = new Map<string, ApprovalRequestId>();
-            yield* input.acp.handleElicitation((params) => {
+            const handleDevinElicitation = (
+              method: string,
+              source: "acp.jsonrpc" | "acp.devin.extension",
+              params: EffectAcpSchema.ElicitationRequest,
+            ) => {
               const elicitationId = params.mode === "url" ? params.elicitationId : undefined;
               return input.mapAcpCallbackFailure(
                 handleAcpUserInputRequest<
@@ -103,8 +112,8 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                 >({
                   provider: PROVIDER,
                   threadId: input.threadId,
-                  method: "session/elicitation",
-                  source: "acp.jsonrpc",
+                  method,
+                  source,
                   request: params,
                   prompt: {
                     ...makeDevinElicitationPrompt(params),
@@ -140,7 +149,10 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                   ),
                 ),
               );
-            });
+            };
+            yield* input.acp.handleElicitation((params) =>
+              handleDevinElicitation("session/elicitation", "acp.jsonrpc", params),
+            );
             yield* input.acp.handleElicitationComplete((notification) =>
               Effect.suspend(() => {
                 const requestId = urlElicitationRequestIds.get(notification.elicitationId);
@@ -157,6 +169,19 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
               }),
             );
             yield* input.acp.handleUnknownExtRequest((method, params) => {
+              if (methodLooksLikeDevinElicitation(method)) {
+                return decodeDevinElicitationRequest(params).pipe(
+                  Effect.mapError((error) =>
+                    EffectAcpErrors.AcpRequestError.invalidParams(
+                      "Invalid Devin elicitation payload",
+                      { params, error },
+                    ),
+                  ),
+                  Effect.flatMap((request) =>
+                    handleDevinElicitation(method, "acp.devin.extension", request),
+                  ),
+                );
+              }
               if (methodLooksLikeDevinCreatePlan(method)) {
                 return input.mapAcpCallbackFailure(
                   Effect.gen(function* () {

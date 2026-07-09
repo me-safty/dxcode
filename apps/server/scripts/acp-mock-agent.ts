@@ -22,6 +22,7 @@ const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION ===
 const emitDevinAskQuestion = process.env.T3_ACP_EMIT_DEVIN_ASK_QUESTION === "1";
 const emitDevinCreatePlan = process.env.T3_ACP_EMIT_DEVIN_CREATE_PLAN === "1";
 const emitDevinUpdateTodos = process.env.T3_ACP_EMIT_DEVIN_UPDATE_TODOS === "1";
+const emitDevinPrivateElicitation = process.env.T3_ACP_EMIT_DEVIN_PRIVATE_ELICITATION === "1";
 const emitElicitation = process.env.T3_ACP_EMIT_ELICITATION === "1";
 const emitUrlElicitationComplete = process.env.T3_ACP_EMIT_URL_ELICITATION_COMPLETE === "1";
 const emitXAiPromptCompleteThenHang = process.env.T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG === "1";
@@ -900,6 +901,56 @@ const program = Effect.gen(function* () {
             { content: "Verify behavior", status: "pending" },
           ],
         });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitDevinPrivateElicitation) {
+        const result = yield* agent.client.extRequest("_session/elicitation", {
+          mode: "form",
+          sessionId: requestedSessionId,
+          message: "What would you like Devin to do?",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              q0: {
+                type: "string",
+                title: "Task",
+                description: "What would you like Devin to do?",
+                oneOf: [
+                  {
+                    const: "Build a new feature",
+                    title: "Add new functionality to the project.",
+                  },
+                  {
+                    const: "Research or plan only",
+                    title: "Explore options without changing files.",
+                  },
+                ],
+              },
+            },
+            required: ["q0"],
+          },
+          _meta: {
+            "cognition.ai/allowOther": true,
+          },
+        });
+        if (
+          typeof result !== "object" ||
+          result === null ||
+          !("action" in result) ||
+          typeof result.action !== "object" ||
+          result.action === null ||
+          !("action" in result.action) ||
+          result.action.action !== "accept" ||
+          !("content" in result.action) ||
+          typeof result.action.content !== "object" ||
+          result.action.content === null ||
+          !("q0" in result.action.content) ||
+          result.action.content.q0 !== "Research or plan only"
+        ) {
+          throw new Error("Unexpected private Devin elicitation response.");
+        }
 
         return { stopReason: "end_turn" };
       }

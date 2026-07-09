@@ -54,6 +54,55 @@ describe("makeDevinElicitationPrompt", () => {
     });
   });
 
+  it("uses const values as labels when Devin stores option descriptions in titles", () => {
+    const prompt = makeDevinElicitationPrompt({
+      mode: "form",
+      sessionId: "session-1",
+      message: "What would you like Devin to do?",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          q0: {
+            type: "string",
+            title: "Task",
+            description: "What would you like Devin to do?",
+            oneOf: [
+              {
+                const: "Build a new feature",
+                title: "Add new functionality to the project.",
+              },
+              {
+                const: "Research or plan only",
+                title: "Explore options without changing files.",
+              },
+            ],
+          },
+        },
+        required: ["q0"],
+      },
+      _meta: {
+        "cognition.ai/allowOther": true,
+      },
+    });
+
+    expect(prompt.questions[0]?.options).toEqual([
+      {
+        label: "Build a new feature",
+        description: "Add new functionality to the project.",
+      },
+      {
+        label: "Research or plan only",
+        description: "Explore options without changing files.",
+      },
+    ]);
+    expect(prompt.makeResponse({ q0: "Research or plan only" })).toEqual({
+      action: {
+        action: "accept",
+        content: { q0: "Research or plan only" },
+      },
+    });
+  });
+
   it("treats empty numeric answers as missing instead of zero", () => {
     const prompt = makeDevinElicitationPrompt({
       mode: "form",
