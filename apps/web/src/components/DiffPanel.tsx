@@ -808,7 +808,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                   sectionId={reviewSectionId}
                   sectionTitle={reviewSectionTitle}
                   composerDraftTarget={composerDraftTarget}
-                  renderHeaderMetadata={(fileDiff) => (
+                  renderHeaderFilenameSuffix={(fileDiff) => (
                     <DiffFilePathCopyButton filePath={resolveFileDiffPath(fileDiff)} />
                   )}
                   renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
