@@ -40,7 +40,7 @@ function canUseVcsRefsCache(input: VcsListRefsInput): boolean {
  * partial result as a complete offline list would make branch selection
  * misleading.
  */
-export const makeCachedVcsRefsState = Effect.fn("CachedVcsRefsState.make")(function* (
+export const makeCachedVcsRefsChanges = Effect.fn("CachedVcsRefsState.makeChanges")(function* (
   input: VcsListRefsInput,
 ) {
   const supervisor = yield* EnvironmentSupervisor;
@@ -64,35 +64,30 @@ export const makeCachedVcsRefsState = Effect.fn("CachedVcsRefsState.make")(funct
   const state = yield* SubscriptionRef.make(cached);
 
   const refresh = Effect.fn("CachedVcsRefsState.refresh")(function* () {
-    const refs = yield* request(WS_METHODS.vcsListRefs, input);
-    yield* SubscriptionRef.set(state, Option.some(refs));
-    if (!useCache) {
-      return;
-    }
-    yield* cache.saveVcsRefs(environmentId, input.cwd, refs).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("Could not persist cached Git refs.").pipe(
-          Effect.annotateLogs({
-            environmentId,
-            cwd: input.cwd,
-            ...safeErrorLogAttributes(error),
-          }),
-        ),
-      ),
+    const refs = yield* request(WS_METHODS.vcsListRefs, input).pipe(
+      Effect.provideService(EnvironmentSupervisor, supervisor),
     );
+    yield* SubscriptionRef.set(state, Option.some(refs));
+    if (useCache) {
+      yield* cache.saveVcsRefs(environmentId, input.cwd, refs).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not persist cached Git refs.").pipe(
+            Effect.annotateLogs({
+              environmentId,
+              cwd: input.cwd,
+              ...safeErrorLogAttributes(error),
+            }),
+          ),
+        ),
+      );
+    }
+    return refs;
   });
 
-  yield* Stream.concat(
-    Stream.fromEffect(SubscriptionRef.get(supervisor.state)),
-    SubscriptionRef.changes(supervisor.state),
-  ).pipe(
-    Stream.filterMap((connection) =>
-      connection.phase === "connected" ? Result.succeed(connection.generation) : Result.failVoid,
-    ),
-    Stream.changes,
-    Stream.runForEach(() =>
-      refresh().pipe(
-        Effect.catch((error) =>
+  const refreshOrReuseKnownRefs = Effect.fn("CachedVcsRefsState.refreshOrReuseKnownRefs")(
+    function* () {
+      return yield* refresh().pipe(
+        Effect.tapError((error) =>
           Effect.logWarning("Could not refresh Git refs.").pipe(
             Effect.annotateLogs({
               environmentId,
@@ -101,32 +96,44 @@ export const makeCachedVcsRefsState = Effect.fn("CachedVcsRefsState.make")(funct
             }),
           ),
         ),
-      ),
-    ),
-    Effect.forkScoped,
-  );
-
-  return state;
-});
-
-export function cachedVcsRefsChanges(environmentId: EnvironmentId, input: VcsListRefsInput) {
-  return followStreamInEnvironment(
-    environmentId,
-    Stream.unwrap(
-      makeCachedVcsRefsState(input).pipe(
-        Effect.map((state) =>
-          SubscriptionRef.changes(state).pipe(
-            Stream.filterMap((result) =>
-              Option.match(result, {
-                onNone: () => Result.failVoid,
-                onSome: (value) => Result.succeed(value),
+        Effect.catch((error) =>
+          SubscriptionRef.get(state).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.fail(error),
+                onSome: Effect.succeed,
               }),
             ),
           ),
         ),
-      ),
+      );
+    },
+  );
+
+  const cachedRefs = Stream.fromEffect(SubscriptionRef.get(state)).pipe(
+    Stream.filterMap((refs) =>
+      Option.match(refs, {
+        onNone: () => Result.failVoid,
+        onSome: Result.succeed,
+      }),
     ),
   );
+  const refreshedRefs = Stream.concat(
+    Stream.fromEffect(SubscriptionRef.get(supervisor.state)),
+    SubscriptionRef.changes(supervisor.state),
+  ).pipe(
+    Stream.filterMap((connection) =>
+      connection.phase === "connected" ? Result.succeed(connection.generation) : Result.failVoid,
+    ),
+    Stream.changes,
+    Stream.mapEffect(refreshOrReuseKnownRefs, { concurrency: 1 }),
+  );
+
+  return Stream.concat(cachedRefs, refreshedRefs);
+});
+
+export function cachedVcsRefsChanges(environmentId: EnvironmentId, input: VcsListRefsInput) {
+  return followStreamInEnvironment(environmentId, Stream.unwrap(makeCachedVcsRefsChanges(input)));
 }
 
 export function createVcsEnvironmentAtoms<R, E>(

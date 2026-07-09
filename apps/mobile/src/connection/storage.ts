@@ -434,11 +434,31 @@ export const connectionStorageLayer = Layer.effectContext(
             catch: (cause) => shellPersistenceError("load-server-config", cause),
           });
           const stored = yield* decodeStoredServerConfig(raw).pipe(
-            Effect.mapError((cause) => shellPersistenceError("load-server-config", cause)),
+            Effect.map(Option.some),
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                yield* Effect.logWarning("Discarding corrupt cached server configuration.", {
+                  environmentId,
+                  error: String(error),
+                });
+                yield* Effect.try({
+                  try: () => file.delete(),
+                  catch: (cause) => shellPersistenceError("load-server-config", cause),
+                }).pipe(
+                  Effect.catch((deleteError) =>
+                    Effect.logWarning("Could not delete corrupt cached server configuration.", {
+                      environmentId,
+                      error: String(deleteError),
+                    }),
+                  ),
+                );
+                return Option.none();
+              }),
+            ),
           );
-          return stored.environmentId === environmentId
-            ? Option.some(stored.config)
-            : Option.none();
+          return Option.flatMap(stored, (value) =>
+            value.environmentId === environmentId ? Option.some(value.config) : Option.none(),
+          );
         }),
       saveServerConfig: (environmentId, config) =>
         Effect.gen(function* () {

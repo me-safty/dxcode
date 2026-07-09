@@ -1,18 +1,21 @@
-import { EnvironmentId, type VcsListRefsResult } from "@t3tools/contracts";
+import { EnvironmentId, WS_METHODS, type VcsListRefsResult } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import {
   AVAILABLE_CONNECTION_STATE,
   PrimaryConnectionTarget,
   type PreparedConnection,
+  type SupervisorConnectionState,
 } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as Persistence from "../platform/persistence.ts";
+import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
-import { makeCachedVcsRefsState } from "./vcs.ts";
+import { makeCachedVcsRefsChanges } from "./vcs.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -20,6 +23,15 @@ const TARGET = new PrimaryConnectionTarget({
   httpBaseUrl: "https://environment.example.test",
   wsBaseUrl: "wss://environment.example.test",
 });
+
+const CONNECTED_CONNECTION_STATE: SupervisorConnectionState = {
+  ...AVAILABLE_CONNECTION_STATE,
+  desired: true,
+  network: "online",
+  phase: "connected",
+  attempt: 1,
+  generation: 1,
+};
 
 const CACHED_REFS: VcsListRefsResult = {
   refs: [
@@ -36,6 +48,31 @@ const CACHED_REFS: VcsListRefsResult = {
   totalCount: 1,
 };
 
+function session(client: WsRpcProtocolClient): RpcSession {
+  return {
+    client,
+    initialConfig: Effect.never,
+    ready: Effect.void,
+    probe: Effect.void,
+    closed: Effect.never,
+  };
+}
+
+function cacheWithRefs(refs: Option.Option<VcsListRefsResult>) {
+  return Persistence.EnvironmentCacheStore.of({
+    loadShell: () => Effect.succeed(Option.none()),
+    saveShell: () => Effect.void,
+    loadThread: () => Effect.succeed(Option.none()),
+    saveThread: () => Effect.void,
+    removeThread: () => Effect.void,
+    loadServerConfig: () => Effect.succeed(Option.none()),
+    saveServerConfig: () => Effect.void,
+    loadVcsRefs: () => Effect.succeed(refs),
+    saveVcsRefs: () => Effect.void,
+    clear: () => Effect.void,
+  });
+}
+
 describe("cached VCS refs", () => {
   it.effect("loads an unfiltered branch list without a connection", () =>
     Effect.scoped(
@@ -49,24 +86,46 @@ describe("cached VCS refs", () => {
           disconnect: Effect.void,
           retryNow: Effect.void,
         } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
-        const cache = Persistence.EnvironmentCacheStore.of({
-          loadShell: () => Effect.succeed(Option.none()),
-          saveShell: () => Effect.void,
-          loadThread: () => Effect.succeed(Option.none()),
-          saveThread: () => Effect.void,
-          removeThread: () => Effect.void,
-          loadServerConfig: () => Effect.succeed(Option.none()),
-          saveServerConfig: () => Effect.void,
-          loadVcsRefs: () => Effect.succeed(Option.some(CACHED_REFS)),
-          saveVcsRefs: () => Effect.void,
-          clear: () => Effect.void,
-        });
-        const state = yield* makeCachedVcsRefsState({ cwd: "/repo", limit: 100 }).pipe(
-          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-          Effect.provideService(Persistence.EnvironmentCacheStore, cache),
-        );
+        const refs = yield* Stream.unwrap(
+          makeCachedVcsRefsChanges({ cwd: "/repo", limit: 100 }).pipe(
+            Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+            Effect.provideService(
+              Persistence.EnvironmentCacheStore,
+              cacheWithRefs(Option.some(CACHED_REFS)),
+            ),
+          ),
+        ).pipe(Stream.runHead);
 
-        expect(Option.getOrThrow(yield* SubscriptionRef.get(state))).toEqual(CACHED_REFS);
+        expect(Option.getOrThrow(refs)).toEqual(CACHED_REFS);
+      }),
+    ),
+  );
+
+  it.effect("propagates a live failure when no cached refs are available", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const expectedError = new Error("Could not list Git refs.");
+        const client = {
+          [WS_METHODS.vcsListRefs]: () => Effect.fail(expectedError),
+        } as unknown as WsRpcProtocolClient;
+        const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+          target: TARGET,
+          state: yield* SubscriptionRef.make(CONNECTED_CONNECTION_STATE),
+          session: yield* SubscriptionRef.make(Option.some(session(client))),
+          prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+          connect: Effect.void,
+          disconnect: Effect.void,
+          retryNow: Effect.void,
+        } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+
+        const error = yield* Stream.unwrap(
+          makeCachedVcsRefsChanges({ cwd: "/repo", limit: 100 }).pipe(
+            Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+            Effect.provideService(Persistence.EnvironmentCacheStore, cacheWithRefs(Option.none())),
+          ),
+        ).pipe(Stream.runHead, Effect.flip);
+
+        expect(error).toBe(expectedError);
       }),
     ),
   );
