@@ -173,6 +173,25 @@ export async function clearSavedConnection(environmentId: EnvironmentId): Promis
   await writeJsonStorageItem(CONNECTIONS_KEY, { connections: next });
 }
 
+async function savePreferencesJson(encoded: string): Promise<void> {
+  try {
+    await mobileDatabaseRuntime.runPromise(
+      MobileDatabase.pipe(Effect.flatMap((database) => database.savePreferencesJson(encoded))),
+    );
+  } catch (cause) {
+    console.warn(
+      "[mobile-storage] database unavailable, saving preferences to secure storage",
+      cause,
+    );
+    await writeStorageItem(PREFERENCES_KEY, encoded);
+    return;
+  }
+
+  await deleteStorageItem(PREFERENCES_KEY).catch((cause) => {
+    console.warn("[mobile-storage] could not remove migrated preferences", cause);
+  });
+}
+
 export async function loadPreferences(): Promise<Preferences> {
   let databaseAvailable = true;
   const storedJson = await mobileDatabaseRuntime
@@ -182,24 +201,26 @@ export async function loadPreferences(): Promise<Preferences> {
       console.warn("[mobile-storage] database unavailable, using legacy preferences", cause);
       return Option.none<string>();
     });
-  let parsed = Option.isSome(storedJson)
-    ? parseJsonStorageItem<Preferences>(PREFERENCES_KEY, storedJson.value)
-    : null;
-
-  if (Option.isNone(storedJson)) {
-    const legacyJson = await readStorageItem(PREFERENCES_KEY);
-    parsed =
-      legacyJson === null ? null : parseJsonStorageItem<Preferences>(PREFERENCES_KEY, legacyJson);
-    if (parsed !== null && databaseAvailable) {
-      await mobileDatabaseRuntime.runPromise(
-        MobileDatabase.pipe(
-          Effect.flatMap((database) => database.savePreferencesJson(JSON.stringify(parsed))),
-        ),
-      );
-      await deleteStorageItem(PREFERENCES_KEY).catch((cause) => {
-        console.warn("[mobile-storage] could not remove migrated preferences", cause);
-      });
+  const legacyJson = await readStorageItem(PREFERENCES_KEY).catch((cause) => {
+    if (Option.isNone(storedJson)) {
+      throw cause;
     }
+    console.warn("[mobile-storage] could not inspect legacy preferences", cause);
+    return null;
+  });
+  const legacyPreferences =
+    legacyJson === null ? null : parseJsonStorageItem<Preferences>(PREFERENCES_KEY, legacyJson);
+  let parsed =
+    legacyPreferences ??
+    (Option.isSome(storedJson)
+      ? parseJsonStorageItem<Preferences>(PREFERENCES_KEY, storedJson.value)
+      : null);
+
+  // SecureStore is both the legacy location and the durable fallback when
+  // SQLite is temporarily unavailable. Prefer it and reconcile it back into
+  // SQLite so a recovered database cannot revive an older preference value.
+  if (legacyPreferences !== null && databaseAvailable && legacyJson !== null) {
+    await savePreferencesJson(legacyJson);
   }
 
   if (!parsed || typeof parsed !== "object") {
@@ -268,9 +289,7 @@ export async function updatePreferences(
     } catch (cause) {
       throw new MobileStorageEncodeError({ key: PREFERENCES_KEY, cause });
     }
-    await mobileDatabaseRuntime.runPromise(
-      MobileDatabase.pipe(Effect.flatMap((database) => database.savePreferencesJson(encoded))),
-    );
+    await savePreferencesJson(encoded);
     return next;
   });
   preferencesWriteQueue = task.catch(() => undefined);
