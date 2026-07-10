@@ -7,7 +7,7 @@ import * as Function from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import * as RelayDb from "../db.ts";
 import { relayAgentActivityRows, relayEnvironmentLinks } from "../persistence/schema.ts";
@@ -97,6 +97,8 @@ const decodeRelayAgentActivityStateJson = Schema.decodeUnknownOption(
   Schema.fromJsonString(RelayAgentActivityStateSchema),
 );
 
+const TERMINAL_PRUNE_BATCH_SIZE = 500;
+
 export const make = Effect.gen(function* () {
   const db = yield* RelayDb.RelayDb;
 
@@ -181,15 +183,26 @@ export const make = Effect.gen(function* () {
     pruneTerminal: Effect.fn("relay.agent_activity_rows.prune_terminal")(function* (input) {
       yield* Effect.annotateCurrentSpan({
         "relay.agent_activity_prune.before": input.updatedBefore,
+        "relay.agent_activity_prune.batch_size": TERMINAL_PRUNE_BATCH_SIZE,
       });
+      // Bound each cron invocation so a large backlog cannot hold row locks in
+      // one long transaction. SKIP LOCKED also lets multiple worker instances
+      // prune disjoint batches without waiting on one another.
       yield* db
-        .delete(relayAgentActivityRows)
-        .where(
-          and(
-            sql`${relayAgentActivityRows.stateJson} ->> 'phase' IN ('completed', 'failed')`,
-            lt(relayAgentActivityRows.updatedAt, input.updatedBefore),
-          ),
-        )
+        .execute(sql`
+          WITH terminal_rows AS (
+            SELECT ctid
+            FROM ${relayAgentActivityRows}
+            WHERE ${relayAgentActivityRows.stateJson} ->> 'phase' IN ('completed', 'failed')
+              AND ${relayAgentActivityRows.updatedAt} < ${input.updatedBefore}
+            ORDER BY ${relayAgentActivityRows.updatedAt}
+            LIMIT ${TERMINAL_PRUNE_BATCH_SIZE}
+            FOR UPDATE SKIP LOCKED
+          )
+          DELETE FROM ${relayAgentActivityRows}
+          USING terminal_rows
+          WHERE ${relayAgentActivityRows}.ctid = terminal_rows.ctid
+        `)
         .pipe(
           Effect.mapError(
             (cause) =>
