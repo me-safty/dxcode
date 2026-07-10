@@ -4,6 +4,7 @@ import {
   deriveLatestThreadRun,
   deriveThreadRuntime,
 } from "@t3tools/client-runtime/state/thread-execution";
+import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import { useCallback, useEffect, useMemo } from "react";
 
 import {
@@ -107,6 +108,13 @@ export function useThreadComposerState() {
   const draftMessage = selectedDraft?.text ?? "";
   const draftAttachments = selectedDraft?.attachments ?? [];
   const selectedThreadQueueCount = selectedThreadQueuedMessages.length;
+  const selectedThreadQueuedRunCount = useMemo(
+    () =>
+      selectedThreadProjection
+        ? deriveThreadQueueWorkflowState(selectedThreadProjection.projection).queuedRuns.length
+        : 0,
+    [selectedThreadProjection],
+  );
   const selectedThread = selectedThreadShell;
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null;
   const runtimeMode = selectedDraft?.runtimeMode ?? selectedThread?.runtimeMode ?? null;
@@ -306,6 +314,7 @@ export function useThreadComposerState() {
   return {
     selectedThreadFeed,
     selectedThreadQueueCount,
+    selectedThreadQueuedRunCount,
     activeWorkStartedAt,
     draftMessage,
     draftAttachments,

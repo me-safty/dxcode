@@ -9,6 +9,7 @@ describe("resolveThreadComposerSendLabel", () => {
         connectionState: "connected",
         activeThreadBusy: true,
         queueCount: 0,
+        queuedRunCount: 0,
       }),
     ).toBe("Steer");
   });
@@ -19,6 +20,7 @@ describe("resolveThreadComposerSendLabel", () => {
         connectionState: "offline",
         activeThreadBusy: true,
         queueCount: 0,
+        queuedRunCount: 0,
       }),
     ).toBe("Queue");
     expect(
@@ -26,6 +28,18 @@ describe("resolveThreadComposerSendLabel", () => {
         connectionState: "connected",
         activeThreadBusy: true,
         queueCount: 1,
+        queuedRunCount: 0,
+      }),
+    ).toBe("Queue");
+  });
+
+  it("labels delivery behind server-queued runs as queued", () => {
+    expect(
+      resolveThreadComposerSendLabel({
+        connectionState: "connected",
+        activeThreadBusy: true,
+        queueCount: 0,
+        queuedRunCount: 2,
       }),
     ).toBe("Queue");
   });
@@ -36,6 +50,7 @@ describe("resolveThreadComposerSendLabel", () => {
         connectionState: "connected",
         activeThreadBusy: false,
         queueCount: 0,
+        queuedRunCount: 0,
       }),
     ).toBe("Send");
   });

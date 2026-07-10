@@ -98,6 +98,7 @@ export interface ThreadComposerProps {
   readonly selectedThread: EnvironmentThreadShell;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
+  readonly queuedRunCount: number;
   readonly activeThreadBusy: boolean;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
@@ -318,6 +319,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     connectionState: props.connectionState,
     activeThreadBusy: props.activeThreadBusy,
     queueCount: props.queueCount,
+    queuedRunCount: props.queuedRunCount,
   });
   const currentModelSelection = props.selectedThread.modelSelection;
   const currentRuntimeMode = props.selectedThread.runtimeMode;
