@@ -2,12 +2,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
 import { vi } from "vite-plus/test";
 
 vi.mock("electron", async (importOriginal) => ({
@@ -98,8 +100,11 @@ function makeFakeBrowserWindow() {
 
   return {
     window: window as unknown as Electron.BrowserWindow,
-    loadURL: window.loadURL,
     getBounds: window.getBounds,
+    getNormalBounds: window.getNormalBounds,
+    isFullScreen: window.isFullScreen,
+    isMaximized: window.isMaximized,
+    loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
     send: webContents.send,
@@ -356,7 +361,7 @@ describe("DesktopWindow", () => {
     );
     assert.deepEqual(
       DesktopWindow.resolveInitialMainWindowBounds(persistedBounds, [displays[0]!]),
-      DesktopAppSettings.DEFAULT_MAIN_WINDOW_BOUNDS,
+      DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE,
     );
   });
 
@@ -403,6 +408,8 @@ describe("DesktopWindow", () => {
         assert.equal(yield* Ref.get(createCount), 1);
         assert.equal(createdWindowOptions[0]?.width, 1100);
         assert.equal(createdWindowOptions[0]?.height, 780);
+        assert.isUndefined(createdWindowOptions[0]?.x);
+        assert.isUndefined(createdWindowOptions[0]?.y);
         assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);
@@ -437,6 +444,159 @@ describe("DesktopWindow", () => {
         assert.equal(createdWindowOptions[0]?.x, 120);
         assert.equal(createdWindowOptions[0]?.y, 80);
       }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("debounces move and resize bounds updates", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        mainWindowBoundsUpdates,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const move = fakeWindow.windowListeners.get("move");
+        const resize = fakeWindow.windowListeners.get("resize");
+        if (!move || !resize) {
+          return yield* Effect.die("window bounds listeners were not registered");
+        }
+
+        fakeWindow.getBounds.mockReturnValue({ x: 120, y: 80, width: 1280, height: 840 });
+        move();
+        yield* TestClock.adjust(250);
+
+        fakeWindow.getBounds.mockReturnValue({ x: 160, y: 100, width: 1360, height: 900 });
+        resize();
+        yield* TestClock.adjust(499);
+        assert.deepEqual(mainWindowBoundsUpdates, []);
+
+        yield* TestClock.adjust(1);
+        yield* Effect.promise(() => Promise.resolve());
+        assert.deepEqual(mainWindowBoundsUpdates, [{ x: 160, y: 100, width: 1360, height: 900 }]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("persists normal bounds for a maximized window", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      fakeWindow.isMaximized.mockReturnValue(true);
+      fakeWindow.getBounds.mockReturnValue({ x: 0, y: 0, width: 1920, height: 1080 });
+      fakeWindow.getNormalBounds.mockReturnValue({ x: 220, y: 140, width: 1380, height: 920 });
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        mainWindowBoundsUpdates,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) {
+          return yield* Effect.die("window close listener was not registered");
+        }
+        close();
+        yield* Effect.promise(() => Promise.resolve());
+
+        assert.deepEqual(mainWindowBoundsUpdates, [{ x: 220, y: 140, width: 1380, height: 920 }]);
+        assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 1);
+        assert.equal(fakeWindow.getBounds.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("does not persist fullscreen bounds", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      fakeWindow.isFullScreen.mockReturnValue(true);
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        mainWindowBoundsUpdates,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) {
+          return yield* Effect.die("window close listener was not registered");
+        }
+        close();
+        yield* Effect.promise(() => Promise.resolve());
+
+        assert.deepEqual(mainWindowBoundsUpdates, []);
+        assert.equal(fakeWindow.getBounds.mock.calls.length, 0);
+        assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("logs display lookup failures before falling back to the default size", () =>
+    Effect.gen(function* () {
+      const displayLookupFailure = new Error("screen API unavailable");
+      vi.mocked(Electron.screen.getAllDisplays).mockImplementationOnce(() => {
+        throw displayLookupFailure;
+      });
+      const logRecords: Array<{
+        readonly message: unknown;
+        readonly annotations: Readonly<Record<string, unknown>>;
+      }> = [];
+      const logger = Logger.make(({ fiber, message }) => {
+        logRecords.push({
+          message,
+          annotations: { ...fiber.getRef(References.CurrentLogAnnotations) },
+        });
+      });
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        createdWindowOptions,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+      }).pipe(
+        Effect.provide(Layer.mergeAll(layer, Logger.layer([logger], { mergeWithExisting: false }))),
+      );
+
+      const warning = logRecords.find(
+        (record) =>
+          Array.isArray(record.message) &&
+          record.message[0] === "failed to read connected displays; using defaults",
+      );
+      assert.isDefined(warning);
+      assert.strictEqual(warning.annotations.cause, displayLookupFailure);
+      assert.equal(createdWindowOptions[0]?.width, 1100);
+      assert.equal(createdWindowOptions[0]?.height, 780);
+      assert.isUndefined(createdWindowOptions[0]?.x);
+      assert.isUndefined(createdWindowOptions[0]?.y);
     }),
   );
 

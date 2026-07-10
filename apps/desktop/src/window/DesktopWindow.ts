@@ -119,14 +119,14 @@ function windowFitsWithinDisplay(
 export function resolveInitialMainWindowBounds(
   persistedBounds: DesktopAppSettings.DesktopWindowBounds | null,
   displays: readonly DisplayBounds[],
-): DesktopAppSettings.DesktopWindowBounds {
+): DesktopAppSettings.DesktopWindowBounds | typeof DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE {
   if (
     persistedBounds !== null &&
     displays.some((display) => windowFitsWithinDisplay(persistedBounds, display))
   ) {
     return persistedBounds;
   }
-  return DesktopAppSettings.DEFAULT_MAIN_WINDOW_BOUNDS;
+  return DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
 }
 
 // A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
@@ -282,18 +282,24 @@ export const make = Effect.gen(function* () {
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
     const persistedBounds = (yield* desktopSettings.get).mainWindowBounds;
-    const displayBounds = yield* Effect.sync(() => {
+    const displayBoundsResult = yield* Effect.sync(() => {
       try {
-        return Electron.screen.getAllDisplays().map((display) => display.bounds);
-      } catch {
-        return [];
+        return {
+          _tag: "Success" as const,
+          bounds: Electron.screen.getAllDisplays().map((display) => display.bounds),
+        };
+      } catch (cause) {
+        return { _tag: "Failure" as const, cause };
       }
     });
+    const displayBounds =
+      displayBoundsResult._tag === "Success"
+        ? displayBoundsResult.bounds
+        : yield* logWindowWarning("failed to read connected displays; using defaults", {
+            cause: displayBoundsResult.cause,
+          }).pipe(Effect.as<readonly Electron.Rectangle[]>([]));
     const initialBounds = resolveInitialMainWindowBounds(persistedBounds, displayBounds);
-    if (
-      persistedBounds !== null &&
-      initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_BOUNDS
-    ) {
+    if (persistedBounds !== null && initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE) {
       yield* logWindowWarning("saved main window bounds could not be restored; using defaults");
     }
     const window = yield* electronWindow.create({

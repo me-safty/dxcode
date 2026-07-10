@@ -60,12 +60,10 @@ export const DesktopWindowBoundsSchema = Schema.Struct({
   height: Schema.Int.check(Schema.isGreaterThanOrEqualTo(MIN_MAIN_WINDOW_SIZE.height)),
 });
 export type DesktopWindowBounds = typeof DesktopWindowBoundsSchema.Type;
-export const DEFAULT_MAIN_WINDOW_BOUNDS: DesktopWindowBounds = {
-  x: 0,
-  y: 0,
+export const DEFAULT_MAIN_WINDOW_SIZE = {
   width: 1100,
   height: 780,
-};
+} as const;
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   mainWindowBounds: null,
