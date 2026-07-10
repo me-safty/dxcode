@@ -1,15 +1,111 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
 import {
   deriveThreadRelationshipGraph,
+  flattenSubagentThreadTree,
+  getSubagentThreadAncestorKeys,
+  getSubagentThreadTreeRoots,
   immediateThreadRelationships,
+  isSubagentThread,
   relatedThreadIds,
   resolveMergeBackTargetThreadId,
+  subagentThreadKey,
+  type SubagentThreadTreeInput,
   walkThreadRelationships,
 } from "./threadRelationships.ts";
 
+const environmentId = EnvironmentId.make("environment-1");
+
+function treeThread(input: {
+  readonly id: string;
+  readonly parentId?: string | null;
+  readonly relationship?: "subagent" | "fork" | null;
+  readonly updatedAt?: string;
+}): SubagentThreadTreeInput {
+  const id = ThreadId.make(input.id);
+  const parentThreadId = input.parentId ? ThreadId.make(input.parentId) : null;
+  return {
+    environmentId,
+    id,
+    lineage: {
+      rootThreadId: parentThreadId ?? id,
+      parentThreadId,
+      relationshipToParent: input.relationship ?? null,
+    },
+    createdAt: input.updatedAt ?? "2026-07-01T00:00:00.000Z",
+    updatedAt: input.updatedAt ?? "2026-07-01T00:00:00.000Z",
+    latestUserMessageAt: input.updatedAt ?? null,
+  };
+}
+
 describe("thread relationships", () => {
+  it("projects nested subagents while keeping forks as roots", () => {
+    const root = treeThread({ id: "root" });
+    const olderChild = treeThread({
+      id: "child-old",
+      parentId: "root",
+      relationship: "subagent",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    });
+    const newerChild = treeThread({
+      id: "child-new",
+      parentId: "root",
+      relationship: "subagent",
+      updatedAt: "2026-07-02T00:00:00.000Z",
+    });
+    const grandchild = treeThread({
+      id: "grandchild",
+      parentId: "child-new",
+      relationship: "subagent",
+    });
+    const fork = treeThread({ id: "fork", parentId: "root", relationship: "fork" });
+    const threads = [root, olderChild, newerChild, grandchild, fork];
+    const roots = getSubagentThreadTreeRoots(threads);
+    const rows = flattenSubagentThreadTree({
+      threads,
+      roots,
+      expandedThreadKeys: new Set([subagentThreadKey(root), subagentThreadKey(newerChild)]),
+      threadSortOrder: "updated_at",
+    });
+
+    expect(isSubagentThread(olderChild)).toBe(true);
+    expect(roots.map((thread) => thread.id)).toEqual([root.id, fork.id]);
+    expect(rows.map((row) => [row.thread.id, row.depth])).toEqual([
+      [root.id, 0],
+      [newerChild.id, 1],
+      [grandchild.id, 2],
+      [olderChild.id, 1],
+      [fork.id, 0],
+    ]);
+    expect(getSubagentThreadAncestorKeys(threads, subagentThreadKey(grandchild))).toEqual(
+      new Set([subagentThreadKey(newerChild), subagentThreadKey(root)]),
+    );
+  });
+
+  it("keeps orphans and rootless cycles visible exactly once", () => {
+    const orphan = treeThread({
+      id: "orphan",
+      parentId: "missing",
+      relationship: "subagent",
+    });
+    const first = treeThread({ id: "cycle-a", parentId: "cycle-b", relationship: "subagent" });
+    const second = treeThread({ id: "cycle-b", parentId: "cycle-a", relationship: "subagent" });
+    const threads = [orphan, first, second];
+    const roots = getSubagentThreadTreeRoots(threads);
+    const rows = flattenSubagentThreadTree({
+      threads,
+      roots,
+      expandedThreadKeys: new Set(threads.map(subagentThreadKey)),
+      threadSortOrder: "created_at",
+    });
+
+    expect(roots.map((thread) => thread.id)).toEqual([orphan.id, first.id]);
+    expect(rows.map((row) => row.thread.id)).toEqual([orphan.id, first.id, second.id]);
+    expect(new Set(rows.map((row) => subagentThreadKey(row.thread))).size).toBe(3);
+    expect(rows.at(-1)?.hasSubagentChildren).toBe(false);
+  });
+
   it("keeps missing parents and cycles navigable without recursive traversal", () => {
     const root = ThreadId.make("thread-root");
     const child = ThreadId.make("thread-child");
