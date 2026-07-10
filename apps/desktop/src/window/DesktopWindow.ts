@@ -78,6 +78,7 @@ export class DesktopWindow extends Context.Service<
     // window so a "macOS dock click" while the backend is down doesn't
     // produce a stranded window pointing at nothing.
     readonly handleBackendNotReady: Effect.Effect<void>;
+    readonly flushMainWindowBounds: Effect.Effect<void>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
     readonly syncAppearance: Effect.Effect<void>;
   }
@@ -245,6 +246,7 @@ export const make = Effect.gen(function* () {
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
+  let flushMainWindowBounds: Effect.Effect<void> = Effect.void;
 
   const dismissConnectingSplash = Effect.gen(function* () {
     const splash = yield* Ref.getAndSet(splashWindowRef, Option.none());
@@ -327,8 +329,9 @@ export const make = Effect.gen(function* () {
     }
 
     let boundsPersistFiber: Fiber.Fiber<void, never> | undefined;
+    let pendingBoundsPersistFiber: Fiber.Fiber<void, never> | undefined;
     const readPersistableBounds = (): DesktopAppSettings.DesktopWindowBounds | null => {
-      if (window.isDestroyed() || window.isFullScreen()) {
+      if (window.isDestroyed() || window.isFullScreen() || window.isMinimized()) {
         return null;
       }
       const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds();
@@ -338,12 +341,12 @@ export const make = Effect.gen(function* () {
       const height = Math.round(bounds.height);
       return { x, y, width, height };
     };
-    const persistCurrentBounds = () => {
+    const persistCurrentBounds = (): Fiber.Fiber<void, never> | undefined => {
       const bounds = readPersistableBounds();
       if (bounds === null) {
-        return;
+        return pendingBoundsPersistFiber;
       }
-      void runPromise(
+      pendingBoundsPersistFiber = runFork(
         desktopSettings.setMainWindowBounds(bounds).pipe(
           Effect.asVoid,
           Effect.catch((error) =>
@@ -353,6 +356,7 @@ export const make = Effect.gen(function* () {
           ),
         ),
       );
+      return pendingBoundsPersistFiber;
     };
     const scheduleBoundsPersist = () => {
       if (boundsPersistFiber !== undefined) {
@@ -365,7 +369,7 @@ export const make = Effect.gen(function* () {
           Effect.andThen(
             Effect.sync(() => {
               boundsPersistFiber = undefined;
-              persistCurrentBounds();
+              void persistCurrentBounds();
             }),
           ),
         ),
@@ -379,6 +383,15 @@ export const make = Effect.gen(function* () {
       boundsPersistFiber = undefined;
       runFork(Fiber.interrupt(fiber));
     };
+    const flushBoundsPersist = Effect.sync(() => {
+      clearBoundsPersist();
+      return persistCurrentBounds();
+    }).pipe(
+      Effect.flatMap((fiber) =>
+        fiber === undefined ? Effect.void : Fiber.join(fiber).pipe(Effect.asVoid),
+      ),
+    );
+    flushMainWindowBounds = flushBoundsPersist;
 
     yield* previewManager.setMainWindow(window);
     window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
@@ -472,8 +485,7 @@ export const make = Effect.gen(function* () {
     window.on("resize", scheduleBoundsPersist);
     window.on("move", scheduleBoundsPersist);
     window.on("close", () => {
-      clearBoundsPersist();
-      persistCurrentBounds();
+      runFork(flushBoundsPersist);
     });
 
     let developmentLoadRetryIndex = 0;
@@ -700,6 +712,9 @@ export const make = Effect.gen(function* () {
     }),
     handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
       Effect.withSpan("desktop.window.handleBackendNotReady"),
+    ),
+    flushMainWindowBounds: Effect.suspend(() => flushMainWindowBounds).pipe(
+      Effect.withSpan("desktop.window.flushMainWindowBounds"),
     ),
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });

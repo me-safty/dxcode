@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -102,8 +104,10 @@ function makeFakeBrowserWindow() {
     window: window as unknown as Electron.BrowserWindow,
     getBounds: window.getBounds,
     getNormalBounds: window.getNormalBounds,
+    isDestroyed: window.isDestroyed,
     isFullScreen: window.isFullScreen,
     isMaximized: window.isMaximized,
+    isMinimized: window.isMinimized,
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
@@ -173,6 +177,9 @@ function makeTestLayer(input: {
   readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
   readonly desktopSettings?: DesktopAppSettings.DesktopSettings;
   readonly mainWindowBoundsUpdates?: DesktopAppSettings.DesktopWindowBounds[];
+  readonly beforeMainWindowBoundsUpdate?: (
+    bounds: DesktopAppSettings.DesktopWindowBounds,
+  ) => Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
@@ -180,7 +187,10 @@ function makeTestLayer(input: {
     get: Effect.sync(() => desktopSettings),
     load: Effect.sync(() => desktopSettings),
     setMainWindowBounds: (bounds) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
+        if (input.beforeMainWindowBoundsUpdate) {
+          yield* input.beforeMainWindowBoundsUpdate(bounds);
+        }
         const changed =
           desktopSettings.mainWindowBounds === null ||
           !desktopWindowBoundsEquivalence(desktopSettings.mainWindowBounds, bounds);
@@ -552,6 +562,39 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("does not persist minimized window bounds", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      fakeWindow.isMinimized.mockReturnValue(true);
+      fakeWindow.getBounds.mockReturnValue({ x: -32_000, y: -32_000, width: 160, height: 28 });
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        mainWindowBoundsUpdates,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) {
+          return yield* Effect.die("window close listener was not registered");
+        }
+        close();
+        yield* desktopWindow.flushMainWindowBounds;
+
+        assert.deepEqual(mainWindowBoundsUpdates, []);
+        assert.equal(fakeWindow.getBounds.mock.calls.length, 0);
+        assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("logs display lookup failures before falling back to the default size", () =>
     Effect.gen(function* () {
       const displayLookupFailure = new Error("screen API unavailable");
@@ -607,11 +650,19 @@ describe("DesktopWindow", () => {
       const createCount = yield* Ref.make(0);
       const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
       const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+      const writeStarted = yield* Deferred.make<void>();
+      const allowWrite = yield* Deferred.make<void>();
+      const flushCompleted = yield* Deferred.make<void>();
       const layer = makeTestLayer({
         window: fakeWindow.window,
         createCount,
         mainWindow,
         mainWindowBoundsUpdates,
+        beforeMainWindowBoundsUpdate: () =>
+          Deferred.succeed(writeStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(allowWrite)),
+            Effect.asVoid,
+          ),
       });
 
       yield* Effect.gen(function* () {
@@ -623,7 +674,19 @@ describe("DesktopWindow", () => {
           return yield* Effect.die("window close listener was not registered");
         }
         close();
-        yield* Effect.promise(() => Promise.resolve());
+        yield* Deferred.await(writeStarted);
+        fakeWindow.isDestroyed.mockReturnValue(true);
+
+        const flushFiber = yield* desktopWindow.flushMainWindowBounds.pipe(
+          Effect.andThen(Deferred.succeed(flushCompleted, undefined)),
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* Effect.yieldNow;
+        assert.isFalse(yield* Deferred.isDone(flushCompleted));
+
+        yield* Deferred.succeed(allowWrite, undefined);
+        yield* Fiber.join(flushFiber);
+        assert.isTrue(yield* Deferred.isDone(flushCompleted));
 
         assert.deepEqual(mainWindowBoundsUpdates, [
           {
