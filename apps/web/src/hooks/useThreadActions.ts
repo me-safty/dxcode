@@ -4,9 +4,12 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  getOwnedSubagentSubtree,
+  threadSubtreeActionCopy,
+} from "@t3tools/client-runtime/state/thread-relationships";
+import { presentThreadShell, threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
-import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef } from "react";
@@ -19,7 +22,9 @@ import { vcsEnvironment } from "../state/vcs";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
 import { readLocalApi } from "../localApi";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readEnvironmentThreadRefs, readProject, readThreadShell } from "../state/entities";
+import { environmentSnapshotAtom } from "../state/shell";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -27,16 +32,31 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
 
-export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArchiveBlockedError>()(
-  "ThreadArchiveBlockedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "Cannot archive a running thread.";
+function readEnvironmentThreads(environmentId: EnvironmentId) {
+  const snapshot = appAtomRegistry.get(environmentSnapshotAtom(environmentId));
+  if (snapshot !== null) {
+    return [...snapshot.threads, ...snapshot.archivedThreads].map((thread) =>
+      presentThreadShell(environmentId, thread),
+    );
   }
+  return readEnvironmentThreadRefs(environmentId).flatMap((ref) => {
+    const thread = readThreadShell(ref);
+    return thread === null ? [] : [thread];
+  });
+}
+
+/** Reads the complete active + archived owned-subagent subtree from the shell cache. */
+export function readThreadSubtree(
+  target: ScopedThreadRef,
+  fallbackRoot?: ReturnType<typeof presentThreadShell>,
+) {
+  const threads = readEnvironmentThreads(target.environmentId);
+  const root = threads.find((candidate) => candidate.id === target.threadId) ?? fallbackRoot;
+  if (root === undefined) return [];
+  return getOwnedSubagentSubtree(
+    threads.some((candidate) => candidate.id === root.id) ? threads : [...threads, root],
+    root,
+  );
 }
 
 export function useThreadActions() {
@@ -59,6 +79,7 @@ export function useThreadActions() {
   });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
+  const confirmThreadArchive = useClientSettings((settings) => settings.confirmThreadArchive);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
@@ -74,7 +95,11 @@ export function useThreadActions() {
   handleNewThreadRef.current = handleNewThread;
 
   const resolveThreadTarget = useCallback((target: ScopedThreadRef) => {
-    const thread = readThreadShell(target);
+    const thread =
+      readThreadShell(target) ??
+      readEnvironmentThreads(target.environmentId).find(
+        (candidate) => candidate.id === target.threadId,
+      );
     if (!thread) {
       return null;
     }
@@ -83,6 +108,11 @@ export function useThreadActions() {
       threadRef: target,
     };
   }, []);
+  const getThreadSubtree = useCallback(
+    (target: ScopedThreadRef, fallbackRoot?: ReturnType<typeof presentThreadShell>) =>
+      readThreadSubtree(target, fallbackRoot),
+    [],
+  );
   const getCurrentRouteThreadRef = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteRef(currentRouteParams);
@@ -93,21 +123,12 @@ export function useThreadActions() {
       const resolved = resolveThreadTarget(target);
       if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
-      if (thread.runtime?.status === "running" && thread.runtime.activeRunId != null) {
-        return AsyncResult.failure(
-          Cause.fail(
-            new ThreadArchiveBlockedError({
-              environmentId: threadRef.environmentId,
-              threadId: threadRef.threadId,
-            }),
-          ),
-        );
-      }
 
       const currentRouteThreadRef = getCurrentRouteThreadRef();
+      const subtree = getThreadSubtree(threadRef, thread);
       const shouldNavigateToDraft =
-        currentRouteThreadRef?.threadId === threadRef.threadId &&
-        currentRouteThreadRef.environmentId === threadRef.environmentId;
+        currentRouteThreadRef?.environmentId === threadRef.environmentId &&
+        subtree.some((entry) => entry.id === currentRouteThreadRef.threadId);
       const archiveResult = await archiveThreadMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId },
@@ -130,7 +151,38 @@ export function useThreadActions() {
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       return archiveResult;
     },
-    [archiveThreadMutation, getCurrentRouteThreadRef, resolveThreadTarget],
+    [archiveThreadMutation, getCurrentRouteThreadRef, getThreadSubtree, resolveThreadTarget],
+  );
+
+  const confirmAndArchiveThread = useCallback(
+    async (target: ScopedThreadRef, options: { readonly confirmed?: boolean } = {}) => {
+      const localApi = readLocalApi();
+      const resolved = resolveThreadTarget(target);
+      const subtree = getThreadSubtree(target, resolved?.thread);
+      const descendants = subtree.slice(1).filter((entry) => entry.archivedAt === null);
+      const activeThreadCount = [resolved?.thread, ...descendants].filter(
+        (entry) => entry !== undefined && threadRuntimeIsActive(entry.runtime),
+      ).length;
+      if (
+        options.confirmed !== true &&
+        (confirmThreadArchive || descendants.length > 0 || activeThreadCount > 0) &&
+        localApi
+      ) {
+        const copy = threadSubtreeActionCopy({
+          action: "archive",
+          threadTitle: resolved?.thread.title ?? "this thread",
+          descendantCount: descendants.length,
+          activeThreadCount,
+        });
+        const confirmationResult = await settlePromise(() =>
+          localApi.dialogs.confirm([copy.title, copy.message].join("\n")),
+        );
+        if (confirmationResult._tag === "Failure") return confirmationResult;
+        if (!confirmationResult.value) return AsyncResult.success(undefined);
+      }
+      return archiveThread(target);
+    },
+    [archiveThread, confirmThreadArchive, getThreadSubtree, resolveThreadTarget],
   );
 
   const unarchiveThread = useCallback(
@@ -162,25 +214,32 @@ export function useThreadActions() {
         return result;
       }
       const { thread, threadRef } = resolved;
-      const threads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
-        const shell = readThreadShell(ref);
-        return shell === null ? [] : [shell];
-      });
+      const threads = readEnvironmentThreads(threadRef.environmentId);
+      const subtree = getOwnedSubagentSubtree(threads, thread);
       const threadProject = readProject({
         environmentId: threadRef.environmentId,
         projectId: thread.projectId,
       });
-      const deletedIds =
-        opts.deletedThreadKeys && opts.deletedThreadKeys.size > 0
-          ? new Set<ThreadId>(
-              [...opts.deletedThreadKeys].flatMap((threadKey) => {
-                const ref = parseScopedThreadKey(threadKey);
-                return ref && ref.environmentId === threadRef.environmentId ? [ref.threadId] : [];
-              }),
-            )
-          : undefined;
+      const explicitlyDeletedIds = new Set<ThreadId>(
+        [...(opts.deletedThreadKeys ?? [])].flatMap((threadKey) => {
+          const ref = parseScopedThreadKey(threadKey);
+          return ref && ref.environmentId === threadRef.environmentId ? [ref.threadId] : [];
+        }),
+      );
+      explicitlyDeletedIds.add(threadRef.threadId);
+      const deletedIds = new Set<ThreadId>();
+      for (const rootId of explicitlyDeletedIds) {
+        const root = threads.find((entry) => entry.id === rootId);
+        if (root === undefined) {
+          deletedIds.add(rootId);
+          continue;
+        }
+        for (const entry of getOwnedSubagentSubtree(threads, root)) {
+          deletedIds.add(entry.id);
+        }
+      }
       const survivingThreads =
-        deletedIds && deletedIds.size > 0
+        deletedIds.size > 0
           ? threads.filter((entry) => entry.id === threadRef.threadId || !deletedIds.has(entry.id))
           : threads;
       const orphanedWorktreePath = getOrphanedWorktreePathForThread(
@@ -222,13 +281,13 @@ export function useThreadActions() {
         input: { threadId: threadRef.threadId, deleteHistory: true },
       });
 
-      const deletedThreadIds = deletedIds ?? new Set<ThreadId>();
+      const deletedThreadIds = deletedIds;
       const currentRouteThreadRef = getCurrentRouteThreadRef();
       const shouldNavigateToFallback =
-        currentRouteThreadRef?.threadId === threadRef.threadId &&
-        currentRouteThreadRef.environmentId === threadRef.environmentId;
+        currentRouteThreadRef?.environmentId === threadRef.environmentId &&
+        deletedThreadIds.has(currentRouteThreadRef.threadId);
       const fallbackThreadId = getFallbackThreadIdAfterDelete({
-        threads,
+        threads: threads.filter((entry) => entry.archivedAt === null),
         deletedThreadId: threadRef.threadId,
         deletedThreadIds,
         sortOrder: sidebarThreadSortOrder,
@@ -241,12 +300,15 @@ export function useThreadActions() {
         return deleteResult;
       }
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
-      clearComposerDraftForThread(threadRef);
-      clearProjectDraftThreadById(
-        scopeProjectRef(threadRef.environmentId, thread.projectId),
-        threadRef,
-      );
-      clearTerminalUiState(threadRef);
+      for (const deletedThread of subtree) {
+        const deletedThreadRef = scopeThreadRef(deletedThread.environmentId, deletedThread.id);
+        clearComposerDraftForThread(deletedThreadRef);
+        clearProjectDraftThreadById(
+          scopeProjectRef(deletedThread.environmentId, deletedThread.projectId),
+          deletedThreadRef,
+        );
+        clearTerminalUiState(deletedThreadRef);
+      }
 
       if (shouldNavigateToFallback) {
         if (fallbackThreadId) {
@@ -349,16 +411,21 @@ export function useThreadActions() {
     async (target: ScopedThreadRef) => {
       const localApi = readLocalApi();
       const resolved = resolveThreadTarget(target);
+      const subtree = getThreadSubtree(target, resolved?.thread);
+      const descendantCount = Math.max(0, subtree.length - 1);
+      const activeThreadCount = subtree.filter((entry) =>
+        threadRuntimeIsActive(entry.runtime),
+      ).length;
 
-      if (confirmThreadDelete && localApi) {
-        const title = resolved?.thread.title ?? "this thread";
+      if ((confirmThreadDelete || descendantCount > 0 || activeThreadCount > 0) && localApi) {
+        const copy = threadSubtreeActionCopy({
+          action: "delete",
+          threadTitle: resolved?.thread.title ?? "this thread",
+          descendantCount,
+          activeThreadCount,
+        });
         const confirmationResult = await settlePromise(() =>
-          localApi.dialogs.confirm(
-            [
-              `Delete thread "${title}"?`,
-              "This permanently clears conversation history for this thread.",
-            ].join("\n"),
-          ),
+          localApi.dialogs.confirm([copy.title, copy.message].join("\n")),
         );
         if (confirmationResult._tag === "Failure") {
           return confirmationResult;
@@ -370,16 +437,54 @@ export function useThreadActions() {
 
       return deleteThread(target);
     },
-    [confirmThreadDelete, deleteThread, resolveThreadTarget],
+    [confirmThreadDelete, deleteThread, getThreadSubtree, resolveThreadTarget],
+  );
+
+  const confirmAndUnarchiveThread = useCallback(
+    async (target: ScopedThreadRef) => {
+      const localApi = readLocalApi();
+      const resolved = resolveThreadTarget(target);
+      const subtree = getThreadSubtree(target, resolved?.thread);
+      const descendantCount =
+        resolved === null
+          ? 0
+          : subtree.slice(1).filter((entry) => entry.archivedAt === resolved.thread.archivedAt)
+              .length;
+      if (descendantCount > 0 && localApi) {
+        const copy = threadSubtreeActionCopy({
+          action: "unarchive",
+          threadTitle: resolved?.thread.title ?? "this thread",
+          descendantCount,
+        });
+        const confirmationResult = await settlePromise(() =>
+          localApi.dialogs.confirm([copy.title, copy.message].join("\n")),
+        );
+        if (confirmationResult._tag === "Failure") return confirmationResult;
+        if (!confirmationResult.value) return AsyncResult.success(undefined);
+      }
+      return unarchiveThread(target);
+    },
+    [getThreadSubtree, resolveThreadTarget, unarchiveThread],
   );
 
   return useMemo(
     () => ({
       archiveThread,
+      confirmAndArchiveThread,
       unarchiveThread,
+      confirmAndUnarchiveThread,
       deleteThread,
       confirmAndDeleteThread,
+      getThreadSubtree,
     }),
-    [archiveThread, confirmAndDeleteThread, deleteThread, unarchiveThread],
+    [
+      archiveThread,
+      confirmAndArchiveThread,
+      confirmAndDeleteThread,
+      confirmAndUnarchiveThread,
+      deleteThread,
+      getThreadSubtree,
+      unarchiveThread,
+    ],
   );
 }

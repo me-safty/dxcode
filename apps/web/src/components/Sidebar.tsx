@@ -64,6 +64,12 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import {
+  getOwnedSubagentDescendants,
+  hasUnavailableSubagentParent,
+  threadSubtreeActionCopy,
+} from "@t3tools/client-runtime/state/thread-relationships";
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -113,7 +119,7 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
-import { useThreadActions } from "../hooks/useThreadActions";
+import { readThreadSubtree, useThreadActions } from "../hooks/useThreadActions";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
@@ -341,6 +347,9 @@ interface SidebarThreadRowProps {
   isActive: boolean;
   jumpLabel: string | null;
   appSettingsConfirmThreadArchive: boolean;
+  subagentDescendantCount: number;
+  activeSubagentDescendantCount: number;
+  hasUnavailableSubagentParent: boolean;
   renamingThreadKey: string | null;
   renamingTitle: string;
   setRenamingTitle: (title: string) => void;
@@ -368,7 +377,10 @@ interface SidebarThreadRowProps {
     originalTitle: string,
   ) => Promise<void>;
   cancelRename: () => void;
-  attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  attemptArchiveThread: (
+    threadRef: ScopedThreadRef,
+    options?: { readonly confirmed?: boolean },
+  ) => Promise<void>;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
   toggleSubagentBranch: (threadKey: string) => void;
 }
@@ -383,6 +395,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     isActive,
     jumpLabel,
     appSettingsConfirmThreadArchive,
+    subagentDescendantCount,
+    activeSubagentDescendantCount,
+    hasUnavailableSubagentParent,
     renamingThreadKey,
     renamingTitle,
     setRenamingTitle,
@@ -481,8 +496,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     },
     [discoveredPorts, navigateToThread, openPreview, threadRef],
   );
-  const isThreadRunning =
-    thread.runtime?.status === "running" && thread.runtime.activeRunId != null;
+  const activeThreadCount =
+    activeSubagentDescendantCount + (threadRuntimeIsActive(thread.runtime) ? 1 : 0);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -492,12 +507,18 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
-  const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
+  const isConfirmingArchive = confirmingArchiveThreadKey === threadKey;
+  const shouldConfirmArchive =
+    appSettingsConfirmThreadArchive || subagentDescendantCount > 0 || activeThreadCount > 0;
+  const archiveActionCopy = threadSubtreeActionCopy({
+    action: "archive",
+    threadTitle: thread.title,
+    descendantCount: subagentDescendantCount,
+    activeThreadCount,
+  });
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
-    : !isThreadRunning
-      ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
-      : "pointer-events-none";
+    : "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0";
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
   }, [setConfirmingArchiveThreadKey, threadKey]);
@@ -677,7 +698,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       event.preventDefault();
       event.stopPropagation();
       clearConfirmingArchive();
-      void attemptArchiveThread(threadRef);
+      void attemptArchiveThread(threadRef, { confirmed: true });
     },
     [attemptArchiveThread, clearConfirmingArchive, threadRef],
   );
@@ -794,6 +815,22 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipPopup side="top">Open parent thread</TooltipPopup>
             </Tooltip>
           ) : null}
+          {hasUnavailableSubagentParent ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    role="img"
+                    aria-label="Parent thread unavailable"
+                    className="inline-flex size-4 shrink-0 items-center justify-center text-amber-500"
+                  />
+                }
+              >
+                <TriangleAlertIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">Parent thread unavailable</TooltipPopup>
+            </Tooltip>
+          ) : null}
           {prStatus && (
             <Tooltip>
               <TooltipTrigger
@@ -890,51 +927,54 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 type="button"
                 data-thread-selection-safe
                 data-testid={`thread-archive-confirm-${thread.id}`}
-                aria-label={`Confirm archive ${thread.title}`}
+                aria-label={
+                  subagentDescendantCount > 0
+                    ? `Confirm archive ${thread.title} and ${subagentDescendantCount} subagent thread${subagentDescendantCount === 1 ? "" : "s"}`
+                    : `Confirm archive ${thread.title}`
+                }
+                title={archiveActionCopy.message}
                 className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-md bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
                 onPointerDown={stopPropagationOnPointerDown}
                 onClick={handleConfirmArchiveClick}
               >
-                Confirm
+                {subagentDescendantCount > 0 ? `Confirm +${subagentDescendantCount}` : "Confirm"}
               </button>
-            ) : !isThreadRunning ? (
-              appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                  <button
-                    type="button"
-                    data-thread-selection-safe
-                    data-testid={`thread-archive-${thread.id}`}
-                    aria-label={`Archive ${thread.title}`}
-                    className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
-                    onPointerDown={stopPropagationOnPointerDown}
-                    onClick={handleStartArchiveConfirmation}
-                  >
-                    <ArchiveIcon className="size-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                        <button
-                          type="button"
-                          data-thread-selection-safe
-                          data-testid={`thread-archive-${thread.id}`}
-                          aria-label={`Archive ${thread.title}`}
-                          className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
-                          onPointerDown={stopPropagationOnPointerDown}
-                          onClick={handleArchiveImmediateClick}
-                        >
-                          <ArchiveIcon className="size-3.5" />
-                        </button>
-                      </div>
-                    }
-                  />
-                  <TooltipPopup side="top">Archive</TooltipPopup>
-                </Tooltip>
-              )
-            ) : null}
+            ) : shouldConfirmArchive ? (
+              <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <button
+                  type="button"
+                  data-thread-selection-safe
+                  data-testid={`thread-archive-${thread.id}`}
+                  aria-label={`Archive ${thread.title}`}
+                  className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                  onPointerDown={stopPropagationOnPointerDown}
+                  onClick={handleStartArchiveConfirmation}
+                >
+                  <ArchiveIcon className="size-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <button
+                        type="button"
+                        data-thread-selection-safe
+                        data-testid={`thread-archive-${thread.id}`}
+                        aria-label={`Archive ${thread.title}`}
+                        className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                        onPointerDown={stopPropagationOnPointerDown}
+                        onClick={handleArchiveImmediateClick}
+                      >
+                        <ArchiveIcon className="size-3.5" />
+                      </button>
+                    </div>
+                  }
+                />
+                <TooltipPopup side="top">Archive</TooltipPopup>
+              </Tooltip>
+            )}
             <span className={threadMetaClassName}>
               <span className="inline-flex items-center gap-1">
                 {isRemoteThread && !isDesktopLocalThread && (
@@ -995,6 +1035,7 @@ interface SidebarProjectThreadListProps {
   hiddenThreadStatus: ThreadStatusPill | null;
   orderedProjectThreadKeys: readonly string[];
   renderedThreads: readonly SidebarThreadTreeRow[];
+  allProjectThreads: readonly SidebarThreadSummary[];
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
   isThreadListExpanded: boolean;
@@ -1030,7 +1071,10 @@ interface SidebarProjectThreadListProps {
     originalTitle: string,
   ) => Promise<void>;
   cancelRename: () => void;
-  attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  attemptArchiveThread: (
+    threadRef: ScopedThreadRef,
+    options?: { readonly confirmed?: boolean },
+  ) => Promise<void>;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
   expandThreadListForProject: (projectKey: string) => void;
   collapseThreadListForProject: (projectKey: string) => void;
@@ -1048,6 +1092,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hiddenThreadStatus,
     orderedProjectThreadKeys,
     renderedThreads,
+    allProjectThreads,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -1101,6 +1146,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         renderedThreads.map((row) => {
           const { thread } = row;
           const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+          const subagentDescendants = getOwnedSubagentDescendants(allProjectThreads, thread);
           return (
             <SidebarThreadRow
               key={threadKey}
@@ -1114,6 +1160,13 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               isActive={activeRouteThreadKey === threadKey}
               jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
               appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+              subagentDescendantCount={subagentDescendants.length}
+              activeSubagentDescendantCount={
+                subagentDescendants.filter((descendant) =>
+                  threadRuntimeIsActive(descendant.runtime),
+                ).length
+              }
+              hasUnavailableSubagentParent={hasUnavailableSubagentParent(allProjectThreads, thread)}
               renamingThreadKey={renamingThreadKey}
               renamingTitle={renamingTitle}
               setRenamingTitle={setRenamingTitle}
@@ -1180,7 +1233,7 @@ interface SidebarProjectItemProps {
   activeRouteThreadKey: string | null;
   newThreadShortcutLabel: string | null;
   handleNewThread: ReturnType<typeof useNewThreadHandler>;
-  archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
+  archiveThread: ReturnType<typeof useThreadActions>["confirmAndArchiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   threadJumpLabelByKey: ReadonlyMap<string, string>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
@@ -1943,20 +1996,72 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (clicked !== "delete") return;
 
-      if (appSettingsConfirmThreadDelete) {
+      const selectedThreads = threadKeys.flatMap((threadKey) => {
+        const thread = sidebarThreadByKeyRef.current.get(threadKey);
+        return thread === undefined ? [] : [thread];
+      });
+      const rootThreads: typeof selectedThreads = [];
+      for (const selectedThread of selectedThreads) {
+        const selectedRef = scopeThreadRef(selectedThread.environmentId, selectedThread.id);
+        if (
+          rootThreads.some((rootThread) =>
+            readThreadSubtree(scopeThreadRef(rootThread.environmentId, rootThread.id)).some(
+              (entry) =>
+                entry.environmentId === selectedThread.environmentId &&
+                entry.id === selectedThread.id,
+            ),
+          )
+        ) {
+          continue;
+        }
+        const selectedSubtree = readThreadSubtree(selectedRef);
+        for (let index = rootThreads.length - 1; index >= 0; index -= 1) {
+          const rootThread = rootThreads[index];
+          if (
+            rootThread &&
+            selectedSubtree.some(
+              (entry) =>
+                entry.environmentId === rootThread.environmentId && entry.id === rootThread.id,
+            )
+          ) {
+            rootThreads.splice(index, 1);
+          }
+        }
+        rootThreads.push(selectedThread);
+      }
+      const deletedThreadKeys = new Set(
+        rootThreads.flatMap((rootThread) =>
+          readThreadSubtree(scopeThreadRef(rootThread.environmentId, rootThread.id)).map((entry) =>
+            scopedThreadKey(scopeThreadRef(entry.environmentId, entry.id)),
+          ),
+        ),
+      );
+      const cascadedCount = Math.max(0, deletedThreadKeys.size - selectedThreads.length);
+      const activeThreadCount = rootThreads
+        .flatMap((rootThread) =>
+          readThreadSubtree(scopeThreadRef(rootThread.environmentId, rootThread.id)),
+        )
+        .filter((entry) => threadRuntimeIsActive(entry.runtime)).length;
+      const deleteMessage =
+        cascadedCount > 0
+          ? `This permanently deletes the selected threads and ${cascadedCount} owned subagent thread${cascadedCount === 1 ? "" : "s"}, including their conversation and terminal history.`
+          : "This permanently deletes the selected threads, including their conversation and terminal history.";
+      const activeWarning =
+        activeThreadCount > 0
+          ? ` Active work in ${activeThreadCount} thread${activeThreadCount === 1 ? "" : "s"} will be cancelled.`
+          : "";
+
+      if (appSettingsConfirmThreadDelete || cascadedCount > 0 || activeThreadCount > 0) {
         const confirmed = await api.dialogs.confirm(
           [
-            `Delete ${count} thread${count === 1 ? "" : "s"}?`,
-            "This permanently clears conversation history for these threads.",
+            `Delete ${deletedThreadKeys.size} thread${deletedThreadKeys.size === 1 ? "" : "s"}?`,
+            `${deleteMessage}${activeWarning}`,
           ].join("\n"),
         );
         if (!confirmed) return;
       }
 
-      const deletedThreadKeys = new Set(threadKeys);
-      for (const threadKey of threadKeys) {
-        const thread = sidebarThreadByKeyRef.current.get(threadKey);
-        if (!thread) continue;
+      for (const thread of rootThreads) {
         const result = await deleteThread(scopeThreadRef(thread.environmentId, thread.id), {
           deletedThreadKeys,
         });
@@ -2113,8 +2218,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
 
   const attemptArchiveThread = useCallback(
-    async (threadRef: ScopedThreadRef) => {
-      const result = await archiveThread(threadRef);
+    async (threadRef: ScopedThreadRef, options?: { readonly confirmed?: boolean }) => {
+      const result = await archiveThread(threadRef, options);
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         toastManager.add(
@@ -2313,13 +2418,19 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
       if (clicked !== "delete") return;
-      if (appSettingsConfirmThreadDelete) {
-        const confirmed = await api.dialogs.confirm(
-          [
-            `Delete thread "${thread.title}"?`,
-            "This permanently clears conversation history for this thread.",
-          ].join("\n"),
-        );
+      const subtree = readThreadSubtree(threadRef);
+      const descendantCount = Math.max(0, subtree.length - 1);
+      const activeThreadCount = subtree.filter((entry) =>
+        threadRuntimeIsActive(entry.runtime),
+      ).length;
+      if (appSettingsConfirmThreadDelete || descendantCount > 0 || activeThreadCount > 0) {
+        const copy = threadSubtreeActionCopy({
+          action: "delete",
+          threadTitle: thread.title,
+          descendantCount,
+          activeThreadCount,
+        });
+        const confirmed = await api.dialogs.confirm([copy.title, copy.message].join("\n"));
         if (!confirmed) {
           return;
         }
@@ -2463,6 +2574,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
         renderedThreads={renderedThreads}
+        allProjectThreads={sidebarThreads}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}
@@ -3020,7 +3132,7 @@ interface SidebarProjectsContentProps {
   handleProjectDragEnd: (event: DragEndEvent) => void;
   handleProjectDragCancel: (event: DragCancelEvent) => void;
   handleNewThread: ReturnType<typeof useNewThreadHandler>;
-  archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
+  archiveThread: ReturnType<typeof useThreadActions>["confirmAndArchiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
   expandedThreadListsByProject: ReadonlySet<string>;
@@ -3310,7 +3422,7 @@ export default function Sidebar() {
   const sidebarShowSubagentThreads = useClientSettings((s) => s.sidebarShowSubagentThreads);
   const updateSettings = useUpdateClientSettings();
   const handleNewThread = useNewThreadHandler();
-  const { archiveThread, deleteThread } = useThreadActions();
+  const { confirmAndArchiveThread: archiveThread, deleteThread } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadRef = useParams({
     strict: false,

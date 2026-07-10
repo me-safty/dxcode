@@ -1436,7 +1436,7 @@ export function ProviderSettingsPanel() {
 
 export function ArchivedThreadsPanel() {
   const projects = useProjects();
-  const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
+  const { confirmAndUnarchiveThread, confirmAndDeleteThread } = useThreadActions();
   const environmentIds = useMemo(
     () => [...new Set(projects.map((project) => project.environmentId))],
     [projects],
@@ -1508,7 +1508,7 @@ export function ArchivedThreadsPanel() {
       );
 
       if (clicked === "unarchive") {
-        const result = await unarchiveThread(threadRef);
+        const result = await confirmAndUnarchiveThread(threadRef);
         if (result._tag === "Success") {
           refreshArchivedThreads();
         } else if (!isAtomCommandInterrupted(result)) {
@@ -1540,7 +1540,7 @@ export function ArchivedThreadsPanel() {
         }
       }
     },
-    [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
+    [confirmAndDeleteThread, confirmAndUnarchiveThread, refreshArchivedThreads],
   );
 
   return (
@@ -1620,7 +1620,7 @@ export function ArchivedThreadsPanel() {
                     className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
                     onClick={() => {
                       void (async () => {
-                        const result = await unarchiveThread(
+                        const result = await confirmAndUnarchiveThread(
                           scopeThreadRef(thread.environmentId, thread.id),
                         );
                         if (result._tag === "Success") {
