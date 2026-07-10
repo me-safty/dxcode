@@ -227,6 +227,27 @@ describe("provider update launch notification logic", () => {
     expect(canOneClickUpdateProviderCandidate(candidate, [candidate])).toBe(false);
   });
 
+  it("blocks a shared driver action while a sibling instance is already updating", () => {
+    const candidate = updateCandidate({
+      driver: driver("codex"),
+      instanceId: instanceId("codex"),
+    });
+    const activeSibling = provider({
+      driver: driver("codex"),
+      instanceId: instanceId("codex_work"),
+      updateState: {
+        status: "running",
+        startedAt: checkedAt,
+        finishedAt: null,
+        message: "Updating provider.",
+        output: null,
+      },
+    });
+
+    expect(hasOneClickUpdateProviderCandidate(candidate, [candidate, activeSibling])).toBe(true);
+    expect(canOneClickUpdateProviderCandidate(candidate, [candidate, activeSibling])).toBe(false);
+  });
+
   it("builds a notification key from provider latest versions", () => {
     const codex = updateCandidate({
       driver: driver("codex"),
@@ -554,6 +575,29 @@ describe("provider update launch notification logic", () => {
       tone: "loading",
       title: "Updating Codex",
       description: "Codex update in progress.",
+    });
+  });
+
+  it("shows a non-default instance's active update ahead of an idle default instance", () => {
+    const view = getProviderUpdateSidebarPillView([
+      provider({ driver: driver("codex"), instanceId: instanceId("codex") }),
+      provider({
+        driver: driver("codex"),
+        instanceId: instanceId("codex_work"),
+        updateState: {
+          status: "running",
+          startedAt: checkedAt,
+          finishedAt: null,
+          message: "Updating provider.",
+          output: null,
+        },
+      }),
+    ]);
+
+    expect(view).toMatchObject({
+      key: "loading:codex:running",
+      tone: "loading",
+      title: "Updating Codex",
     });
   });
 
@@ -887,7 +931,7 @@ describe("provider update launch notification logic", () => {
       providers: input.providers,
     });
 
-    it("groups each environment's outdated one-click candidates", () => {
+    it("groups each environment's outdated candidates and safe one-click targets", () => {
       const result = buildLocalEnvironmentUpdateGroups([
         environment({
           environmentId: "env-windows",
@@ -905,6 +949,97 @@ describe("provider update launch notification logic", () => {
       expect(result.isAnySettling).toBe(false);
       expect(result.groups.map((group) => group.label)).toEqual(["Windows", "WSL"]);
       expect(result.groups.every((group) => group.candidates.length === 1)).toBe(true);
+      expect(result.groups.every((group) => group.oneClickCandidates.length === 1)).toBe(true);
+      expect(result.groups.every((group) => group.runnableCandidates.length === 1)).toBe(true);
+    });
+
+    it("keeps settings-only updates visible without creating a runnable target", () => {
+      const { groups } = buildLocalEnvironmentUpdateGroups([
+        environment({
+          environmentId: "env-wsl",
+          label: "WSL",
+          providers: [
+            provider({
+              driver: driver("codex"),
+              instanceId: instanceId("codex_personal"),
+              latestVersion: "0.143.0",
+              updateCommand: "codex update",
+              updateActionKey:
+                "codex-native /home/me/.codex/packages/standalone/current/bin/codex update",
+            }),
+            provider({
+              driver: driver("codex"),
+              instanceId: instanceId("codex_work"),
+              latestVersion: "0.143.0",
+              updateCommand: "codex update",
+              updateActionKey:
+                "codex-native /home/me/work-codex/packages/standalone/current/bin/codex update",
+            }),
+          ],
+        }),
+      ]);
+
+      expect(groups[0]?.candidates).toHaveLength(1);
+      expect(groups[0]?.oneClickCandidates).toEqual([]);
+      expect(groups[0]?.runnableCandidates).toEqual([]);
+      expect(environmentGroupsWithUpdates(groups).map((group) => group.environmentId)).toEqual([
+        "env-wsl",
+      ]);
+      expect(localEnvironmentUpdateNotificationKey(groups)).toBe("env-wsl=codex:0.143.0");
+    });
+
+    it("keeps active update targets available for live progress but not redispatch", () => {
+      const active = provider({
+        driver: driver("codex"),
+        instanceId: instanceId("codex_wsl"),
+        updateState: {
+          status: "running",
+          startedAt: checkedAt,
+          finishedAt: null,
+          message: "Updating provider.",
+          output: null,
+        },
+      });
+      const { groups } = buildLocalEnvironmentUpdateGroups([
+        environment({
+          environmentId: "env-wsl",
+          label: "WSL",
+          providers: [active],
+        }),
+      ]);
+
+      expect(groups[0]?.candidates).toHaveLength(1);
+      expect(groups[0]?.oneClickCandidates).toHaveLength(1);
+      expect(groups[0]?.runnableCandidates).toEqual([]);
+    });
+
+    it("does not expose an idle representative while a same-driver sibling is active", () => {
+      const idleDefault = provider({
+        driver: driver("codex"),
+        instanceId: instanceId("codex"),
+      });
+      const activeSibling = provider({
+        driver: driver("codex"),
+        instanceId: instanceId("codex_work"),
+        updateState: {
+          status: "running",
+          startedAt: checkedAt,
+          finishedAt: null,
+          message: "Updating provider.",
+          output: null,
+        },
+      });
+      const { groups } = buildLocalEnvironmentUpdateGroups([
+        environment({
+          environmentId: "env-wsl",
+          label: "WSL",
+          providers: [idleDefault, activeSibling],
+        }),
+      ]);
+
+      expect(groups[0]?.candidates).toHaveLength(1);
+      expect(groups[0]?.oneClickCandidates).toHaveLength(1);
+      expect(groups[0]?.runnableCandidates).toEqual([]);
     });
 
     it("flags settling while a secondary backend is still connecting", () => {
@@ -1040,8 +1175,11 @@ describe("provider update launch notification logic", () => {
       environmentId: "env-wsl" as EnvironmentId,
       label: "WSL",
       isPrimary: false,
+      connectionState: "ready",
       isSettling: false,
       candidates: [updateCandidate({ driver: driver("codex"), latestVersion: "1.1.0" })],
+      oneClickCandidates: [updateCandidate({ driver: driver("codex"), latestVersion: "1.1.0" })],
+      runnableCandidates: [updateCandidate({ driver: driver("codex"), latestVersion: "1.1.0" })],
       providers: [],
     };
     const runningResult: ProviderUpdateToastView = {

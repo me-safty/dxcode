@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   deriveCodexStandaloneUpdateEnvironment,
   isCodexStandaloneCommandPath,
+  resolveCodexProviderMaintenanceCapabilities,
 } from "./CodexDriver.ts";
 
 describe("isCodexStandaloneCommandPath", () => {
@@ -65,5 +66,82 @@ describe("deriveCodexStandaloneUpdateEnvironment", () => {
 
   it("returns null when no install root precedes the standalone segment", () => {
     expect(deriveCodexStandaloneUpdateEnvironment("/packages/standalone/current/codex")).toBeNull();
+  });
+});
+
+describe("resolveCodexProviderMaintenanceCapabilities", () => {
+  it.each([
+    {
+      label: "bare command",
+      binaryPath: "codex",
+      resolvedCommandPath: "/home/u/.local/bin/codex",
+      expectedExecutable: "/home/u/.local/bin/codex",
+    },
+    {
+      label: "current alias",
+      binaryPath: "/home/u/.codex/packages/standalone/current/codex",
+      resolvedCommandPath: "/home/u/.codex/packages/standalone/current/codex",
+      expectedExecutable: "/home/u/.codex/packages/standalone/current/codex",
+    },
+    {
+      label: "visible alias",
+      binaryPath: "/usr/local/bin/codex",
+      resolvedCommandPath: "/usr/local/bin/codex",
+      expectedExecutable: "/usr/local/bin/codex",
+    },
+  ])("allows native updates for a $label with a versioned release realpath", (testCase) => {
+    expect(
+      resolveCodexProviderMaintenanceCapabilities({
+        binaryPath: testCase.binaryPath,
+        platform: "linux",
+        resolvedCommandPath: testCase.resolvedCommandPath,
+        realCommandPath:
+          "/home/u/.codex/packages/standalone/releases/0.111.0-x86_64-unknown-linux-musl/codex",
+      }),
+    ).toEqual({
+      provider: "codex",
+      packageName: "@openai/codex",
+      update: {
+        command: `CODEX_HOME=/home/u/.codex ${testCase.expectedExecutable} update`,
+        executable: testCase.expectedExecutable,
+        args: ["update"],
+        lockKey: "codex-native",
+        env: { CODEX_HOME: "/home/u/.codex" },
+      },
+    });
+  });
+
+  it.each([
+    "/home/u/.codex/packages/standalone/releases/0.111.0-x86_64-unknown-linux-musl/codex",
+    "/home/u/.codex/packages/standalone/releases/0.111.0-x86_64-unknown-linux-musl/bin/codex",
+  ])("disables one-click updates for an explicitly configured release path: %s", (binaryPath) => {
+    expect(
+      resolveCodexProviderMaintenanceCapabilities({
+        binaryPath,
+        resolvedCommandPath: binaryPath,
+        realCommandPath: binaryPath,
+      }),
+    ).toEqual({
+      provider: "codex",
+      packageName: "@openai/codex",
+      update: null,
+    });
+  });
+
+  it("disables one-click updates when a bare command resolves directly to a release", () => {
+    const releasePath =
+      "/home/u/.codex/packages/standalone/releases/0.111.0-x86_64-unknown-linux-musl/codex";
+
+    expect(
+      resolveCodexProviderMaintenanceCapabilities({
+        binaryPath: "codex",
+        resolvedCommandPath: releasePath,
+        realCommandPath: releasePath,
+      }),
+    ).toEqual({
+      provider: "codex",
+      packageName: "@openai/codex",
+      update: null,
+    });
   });
 });

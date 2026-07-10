@@ -3,6 +3,7 @@ import {
   type ServerProvider,
   type ServerProviderVersionAdvisory,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
@@ -13,6 +14,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+
+import { makeProviderMaintenanceManualCommand } from "./providerMaintenanceCommand.ts";
 
 const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
 const LATEST_VERSION_TIMEOUT_MS = 4_000;
@@ -44,7 +47,7 @@ export interface ProviderMaintenanceCapabilities {
 }
 
 export interface ProviderMaintenanceCommandAction {
-  readonly command: string;
+  readonly command: string | null;
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   readonly lockKey: string;
@@ -54,6 +57,7 @@ export interface ProviderMaintenanceCommandAction {
 export interface ProviderMaintenanceCapabilityResolutionOptions {
   readonly binaryPath?: string | null;
   readonly env?: NodeJS.ProcessEnv;
+  readonly platform?: NodeJS.Platform;
   readonly resolvedCommandPath?: string | null;
   readonly realCommandPath?: string | null;
 }
@@ -69,7 +73,6 @@ export interface PackageManagedProviderMaintenanceDefinition {
   readonly npmPackageName: string;
   readonly homebrewFormula: string | null;
   readonly nativeUpdate: {
-    readonly defaultExecutable: string;
     readonly args: ReadonlyArray<string>;
     readonly lockKey: string;
     readonly isCommandPath: (commandPath: string) => boolean;
@@ -109,12 +112,18 @@ export function makeProviderMaintenanceCapabilities(input: {
   readonly updateArgs: ReadonlyArray<string>;
   readonly updateLockKey: string | null;
   readonly updateEnv?: Readonly<Record<string, string>> | null;
+  readonly platform?: NodeJS.Platform;
 }): ProviderMaintenanceCapabilities {
   const update =
     input.updateExecutable === null || input.updateLockKey === null
       ? null
       : {
-          command: [input.updateExecutable, ...input.updateArgs].join(" "),
+          command: makeProviderMaintenanceManualCommand({
+            executable: input.updateExecutable,
+            args: input.updateArgs,
+            ...(input.updateEnv !== undefined ? { env: input.updateEnv } : {}),
+            ...(input.platform !== undefined ? { platform: input.platform } : {}),
+          }),
           executable: input.updateExecutable,
           args: input.updateArgs,
           lockKey: input.updateLockKey,
@@ -229,6 +238,7 @@ function makeNativeProviderMaintenanceCapabilities(
   options: {
     readonly updateExecutable: string;
     readonly updateEnv: Readonly<Record<string, string>> | null;
+    readonly platform?: NodeJS.Platform;
   },
 ): ProviderMaintenanceCapabilities {
   return makeProviderMaintenanceCapabilities({
@@ -238,6 +248,7 @@ function makeNativeProviderMaintenanceCapabilities(
     updateArgs: nativeUpdate.args,
     updateLockKey: nativeUpdate.lockKey,
     updateEnv: options.updateEnv,
+    ...(options.platform !== undefined ? { platform: options.platform } : {}),
   });
 }
 
@@ -316,10 +327,13 @@ export function resolvePackageManagedProviderMaintenance(
       );
       if (nativeCommandPath !== undefined) {
         return makeNativeProviderMaintenanceCapabilities(definition, nativeUpdate, {
-          updateExecutable: hasPathSeparator(binaryPath)
-            ? resolvedCommandPath
-            : nativeUpdate.defaultExecutable,
+          // Capability detection may use an instance-specific PATH that is not
+          // present in the long-lived server process. Pin the executable we
+          // actually resolved so the later update spawn cannot select a
+          // different installation (or fail with ENOENT).
+          updateExecutable: resolvedCommandPath,
           updateEnv: nativeUpdate.deriveEnv?.(nativeCommandPath) ?? null,
+          ...(options?.platform !== undefined ? { platform: options.platform } : {}),
         });
       }
     }
@@ -381,9 +395,11 @@ export const resolveProviderMaintenanceCapabilitiesEffect = Effect.fn(
   resolver: ProviderMaintenanceCapabilitiesResolver,
   options?: Omit<ProviderMaintenanceCapabilityResolutionOptions, "realCommandPath">,
 ) {
+  const platform = options?.platform ?? (yield* HostProcessPlatform);
+  const resolutionOptions = { ...options, platform };
   const binaryPath = nonEmptyString(options?.binaryPath);
   if (!binaryPath) {
-    return resolver.resolve(options);
+    return resolver.resolve(resolutionOptions);
   }
 
   const env = options?.env ?? (yield* readCommandLookupEnv);
@@ -392,7 +408,7 @@ export const resolveProviderMaintenanceCapabilitiesEffect = Effect.fn(
       Effect.catchTag("CommandResolutionError", () => Effect.succeed(null)),
     )) ?? (hasPathSeparator(binaryPath) ? binaryPath : null);
   if (!resolvedCommandPath) {
-    return resolver.resolve(options);
+    return resolver.resolve(resolutionOptions);
   }
 
   const fileSystem = yield* FileSystem.FileSystem;
@@ -400,7 +416,7 @@ export const resolveProviderMaintenanceCapabilitiesEffect = Effect.fn(
     .realPath(resolvedCommandPath)
     .pipe(Effect.orElseSucceed(() => resolvedCommandPath));
   return resolver.resolve({
-    ...options,
+    ...resolutionOptions,
     env,
     resolvedCommandPath,
     realCommandPath,
