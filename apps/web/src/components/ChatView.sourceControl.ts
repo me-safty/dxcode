@@ -38,6 +38,7 @@ interface UseSourceControlThreadMetadataRoutingInput {
   readonly activeThreadRef: ScopedThreadRef | null;
   readonly activeThreadKey: string | null;
   readonly draftId: DraftId | null;
+  readonly expectedBranch: string | null;
   readonly existingThreadKeys: ReadonlySet<string>;
   readonly isServerThread: boolean;
   readonly setDraftThreadContext: SetDraftThreadContext;
@@ -68,6 +69,7 @@ interface SourceControlRightPanelSurfaceState {
 
 interface SourceControlServerMetadataUpdateInput {
   readonly activeThreadRef: ScopedThreadRef;
+  readonly expectedBranch: string | null;
   readonly metadata: SourceControlThreadRefChange;
   readonly requestSequence: number;
   readonly getCurrentSequence: () => number | undefined;
@@ -150,8 +152,14 @@ export function resolveVisibleSourceControlSurface(input: {
 export async function runSourceControlServerMetadataUpdate(
   input: SourceControlServerMetadataUpdateInput,
 ): Promise<SourceControlServerMetadataUpdateResult> {
-  const { activeThreadRef, getCurrentSequence, metadata, requestSequence, updateThreadMetadata } =
-    input;
+  const {
+    activeThreadRef,
+    expectedBranch,
+    getCurrentSequence,
+    metadata,
+    requestSequence,
+    updateThreadMetadata,
+  } = input;
   let result: AtomCommandResult<unknown, unknown>;
   try {
     result = await updateThreadMetadata({
@@ -159,6 +167,7 @@ export async function runSourceControlServerMetadataUpdate(
       input: {
         threadId: activeThreadRef.threadId,
         branch: metadata.branch,
+        expectedBranch,
         worktreePath: metadata.worktreePath,
       },
     });
@@ -235,6 +244,7 @@ export function useSourceControlThreadMetadataRouting(
     activeThreadKey,
     activeThreadRef,
     draftId,
+    expectedBranch,
     existingThreadKeys,
     isServerThread,
     setDraftThreadContext,
@@ -292,6 +302,7 @@ export function useSourceControlThreadMetadataRouting(
       metadataUpdateSequenceByThreadKeyRef.current[targetThreadKey] = requestSequence;
       const result = await runSourceControlServerMetadataUpdate({
         activeThreadRef: activeThreadMetadataRef,
+        expectedBranch,
         getCurrentSequence: () => metadataUpdateSequenceByThreadKeyRef.current[targetThreadKey],
         metadata,
         requestSequence,
@@ -309,7 +320,14 @@ export function useSourceControlThreadMetadataRouting(
         [targetThreadKey]: result.message,
       }));
     },
-    [activeThreadMetadataRef, draftId, isServerThread, setDraftThreadContext, updateThreadMetadata],
+    [
+      activeThreadMetadataRef,
+      draftId,
+      expectedBranch,
+      isServerThread,
+      setDraftThreadContext,
+      updateThreadMetadata,
+    ],
   );
 
   return {

@@ -21,6 +21,7 @@ const metadata = {
   branch: "feature/source-control",
   worktreePath: "/tmp/source-control",
 };
+const expectedBranch = "feature/previous-ref";
 
 describe("sourceControlMetadataErrorFromFailure", () => {
   it("formats structured object errors without collapsing to object text", () => {
@@ -116,6 +117,7 @@ describe("runSourceControlServerMetadataUpdate", () => {
     const calls: unknown[] = [];
     const result = await runSourceControlServerMetadataUpdate({
       activeThreadRef,
+      expectedBranch,
       getCurrentSequence: () => 1,
       metadata,
       requestSequence: 1,
@@ -132,6 +134,7 @@ describe("runSourceControlServerMetadataUpdate", () => {
         input: {
           threadId,
           branch: metadata.branch,
+          expectedBranch,
           worktreePath: metadata.worktreePath,
         },
       },
@@ -141,6 +144,7 @@ describe("runSourceControlServerMetadataUpdate", () => {
   it("drops stale results after a newer server-thread metadata request", async () => {
     const result = await runSourceControlServerMetadataUpdate({
       activeThreadRef,
+      expectedBranch,
       getCurrentSequence: () => 2,
       metadata,
       requestSequence: 1,
@@ -153,6 +157,7 @@ describe("runSourceControlServerMetadataUpdate", () => {
   it("drops stale thrown errors after a newer server-thread metadata request", async () => {
     const result = await runSourceControlServerMetadataUpdate({
       activeThreadRef,
+      expectedBranch,
       getCurrentSequence: () => 2,
       metadata,
       requestSequence: 1,
@@ -167,6 +172,7 @@ describe("runSourceControlServerMetadataUpdate", () => {
   it("converts thrown update errors into controlled metadata failures", async () => {
     const result = await runSourceControlServerMetadataUpdate({
       activeThreadRef,
+      expectedBranch,
       getCurrentSequence: () => 1,
       metadata,
       requestSequence: 1,
@@ -184,6 +190,7 @@ describe("runSourceControlServerMetadataUpdate", () => {
   it("keeps interrupted command results silent", async () => {
     const result = await runSourceControlServerMetadataUpdate({
       activeThreadRef,
+      expectedBranch,
       getCurrentSequence: () => 1,
       metadata,
       requestSequence: 1,
