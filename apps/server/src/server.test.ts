@@ -3735,7 +3735,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({})),
       );
 
-      assert.deepEqual(response.availableEditors, ["file-manager"]);
+      assert.deepEqual(response.availableEditors, []);
     }).pipe(TestClock.withLive, Effect.provide(NodeHttpServer.layerTest)),
   );
 

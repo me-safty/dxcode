@@ -118,7 +118,7 @@ const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchComma
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const EDITOR_DISCOVERY_TIMEOUT = Duration.millis(500);
-const EDITOR_DISCOVERY_FALLBACK = ["file-manager"] as const;
+const EDITOR_DISCOVERY_FALLBACK = [] as const;
 
 function unexpectedCompatibilityError(error: never): never {
   throw new Error(`Unhandled compatibility error: ${String(error)}`);
