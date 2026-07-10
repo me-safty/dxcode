@@ -18,6 +18,18 @@ import {
   resolveAsset,
 } from "./AssetAccess.ts";
 
+type FallbackTag =
+  | "project-favicon"
+  | "project-favicon-react"
+  | "project-favicon-nextjs"
+  | "project-favicon-vue"
+  | "project-favicon-svelte"
+  | "project-favicon-angular"
+  | "project-favicon-android"
+  | "project-favicon-youtube"
+  | "project-favicon-tiktok"
+  | "project-favicon-instagram";
+
 const configLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-asset-access-test-",
 });
@@ -249,7 +261,7 @@ describe("AssetAccess", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
 
-      const resolveFallbackSvg = Effect.fnUntraced(function* (root: string) {
+      const resolveFallbackTag = Effect.fnUntraced(function* (root: string) {
         const result = yield* issueAssetUrl({
           resource: { _tag: "project-favicon", cwd: root },
         });
@@ -260,36 +272,88 @@ describe("AssetAccess", () => {
           suffix.slice(separatorIndex + 1),
         );
         expect(resolved?.kind).toBe("project-favicon-fallback");
-        return resolved?.kind === "project-favicon-fallback" ? resolved.svg : "";
+        if (resolved?.kind !== "project-favicon-fallback") return "project-favicon" as FallbackTag;
+        const match = /data-fallback="([^"]+)"/.exec(resolved.svg);
+        return (match?.[1] ?? "project-favicon") as FallbackTag;
       });
 
-      const reactRoot = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-react-",
-      });
-      yield* fileSystem.writeFileString(
-        path.join(reactRoot, "package.json"),
-        '{"dependencies":{"react":"^19.0.0"}}',
-      );
-      expect(yield* resolveFallbackSvg(reactRoot)).toContain(
-        'data-fallback="project-favicon-react"',
-      );
+      const makePkgRoot = (prefix: string, deps: Record<string, string>) =>
+        Effect.gen(function* () {
+          const root = yield* fileSystem.makeTempDirectoryScoped({ prefix });
+          const entries = Object.entries(deps)
+            .map(([k, v]) => `"${k}":"${v}"`)
+            .join(",");
+          yield* fileSystem.writeFileString(
+            path.join(root, "package.json"),
+            `{"dependencies":{${entries}}}`,
+          );
+          return root;
+        });
 
+      // Next.js takes priority over plain React
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-next-", { next: "^15.0.0", react: "^19.0.0" }),
+        ),
+      ).toBe("project-favicon-nextjs");
+
+      // Plain React
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-react-", { react: "^19.0.0" }),
+        ),
+      ).toBe("project-favicon-react");
+
+      // Angular
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-ng-", { "@angular/core": "^18.0.0" }),
+        ),
+      ).toBe("project-favicon-angular");
+
+      // Svelte
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-svelte-", { svelte: "^5.0.0" }),
+        ),
+      ).toBe("project-favicon-svelte");
+
+      // Vue
+      expect(
+        yield* resolveFallbackTag(yield* makePkgRoot("t3-asset-favicon-vue-", { vue: "^3.0.0" })),
+      ).toBe("project-favicon-vue");
+
+      // Android (Gradle marker file)
       const androidRoot = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-asset-favicon-android-",
       });
       yield* fileSystem.writeFileString(path.join(androidRoot, "build.gradle"), "");
-      expect(yield* resolveFallbackSvg(androidRoot)).toContain(
-        'data-fallback="project-favicon-android"',
-      );
+      expect(yield* resolveFallbackTag(androidRoot)).toBe("project-favicon-android");
 
-      const plainRoot = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-asset-favicon-plain-",
+      // YouTube (project name matching)
+      const ytRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-youtube-companion-",
       });
-      yield* fileSystem.writeFileString(
-        path.join(plainRoot, "package.json"),
-        '{"dependencies":{"express":"^5.0.0"}}',
-      );
-      expect(yield* resolveFallbackSvg(plainRoot)).toBe(FALLBACK_PROJECT_FAVICON_SVG);
+      expect(yield* resolveFallbackTag(ytRoot)).toBe("project-favicon-youtube");
+
+      // TikTok (project name matching)
+      const tiktokRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-tiktok-bot-",
+      });
+      expect(yield* resolveFallbackTag(tiktokRoot)).toBe("project-favicon-tiktok");
+
+      // Instagram (project name matching)
+      const igRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-insta-poster-",
+      });
+      expect(yield* resolveFallbackTag(igRoot)).toBe("project-favicon-instagram");
+
+      // Generic fallback for unrecognized stacks
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-plain-", { express: "^5.0.0" }),
+        ),
+      ).toBe("project-favicon");
     }).pipe(Effect.provide(testLayer)),
   );
 
