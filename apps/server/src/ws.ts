@@ -1222,9 +1222,18 @@ const makeWsRpcLayer = (
 
               // The HTTP/cached path above resumes from a known sequence. For
               // clients that fall back to a WebSocket snapshot, acquire the live
-              // subscription before reading the atomic snapshot so events emitted
-              // during that read can be filtered against its sequence and retained.
+              // subscription and drain its thread-filtered stream into a scoped
+              // buffer before reading the atomic snapshot. This retains matching
+              // events without allowing the underlying unbounded subscription to
+              // accumulate unrelated orchestration traffic during a slow read.
               const liveStream = yield* subscribeThreadDetailEvents(input.threadId);
+              const liveBuffer =
+                yield* Queue.unbounded<
+                  Extract<OrchestrationThreadStreamItem, { readonly kind: "event" }>
+                >();
+              yield* Effect.forkScoped(
+                liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
+              );
 
               const snapshot = yield* projectionSnapshotQuery
                 .getThreadDetailSnapshot(input.threadId)
@@ -1245,7 +1254,7 @@ const makeWsRpcLayer = (
                 });
               }
 
-              const liveTailStream = liveStream.pipe(
+              const liveTailStream = Stream.fromQueue(liveBuffer).pipe(
                 Stream.filter((item) => item.event.sequence > snapshot.value.snapshotSequence),
               );
 
