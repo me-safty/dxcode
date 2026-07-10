@@ -106,6 +106,31 @@ describe("thread relationships", () => {
     expect(rows.at(-1)?.hasSubagentChildren).toBe(false);
   });
 
+  it("only returns ancestors from the projected tree", () => {
+    const orphan = treeThread({
+      id: "orphan",
+      parentId: "missing",
+      relationship: "subagent",
+    });
+    const first = treeThread({
+      id: "cycle-a",
+      parentId: "cycle-b",
+      relationship: "subagent",
+    });
+    const second = treeThread({
+      id: "cycle-b",
+      parentId: "cycle-a",
+      relationship: "subagent",
+    });
+    const threads = [orphan, first, second];
+
+    expect(getSubagentThreadAncestorKeys(threads, subagentThreadKey(orphan))).toEqual(new Set());
+    expect(getSubagentThreadAncestorKeys(threads, subagentThreadKey(first))).toEqual(new Set());
+    expect(getSubagentThreadAncestorKeys(threads, subagentThreadKey(second))).toEqual(
+      new Set([subagentThreadKey(first)]),
+    );
+  });
+
   it("keeps missing parents and cycles navigable without recursive traversal", () => {
     const root = ThreadId.make("thread-root");
     const child = ThreadId.make("thread-child");
