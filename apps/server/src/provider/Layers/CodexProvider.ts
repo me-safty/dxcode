@@ -26,6 +26,7 @@ import { ServerSettingsError } from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
@@ -285,99 +286,6 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
     },
   };
 }
-
-export const T3CODE_CODEX_LAUNCH_ARGS_ENV = "T3CODE_CODEX_LAUNCH_ARGS";
-
-export const resolveCodexLaunchArgs = (
-  launchArgs?: string,
-  environment: NodeJS.ProcessEnv = process.env,
-) => environment[T3CODE_CODEX_LAUNCH_ARGS_ENV]?.trim() || launchArgs?.trim() || "";
-
-export const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> => {
-  const input = launchArgs?.trim();
-  if (!input) return [];
-
-  const args: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | undefined;
-  let quoted = false;
-
-  for (let index = 0; index < input.length; index++) {
-    const char = input[index];
-    if (char === undefined) continue;
-
-    if (quote) {
-      if (char === quote) {
-        quote = undefined;
-        quoted = true;
-      } else if (char === "\\" && quote === '"') {
-        const next = input[index + 1];
-        if (next !== undefined && ['"', "\\", "$", "`"].includes(next)) {
-          current += next;
-          index++;
-        } else {
-          current += char;
-        }
-      } else {
-        current += char;
-      }
-      continue;
-    }
-
-    if (char === "'" || char === '"') {
-      quote = char;
-      quoted = true;
-    } else if (/\s/.test(char)) {
-      if (current || quoted) {
-        args.push(current);
-        current = "";
-        quoted = false;
-      }
-    } else if (char === "\\") {
-      const next = input[index + 1];
-      if (next !== undefined && /\s/.test(next)) {
-        current += next;
-        index++;
-      } else {
-        current += char;
-      }
-    } else {
-      current += char;
-    }
-  }
-
-  if (current || quoted) args.push(current);
-  return args;
-};
-
-export const codexAppServerArgs = (launchArgs?: string) => [
-  "app-server",
-  ...codexLaunchArgv(launchArgs),
-];
-
-export const codexExecLaunchArgs = (launchArgs?: string) => {
-  const args = codexLaunchArgv(launchArgs);
-  const execArgs: Array<string> = [];
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index];
-    if (arg === undefined) continue;
-    if (arg === "--strict-config" || arg.startsWith("--config=") || arg.startsWith("-c=")) {
-      execArgs.push(arg);
-    } else if (arg === "--config" || arg === "-c" || arg === "--enable" || arg === "--disable") {
-      execArgs.push(arg);
-      const value = args[index + 1];
-      if (value !== undefined && !value.startsWith("-")) {
-        execArgs.push(value);
-        index++;
-      } else {
-        execArgs.pop();
-      }
-    } else if (arg.startsWith("--enable=") || arg.startsWith("--disable=")) {
-      execArgs.push(arg);
-    }
-  }
-  return execArgs;
-};
 
 const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
   readonly binaryPath: string;

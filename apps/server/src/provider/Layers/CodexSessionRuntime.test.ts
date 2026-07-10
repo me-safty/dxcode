@@ -12,9 +12,9 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
+import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
-  codexSessionAppServerArgs,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,

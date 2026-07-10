@@ -5,9 +5,8 @@ import { describe, it } from "vite-plus/test";
 import {
   codexAppServerArgs,
   codexExecLaunchArgs,
-  codexLaunchArgv,
   resolveCodexLaunchArgs,
-} from "./CodexProvider.ts";
+} from "./codexLaunchArgs.ts";
 
 describe("resolveCodexLaunchArgs", () => {
   it("uses T3CODE_CODEX_LAUNCH_ARGS before configured settings", () => {
@@ -26,24 +25,6 @@ describe("resolveCodexLaunchArgs", () => {
 
   it("ignores whitespace-only environment values", () => {
     NodeAssert.equal(resolveCodexLaunchArgs("", { T3CODE_CODEX_LAUNCH_ARGS: "   " }), "");
-  });
-});
-
-describe("codexLaunchArgv", () => {
-  it("preserves quoted values and escaped spaces", () => {
-    NodeAssert.deepStrictEqual(
-      codexLaunchArgv(
-        String.raw`--config model="gpt 5" --enable foo\ bar --config=profile='work profile'`,
-      ),
-      ["--config", "model=gpt 5", "--enable", "foo bar", "--config=profile=work profile"],
-    );
-  });
-
-  it("preserves literal backslashes in path values", () => {
-    NodeAssert.deepStrictEqual(
-      codexLaunchArgv(String.raw`--config cacheDir=C:\Users\me --config "quoted=C:\Users\me"`),
-      ["--config", String.raw`cacheDir=C:\Users\me`, "--config", String.raw`quoted=C:\Users\me`],
-    );
   });
 });
 
