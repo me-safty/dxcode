@@ -38,6 +38,21 @@ export interface OrchestrationEngineShape {
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
 
   /**
+   * Replay persisted events for a single thread aggregate from an exclusive
+   * sequence cursor. Backs incremental thread catch-up (Fix 2).
+   *
+   * @param threadId - Thread aggregate (stream) id.
+   * @param fromSequenceExclusive - Sequence cursor (exclusive).
+   * @param limit - Maximum number of events to emit.
+   * @returns Stream containing ordered events for the thread.
+   */
+  readonly readThreadEvents: (
+    threadId: string,
+    fromSequenceExclusive: number,
+    limit?: number,
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
+
+  /**
    * Dispatch a validated orchestration command.
    *
    * @param command - Valid orchestration command.

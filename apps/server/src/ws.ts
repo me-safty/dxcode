@@ -1,12 +1,14 @@
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
@@ -25,6 +27,8 @@ import {
   type DiscoveredLocalServerList,
   EventId,
   type OrchestrationCommand,
+  type CompressionCodec,
+  layerCompressedJson,
   type GitActionProgressEvent,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
@@ -51,6 +55,8 @@ import {
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   EnvironmentAuthorizationError,
+  type OrchestrationThread,
+  type OrchestrationThreadV2StreamItem,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -61,7 +67,9 @@ import {
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
-import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { RpcServer } from "effect/unstable/rpc";
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
+import * as zlib from "node:zlib";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as ServerConfig from "./config.ts";
@@ -70,6 +78,13 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ThreadSyncQuery from "./orchestration/Services/ThreadSyncQuery.ts";
+import {
+  buildSnapshotChunks,
+  externalizeActivities,
+  externalizeThreadEvent,
+  trimWindowMessage,
+} from "./orchestration/ThreadSyncWire.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -115,6 +130,7 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -252,6 +268,31 @@ function projectSetupScriptCompatibilityDetail(
   }
 }
 
+// Incremental thread catch-up (Fix 2): when a reconnecting client is more than
+// this many events behind, replaying the delta is no longer cheaper than a fresh
+// (compacted) snapshot, so the server falls back to a full snapshot.
+const THREAD_CATCHUP_MAX_EVENTS = 5_000;
+
+// Loose wire shape for the thread-stream head (snapshot | catch-up | event).
+// Structurally matches `OrchestrationThreadStreamItem` but carries plain `number`
+// sequences (the projection watermark is a `number`); the RPC layer validates the
+// outgoing frames against the schema at runtime. Kept local so both head branches
+// unify to one `Stream` type.
+type ThreadStreamHeadItem =
+  | {
+      readonly kind: "snapshot";
+      readonly snapshot: {
+        readonly snapshotSequence: number;
+        readonly thread: OrchestrationThread;
+      };
+    }
+  | {
+      readonly kind: "catchup";
+      readonly fromSequence: number;
+      readonly toSequence: number;
+    }
+  | { readonly kind: "event"; readonly event: OrchestrationEvent };
+
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
   {
@@ -274,16 +315,24 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   );
 }
 
+// Thread events that are SAFE to carry in a catch-up delta: detail events (which
+// mutate the client's thread) plus the "*-requested" events the client reducer
+// treats as pure no-ops. A non-delta-safe thread event in the window (deleted /
+// archived / meta-updated / mode change) alters existence or metadata a delta
+// can't convey and must force a full snapshot — but these no-ops must NOT, or an
+// approval-parked thread would re-download in full on every reconnect (Fix 2 review).
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.getTurnDiff, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.getThreadHistoryPage, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.replayEvents, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.subscribeThreadV2, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
@@ -396,6 +445,7 @@ const makeWsRpcLayer = (
       const currentSessionId = currentSession.sessionId;
       const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+      const threadSyncQuery = yield* ThreadSyncQuery.ThreadSyncQuery;
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
@@ -1038,6 +1088,37 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.getThreadHistoryPage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadHistoryPage,
+            Effect.gen(function* () {
+              const result = yield* threadSyncQuery.getHistoryPage(input);
+              if (result.page === null) {
+                return yield* new OrchestrationGetSnapshotError({
+                  message: "Thread history changed; reload the tail window.",
+                  cause: {
+                    requestedHistoryEpoch: input.historyEpoch,
+                    currentHistoryEpoch: result.currentHistoryEpoch,
+                  },
+                });
+              }
+              return {
+                ...result.page,
+                messages: result.page.messages.map(trimWindowMessage),
+                activities: yield* externalizeActivities(result.page.activities),
+              };
+            }).pipe(
+              Effect.mapError((cause) =>
+                isOrchestrationGetSnapshotError(cause)
+                  ? cause
+                  : new OrchestrationGetSnapshotError({
+                      message: `Failed to load thread history for ${input.threadId}`,
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.replayEvents]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.replayEvents,
@@ -1235,6 +1316,245 @@ const makeWsRpcLayer = (
                 }),
                 liveStream,
               );
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeThreadV2]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeThreadV2,
+            Effect.gen(function* () {
+              const rawLive = orchestrationEngine.streamDomainEvents.pipe(
+                Stream.filter(
+                  (event) =>
+                    event.aggregateKind === "thread" && event.aggregateId === input.threadId,
+                ),
+              );
+              const liveQueue = yield* Queue.dropping<OrchestrationEvent>(2_048);
+              const overflow = yield* Deferred.make<void>();
+              yield* rawLive.pipe(
+                Stream.runForEach((event) =>
+                  Queue.offer(liveQueue, event).pipe(
+                    Effect.flatMap((accepted) =>
+                      accepted
+                        ? Effect.void
+                        : Deferred.succeed(overflow, undefined).pipe(Effect.asVoid),
+                    ),
+                  ),
+                ),
+                Effect.forkScoped,
+              );
+
+              const tail = yield* threadSyncQuery.getTail(input.threadId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to load thread tail ${input.threadId}`,
+                      cause,
+                    }),
+                ),
+              );
+              if (Option.isNone(tail)) {
+                // A cached client reconnecting after the thread was hard-deleted
+                // must receive the terminal event (so it can clean up its cache)
+                // rather than an error it will retry forever. The tail query only
+                // returns nothing for deleted threads; replay the lifecycle
+                // event from the log when the client holds a resume cursor.
+                if (input.sinceSequence !== undefined) {
+                  // Page to the END of the thread's log: the deletion is always
+                  // its final event, and a single capped read would miss it when
+                  // more than one page of events accumulated since the cursor.
+                  const deletedEvent = yield* Effect.gen(function* () {
+                    let cursor = input.sinceSequence ?? 0;
+                    for (;;) {
+                      const page = yield* Stream.runCollect(
+                        orchestrationEngine.readThreadEvents(
+                          input.threadId,
+                          cursor,
+                          THREAD_CATCHUP_MAX_EVENTS,
+                        ),
+                      ).pipe(
+                        Effect.map((events) => Array.from(events)),
+                        Effect.catch(() => Effect.succeed([] as Array<OrchestrationEvent>)),
+                      );
+                      const found = page.find((event) => event.type === "thread.deleted");
+                      if (found !== undefined) return found;
+                      if (page.length < THREAD_CATCHUP_MAX_EVENTS) return undefined;
+                      cursor = page[page.length - 1]!.sequence;
+                    }
+                  });
+                  if (deletedEvent !== undefined) {
+                    const enriched = yield* enrichOrchestrationEvents([deletedEvent]);
+                    return Stream.fromIterable<OrchestrationThreadV2StreamItem>([
+                      {
+                        kind: "catchup" as const,
+                        historyEpoch: input.historyEpoch ?? 0,
+                        fromSequence: input.sinceSequence,
+                        toSequence: deletedEvent.sequence,
+                        eventCount: enriched.length,
+                      },
+                      ...enriched.map((event) => ({ kind: "event" as const, event })),
+                    ]);
+                  }
+                }
+                return yield* new OrchestrationGetSnapshotError({
+                  message: `Thread ${input.threadId} was not found`,
+                  cause: input.threadId,
+                });
+              }
+
+              const snapshot = tail.value;
+              const streamHead: ReadonlyArray<OrchestrationThreadV2StreamItem> = yield* Effect.gen(
+                function* () {
+                  if (
+                    input.sinceSequence !== undefined &&
+                    input.historyEpoch === snapshot.historyEpoch &&
+                    input.sinceSequence <= snapshot.watermark
+                  ) {
+                    const rawCatchup = yield* Stream.runCollect(
+                      orchestrationEngine.readThreadEvents(
+                        input.threadId,
+                        input.sinceSequence,
+                        THREAD_CATCHUP_MAX_EVENTS + 1,
+                      ),
+                    ).pipe(Effect.map((events) => Array.from(events)));
+                    const catchup = rawCatchup.filter(
+                      (event) => event.sequence <= snapshot.watermark,
+                    );
+                    if (
+                      catchup.length <= THREAD_CATCHUP_MAX_EVENTS &&
+                      catchup.every((event) => event.type !== "thread.reverted")
+                    ) {
+                      const enriched = yield* enrichOrchestrationEvents(catchup);
+                      const externalized = yield* Effect.forEach(enriched, externalizeThreadEvent, {
+                        concurrency: 4,
+                      });
+                      return [
+                        {
+                          kind: "catchup" as const,
+                          historyEpoch: snapshot.historyEpoch,
+                          fromSequence: input.sinceSequence,
+                          toSequence: snapshot.watermark,
+                          eventCount: externalized.length,
+                        },
+                        ...externalized.map((event) => ({
+                          kind: "event" as const,
+                          event,
+                        })),
+                      ];
+                    }
+                  }
+
+                  const head = {
+                    ...snapshot.head,
+                    pendingRequests: yield* externalizeActivities(snapshot.head.pendingRequests),
+                  };
+                  const activities = yield* externalizeActivities(snapshot.activities);
+                  const snapshotId = yield* crypto.randomUUIDv4;
+                  const built = buildSnapshotChunks({
+                    snapshotId,
+                    head,
+                    messages: snapshot.messages,
+                    activities,
+                  });
+                  const oldestMessage = built.messages[0];
+                  const oldestActivity = built.activities[0];
+                  return [
+                    {
+                      kind: "snapshot-start" as const,
+                      snapshotId,
+                      historyEpoch: snapshot.historyEpoch,
+                      watermark: snapshot.watermark,
+                      chunkCount: built.chunks.length,
+                      inlineBytes: built.inlineBytes,
+                    },
+                    ...built.chunks,
+                    {
+                      kind: "snapshot-complete" as const,
+                      snapshotId,
+                      historyEpoch: snapshot.historyEpoch,
+                      lastAppliedSequence: snapshot.watermark,
+                      before: {
+                        message:
+                          oldestMessage === undefined
+                            ? null
+                            : {
+                                createdAt: oldestMessage.createdAt,
+                                messageId: oldestMessage.id,
+                              },
+                        activity:
+                          oldestActivity === undefined
+                            ? null
+                            : {
+                                createdAt: oldestActivity.createdAt,
+                                activityId: oldestActivity.id,
+                              },
+                      },
+                      hasOlderMessages: snapshot.head.counts.messages > built.messages.length,
+                      hasOlderActivities: snapshot.head.counts.activities > built.activities.length,
+                    },
+                  ];
+                },
+              ).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to prepare thread tail ${input.threadId}`,
+                      cause,
+                    }),
+                ),
+              );
+
+              const lastSentSequence = yield* Ref.make(snapshot.watermark);
+              const liveEvents = Stream.fromQueue(liveQueue).pipe(
+                Stream.filter((event) => event.sequence > snapshot.watermark),
+                Stream.mapEffect((event) => {
+                  if (event.type === "thread.reverted") {
+                    return Effect.succeed<OrchestrationThreadV2StreamItem>({
+                      kind: "resync-required" as const,
+                      reason: "history-invalidated" as const,
+                    });
+                  }
+                  return externalizeThreadEvent(event).pipe(
+                    Effect.tap((externalized) => Ref.set(lastSentSequence, externalized.sequence)),
+                    Effect.map(
+                      (externalized): OrchestrationThreadV2StreamItem => ({
+                        kind: "event" as const,
+                        event: externalized,
+                      }),
+                    ),
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: `Failed to prepare live thread event ${input.threadId}`,
+                          cause,
+                        }),
+                    ),
+                  );
+                }),
+              );
+              const overflowEvent = Stream.fromEffect(Deferred.await(overflow)).pipe(
+                Stream.map(
+                  (): OrchestrationThreadV2StreamItem => ({
+                    kind: "resync-required" as const,
+                    reason: "live-buffer-overflow" as const,
+                  }),
+                ),
+              );
+              const keepalives = Stream.fromEffectSchedule(
+                Ref.get(lastSentSequence),
+                Schedule.spaced("15 seconds"),
+              ).pipe(
+                Stream.map((sequence) => ({
+                  kind: "keepalive" as const,
+                  sequence,
+                })),
+              );
+              const boundedLive = liveEvents.pipe(
+                Stream.merge(overflowEvent),
+                Stream.merge(keepalives),
+                Stream.takeUntil((item) => item.kind === "resync-required"),
+              );
+              return Stream.concat(Stream.fromIterable(streamHead), boundedLive);
             }),
             { "rpc.aggregate": "orchestration" },
           ),
@@ -1859,66 +2179,82 @@ const makeWsRpcLayer = (
     }),
   );
 
+// Compression is capability-gated on /ws-compressed. /ws stays byte-for-byte
+// JSON compatible with pre-negotiation clients.
+const nodeGzipCodec: CompressionCodec = {
+  compressSync: (b) => zlib.gzipSync(b, { level: 4 }),
+  decompressSync: (b) => zlib.gunzipSync(b),
+  threshold: 1024,
+};
+
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
-    return HttpRouter.add(
-      "GET",
-      "/ws",
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-        const sessions = yield* SessionStore.SessionStore;
-        const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
-          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-            failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-          ),
-          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-            failEnvironmentInternal("internal_error", error),
-          ),
-        );
-        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
-          disableTracing: true,
-        }).pipe(
-          Effect.provide(
-            makeWsRpcLayer(session, previewAutomationBroker).pipe(
-              Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(ProviderMaintenanceRunner.layer),
-              Layer.provide(
-                SourceControlDiscovery.layer.pipe(
-                  Layer.provide(
-                    SourceControlProviderRegistry.layer.pipe(
-                      Layer.provide(
-                        Layer.mergeAll(
-                          AzureDevOpsCli.layer,
-                          BitbucketApi.layer,
-                          GitHubCli.layer,
-                          GitLabCli.layer,
+    const makeRoute = (
+      path: "/ws" | "/ws-compressed",
+      serialization: Layer.Layer<RpcSerialization.RpcSerialization, never, never>,
+    ) =>
+      HttpRouter.add(
+        "GET",
+        path,
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+          const sessions = yield* SessionStore.SessionStore;
+          const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
+            Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+              failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+            ),
+            Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+              failEnvironmentInternal("internal_error", error),
+            ),
+          );
+          const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
+            disableTracing: true,
+          }).pipe(
+            Effect.provide(
+              makeWsRpcLayer(session, previewAutomationBroker).pipe(
+                Layer.provideMerge(serialization),
+                Layer.provide(ProviderMaintenanceRunner.layer),
+                Layer.provide(
+                  SourceControlDiscovery.layer.pipe(
+                    Layer.provide(
+                      SourceControlProviderRegistry.layer.pipe(
+                        Layer.provide(
+                          Layer.mergeAll(
+                            AzureDevOpsCli.layer,
+                            BitbucketApi.layer,
+                            GitHubCli.layer,
+                            GitLabCli.layer,
+                          ),
+                        ),
+                        Layer.provideMerge(GitVcsDriver.layer),
+                        Layer.provide(
+                          VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
                         ),
                       ),
-                      Layer.provideMerge(GitVcsDriver.layer),
-                      Layer.provide(
-                        VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
-                      ),
                     ),
+                    Layer.provide(VcsProcess.layer),
                   ),
-                  Layer.provide(VcsProcess.layer),
                 ),
               ),
             ),
-          ),
-        );
-        return yield* Effect.acquireUseRelease(
-          sessions.markConnected(session.sessionId),
-          () => rpcWebSocketHttpEffect,
-          () => sessions.markDisconnected(session.sessionId),
-        );
-      }).pipe(
-        Effect.catchTags({
-          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-          EnvironmentInternalError: HttpServerRespondable.toResponse,
-        }),
-      ),
+          );
+          return yield* Effect.acquireUseRelease(
+            sessions.markConnected(session.sessionId),
+            () => rpcWebSocketHttpEffect,
+            () => sessions.markDisconnected(session.sessionId),
+          );
+        }).pipe(
+          Effect.catchTags({
+            EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+            EnvironmentInternalError: HttpServerRespondable.toResponse,
+          }),
+        ),
+      );
+    return Layer.mergeAll(
+      makeRoute("/ws", RpcSerialization.layerJson),
+      makeRoute("/ws-compressed", layerCompressedJson(nodeGzipCodec)),
     );
   }),
 );

@@ -41,6 +41,7 @@ type RpcMethod<TTag extends EnvironmentRpcTag> = WsRpcProtocolClient[TTag];
 export type EnvironmentSubscriptionRpcTag =
   | typeof ORCHESTRATION_WS_METHODS.subscribeShell
   | typeof ORCHESTRATION_WS_METHODS.subscribeThread
+  | typeof ORCHESTRATION_WS_METHODS.subscribeThreadV2
   | typeof WS_METHODS.subscribeAuthAccess
   | typeof WS_METHODS.subscribeServerConfig
   | typeof WS_METHODS.subscribeServerLifecycle
@@ -149,7 +150,12 @@ export function runStream<TTag extends EnvironmentStreamCommandRpcTag>(
 
 export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
   tag: TTag,
-  input: EnvironmentRpcInput<TTag>,
+  // A plain input, or an Effect that resolves the input freshly on every
+  // (re)subscribe. The Effect form lets a durable subscription send an
+  // up-to-date value on reconnect (Fix 2: a thread re-subscribe carries the
+  // client's current `sinceSequence` cursor so the server sends a delta, not a
+  // full re-download) instead of replaying the value captured at first connect.
+  input: EnvironmentRpcInput<TTag> | Effect.Effect<EnvironmentRpcInput<TTag>>,
   options?: {
     readonly onExpectedFailure?: (
       cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
@@ -161,6 +167,9 @@ export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
   EnvironmentRpcStreamFailure<TTag>,
   EnvironmentSupervisor
 > {
+  const resolveInput: Effect.Effect<EnvironmentRpcInput<TTag>> = Effect.isEffect(input)
+    ? (input as Effect.Effect<EnvironmentRpcInput<TTag>>)
+    : Effect.succeed(input);
   return Stream.unwrap(
     EnvironmentSupervisor.pipe(
       Effect.map((supervisor) =>
@@ -180,7 +189,7 @@ export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
                   EnvironmentRpcStreamFailure<TTag>
                 > =>
                   Stream.suspend(() =>
-                    method(input).pipe(
+                    Stream.unwrap(Effect.map(resolveInput, (resolved) => method(resolved))).pipe(
                       Stream.catchCause((cause) => {
                         const hasOnlyExpectedFailures =
                           cause.reasons.length > 0 &&

@@ -5,6 +5,7 @@ import {
   type ServerConfig,
   type ThreadId,
   type VcsListRefsResult,
+  type WindowedOrchestrationThread,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -53,6 +54,15 @@ export class ConnectionRegistrationStore extends Context.Service<
   }
 >()("@t3tools/client-runtime/platform/persistence/ConnectionRegistrationStore") {}
 
+/**
+ * What the thread cache stores: either a complete legacy detail snapshot (with
+ * its `snapshotSequence` resume cursor) or a bounded thread-sync-v2 window
+ * (which carries its own `lastAppliedSequence`). Either way the client can
+ * resume the live subscription from the persisted cursor on reconnect or cold
+ * start instead of re-downloading the whole thread.
+ */
+export type CachedThreadSnapshot = OrchestrationThreadDetailSnapshot | WindowedOrchestrationThread;
+
 export class EnvironmentCacheStore extends Context.Service<
   EnvironmentCacheStore,
   {
@@ -66,13 +76,10 @@ export class EnvironmentCacheStore extends Context.Service<
     readonly loadThread: (
       environmentId: EnvironmentId,
       threadId: ThreadId,
-    ) => Effect.Effect<
-      Option.Option<OrchestrationThreadDetailSnapshot>,
-      ConnectionPersistenceError
-    >;
+    ) => Effect.Effect<Option.Option<CachedThreadSnapshot>, ConnectionPersistenceError>;
     readonly saveThread: (
       environmentId: EnvironmentId,
-      snapshot: OrchestrationThreadDetailSnapshot,
+      snapshot: CachedThreadSnapshot,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
     readonly removeThread: (
       environmentId: EnvironmentId,

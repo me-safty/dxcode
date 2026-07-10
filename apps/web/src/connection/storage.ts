@@ -21,6 +21,7 @@ import {
   EnvironmentId,
   OrchestrationShellSnapshot,
   OrchestrationThreadDetailSnapshot,
+  WindowedOrchestrationThread,
   ServerConfig,
   ThreadId,
   VcsListRefsResult,
@@ -49,14 +50,14 @@ const StoredShellSnapshot = Schema.Struct({
   snapshot: OrchestrationShellSnapshot,
 });
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredShellSnapshot);
-// v2 stores the snapshot sequence alongside the thread so a warm cache can
-// resume via `afterSequence` instead of re-downloading the full thread body.
-// Older v1 entries (no sequence) fail to decode and are treated as a cold cache.
+// v3 stores either a complete legacy detail snapshot (with the sequence a warm
+// cache resumes from via `afterSequence`) or a bounded thread-sync-v2 window.
+// Older entries fail to decode and are treated as a cold cache.
 const StoredThreadSnapshot = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
+  schemaVersion: Schema.Literal(3),
   environmentId: EnvironmentId,
   threadId: ThreadId,
-  snapshot: OrchestrationThreadDetailSnapshot,
+  snapshot: Schema.Union([OrchestrationThreadDetailSnapshot, WindowedOrchestrationThread]),
 });
 const StoredThreadSnapshotJson = Schema.fromJsonString(StoredThreadSnapshot);
 const StoredServerConfig = Schema.Struct({
@@ -538,36 +539,43 @@ export const connectionStorageLayer = Layer.effectContext(
           threadCacheKey(environmentId, threadId),
         ).pipe(
           Effect.flatMap((raw) => {
+            type StoredSnapshot = OrchestrationThreadDetailSnapshot | WindowedOrchestrationThread;
             if (typeof raw !== "string") {
-              return Effect.succeed(Option.none());
+              return Effect.succeed(Option.none<StoredSnapshot>());
             }
             return decodeStoredThreadSnapshot(raw).pipe(
-              Effect.mapError((cause) => persistenceError("load-thread", cause)),
               Effect.map((stored) =>
                 stored.environmentId === environmentId && stored.threadId === threadId
-                  ? Option.some(stored.snapshot)
-                  : Option.none(),
+                  ? Option.some<StoredSnapshot>(stored.snapshot)
+                  : Option.none<StoredSnapshot>(),
+              ),
+              // A record from an older schema version is a cache miss, not an
+              // error — and it must be EVICTED, or every subsequent open of the
+              // thread re-decodes the same incompatible record.
+              Effect.catch(() =>
+                removeDatabaseValue(
+                  database,
+                  THREAD_STORE_NAME,
+                  threadCacheKey(environmentId, threadId),
+                ).pipe(Effect.ignore, Effect.as(Option.none<StoredSnapshot>())),
               ),
             );
           }),
-          Effect.mapError((cause) =>
-            cause._tag === "ConnectionPersistenceError"
-              ? cause
-              : persistenceError("load-thread", cause),
-          ),
+          Effect.mapError((cause) => persistenceError("load-thread", cause)),
         ),
       saveThread: (environmentId, snapshot) =>
         Effect.gen(function* () {
+          const threadId = "head" in snapshot ? snapshot.head.id : snapshot.thread.id;
           const encoded = yield* encodeStoredThreadSnapshot({
-            schemaVersion: 2,
+            schemaVersion: 3,
             environmentId,
-            threadId: snapshot.thread.id,
+            threadId,
             snapshot,
           }).pipe(Effect.mapError((cause) => persistenceError("save-thread", cause)));
           yield* writeDatabaseValue(
             database,
             THREAD_STORE_NAME,
-            threadCacheKey(environmentId, snapshot.thread.id),
+            threadCacheKey(environmentId, threadId),
             encoded,
           );
         }).pipe(

@@ -1,7 +1,9 @@
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Socket from "effect/unstable/socket/Socket";
+import * as pako from "pako";
 
+import { type CompressionCodec, RpcCompressionCodec } from "@t3tools/contracts";
 import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 
 import { cryptoLayer } from "../features/cloud/dpop";
@@ -16,17 +18,28 @@ function configuredRelayUrl(): string {
 
 const httpClientLayer = remoteHttpClientLayer(fetch);
 
+// RN gzip codec for the /ws RPC (Fix 1). pako runs synchronously on the JS
+// thread; fine for one-shot thread sync.
+const pakoCodec: CompressionCodec = {
+  compressSync: (b) => pako.gzip(b),
+  decompressSync: (b) => pako.inflate(b),
+  threshold: 1024,
+};
+const compressionCodecLayer = Layer.succeed(RpcCompressionCodec, pakoCodec);
+
 type RuntimeLayerSource =
   | ReturnType<typeof managedRelayClientLayer>
   | typeof Socket.layerWebSocketConstructorGlobal
+  | typeof compressionCodecLayer
   | typeof cryptoLayer
   | typeof httpClientLayer
   | typeof Persistence.layer
   | typeof tracingLayer;
 
-const runtimeLayer = Layer.merge(
+const runtimeLayer = Layer.mergeAll(
   managedRelayClientLayer(configuredRelayUrl()),
   Socket.layerWebSocketConstructorGlobal,
+  compressionCodecLayer,
 ).pipe(
   Layer.provideMerge(cryptoLayer),
   Layer.provideMerge(httpClientLayer),

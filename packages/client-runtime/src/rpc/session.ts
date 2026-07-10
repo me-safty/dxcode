@@ -1,4 +1,9 @@
-import { type ServerConfig, WS_METHODS } from "@t3tools/contracts";
+import {
+  layerCompressedJson,
+  RpcCompressionCodec,
+  type ServerConfig,
+  WS_METHODS,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -66,6 +71,7 @@ function mapInitialConfigError(error: InitialConfigError): ConnectionAttemptErro
 
 export const make = Effect.gen(function* () {
   const webSocketConstructor = yield* Socket.WebSocketConstructor;
+  const codec = yield* RpcCompressionCodec;
 
   const connect = Effect.fnUntraced(function* (connection: PreparedConnection) {
     yield* Effect.annotateCurrentSpan({
@@ -104,7 +110,9 @@ export const make = Effect.gen(function* () {
       Layer.provide(
         Layer.mergeAll(
           socketLayer,
-          RpcSerialization.layerJson,
+          connection.rpcTransport?.kind === "gzip-json" && codec !== null
+            ? layerCompressedJson(codec)
+            : RpcSerialization.layerJson,
           Layer.succeed(RpcClient.ConnectionHooks, hooks),
         ),
       ),

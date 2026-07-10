@@ -1,5 +1,6 @@
 import { ApprovalRequestId, isToolLifecycleItemType } from "@t3tools/contracts";
 import type {
+  ActivityPayloadAssetReference,
   OrchestrationLatestTurn,
   OrchestrationThread,
   OrchestrationThreadActivity,
@@ -53,6 +54,7 @@ export interface ThreadFeedActivity {
     | "zap";
   readonly toolLike: boolean;
   readonly status: "success" | "failure" | "neutral" | null;
+  readonly payloadAsset?: ActivityPayloadAssetReference;
 }
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
@@ -74,6 +76,7 @@ interface WorkLogEntry {
   requestKind?: PendingApproval["requestKind"];
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   toolData?: unknown;
+  payloadAsset?: ActivityPayloadAssetReference;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -291,6 +294,18 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           : activity.tone,
     activityKind: activity.kind,
   };
+  const payloadData = asRecord(payload?.data);
+  if (
+    payloadData?._tag === "activity-payload-asset" &&
+    typeof payloadData.mediaType === "string" &&
+    typeof payloadData.byteLength === "number" &&
+    typeof payloadData.sha256 === "string"
+  ) {
+    const resource = asRecord(payloadData.resource);
+    if (resource?._tag === "attachment" && typeof resource.attachmentId === "string") {
+      entry.payloadAsset = payloadData as unknown as ActivityPayloadAssetReference;
+    }
+  }
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   if (
@@ -387,6 +402,7 @@ function mergeDerivedWorkLogEntries(
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const payloadAsset = next.payloadAsset ?? previous.payloadAsset;
   return {
     ...previous,
     ...next,
@@ -400,6 +416,7 @@ function mergeDerivedWorkLogEntries(
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolLifecycleStatus ? { toolLifecycleStatus } : {}),
     ...(toolData !== undefined ? { toolData } : {}),
+    ...(payloadAsset !== undefined ? { payloadAsset } : {}),
   };
 }
 
@@ -1310,14 +1327,24 @@ export function buildPendingUserInputAnswers(
 }
 
 export function buildThreadFeed(
-  thread: OrchestrationThread,
+  thread: {
+    readonly syncVersion?: 2;
+    readonly messages: OrchestrationThread["messages"];
+    readonly activities: OrchestrationThread["activities"];
+  },
   options?: {
     readonly loadedMessages?: ReadonlyArray<OrchestrationThread["messages"][number]>;
   },
 ): ThreadFeedEntry[] {
   const loadedMessages = options?.loadedMessages ?? thread.messages;
-  const oldestLoadedMessageCreatedAt =
-    options?.loadedMessages !== undefined ? (loadedMessages[0]?.createdAt ?? null) : null;
+  // Only an explicitly provided message window implies a cutoff. A v2 thread
+  // paginates messages and activities INDEPENDENTLY, so its window may hold
+  // activities older than any loaded message; filtering those out would hide
+  // paged-in activity history permanently.
+  const isLoadedWindow = options?.loadedMessages !== undefined;
+  const oldestLoadedMessageCreatedAt = isLoadedWindow
+    ? (loadedMessages[0]?.createdAt ?? null)
+    : null;
   const workLogEntries = deriveWorkLogEntries(thread.activities);
   const entries = Arr.sortWith(
     [
@@ -1329,7 +1356,7 @@ export function buildThreadFeed(
       })),
       ...workLogEntries
         .filter((entry) => {
-          if (options?.loadedMessages === undefined) {
+          if (!isLoadedWindow) {
             return true;
           }
           return (
@@ -1360,6 +1387,7 @@ export function buildThreadFeed(
                 .join("\n"),
               toolLike: workLogEntryIsToolLike(entry),
               status: workEntryStatus(entry),
+              ...(entry.payloadAsset === undefined ? {} : { payloadAsset: entry.payloadAsset }),
             },
           };
         }),

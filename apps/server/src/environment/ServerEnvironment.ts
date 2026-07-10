@@ -136,6 +136,11 @@ export const make = Effect.gen(function* () {
     capabilities: {
       repositoryIdentity: true,
     },
+    rpcTransports: [
+      { kind: "gzip-json", path: "/ws-compressed" },
+      { kind: "json", path: "/ws" },
+    ],
+    threadSyncVersions: [1, 2],
   };
 
   return ServerEnvironment.of({

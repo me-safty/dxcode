@@ -4,7 +4,6 @@ import type {
   OrchestrationMessage,
   OrchestrationProposedPlan,
   OrchestrationSession,
-  OrchestrationThread,
   OrchestrationThreadActivity,
   ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -16,6 +15,7 @@ import { scopeThread } from "./models.ts";
 import { EMPTY_ENVIRONMENT_THREAD_STATE, type EnvironmentThreadState } from "./threadState.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { THREAD_STATE_IDLE_TTL_MS } from "./threadRetention.ts";
+import type { ThreadDetailData } from "./windowedThread.ts";
 
 const EMPTY_MESSAGES: ReadonlyArray<OrchestrationMessage> = Object.freeze([]);
 const EMPTY_ACTIVITIES: ReadonlyArray<OrchestrationThreadActivity> = Object.freeze([]);
@@ -82,7 +82,7 @@ export function createEnvironmentThreadDetailAtoms<E>(
 
   const threadDetailAtomFamily = Atom.family((key: string) => {
     const ref = parseThreadKey(key);
-    let previousSource: OrchestrationThread | null = null;
+    let previousSource: ThreadDetailData | null = null;
     let previousValue: EnvironmentThread | null = null;
     return Atom.make((get) => {
       const source = Option.getOrNull(get(threadStateValueAtomFamily(key)).data);

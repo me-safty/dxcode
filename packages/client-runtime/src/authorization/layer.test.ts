@@ -180,10 +180,16 @@ describe("RemoteEnvironmentAuthorization", () => {
 
       expect(authorized.socketUrl).toContain("wsTicket=cached-ticket");
       expect(yield* Ref.get(harness.bootstrapCalls)).toBe(0);
-      expect(harness.fetch.calls).toHaveLength(1);
-      expect(String(harness.fetch.calls[0]?.[0])).toBe(
-        "https://environment.example.test/api/auth/websocket-ticket",
+      // Reuse may add a best-effort transport-negotiation probe to the
+      // ENVIRONMENT itself (never the relay); the ticket call must be the only
+      // auth traffic.
+      const ticketCalls = harness.fetch.calls.filter((call) =>
+        String(call[0]).endsWith("/api/auth/websocket-ticket"),
       );
+      expect(ticketCalls).toHaveLength(1);
+      // Offline-tolerant: the failed descriptor probe must not have broken
+      // token reuse (this test's fetch mock rejects every other URL).
+      expect(authorized.rpcTransport).toEqual({ kind: "json", path: "/ws" });
     }),
   );
 

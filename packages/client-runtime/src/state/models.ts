@@ -3,10 +3,10 @@ import type {
   OrchestrationMessage,
   OrchestrationProjectShell,
   OrchestrationShellSnapshot,
-  OrchestrationThread,
   OrchestrationThreadShell,
   ThreadId,
 } from "@t3tools/contracts";
+import type { ThreadDetailData } from "./windowedThread.ts";
 
 export interface EnvironmentProject extends OrchestrationProjectShell {
   readonly environmentId: EnvironmentId;
@@ -18,9 +18,9 @@ export interface EnvironmentThreadShell extends OrchestrationThreadShell {
 
 export type EnvironmentMessage = OrchestrationMessage;
 
-export interface EnvironmentThread extends OrchestrationThread {
+export type EnvironmentThread = ThreadDetailData & {
   readonly environmentId: EnvironmentId;
-}
+};
 
 export function scopeProject(
   environmentId: EnvironmentId,
@@ -38,7 +38,7 @@ export function scopeThreadShell(
 
 export function scopeThread(
   environmentId: EnvironmentId,
-  thread: OrchestrationThread,
+  thread: ThreadDetailData,
 ): EnvironmentThread {
   return { ...thread, environmentId };
 }

@@ -1,3 +1,4 @@
+import { RpcCompressionCodec } from "@t3tools/contracts";
 import { RelayEnvironmentConnectScope } from "@t3tools/contracts/relay";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import * as Context from "effect/Context";
@@ -7,6 +8,11 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
+import {
+  applyRpcTransport,
+  selectRpcTransport,
+  selectThreadSyncVersion,
+} from "../environment/transport.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
@@ -63,11 +69,33 @@ const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary
   ) {
     const bearerToken = yield* auth.bearerToken;
     if (Option.isNone(bearerToken)) {
+      const descriptor =
+        remote.getDescriptor === undefined
+          ? {
+              environmentId: target.environmentId,
+              label: target.label,
+              platform: { os: "unknown" as const, arch: "other" as const },
+              serverVersion: "unknown",
+              capabilities: { repositoryIdentity: false },
+              rpcTransports: [{ kind: "json" as const, path: "/ws" }],
+              threadSyncVersions: [1 as const],
+            }
+          : yield* remote.getDescriptor(target.httpBaseUrl);
+      if (descriptor.environmentId !== target.environmentId) {
+        return yield* environmentMismatchError({
+          expected: target.environmentId,
+          actual: descriptor.environmentId,
+        });
+      }
+      const hasCompressionCodec = (yield* RpcCompressionCodec) !== null;
+      const rpcTransport = selectRpcTransport(descriptor, { hasCompressionCodec });
       return {
         environmentId: target.environmentId,
         label: target.label,
         httpBaseUrl: target.httpBaseUrl,
-        socketUrl: primarySocketUrl(target),
+        socketUrl: applyRpcTransport(primarySocketUrl(target), rpcTransport),
+        rpcTransport,
+        threadSyncVersion: selectThreadSyncVersion(descriptor),
         httpAuthorization: null,
         target,
       } satisfies PreparedConnection;
@@ -132,6 +160,8 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
       label: authorized.label,
       httpBaseUrl: authorized.httpBaseUrl,
       socketUrl: authorized.socketUrl,
+      rpcTransport: authorized.rpcTransport ?? { kind: "json", path: "/ws" },
+      threadSyncVersion: authorized.threadSyncVersion ?? 1,
       httpAuthorization: authorized.httpAuthorization,
       target,
     } satisfies PreparedConnection;
@@ -177,6 +207,11 @@ const makeRelayBroker = Effect.fn("clientRuntime.connection.broker.makeRelay")(f
         label: authorized.label,
         httpBaseUrl: authorized.httpBaseUrl,
         socketUrl: authorized.socketUrl,
+        rpcTransport: authorized.rpcTransport ?? {
+          kind: "json",
+          path: "/ws",
+        },
+        threadSyncVersion: authorized.threadSyncVersion ?? 1,
         httpAuthorization: authorized.httpAuthorization,
         target,
       } satisfies PreparedConnection;
@@ -235,6 +270,8 @@ const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(funct
       label: authorized.label,
       httpBaseUrl: authorized.httpBaseUrl,
       socketUrl: authorized.socketUrl,
+      rpcTransport: authorized.rpcTransport ?? { kind: "json", path: "/ws" },
+      threadSyncVersion: authorized.threadSyncVersion ?? 1,
       httpAuthorization: authorized.httpAuthorization,
       target,
     } satisfies PreparedConnection;

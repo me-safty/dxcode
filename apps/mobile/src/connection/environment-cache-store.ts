@@ -8,6 +8,7 @@ import {
   OrchestrationThreadDetailSnapshot,
   ServerConfig,
   VcsListRefsResult,
+  WindowedOrchestrationThread,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,7 +18,10 @@ import * as Schema from "effect/Schema";
 import * as MobileDatabase from "../persistence/mobile-database";
 
 const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
-const THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION = 2;
+// Bumped 2 -> 3: the stored snapshot is now either a complete legacy detail
+// snapshot or a bounded thread-sync-v2 window. Version-2 records fail decode
+// and are evicted by loadDecodedCache, so upgrades take one clean resync.
+const THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION = 3;
 const SERVER_CONFIG_CACHE_SCHEMA_VERSION = 1;
 const VCS_REFS_CACHE_SCHEMA_VERSION = 1;
 
@@ -30,7 +34,7 @@ const StoredThreadSnapshot = Schema.Struct({
   schemaVersion: Schema.Literal(THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION),
   environmentId: Schema.String,
   threadId: Schema.String,
-  snapshot: OrchestrationThreadDetailSnapshot,
+  snapshot: Schema.Union([OrchestrationThreadDetailSnapshot, WindowedOrchestrationThread]),
 });
 const StoredServerConfig = Schema.Struct({
   schemaVersion: Schema.Literal(SERVER_CONFIG_CACHE_SCHEMA_VERSION),
@@ -150,7 +154,7 @@ export const make = Effect.fn("MobileEnvironmentCacheStore.make")(function* () {
       }),
     ),
     saveThread: Effect.fn("MobileEnvironmentCache.saveThread")(function* (environmentId, snapshot) {
-      const threadId = snapshot.thread.id;
+      const threadId = "head" in snapshot ? snapshot.head.id : snapshot.thread.id;
       const payload = yield* encodeStoredThreadSnapshot({
         schemaVersion: THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION,
         environmentId,

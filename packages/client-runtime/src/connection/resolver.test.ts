@@ -217,6 +217,8 @@ describe("ConnectionResolver", () => {
         label: "Primary",
         httpBaseUrl: "http://127.0.0.1:3777",
         socketUrl: "ws://127.0.0.1:3777/ws",
+        rpcTransport: { kind: "json", path: "/ws" },
+        threadSyncVersion: 1,
         httpAuthorization: null,
         target,
       });

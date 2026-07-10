@@ -166,8 +166,10 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
             })
           : Option.none(),
       ),
-    saveThread: (_environmentId, thread) =>
-      Ref.update(savedThreads, (current) => [...current, thread]),
+    saveThread: (_environmentId, snapshot) =>
+      "thread" in snapshot
+        ? Ref.update(savedThreads, (current) => [...current, snapshot])
+        : Effect.die("Legacy sync test unexpectedly persisted a v2 window."),
     removeThread: (_environmentId, threadId) =>
       Ref.update(removedThreads, (current) => [...current, threadId]),
     loadServerConfig: () => Effect.succeed(Option.none()),

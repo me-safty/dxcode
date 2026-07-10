@@ -47,6 +47,22 @@ export interface OrchestrationEventStoreShape {
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
 
   /**
+   * Read events for a single thread aggregate after the provided sequence,
+   * ordered by global sequence ascending. Backs incremental thread catch-up
+   * (Fix 2) so a reconnecting client fetches only the delta, not the whole thread.
+   *
+   * @param threadId - Thread aggregate (stream) id.
+   * @param sequenceExclusive - Sequence cursor (exclusive).
+   * @param limit - Maximum number of events to emit.
+   * @returns Stream containing ordered events for the thread.
+   */
+  readonly readThreadFromSequence: (
+    threadId: string,
+    sequenceExclusive: number,
+    limit?: number,
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+
+  /**
    * Read all events from the beginning of the stream.
    *
    * @returns Stream containing all stored events.
