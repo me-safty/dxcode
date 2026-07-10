@@ -183,7 +183,7 @@ interface DiffPanelProps {
 export { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 
 export default function DiffPanel({ mode = "inline", composerDraftTarget }: DiffPanelProps) {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, syntaxTheme } = useTheme();
   const settings = useClientSettings();
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
@@ -844,7 +844,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                     diffStyle: diffRenderMode === "split" ? "split" : "unified",
                     lineDiffType: "none",
                     overflow: wordWrap ? "wrap" : "scroll",
-                    theme: resolveDiffThemeName(resolvedTheme),
+                    theme: resolveDiffThemeName(syntaxTheme),
                     themeType: resolvedTheme as DiffThemeType,
                     unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                     stickyHeaders: true,

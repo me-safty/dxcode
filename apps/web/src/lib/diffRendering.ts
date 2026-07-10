@@ -1,15 +1,26 @@
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
+import { registerCustomTheme } from "@pierre/diffs";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
+import ayuBlackTheme from "../themes/ayu-black-color-theme.json";
+
+export type AppSyntaxTheme = "light" | "dark" | "ayuBlack";
 
 export const DIFF_THEME_NAMES = {
   light: "pierre-light",
   dark: "pierre-dark",
+  ayuBlack: "t3code-ayu-black",
 } as const;
 
 export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
 
-export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
-  return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
+registerCustomTheme(DIFF_THEME_NAMES.ayuBlack, async () => ({
+  ...ayuBlackTheme,
+  name: DIFF_THEME_NAMES.ayuBlack,
+  type: "dark",
+}));
+
+export function resolveDiffThemeName(theme: AppSyntaxTheme): DiffThemeName {
+  return DIFF_THEME_NAMES[theme];
 }
 
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;

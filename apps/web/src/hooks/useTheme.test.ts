@@ -27,6 +27,16 @@ afterEach(() => {
 });
 
 describe("theme failure handling", () => {
+  it("restores the Ayu Black preference from storage", async () => {
+    const localStorage = createStorage();
+    localStorage.setItem("t3code:theme", "ayuBlack");
+    vi.stubGlobal("window", { localStorage });
+
+    const { readThemePreference } = await import("./useTheme");
+
+    expect(readThemePreference()).toBe("ayuBlack");
+  });
+
   it("preserves exact storage causes and operation context", async () => {
     const readCause = new Error("storage read blocked");
     const writeCause = new Error("storage quota exceeded");
@@ -189,5 +199,14 @@ describe("theme failure handling", () => {
       expect(attributes).not.toHaveProperty("cause");
       expect(JSON.stringify(attributes)).not.toContain(cause.message);
     }
+  });
+
+  it("maps Ayu Black to dark for the desktop shell", async () => {
+    const setTheme = vi.fn().mockResolvedValue(undefined);
+
+    const { syncDesktopThemePreference } = await import("./useTheme");
+    await syncDesktopThemePreference({ setTheme }, "ayuBlack");
+
+    expect(setTheme).toHaveBeenCalledWith("dark");
   });
 });

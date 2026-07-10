@@ -277,7 +277,11 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   if (cached) return cached;
 
   const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+    themes: [
+      resolveDiffThemeName("dark"),
+      resolveDiffThemeName("light"),
+      resolveDiffThemeName("ayuBlack"),
+    ],
     langs: [language as SupportedLanguages],
     preferredHighlighter: "shiki-js",
   }).catch((err) => {
@@ -1238,7 +1242,7 @@ function ChatMarkdown({
   className,
   lineBreaks = false,
 }: ChatMarkdownProps) {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, syntaxTheme } = useTheme();
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
   });
@@ -1252,7 +1256,7 @@ function ChatMarkdown({
     environmentId,
     serverConfig?.availableEditors ?? [],
   );
-  const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const diffThemeName = resolveDiffThemeName(syntaxTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
