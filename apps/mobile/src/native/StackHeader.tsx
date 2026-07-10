@@ -14,7 +14,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import type { ColorValue } from "react-native";
+import { Platform, Pressable, Text, View, type ColorValue } from "react-native";
 
 export {
   nativeHeaderScrollEdgeEffects,
@@ -253,6 +253,82 @@ function collectToolbarItems(children: ReactNode): NativeStackHeaderItem[] {
   return items;
 }
 
+function androidToolbarButtonLabel(icon: unknown): string {
+  switch (icon) {
+    case "plus":
+    case "square.and.pencil":
+      return "+";
+    case "xmark":
+      return "×";
+    case "gearshape":
+      return "⚙";
+    case "qrcode.viewfinder":
+      return "QR";
+    default:
+      return "⋯";
+  }
+}
+
+function AndroidHeaderToolbar(props: { readonly children?: ReactNode }) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        // Leave room for Android's system bubble/edge affordances, which otherwise
+        // sit directly on top of the rightmost header action on Samsung devices.
+        marginRight: 72,
+      }}
+    >
+      {Children.toArray(props.children).map((child, index) => {
+        if (!isValidElement<ToolbarElementProps>(child)) {
+          return null;
+        }
+        const typeName = elementTypeName(child);
+        if (typeName !== "NativeHeaderToolbarButton") {
+          return null;
+        }
+        const accessibilityLabel =
+          typeof child.props.accessibilityLabel === "string"
+            ? child.props.accessibilityLabel
+            : undefined;
+        const onPress =
+          typeof child.props.onPress === "function"
+            ? (child.props.onPress as () => void)
+            : undefined;
+        return (
+          <Pressable
+            key={accessibilityLabel ?? `${String(child.props.icon)}-${index}`}
+            accessibilityLabel={accessibilityLabel}
+            accessibilityRole="button"
+            disabled={Boolean(child.props.disabled)}
+            hitSlop={8}
+            onPress={onPress}
+            style={{
+              alignItems: "center",
+              height: 44,
+              justifyContent: "center",
+              minWidth: 44,
+              opacity: child.props.disabled ? 0.4 : 1,
+            }}
+          >
+            <Text
+              style={{
+                color: (child.props.tintColor as ColorValue | undefined) ?? "#8E8E93",
+                fontSize: child.props.icon === "gearshape" ? 22 : 30,
+                fontWeight: "500",
+              }}
+            >
+              {androidToolbarButtonLabel(child.props.icon)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function NativeHeaderToolbarRoot(props: {
   readonly placement?: "left" | "right" | "bottom";
   readonly children?: ReactNode;
@@ -263,6 +339,15 @@ function NativeHeaderToolbarRoot(props: {
   useEffect(() => {
     if (!navigation) {
       return;
+    }
+    if (Platform.OS === "android" && props.placement !== "bottom") {
+      const optionName = props.placement === "left" ? "headerLeft" : "headerRight";
+      navigation.setOptions({
+        [optionName]: () => <AndroidHeaderToolbar>{props.children}</AndroidHeaderToolbar>,
+      });
+      return () => {
+        navigation.setOptions({ [optionName]: undefined });
+      };
     }
     if (props.placement === "bottom") {
       navigation.setOptions({
@@ -284,7 +369,7 @@ function NativeHeaderToolbarRoot(props: {
     return () => {
       navigation.setOptions({ unstable_headerRightItems: () => [] });
     };
-  }, [items, navigation, props.placement]);
+  }, [items, navigation, props.children, props.placement]);
 
   return null;
 }

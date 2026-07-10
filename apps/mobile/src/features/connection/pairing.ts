@@ -23,7 +23,9 @@ export function buildPairingUrl(host: string, code: string): string {
     url.hash = new URLSearchParams([["token", c]]).toString();
     return url.toString();
   } catch {
-    return `${h}#token=${c}`;
+    const normalizedHost = h.includes("://") ? h : `https://${h}`;
+    const separator = normalizedHost.includes("#") ? "&" : "#";
+    return `${normalizedHost}${separator}token=${encodeURIComponent(c)}`;
   }
 }
 

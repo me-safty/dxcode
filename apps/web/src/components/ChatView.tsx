@@ -5029,7 +5029,7 @@ function ChatViewContent(props: ChatViewProps) {
                     !inlineRightPanelOwnsTitleBar &&
                     "wco:pr-[var(--workspace-native-controls-inset)]",
                 )
-              : "workspace-topbar pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+              : "workspace-topbar pl-[calc(var(--app-safe-area-inset-left)+0.75rem)] pr-[calc(var(--app-safe-area-inset-right)+0.75rem)] sm:pl-[calc(var(--app-safe-area-inset-left)+1.25rem)] sm:pr-[calc(var(--app-safe-area-inset-right)+1.25rem)]",
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
@@ -5219,8 +5219,8 @@ function ChatViewContent(props: ChatViewProps) {
                 className={cn(
                   "chat-composer-horizontal-inset chat-composer-lower-chrome relative z-10",
                   isGitRepo
-                    ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
-                    : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+                    ? "pb-[calc(var(--app-safe-area-inset-bottom)+0.25rem)]"
+                    : "pb-[calc(var(--app-safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(var(--app-safe-area-inset-bottom)+1rem)]",
                 )}
               >
                 {isGitRepo && (

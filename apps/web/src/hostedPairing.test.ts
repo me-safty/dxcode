@@ -11,6 +11,13 @@ import {
 describe("hostedPairing", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("treats the native Capacitor shell as a hosted static client", () => {
+    vi.stubGlobal("Capacitor", { isNativePlatform: () => true });
+
+    expect(isHostedStaticApp(new URL("http://localhost"))).toBe(true);
   });
 
   it("reads hosted pairing host and query token parameters", () => {

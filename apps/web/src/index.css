@@ -5,11 +5,17 @@
 @custom-variant wco (&:is(.wco, .wco *));
 
 :root {
+  /* Capacitor 8 supplies --safe-area-inset-* on Android WebViews where the
+     standard env() values are still incorrectly reported as zero. */
+  --app-safe-area-inset-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --app-safe-area-inset-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --app-safe-area-inset-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --app-safe-area-inset-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   --app-scrollbar-width: 6px;
   --workspace-topbar-height: 52px;
   --workspace-controls-top: 0px;
-  --workspace-controls-left: calc(env(safe-area-inset-left) + 0.75rem);
-  --workspace-controls-right: calc(env(safe-area-inset-right) + 0.75rem);
+  --workspace-controls-left: calc(var(--app-safe-area-inset-left) + 0.75rem);
+  --workspace-controls-right: calc(var(--app-safe-area-inset-right) + 0.75rem);
   --workspace-native-controls-inset: 0px;
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
@@ -20,6 +26,49 @@
     var(--workspace-controls-left) + var(--workspace-titlebar-control-size) +
       var(--workspace-titlebar-control-gap)
   );
+}
+
+/* Android enforces edge-to-edge rendering for current target SDKs. Keep the
+   complete Capacitor application shell inside the injected system-bar insets,
+   including fixed sidebar and titlebar elements that do not inherit #root
+   padding. */
+html.capacitor-native {
+  --workspace-controls-top: 0px;
+}
+
+html.capacitor-native #root {
+  padding: 0;
+}
+
+html.capacitor-native [data-slot="sidebar-wrapper"] {
+  position: fixed;
+  top: var(--app-safe-area-inset-top);
+  right: var(--app-safe-area-inset-right);
+  bottom: var(--app-safe-area-inset-bottom);
+  left: var(--app-safe-area-inset-left);
+  width: auto;
+  height: calc(
+    100dvh - var(--app-safe-area-inset-top) - var(--app-safe-area-inset-bottom)
+  ) !important;
+  min-height: 0 !important;
+}
+
+html.capacitor-native [data-slot="sidebar-inset"] {
+  height: 100% !important;
+}
+
+html.capacitor-native [data-slot="sidebar-container"] {
+  top: var(--app-safe-area-inset-top);
+  bottom: var(--app-safe-area-inset-bottom);
+  height: calc(100dvh - var(--app-safe-area-inset-top) - var(--app-safe-area-inset-bottom));
+}
+
+html.capacitor-native [data-sidebar-control] {
+  top: var(--app-safe-area-inset-top);
+}
+
+html.capacitor-native .chat-composer-lower-chrome {
+  --app-safe-area-inset-bottom: 0px;
 }
 
 .wco {
@@ -147,8 +196,8 @@
   }
 
   .chat-composer-horizontal-inset {
-    padding-inline-start: calc(env(safe-area-inset-left) + 0.75rem);
-    padding-inline-end: calc(env(safe-area-inset-right) + 0.75rem);
+    padding-inline-start: calc(var(--app-safe-area-inset-left) + 0.75rem);
+    padding-inline-end: calc(var(--app-safe-area-inset-right) + 0.75rem);
   }
 
   .chat-composer-glass,
@@ -186,8 +235,8 @@
 
   @media (min-width: 40rem) {
     .chat-composer-horizontal-inset {
-      padding-inline-start: calc(env(safe-area-inset-left) + 1.25rem);
-      padding-inline-end: calc(env(safe-area-inset-right) + 1.25rem);
+      padding-inline-start: calc(var(--app-safe-area-inset-left) + 1.25rem);
+      padding-inline-end: calc(var(--app-safe-area-inset-right) + 1.25rem);
     }
   }
 
@@ -203,16 +252,16 @@
    Insets resolve to 0 when the browser already constrains the layout viewport
    to the safe area. */
 @utility pt-safe {
-  padding-top: max(env(safe-area-inset-top), 0px);
+  padding-top: max(var(--app-safe-area-inset-top), 0px);
 }
 @utility pb-safe {
-  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  padding-bottom: max(var(--app-safe-area-inset-bottom), 0px);
 }
 @utility pl-safe {
-  padding-left: max(env(safe-area-inset-left), 0px);
+  padding-left: max(var(--app-safe-area-inset-left), 0px);
 }
 @utility pr-safe {
-  padding-right: max(env(safe-area-inset-right), 0px);
+  padding-right: max(var(--app-safe-area-inset-right), 0px);
 }
 
 /* Suppress all transitions during theme changes */
@@ -300,7 +349,7 @@ body {
 
 html,
 body {
-  min-height: calc(100svh + env(safe-area-inset-top));
+  min-height: calc(100svh + var(--app-safe-area-inset-top));
   overscroll-behavior: none;
 }
 
@@ -317,7 +366,10 @@ body {
   overflow-x: clip;
   overflow-y: hidden;
   overscroll-behavior-y: none;
-  padding-top: max(env(safe-area-inset-top), 0px);
+  padding-top: max(var(--app-safe-area-inset-top), 0px);
+  padding-right: max(var(--app-safe-area-inset-right), 0px);
+  padding-bottom: max(var(--app-safe-area-inset-bottom), 0px);
+  padding-left: max(var(--app-safe-area-inset-left), 0px);
 }
 
 body::after {

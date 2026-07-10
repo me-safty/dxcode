@@ -43,6 +43,7 @@ import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/unstable/http";
 
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
+import { isCapacitorNativeApp } from "../capacitor";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
 import {
   readPrimaryEnvironmentTarget,
@@ -113,14 +114,29 @@ const wakeupsLayer = Wakeups.layer({
   ),
 });
 
-function clientMetadata() {
-  const desktop = window.desktopBridge !== undefined;
-  const platform = navigator.platform.trim();
+export function resolveClientMetadata(input: {
+  readonly desktop: boolean;
+  readonly capacitor: boolean;
+  readonly platform: string;
+}) {
+  const platform = input.platform.trim();
   return {
-    label: desktop ? "T3 Code Desktop" : "T3 Code Web",
-    deviceType: "desktop" as const,
+    label: input.capacitor
+      ? "T3 Code Mobile (Capacitor)"
+      : input.desktop
+        ? "T3 Code Desktop"
+        : "T3 Code Web",
+    deviceType: input.capacitor ? ("mobile" as const) : ("desktop" as const),
     ...(platform === "" ? {} : { os: platform }),
   };
+}
+
+function clientMetadata() {
+  return resolveClientMetadata({
+    desktop: window.desktopBridge !== undefined,
+    capacitor: isCapacitorNativeApp(),
+    platform: navigator.platform,
+  });
 }
 
 function sshPreparationError(cause: unknown) {

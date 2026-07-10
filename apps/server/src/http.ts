@@ -40,7 +40,11 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
+import {
+  browserApiCorsAllowedHeaders,
+  browserApiCorsAllowedMethods,
+  mobileCapacitorCorsAllowedOrigins,
+} from "./httpCors.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -54,7 +58,16 @@ export const browserApiCorsLayer = Layer.unwrap(
     // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
     return HttpRouter.cors({
       ...(devOrigin
-        ? { allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS], credentials: true }
+        ? {
+            allowedOrigins: [
+              ...new Set([
+                devOrigin,
+                ...DESKTOP_RENDERER_ORIGINS,
+                ...mobileCapacitorCorsAllowedOrigins,
+              ]),
+            ],
+            credentials: true,
+          }
         : {}),
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,

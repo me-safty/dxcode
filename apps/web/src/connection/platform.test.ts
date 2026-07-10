@@ -14,10 +14,23 @@ import {
   primaryRegistrationToRetainAfterTopologyRead,
   provisionDesktopSshEnvironment,
   readPrimaryEnvironmentTargetResult,
+  resolveClientMetadata,
   secondaryRegistrationsToRetainAfterTopologyRead,
   secondaryBearerExpiresAtEpochMs,
   secondaryBearerRefreshAtEpochMs,
 } from "./platform.ts";
+
+describe("client metadata", () => {
+  it("identifies the Capacitor shell as a mobile client", () => {
+    expect(
+      resolveClientMetadata({ desktop: false, capacitor: true, platform: "Linux armv8l" }),
+    ).toEqual({
+      label: "T3 Code Mobile (Capacitor)",
+      deviceType: "mobile",
+      os: "Linux armv8l",
+    });
+  });
+});
 
 const TARGET: DesktopSshEnvironmentTarget = {
   alias: "devbox",

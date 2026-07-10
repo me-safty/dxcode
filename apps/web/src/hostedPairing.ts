@@ -1,4 +1,5 @@
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
+import { isCapacitorNativeApp } from "./capacitor";
 
 const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
 
@@ -34,6 +35,10 @@ function originFromUrl(value: string): string | null {
 export function isHostedStaticApp(url: URL = new URL(window.location.href)): boolean {
   if (configuredBackendUrl()) {
     return false;
+  }
+
+  if (isCapacitorNativeApp()) {
+    return true;
   }
 
   if (configuredHostedAppChannel()) {

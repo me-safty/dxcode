@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Tailscale and private LAN targets commonly expose T3 Code over HTTP. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

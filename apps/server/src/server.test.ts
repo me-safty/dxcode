@@ -3262,6 +3262,32 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     );
   }
 
+  for (const capacitorOrigin of ["http://localhost", "capacitor://localhost"]) {
+    it.effect(`allows Capacitor preflights from ${capacitorOrigin} in development`, () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest({
+          config: { devUrl: new URL(crossOriginClientOrigin) },
+        });
+
+        const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
+        const response = yield* fetchEffect(sessionUrl, {
+          method: "OPTIONS",
+          headers: {
+            origin: capacitorOrigin,
+            "access-control-request-method": "GET",
+            "access-control-request-headers": "authorization, content-type",
+          },
+        });
+
+        assert.equal(response.status, 204);
+        assertBrowserApiCorsPreflightHeaders(response.headers, {
+          origin: capacitorOrigin,
+          credentials: true,
+        });
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+  }
+
   it.effect("includes CORS headers on remote websocket-ticket auth failures", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

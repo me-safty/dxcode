@@ -6,6 +6,7 @@ import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { isCapacitorNativeApp } from "../capacitor";
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -55,6 +56,7 @@ function SidebarControl() {
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const isCapacitor = isCapacitorNativeApp();
   const macosWindowControlsStyle =
     isElectron && isMacPlatform(navigator.platform)
       ? ({ "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET } as CSSProperties)
@@ -78,7 +80,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={macosWindowControlsStyle}>
+    <SidebarProvider
+      className={isCapacitor ? "h-full min-h-0!" : "h-dvh! min-h-0!"}
+      defaultOpen
+      style={macosWindowControlsStyle}
+    >
       <Sidebar
         side="left"
         collapsible="offcanvas"
