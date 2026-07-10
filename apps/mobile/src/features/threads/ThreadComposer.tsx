@@ -66,6 +66,7 @@ import {
 } from "../../lib/providerOptions";
 import { useComposerPathSearch } from "../../state/use-composer-path-search";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
+import { resolveThreadComposerSendLabel } from "./threadComposerModel";
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -313,10 +314,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   }, [onExpandedChange]);
   const showStopAction = threadRuntimeIsActive(props.selectedThread.runtime);
 
-  const sendLabel =
-    props.connectionState !== "connected" || props.activeThreadBusy || props.queueCount > 0
-      ? "Queue"
-      : "Send";
+  const sendLabel = resolveThreadComposerSendLabel({
+    connectionState: props.connectionState,
+    activeThreadBusy: props.activeThreadBusy,
+    queueCount: props.queueCount,
+  });
   const currentModelSelection = props.selectedThread.modelSelection;
   const currentRuntimeMode = props.selectedThread.runtimeMode;
   const currentInteractionMode = props.selectedThread.interactionMode ?? "default";

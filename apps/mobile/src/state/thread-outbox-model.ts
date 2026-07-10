@@ -169,7 +169,9 @@ export function resolveThreadOutboxDeliveryAction(input: {
   if (!input.threadExists) {
     return input.shellStatus === "live" ? "remove" : "wait";
   }
-  return input.environmentConnected && !input.threadBusy ? "send" : "wait";
+  // Existing-thread messages may be delivered during an active turn. The V2
+  // command policy decides whether to steer, queue, or interrupt-and-restart.
+  return input.environmentConnected ? "send" : "wait";
 }
 
 /**
