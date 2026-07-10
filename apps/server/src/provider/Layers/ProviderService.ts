@@ -281,6 +281,28 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
     });
 
+  // Runtime event types that must NOT count as session activity.
+  // `session.exited` means the provider process is gone — bumping `lastSeenAt`
+  // would keep the directory binding alive past the runtime that backs it,
+  // defeating the reaper. Extend this set if new event types turn out to fire
+  // after a session is effectively dead.
+  const SESSION_ACTIVITY_DENY_LIST: ReadonlySet<ProviderRuntimeEvent["type"]> = new Set([
+    "session.exited",
+  ]);
+
+  const bumpSessionActivity = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+    SESSION_ACTIVITY_DENY_LIST.has(event.type)
+      ? Effect.void
+      : directory.touch(event.threadId).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logDebug("provider.session.activity.touch-failed", {
+              threadId: event.threadId,
+              eventType: event.type,
+              cause,
+            }),
+          ),
+        );
+
   const processRuntimeEvent = (
     source: {
       readonly instanceId: ProviderInstanceId;
@@ -293,7 +315,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         increment(providerRuntimeEventsTotal, {
           provider: canonicalEvent.provider,
           eventType: canonicalEvent.type,
-        }).pipe(Effect.andThen(publishRuntimeEvent(canonicalEvent))),
+        }).pipe(
+          Effect.andThen(publishRuntimeEvent(canonicalEvent)),
+          Effect.andThen(bumpSessionActivity(canonicalEvent)),
+        ),
       ),
     );
 
