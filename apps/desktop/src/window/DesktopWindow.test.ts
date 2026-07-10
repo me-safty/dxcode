@@ -562,11 +562,11 @@ describe("DesktopWindow", () => {
     }),
   );
 
-  it.effect("does not persist minimized window bounds", () =>
+  it.effect("flushes normal bounds when minimized before the debounce completes", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
-      fakeWindow.isMinimized.mockReturnValue(true);
       fakeWindow.getBounds.mockReturnValue({ x: -32_000, y: -32_000, width: 160, height: 28 });
+      fakeWindow.getNormalBounds.mockReturnValue({ x: 180, y: 120, width: 1440, height: 960 });
       const createCount = yield* Ref.make(0);
       const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
       const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
@@ -581,16 +581,19 @@ describe("DesktopWindow", () => {
         const desktopWindow = yield* DesktopWindow.DesktopWindow;
         yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
 
-        const close = fakeWindow.windowListeners.get("close");
-        if (!close) {
-          return yield* Effect.die("window close listener was not registered");
+        const resize = fakeWindow.windowListeners.get("resize");
+        if (!resize) {
+          return yield* Effect.die("window resize listener was not registered");
         }
-        close();
+        resize();
+        yield* TestClock.adjust(250);
+        fakeWindow.isMinimized.mockReturnValue(true);
+
         yield* desktopWindow.flushMainWindowBounds;
 
-        assert.deepEqual(mainWindowBoundsUpdates, []);
+        assert.deepEqual(mainWindowBoundsUpdates, [{ x: 180, y: 120, width: 1440, height: 960 }]);
         assert.equal(fakeWindow.getBounds.mock.calls.length, 0);
-        assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 0);
+        assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 1);
       }).pipe(Effect.provide(layer));
     }),
   );
