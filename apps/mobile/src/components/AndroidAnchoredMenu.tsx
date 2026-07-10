@@ -108,22 +108,29 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps) {
   }, []);
 
   // The dropdown renders in-window (no Modal takes focus), so the hardware
-  // back gesture needs explicit handling while it is open. Under predictive
-  // back (enableOnBackInvokedCallback) this stays correct: back reaches JS
+  // back gesture needs explicit handling while it is open. Back steps out of
+  // a drilled-in submenu one level at a time (mirroring the tappable parent
+  // header) before closing the menu. Under predictive back
+  // (enableOnBackInvokedCallback) this stays correct: back reaches JS
   // through always-registered OnBackPressedDispatcher callbacks (react-native
   // core on Android 16+, withAndroidPredictiveBackCompat on 13-15), which
   // also keeps the system from playing a "leave app" preview while the menu
   // merely closes.
+  const submenuDepth = path.length;
   useEffect(() => {
     if (anchor === null) {
       return;
     }
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      close();
+      if (submenuDepth > 0) {
+        setPath((current) => current.slice(0, -1));
+      } else {
+        close();
+      }
       return true;
     });
     return () => subscription.remove();
-  }, [anchor, close]);
+  }, [anchor, close, submenuDepth]);
 
   const parent = path.length > 0 ? path[path.length - 1] : null;
   const levelActions = (parent?.subactions ?? props.actions).filter(
