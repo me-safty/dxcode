@@ -6,6 +6,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import type {
@@ -367,9 +368,11 @@ describe("ProviderUpdateEnvironmentRows", () => {
 
   it.each(["connecting", "disconnected", "error"] as const)(
     "keeps an empty interacted host open while an environment is %s",
-    (connectionState) => {
+    async (connectionState) => {
       const onEmpty = vi.fn();
-      renderRow();
+      testState.updateProvider.mockResolvedValue(AsyncResult.failure(Cause.interrupt()));
+      renderRow().props.onUpdate();
+      await flushPromises();
       testState.isAnySettling = connectionState === "connecting";
       testState.groups = testState.groups.map((group) => ({
         ...group,
@@ -389,28 +392,38 @@ describe("ProviderUpdateEnvironmentRows", () => {
     },
   );
 
-  it("ignores an unrelated disconnected environment when closing an empty host", () => {
+  it("ignores an unattempted disconnected candidate when closing an empty host", async () => {
     const onEmpty = vi.fn();
-    renderRow();
+    const attemptedGroup = testState.groups[0]!;
+    const unattemptedCandidate = {
+      ...provider(),
+      instanceId: ProviderInstanceId.make("codex-other-wsl"),
+    } as ProviderUpdateCandidate;
     testState.groups = [
+      attemptedGroup,
       {
-        ...testState.groups[0]!,
-        candidates: [],
-        oneClickCandidates: [],
-        runnableCandidates: [],
-        providers: [],
-      },
-      {
-        ...testState.groups[0]!,
+        ...attemptedGroup,
         environmentId: "env-unrelated" as EnvironmentId,
         label: "Other WSL",
-        connectionState: "disconnected",
-        candidates: [],
-        oneClickCandidates: [],
-        runnableCandidates: [],
-        providers: [],
+        candidates: [unattemptedCandidate],
+        oneClickCandidates: [unattemptedCandidate],
+        runnableCandidates: [unattemptedCandidate],
+        providers: [unattemptedCandidate],
       },
     ];
+    testState.updateProvider.mockResolvedValue(AsyncResult.failure(Cause.interrupt()));
+
+    renderRow().props.onUpdate();
+    await flushPromises();
+
+    testState.groups = testState.groups.map((group) => ({
+      ...group,
+      connectionState: group.environmentId === environmentId ? "ready" : "disconnected",
+      candidates: [],
+      oneClickCandidates: [],
+      runnableCandidates: [],
+      providers: group.environmentId === environmentId ? [provider("succeeded")] : [],
+    }));
 
     hooks.beginRender();
     const output = ProviderUpdateEnvironmentRows({ onEmpty });

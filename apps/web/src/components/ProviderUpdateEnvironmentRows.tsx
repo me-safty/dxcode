@@ -223,7 +223,11 @@ export function ProviderUpdateEnvironmentRows({
   const [resultByEnvironment, setResultByEnvironment] = useState<
     ReadonlyMap<EnvironmentId, EnvironmentUpdateResult>
   >(() => new Map());
-  const relevantEnvironmentIdsRef = useRef<Set<EnvironmentId>>(new Set());
+  // Remember only environments where this mounted prompt actually accepted an
+  // update attempt. If an interrupted request loses its row while that backend
+  // reconnects, this keeps the prompt alive until its snapshot is authoritative
+  // again without letting an unrelated offline candidate strand the prompt.
+  const attemptedEnvironmentIdsRef = useRef<Set<EnvironmentId>>(new Set());
 
   const clearPending = useCallback((environmentId: EnvironmentId) => {
     setPendingEnvironments((previous) => {
@@ -246,6 +250,7 @@ export function ProviderUpdateEnvironmentRows({
         return;
       }
       inFlightEnvironmentsRef.current.add(environmentId);
+      attemptedEnvironmentIdsRef.current.add(environmentId);
       const requestVersion = (requestVersionRef.current.get(environmentId) ?? 0) + 1;
       requestVersionRef.current.set(environmentId, requestVersion);
       const isCurrentRequest = () =>
@@ -457,27 +462,14 @@ export function ProviderUpdateEnvironmentRows({
     .filter(({ group, status }) => group.candidates.length > 0 || status.kind !== "idle");
 
   useEffect(() => {
-    for (const group of groups) {
-      if (
-        group.candidates.length > 0 ||
-        pendingEnvironments.has(group.environmentId) ||
-        errorByEnvironment.has(group.environmentId) ||
-        resultByEnvironment.has(group.environmentId)
-      ) {
-        relevantEnvironmentIdsRef.current.add(group.environmentId);
-      }
-    }
-  }, [errorByEnvironment, groups, pendingEnvironments, resultByEnvironment]);
-
-  useEffect(() => {
     // Empty provider snapshots from connecting, disconnected, or failed
     // backends are not authoritative. Keep an interacted toast mounted until
     // every backend that contributed an update or attempt is ready; unrelated
     // offline environments must not strand an otherwise-empty toast.
-    const relevantGroups = groups.filter((group) =>
-      relevantEnvironmentIdsRef.current.has(group.environmentId),
+    const attemptedGroups = groups.filter((group) =>
+      attemptedEnvironmentIdsRef.current.has(group.environmentId),
     );
-    if (rows.length === 0 && relevantGroups.every((group) => group.connectionState === "ready")) {
+    if (rows.length === 0 && attemptedGroups.every((group) => group.connectionState === "ready")) {
       onEmpty?.();
     }
   }, [groups, onEmpty, rows.length]);
