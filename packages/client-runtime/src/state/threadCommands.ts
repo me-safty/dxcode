@@ -40,6 +40,15 @@ import {
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
+export type ThreadCommandLane = "control" | "mutation";
+
+export function threadCommandConcurrencyKey(
+  lane: ThreadCommandLane,
+  { environmentId, input }: { environmentId: string; input: { threadId: string } },
+): string {
+  return JSON.stringify([environmentId, input.threadId, lane]);
+}
+
 export type {
   ArchiveThreadInput,
   CreateThreadInput,
@@ -60,6 +69,7 @@ export type {
   UnarchiveThreadInput,
   UpdateThreadMetadataInput,
 } from "../operations/commands.ts";
+export { ThreadTurnNotInterruptibleError } from "../operations/commands.ts";
 
 export function createThreadEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
@@ -67,8 +77,13 @@ export function createThreadEnvironmentAtoms<R, E>(
   const scheduler = createAtomCommandScheduler();
   const concurrency = {
     mode: "serial" as const,
-    key: ({ environmentId, input }: { environmentId: string; input: { threadId: string } }) =>
-      JSON.stringify([environmentId, input.threadId]),
+    key: (input: { environmentId: string; input: { threadId: string } }) =>
+      threadCommandConcurrencyKey("mutation", input),
+  };
+  const controlConcurrency = {
+    mode: "serial" as const,
+    key: (input: { environmentId: string; input: { threadId: string } }) =>
+      threadCommandConcurrencyKey("control", input),
   };
   return {
     create: createEnvironmentCommand(runtime, {
@@ -123,7 +138,7 @@ export function createThreadEnvironmentAtoms<R, E>(
       label: "environment-data:commands:thread:interrupt-turn",
       execute: (input: InterruptThreadTurnInput) => interruptThreadTurn(input),
       scheduler,
-      concurrency,
+      concurrency: controlConcurrency,
     }),
     respondToApproval: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:respond-to-approval",
@@ -147,7 +162,7 @@ export function createThreadEnvironmentAtoms<R, E>(
       label: "environment-data:commands:thread:stop-session",
       execute: (input: StopThreadSessionInput) => stopThreadSession(input),
       scheduler,
-      concurrency,
+      concurrency: controlConcurrency,
     }),
     forkFromRun: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:fork-from-run",

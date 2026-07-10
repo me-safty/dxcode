@@ -35,6 +35,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -1283,7 +1284,9 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
         const events = yield* Queue.unbounded<ProviderAdapterV2Event>();
         const activeTurns = yield* Ref.make(new Map<string, ActiveCodexTurnContext>());
         const pendingRootTurns = yield* Ref.make(new Map<string, ProviderAdapterV2TurnInput>());
-        const turnWaiters = yield* Ref.make(new Map<string, Deferred.Deferred<void, never>>());
+        const turnWaiters = yield* Ref.make(
+          new Map<string, ReadonlySet<Deferred.Deferred<void, never>>>(),
+        );
         const subagentThreads = yield* Ref.make(new Map<string, CodexSubagentThreadContext>());
         const pendingSubagentTurns = yield* Ref.make(
           new Map<string, ReadonlyArray<PendingCodexSubagentTurnStarted>>(),
@@ -3514,10 +3517,15 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                     },
               );
             }
-            const waiter = (yield* Ref.get(turnWaiters)).get(payload.turn.id);
-            if (waiter !== undefined) {
-              yield* Deferred.succeed(waiter, undefined);
-            }
+            const waiters = yield* Ref.modify(turnWaiters, (current) => {
+              const matching = current.get(payload.turn.id) ?? new Set();
+              const updated = new Map(current);
+              updated.delete(payload.turn.id);
+              return [matching, updated] as const;
+            });
+            yield* Effect.forEach(waiters, (waiter) => Deferred.succeed(waiter, undefined), {
+              discard: true,
+            });
             yield* Ref.update(activeTurns, (current) => {
               const updated = new Map(current);
               updated.delete(payload.turn.id);
@@ -3694,10 +3702,44 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   `Provider turn ${turnInput.providerTurnId} is not active and cannot be interrupted.`,
                 );
               }
-              yield* client.request("turn/interrupt", {
-                threadId,
-                turnId: activeTurn.nativeTurnId,
+              const terminal = yield* Deferred.make<void>();
+              yield* Ref.update(turnWaiters, (current) => {
+                const updated = new Map(current);
+                const waiters = new Set(updated.get(activeTurn.nativeTurnId));
+                waiters.add(terminal);
+                updated.set(activeTurn.nativeTurnId, waiters);
+                return updated;
               });
+              const unregisterTerminalWaiter = Ref.update(turnWaiters, (current) => {
+                const existing = current.get(activeTurn.nativeTurnId);
+                if (existing === undefined || !existing.has(terminal)) {
+                  return current;
+                }
+                const updated = new Map(current);
+                const waiters = new Set(existing);
+                waiters.delete(terminal);
+                if (waiters.size === 0) {
+                  updated.delete(activeTurn.nativeTurnId);
+                } else {
+                  updated.set(activeTurn.nativeTurnId, waiters);
+                }
+                return updated;
+              });
+              const stopped = yield* client
+                .request("turn/interrupt", {
+                  threadId,
+                  turnId: activeTurn.nativeTurnId,
+                })
+                .pipe(
+                  Effect.andThen(Deferred.await(terminal)),
+                  Effect.timeoutOption("10 seconds"),
+                  Effect.ensuring(unregisterTerminalWaiter),
+                );
+              if (Option.isNone(stopped)) {
+                return yield* toProtocolError(
+                  `Provider turn ${turnInput.providerTurnId} did not reach a terminal state before the interrupt timeout.`,
+                );
+              }
             }).pipe(
               Effect.mapError(
                 (cause) =>

@@ -17,11 +17,12 @@ import {
   type RunId,
   type RuntimeMode,
   type RuntimeRequestId,
-  type ThreadId,
+  ThreadId,
   type UploadChatAttachment,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import { request } from "../rpc/client.ts";
 
@@ -127,6 +128,17 @@ export interface InterruptThreadTurnInput extends ThreadCommandInput {
   readonly runId?: RunId;
   /** Temporary caller compatibility while UI naming moves from turns to runs. */
   readonly turnId?: string;
+}
+
+export class ThreadTurnNotInterruptibleError extends Schema.TaggedErrorClass<ThreadTurnNotInterruptibleError>()(
+  "ThreadTurnNotInterruptibleError",
+  {
+    threadId: ThreadId,
+  },
+) {
+  override get message(): string {
+    return `Thread ${this.threadId} has no active run to interrupt.`;
+  }
 }
 
 export interface RespondToThreadApprovalInput extends ThreadCommandInput {
@@ -503,18 +515,20 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
 export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThreadTurn")(function* (
   input: InterruptThreadTurnInput,
 ) {
-  const projection = yield* getProjection(input.threadId);
-  const runId =
-    input.runId ??
-    (input.turnId as RunId | undefined) ??
-    projection.runs.findLast(
+  let runId = input.runId ?? (input.turnId as RunId | undefined);
+  if (runId === undefined) {
+    const projection = yield* getProjection(input.threadId);
+    runId = projection.runs.findLast(
       (run) =>
         run.status === "preparing" ||
         run.status === "starting" ||
         run.status === "running" ||
         run.status === "waiting",
     )?.id;
-  if (runId === undefined) return { sequence: 0 };
+  }
+  if (runId === undefined) {
+    return yield* new ThreadTurnNotInterruptibleError({ threadId: input.threadId });
+  }
   return yield* dispatch({
     type: "run.interrupt",
     commandId: yield* allocateCommandId(input),
