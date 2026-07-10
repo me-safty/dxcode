@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -17,11 +17,13 @@ import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { MENU_ACTION_CHANNEL } from "../ipc/channels.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
 const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
+const MAIN_WINDOW_BOUNDS_PERSIST_DEBOUNCE_MS = 500;
 const DEVELOPMENT_LOAD_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 const DEVELOPMENT_RETRYABLE_LOAD_ERROR_CODES = new Set([
   -2, // ERR_FAILED
@@ -41,6 +43,7 @@ type WindowTitleBarOptions = Pick<
 type DesktopWindowRuntimeServices =
   | DesktopEnvironment.DesktopEnvironment
   | DesktopAssets.DesktopAssets
+  | DesktopAppSettings.DesktopAppSettings
   | ElectronMenu.ElectronMenu
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
@@ -97,6 +100,33 @@ function getIconOption(
 
 function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+}
+
+type DisplayBounds = Pick<Electron.Rectangle, "x" | "y" | "width" | "height">;
+
+function windowFitsWithinDisplay(
+  windowBounds: DesktopAppSettings.DesktopWindowBounds,
+  displayBounds: DisplayBounds,
+): boolean {
+  return (
+    windowBounds.x >= displayBounds.x &&
+    windowBounds.y >= displayBounds.y &&
+    windowBounds.x + windowBounds.width <= displayBounds.x + displayBounds.width &&
+    windowBounds.y + windowBounds.height <= displayBounds.y + displayBounds.height
+  );
+}
+
+export function resolveInitialMainWindowBounds(
+  persistedBounds: DesktopAppSettings.DesktopWindowBounds | null,
+  displays: readonly DisplayBounds[],
+): DesktopAppSettings.DesktopWindowBounds {
+  if (
+    persistedBounds !== null &&
+    displays.some((display) => windowFitsWithinDisplay(persistedBounds, display))
+  ) {
+    return persistedBounds;
+  }
+  return DesktopAppSettings.DEFAULT_MAIN_WINDOW_BOUNDS;
 }
 
 // A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
@@ -202,6 +232,7 @@ export const make = Effect.gen(function* () {
   const electronTheme = yield* ElectronTheme.ElectronTheme;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const previewManager = yield* PreviewManager.PreviewManager;
+  const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   // Window-side latch for the primary backend's readiness. Set by
   // handleBackendReady (driven by the pool's onReady callback), cleared
   // by handleBackendNotReady (driven by onShutdown). Only consumed by
@@ -250,9 +281,23 @@ export const make = Effect.gen(function* () {
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
+    const persistedBounds = (yield* desktopSettings.get).mainWindowBounds;
+    const displayBounds = yield* Effect.sync(() => {
+      try {
+        return Electron.screen.getAllDisplays().map((display) => display.bounds);
+      } catch {
+        return [];
+      }
+    });
+    const initialBounds = resolveInitialMainWindowBounds(persistedBounds, displayBounds);
+    if (
+      persistedBounds !== null &&
+      initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_BOUNDS
+    ) {
+      yield* logWindowWarning("saved main window bounds could not be restored; using defaults");
+    }
     const window = yield* electronWindow.create({
-      width: 1100,
-      height: 780,
+      ...initialBounds,
       minWidth: 840,
       minHeight: 620,
       show: false,
@@ -274,6 +319,60 @@ export const make = Effect.gen(function* () {
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
     }
+
+    let boundsPersistFiber: Fiber.Fiber<void, never> | undefined;
+    const readPersistableBounds = (): DesktopAppSettings.DesktopWindowBounds | null => {
+      if (window.isDestroyed() || window.isFullScreen()) {
+        return null;
+      }
+      const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds();
+      const x = Math.round(bounds.x);
+      const y = Math.round(bounds.y);
+      const width = Math.round(bounds.width);
+      const height = Math.round(bounds.height);
+      return { x, y, width, height };
+    };
+    const persistCurrentBounds = () => {
+      const bounds = readPersistableBounds();
+      if (bounds === null) {
+        return;
+      }
+      void runPromise(
+        desktopSettings.setMainWindowBounds(bounds).pipe(
+          Effect.asVoid,
+          Effect.catch((error) =>
+            logWindowWarning("failed to persist main window bounds", {
+              message: error.message,
+            }),
+          ),
+        ),
+      );
+    };
+    const scheduleBoundsPersist = () => {
+      if (boundsPersistFiber !== undefined) {
+        const fiber = boundsPersistFiber;
+        boundsPersistFiber = undefined;
+        runFork(Fiber.interrupt(fiber));
+      }
+      boundsPersistFiber = runFork(
+        Effect.sleep(MAIN_WINDOW_BOUNDS_PERSIST_DEBOUNCE_MS).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              boundsPersistFiber = undefined;
+              persistCurrentBounds();
+            }),
+          ),
+        ),
+      );
+    };
+    const clearBoundsPersist = () => {
+      if (boundsPersistFiber === undefined) {
+        return;
+      }
+      const fiber = boundsPersistFiber;
+      boundsPersistFiber = undefined;
+      runFork(Fiber.interrupt(fiber));
+    };
 
     yield* previewManager.setMainWindow(window);
     window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
@@ -363,6 +462,12 @@ export const make = Effect.gen(function* () {
     window.on("page-title-updated", (event) => {
       event.preventDefault();
       window.setTitle(environment.displayName);
+    });
+    window.on("resize", scheduleBoundsPersist);
+    window.on("move", scheduleBoundsPersist);
+    window.on("close", () => {
+      clearBoundsPersist();
+      persistCurrentBounds();
     });
 
     let developmentLoadRetryIndex = 0;
@@ -473,6 +578,7 @@ export const make = Effect.gen(function* () {
 
     window.on("closed", () => {
       clearDevelopmentLoadRetry();
+      clearBoundsPersist();
       void runPromise(electronWindow.clearMain(Option.some(window)));
     });
 

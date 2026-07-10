@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
 import type * as Electron from "electron";
@@ -18,12 +19,20 @@ vi.mock("electron", async (importOriginal) => ({
       setUserAgent: vi.fn(),
     })),
   },
+  screen: {
+    getAllDisplays: vi.fn(() => [
+      {
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      },
+    ]),
+  },
 }));
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -47,6 +56,7 @@ const environmentInput = {
 
 function makeFakeBrowserWindow() {
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
+  const windowListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContents = {
     copyImageAt: vi.fn(),
     getURL: vi.fn(() => "t3code-dev://app/"),
@@ -65,11 +75,17 @@ function makeFakeBrowserWindow() {
   const window = {
     close: vi.fn(),
     focus: vi.fn(),
+    getBounds: vi.fn(() => ({ x: 0, y: 0, width: 1100, height: 780 })),
+    getNormalBounds: vi.fn(() => ({ x: 0, y: 0, width: 1100, height: 780 })),
     isDestroyed: vi.fn(() => false),
+    isFullScreen: vi.fn(() => false),
+    isMaximized: vi.fn(() => false),
     isMinimized: vi.fn(() => false),
     isVisible: vi.fn(() => true),
     loadURL: vi.fn(() => Promise.resolve()),
-    on: vi.fn(),
+    on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
+      windowListeners.set(eventName, listener);
+    }),
     once: vi.fn(),
     restore: vi.fn(),
     setBackgroundColor: vi.fn(),
@@ -83,11 +99,13 @@ function makeFakeBrowserWindow() {
   return {
     window: window as unknown as Electron.BrowserWindow,
     loadURL: window.loadURL,
+    getBounds: window.getBounds,
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
     send: webContents.send,
     setAutoHideCursor: window.setAutoHideCursor,
     webContentsListeners,
+    windowListeners,
   };
 }
 
@@ -139,13 +157,47 @@ const desktopEnvironmentLayer = DesktopEnvironment.layer(environmentInput).pipe(
   ),
 );
 
+const desktopWindowBoundsEquivalence = Schema.toEquivalence(
+  DesktopAppSettings.DesktopWindowBoundsSchema,
+);
+
 function makeTestLayer(input: {
   readonly window: Electron.BrowserWindow;
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
   readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
+  readonly desktopSettings?: DesktopAppSettings.DesktopSettings;
+  readonly mainWindowBoundsUpdates?: DesktopAppSettings.DesktopWindowBounds[];
   readonly openedExternalUrls?: unknown[];
 }) {
+  let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
+  const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
+    get: Effect.sync(() => desktopSettings),
+    load: Effect.sync(() => desktopSettings),
+    setMainWindowBounds: (bounds) =>
+      Effect.sync(() => {
+        const changed =
+          desktopSettings.mainWindowBounds === null ||
+          !desktopWindowBoundsEquivalence(desktopSettings.mainWindowBounds, bounds);
+        if (changed) {
+          desktopSettings = {
+            ...desktopSettings,
+            mainWindowBounds: bounds,
+          };
+          input.mainWindowBoundsUpdates?.push(bounds);
+        }
+        return { settings: desktopSettings, changed };
+      }),
+    setServerExposureMode: () => Effect.die("unexpected server exposure update"),
+    setTailscaleServe: () => Effect.die("unexpected Tailscale Serve update"),
+    setUpdateChannel: () => Effect.die("unexpected update channel change"),
+    setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
+    setWslDistro: () => Effect.die("unexpected WSL distro change"),
+    setWslOnly: () => Effect.die("unexpected WSL-only toggle"),
+    applyWslWindowsFallback: Effect.die("unexpected WSL Windows fallback"),
+    applyWslWindowsFallbackInMemory: Effect.die("unexpected WSL Windows fallback"),
+  } satisfies DesktopAppSettings.DesktopAppSettings["Service"]);
+
   const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
     create: (options) =>
       Effect.sync(() => {
@@ -170,6 +222,7 @@ function makeTestLayer(input: {
       Layer.mergeAll(
         desktopAssetsLayer,
         desktopEnvironmentLayer,
+        desktopAppSettingsLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
         electronMenuLayer,
@@ -267,6 +320,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
         Layer.mergeAll(
           desktopAssetsLayer,
           desktopEnvironmentLayer,
+          DesktopAppSettings.layerTest(),
           desktopServerExposureLayer,
           electronMenuLayer,
           Layer.succeed(ElectronShell.ElectronShell, {
@@ -289,6 +343,23 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
   });
 
 describe("DesktopWindow", () => {
+  it("restores bounds only when the window fits within a connected display", () => {
+    const persistedBounds = { x: 2040, y: 80, width: 1320, height: 880 };
+    const displays = [
+      { x: 0, y: 0, width: 1920, height: 1080 },
+      { x: 1920, y: 0, width: 2560, height: 1440 },
+    ];
+
+    assert.deepEqual(
+      DesktopWindow.resolveInitialMainWindowBounds(persistedBounds, displays),
+      persistedBounds,
+    );
+    assert.deepEqual(
+      DesktopWindow.resolveInitialMainWindowBounds(persistedBounds, [displays[0]!]),
+      DesktopAppSettings.DEFAULT_MAIN_WINDOW_BOUNDS,
+    );
+  });
+
   it("recognizes only same-origin renderer navigations", () => {
     assert.isTrue(
       DesktopWindow.isSameOriginRendererNavigation({
@@ -330,10 +401,78 @@ describe("DesktopWindow", () => {
 
         yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
         assert.equal(yield* Ref.get(createCount), 1);
+        assert.equal(createdWindowOptions[0]?.width, 1100);
+        assert.equal(createdWindowOptions[0]?.height, 780);
         assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("uses the persisted main window bounds when opening the window", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        createdWindowOptions,
+        desktopSettings: {
+          ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+          mainWindowBounds: { x: 120, y: 80, width: 1320, height: 880 },
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        assert.equal(createdWindowOptions[0]?.width, 1320);
+        assert.equal(createdWindowOptions[0]?.height, 880);
+        assert.equal(createdWindowOptions[0]?.x, 120);
+        assert.equal(createdWindowOptions[0]?.y, 80);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("persists the current main window bounds before the window closes", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      fakeWindow.getBounds.mockReturnValue({ x: 240, y: 160, width: 1410, height: 930 });
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        mainWindowBoundsUpdates,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) {
+          return yield* Effect.die("window close listener was not registered");
+        }
+        close();
+        yield* Effect.promise(() => Promise.resolve());
+
+        assert.deepEqual(mainWindowBoundsUpdates, [
+          {
+            x: 240,
+            y: 160,
+            width: 1410,
+            height: 930,
+          },
+        ]);
       }).pipe(Effect.provide(layer));
     }),
   );
