@@ -20,6 +20,7 @@ import {
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveExpandedSubagentThreadKeys,
   resolveSidebarSubagentBranchExpanded,
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
@@ -302,6 +303,58 @@ describe("sidebar thread lineage helpers", () => {
       sidebarThreadKey(child),
     ]);
     expect(getSidebarThreadSelectionKeys(rows)).not.toContain(sidebarThreadKey(grandchild));
+  });
+
+  it("reveals a routed nested child on cold render with empty persisted expansion", () => {
+    const rootId = ThreadId.make("thread-root");
+    const childId = ThreadId.make("thread-child");
+    const grandchildId = ThreadId.make("thread-grandchild");
+    const root = makeThreadFixture({ id: rootId });
+    const child = makeThreadFixture({
+      id: childId,
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: rootId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const grandchild = makeThreadFixture({
+      id: grandchildId,
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: childId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const threads = [root, child, grandchild];
+
+    // Cold load deep-linked to the grandchild: nothing persisted yet, so the
+    // render-time expanded set must already contain the routed thread's
+    // ancestors for the child row to be visible on first paint.
+    const expandedThreadKeys = resolveExpandedSubagentThreadKeys({
+      persistedExpandedThreadKeys: [],
+      activeThreadAncestorKeys: getSidebarSubagentAncestorKeys(
+        threads,
+        sidebarThreadKey(grandchild),
+      ),
+    });
+    const rows = flattenSidebarSubagentTree({
+      threads,
+      roots: getSidebarSubagentTreeRoots(threads),
+      expandedThreadKeys,
+      threadSortOrder: "created_at",
+    });
+
+    expect(rows.map((row) => row.thread.id)).toEqual([rootId, childId, grandchildId]);
+  });
+
+  it("keeps persisted expansion when merging active thread ancestors", () => {
+    expect(
+      resolveExpandedSubagentThreadKeys({
+        persistedExpandedThreadKeys: ["environment:persisted"],
+        activeThreadAncestorKeys: new Set(["environment:ancestor"]),
+      }),
+    ).toEqual(new Set(["environment:persisted", "environment:ancestor"]));
   });
 
   it("keeps an active thread's ancestor expanded when toggled", () => {

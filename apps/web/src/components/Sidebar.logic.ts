@@ -79,6 +79,19 @@ export function getSidebarThreadSelectionKeys(
   return rows.map((row) => sidebarThreadKey(row.thread));
 }
 
+/**
+ * Derives the effective expanded set for rendering the subagent tree: the
+ * persisted expansion plus the ancestors of the currently routed thread. This
+ * runs at render time so a cold load deep-linked to a nested child reveals the
+ * child row on first paint instead of waiting for a post-render effect.
+ */
+export function resolveExpandedSubagentThreadKeys(input: {
+  readonly persistedExpandedThreadKeys: readonly string[];
+  readonly activeThreadAncestorKeys: ReadonlySet<string>;
+}): ReadonlySet<string> {
+  return new Set([...input.persistedExpandedThreadKeys, ...input.activeThreadAncestorKeys]);
+}
+
 export function resolveSidebarSubagentBranchExpanded(input: {
   readonly threadKey: string;
   readonly expandedThreadKeys: ReadonlySet<string>;

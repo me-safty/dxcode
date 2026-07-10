@@ -194,6 +194,7 @@ import {
   flattenSidebarSubagentTree,
   isSidebarSubagentThread,
   resolveAdjacentThreadId,
+  resolveExpandedSubagentThreadKeys,
   isContextMenuPointerDown,
   isTrailingDoubleClick,
   resolveProjectStatusIndicator,
@@ -3326,9 +3327,24 @@ export default function Sidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
   >(() => new Set());
+  const activeSubagentThreadAncestorKeys = useMemo<ReadonlySet<string>>(
+    () =>
+      sidebarShowSubagentThreads && routeThreadKey !== null
+        ? getSidebarSubagentAncestorKeys(sidebarThreads, routeThreadKey)
+        : new Set(),
+    [routeThreadKey, sidebarShowSubagentThreads, sidebarThreads],
+  );
+  // Merge the active route's ancestors into the expanded set at render time so
+  // a cold load deep-linked to a nested subagent reveals the child row on the
+  // first paint; the effect below only persists that expansion so the branch
+  // stays open after navigating away.
   const expandedSubagentThreadKeys = useMemo<ReadonlySet<string>>(
-    () => new Set(persistedExpandedSubagentThreadKeys),
-    [persistedExpandedSubagentThreadKeys],
+    () =>
+      resolveExpandedSubagentThreadKeys({
+        persistedExpandedThreadKeys: persistedExpandedSubagentThreadKeys,
+        activeThreadAncestorKeys: activeSubagentThreadAncestorKeys,
+      }),
+    [activeSubagentThreadAncestorKeys, persistedExpandedSubagentThreadKeys],
   );
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const dragInProgressRef = useRef(false);
@@ -3418,13 +3434,6 @@ export default function Sidebar() {
         ),
       ),
     [sidebarThreads],
-  );
-  const activeSubagentThreadAncestorKeys = useMemo<ReadonlySet<string>>(
-    () =>
-      sidebarShowSubagentThreads && routeThreadKey !== null
-        ? getSidebarSubagentAncestorKeys(sidebarThreads, routeThreadKey)
-        : new Set(),
-    [routeThreadKey, sidebarShowSubagentThreads, sidebarThreads],
   );
   useEffect(() => {
     if (activeSubagentThreadAncestorKeys.size === 0) return;
