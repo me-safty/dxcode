@@ -20,7 +20,10 @@ import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useNewThreadHandler } from "./useHandleNewThread";
-import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
+import {
+  readArchivedThreadShells,
+  refreshArchivedThreadsForEnvironment,
+} from "../lib/archivedThreadsState";
 import { readLocalApi } from "../localApi";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readEnvironmentThreadRefs, readProject, readThreadShell } from "../state/entities";
@@ -39,10 +42,18 @@ function readEnvironmentThreads(environmentId: EnvironmentId) {
       presentThreadShell(environmentId, thread),
     );
   }
-  return readEnvironmentThreadRefs(environmentId).flatMap((ref) => {
+  // The thread refs only track active threads, so merge in any archived
+  // shells already loaded — otherwise subtree reads undercount descendants
+  // whose parents are archived and skip recursive-action confirmations.
+  const active = readEnvironmentThreadRefs(environmentId).flatMap((ref) => {
     const thread = readThreadShell(ref);
     return thread === null ? [] : [thread];
   });
+  const activeIds = new Set(active.map((thread) => thread.id));
+  const archived = readArchivedThreadShells(environmentId)
+    .filter((thread) => !activeIds.has(thread.id))
+    .map((thread) => presentThreadShell(environmentId, thread));
+  return [...active, ...archived];
 }
 
 /** Reads the complete active + archived owned-subagent subtree from the shell cache. */
@@ -269,17 +280,22 @@ export function useThreadActions() {
         shouldDeleteWorktree = confirmationResult.value;
       }
 
-      if (thread.runtime !== null) {
-        await stopThreadSession({
+      // The whole owned subtree is deleted, so stop every member's session
+      // and terminal — not just the selected root's.
+      for (const entry of subtree) {
+        if (entry.runtime !== null) {
+          await stopThreadSession({
+            environmentId: threadRef.environmentId,
+            input: { threadId: entry.id },
+          });
+        }
+      }
+      for (const entry of subtree) {
+        await closeTerminal({
           environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId },
+          input: { threadId: entry.id, deleteHistory: true },
         });
       }
-
-      await closeTerminal({
-        environmentId: threadRef.environmentId,
-        input: { threadId: threadRef.threadId, deleteHistory: true },
-      });
 
       const deletedThreadIds = deletedIds;
       const currentRouteThreadRef = getCurrentRouteThreadRef();

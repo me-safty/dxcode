@@ -4,7 +4,9 @@ import {
   createArchivedThreadSnapshotsAtomFamily,
   makeArchivedThreadsEnvironmentKey,
 } from "@t3tools/client-runtime/state/threads";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { orchestrationEnvironment } from "../state/orchestration";
@@ -24,6 +26,14 @@ const archivedSnapshotsAtom = createArchivedThreadSnapshotsAtomFamily({
 
 export function refreshArchivedThreadsForEnvironment(environmentId: EnvironmentId): void {
   appAtomRegistry.refresh(archivedSnapshotAtom(environmentId));
+}
+
+/** Synchronously reads the archived thread shells already loaded for an environment. */
+export function readArchivedThreadShells(
+  environmentId: EnvironmentId,
+): ReadonlyArray<OrchestrationV2ThreadShell> {
+  const result = appAtomRegistry.get(archivedSnapshotAtom(environmentId));
+  return Option.getOrNull(AsyncResult.value(result))?.threads ?? [];
 }
 
 export function useArchivedThreadSnapshots(environmentIds: ReadonlyArray<EnvironmentId>): {

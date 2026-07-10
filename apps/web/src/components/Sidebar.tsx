@@ -1126,6 +1126,12 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   } = props;
   const showMoreButtonRender = useMemo(() => <button type="button" />, []);
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
+  // Archive confirmations and recovery-root badges describe what the sidebar
+  // shows, so already-archived descendants must not count toward either.
+  const unarchivedProjectThreads = useMemo(
+    () => allProjectThreads.filter((thread) => thread.archivedAt === null),
+    [allProjectThreads],
+  );
 
   return (
     <SidebarMenuSub
@@ -1146,7 +1152,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         renderedThreads.map((row) => {
           const { thread } = row;
           const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-          const subagentDescendants = getOwnedSubagentDescendants(allProjectThreads, thread);
+          const subagentDescendants = getOwnedSubagentDescendants(unarchivedProjectThreads, thread);
           return (
             <SidebarThreadRow
               key={threadKey}
@@ -1166,7 +1172,10 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
                   threadRuntimeIsActive(descendant.runtime),
                 ).length
               }
-              hasUnavailableSubagentParent={hasUnavailableSubagentParent(allProjectThreads, thread)}
+              hasUnavailableSubagentParent={hasUnavailableSubagentParent(
+                unarchivedProjectThreads,
+                thread,
+              )}
               renamingThreadKey={renamingThreadKey}
               renamingTitle={renamingTitle}
               setRenamingTitle={setRenamingTitle}
