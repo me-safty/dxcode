@@ -73,6 +73,21 @@ export function flattenSidebarSubagentTree(input: {
   return flattenSubagentThreadTree(input);
 }
 
+export function getSidebarThreadSelectionKeys(
+  rows: readonly SidebarThreadTreeRow[],
+): readonly string[] {
+  return rows.map((row) => sidebarThreadKey(row.thread));
+}
+
+export function resolveSidebarSubagentBranchExpanded(input: {
+  readonly threadKey: string;
+  readonly expandedThreadKeys: ReadonlySet<string>;
+  readonly activeThreadAncestorKeys: ReadonlySet<string>;
+}): boolean {
+  if (input.activeThreadAncestorKeys.has(input.threadKey)) return true;
+  return !input.expandedThreadKeys.has(input.threadKey);
+}
+
 export function getSidebarForkParentThreadId(
   thread: Pick<SidebarThreadSummary, "forkedFrom" | "lineage">,
 ) {

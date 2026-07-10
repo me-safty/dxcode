@@ -13,12 +13,14 @@ import {
   resolveProjectExpanded,
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
+  setSubagentThreadExpanded,
   setThreadChangedFilesExpanded,
   type UiState,
 } from "./uiStateStore";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
+    expandedSubagentThreadKeys: [],
     projectExpandedById: {},
     projectOrder: [],
     threadLastVisitedAtById: {},
@@ -140,6 +142,21 @@ describe("uiStateStore pure functions", () => {
       defaultAdvertisedEndpointKey: null,
     });
   });
+
+  it("tracks expanded subagent branches without duplicate keys", () => {
+    const first = setSubagentThreadExpanded(makeUiState(), "environment:parent", true);
+    const second = setSubagentThreadExpanded(
+      first,
+      ["environment:parent", "environment:child"],
+      true,
+    );
+
+    expect(second.expandedSubagentThreadKeys).toEqual(["environment:parent", "environment:child"]);
+    expect(setSubagentThreadExpanded(second, "environment:parent", true)).toBe(second);
+    expect(
+      setSubagentThreadExpanded(second, "environment:parent", false).expandedSubagentThreadKeys,
+    ).toEqual(["environment:child"]);
+  });
 });
 
 describe("parsePersistedState", () => {
@@ -150,6 +167,7 @@ describe("parsePersistedState", () => {
         invalid: "no" as unknown as boolean,
       },
       projectOrder: ["physical-b", "", "physical-a", "physical-b"],
+      expandedSubagentThreadKeys: ["environment:parent", "", "environment:parent"],
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
         invalid: "not-a-date",
@@ -164,6 +182,7 @@ describe("parsePersistedState", () => {
     });
 
     expect(parsed).toEqual({
+      expandedSubagentThreadKeys: ["environment:parent"],
       projectExpandedById: {
         logical: false,
       },
@@ -248,6 +267,7 @@ describe("uiStateStore persistence", () => {
 
   it("persists raw UI preferences including thread visit markers", () => {
     const state = makeUiState({
+      expandedSubagentThreadKeys: ["environment:parent"],
       projectExpandedById: {
         logical: false,
       },
@@ -270,6 +290,7 @@ describe("uiStateStore persistence", () => {
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
     expect(persisted).toEqual({
+      expandedSubagentThreadKeys: ["environment:parent"],
       projectExpandedById: {
         logical: false,
       },

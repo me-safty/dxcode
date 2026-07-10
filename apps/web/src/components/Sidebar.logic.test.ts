@@ -5,6 +5,7 @@ import {
   getSidebarThreadIdsToPrewarm,
   getSidebarSubagentAncestorKeys,
   getSidebarSubagentTreeRoots,
+  getSidebarThreadSelectionKeys,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -19,6 +20,7 @@ import {
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveSidebarSubagentBranchExpanded,
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -264,6 +266,69 @@ describe("sidebar thread lineage helpers", () => {
     expect(
       getSidebarSubagentAncestorKeys([root, child, grandchild], sidebarThreadKey(grandchild)),
     ).toEqual(new Set([sidebarThreadKey(child), sidebarThreadKey(root)]));
+  });
+
+  it("uses rendered hierarchy order for range selection", () => {
+    const rootId = ThreadId.make("thread-root");
+    const childId = ThreadId.make("thread-child");
+    const grandchildId = ThreadId.make("thread-grandchild");
+    const root = makeThreadFixture({ id: rootId });
+    const child = makeThreadFixture({
+      id: childId,
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: rootId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const grandchild = makeThreadFixture({
+      id: grandchildId,
+      lineage: {
+        rootThreadId: rootId,
+        parentThreadId: childId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const threads = [root, child, grandchild];
+    const rows = flattenSidebarSubagentTree({
+      threads,
+      roots: getSidebarSubagentTreeRoots(threads),
+      expandedThreadKeys: new Set([sidebarThreadKey(root)]),
+      threadSortOrder: "created_at",
+    });
+
+    expect(getSidebarThreadSelectionKeys(rows)).toEqual([
+      sidebarThreadKey(root),
+      sidebarThreadKey(child),
+    ]);
+    expect(getSidebarThreadSelectionKeys(rows)).not.toContain(sidebarThreadKey(grandchild));
+  });
+
+  it("keeps an active thread's ancestor expanded when toggled", () => {
+    const parentKey = "environment:parent";
+    const expandedThreadKeys = new Set([parentKey]);
+
+    expect(
+      resolveSidebarSubagentBranchExpanded({
+        threadKey: parentKey,
+        expandedThreadKeys,
+        activeThreadAncestorKeys: new Set([parentKey]),
+      }),
+    ).toBe(true);
+    expect(
+      resolveSidebarSubagentBranchExpanded({
+        threadKey: parentKey,
+        expandedThreadKeys,
+        activeThreadAncestorKeys: new Set(),
+      }),
+    ).toBe(false);
+    expect(
+      resolveSidebarSubagentBranchExpanded({
+        threadKey: "environment:collapsed-parent",
+        expandedThreadKeys,
+        activeThreadAncestorKeys: new Set(),
+      }),
+    ).toBe(true);
   });
 });
 

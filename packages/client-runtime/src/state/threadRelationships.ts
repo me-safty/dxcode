@@ -69,16 +69,20 @@ export function getSubagentThreadAncestorKeys<Thread extends SubagentThreadTreeI
   const threadByKey = new Map(
     threads.map((thread) => [subagentThreadKey(thread), thread] as const),
   );
+  const rootKeys = new Set(getSubagentThreadTreeRoots(threads).map(subagentThreadKey));
   const ancestors = new Set<string>();
   const visited = new Set<string>([threadKey]);
   let current = threadByKey.get(threadKey);
 
   while (current !== undefined) {
+    if (rootKeys.has(subagentThreadKey(current))) break;
     const parentKey = subagentParentThreadKey(current);
     if (parentKey === null || visited.has(parentKey)) break;
+    const parent = threadByKey.get(parentKey);
+    if (parent === undefined) break;
     ancestors.add(parentKey);
     visited.add(parentKey);
-    current = threadByKey.get(parentKey);
+    current = parent;
   }
 
   return ancestors;

@@ -17,6 +17,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 export interface PersistedUiState {
+  expandedSubagentThreadKeys?: string[];
   projectExpandedById?: Record<string, boolean>;
   projectOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
@@ -33,6 +34,7 @@ export interface UiProjectState {
 }
 
 export interface UiThreadState {
+  expandedSubagentThreadKeys: string[];
   threadLastVisitedAtById: Record<string, string>;
   threadChangedFilesExpandedById: Record<string, Record<string, boolean>>;
 }
@@ -44,6 +46,7 @@ export interface UiEndpointState {
 export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
 
 const initialState: UiState = {
+  expandedSubagentThreadKeys: [],
   projectExpandedById: {},
   projectOrder: [],
   threadLastVisitedAtById: {},
@@ -121,6 +124,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       : sanitizeStringArray(parsed.projectOrder);
 
   return {
+    expandedSubagentThreadKeys: sanitizeStringArray(parsed.expandedSubagentThreadKeys),
     projectExpandedById,
     projectOrder,
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
@@ -206,6 +210,7 @@ export function persistState(state: UiState): void {
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
+        expandedSubagentThreadKeys: state.expandedSubagentThreadKeys,
         projectExpandedById,
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
@@ -334,6 +339,31 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
+export function setSubagentThreadExpanded(
+  state: UiState,
+  threadKeys: string | readonly string[],
+  expanded: boolean,
+): UiState {
+  const keys = typeof threadKeys === "string" ? [threadKeys] : threadKeys;
+  const expandedKeys = new Set(state.expandedSubagentThreadKeys);
+  let changed = false;
+  for (const key of keys) {
+    if (key.length === 0) continue;
+    if (expanded) {
+      if (expandedKeys.has(key)) continue;
+      expandedKeys.add(key);
+      changed = true;
+      continue;
+    }
+    changed = expandedKeys.delete(key) || changed;
+  }
+  if (!changed) return state;
+  return {
+    ...state,
+    expandedSubagentThreadKeys: [...expandedKeys],
+  };
+}
+
 export function resolveProjectExpanded(
   projectExpandedById: Readonly<Record<string, boolean>>,
   preferenceKeys: readonly string[],
@@ -416,6 +446,7 @@ interface UiStateStore extends UiState {
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
+  setSubagentThreadExpanded: (threadKeys: string | readonly string[], expanded: boolean) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
@@ -434,6 +465,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
+  setSubagentThreadExpanded: (threadKeys, expanded) =>
+    set((state) => setSubagentThreadExpanded(state, threadKeys, expanded)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>

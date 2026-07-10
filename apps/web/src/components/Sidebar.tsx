@@ -190,6 +190,7 @@ import {
   getSidebarSubagentAncestorKeys,
   getSidebarSubagentTreeRoots,
   getSidebarThreadIdsToPrewarm,
+  getSidebarThreadSelectionKeys,
   flattenSidebarSubagentTree,
   isSidebarSubagentThread,
   resolveAdjacentThreadId,
@@ -199,6 +200,7 @@ import {
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveSidebarStageBadgeLabel,
+  resolveSidebarSubagentBranchExpanded,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -1369,12 +1371,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     return counts;
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
 
-  const {
-    projectStatus,
-    sortedProjectThreads,
-    visibleRootProjectThreads,
-    orderedProjectThreadKeys,
-  } = useMemo(() => {
+  const { projectStatus, sortedProjectThreads, visibleRootProjectThreads } = useMemo(() => {
     const lastVisitedAtByThreadKey = new Map(
       projectThreads.map((thread, index) => [
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
@@ -1401,9 +1398,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       sortedProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
     );
     return {
-      orderedProjectThreadKeys: sortedProjectThreads.map((thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      ),
       projectStatus,
       sortedProjectThreads,
       visibleRootProjectThreads,
@@ -1504,6 +1498,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     threadSortOrder,
     visibleRootProjectThreads,
   ]);
+  const orderedProjectThreadKeys = useMemo(
+    () => getSidebarThreadSelectionKeys(renderedThreads),
+    [renderedThreads],
+  );
 
   const handleProjectButtonClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -3296,6 +3294,10 @@ export default function Sidebar() {
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
+  const persistedExpandedSubagentThreadKeys = useUiStateStore(
+    (store) => store.expandedSubagentThreadKeys,
+  );
+  const setSubagentThreadExpanded = useUiStateStore((store) => store.setSubagentThreadExpanded);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
@@ -3324,8 +3326,9 @@ export default function Sidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
   >(() => new Set());
-  const [expandedSubagentThreadKeys, setExpandedSubagentThreadKeys] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  const expandedSubagentThreadKeys = useMemo<ReadonlySet<string>>(
+    () => new Set(persistedExpandedSubagentThreadKeys),
+    [persistedExpandedSubagentThreadKeys],
   );
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const dragInProgressRef = useRef(false);
@@ -3416,33 +3419,33 @@ export default function Sidebar() {
       ),
     [sidebarThreads],
   );
+  const activeSubagentThreadAncestorKeys = useMemo<ReadonlySet<string>>(
+    () =>
+      sidebarShowSubagentThreads && routeThreadKey !== null
+        ? getSidebarSubagentAncestorKeys(sidebarThreads, routeThreadKey)
+        : new Set(),
+    [routeThreadKey, sidebarShowSubagentThreads, sidebarThreads],
+  );
   useEffect(() => {
-    if (!sidebarShowSubagentThreads || routeThreadKey === null) {
-      return;
-    }
-    const ancestorKeys = getSidebarSubagentAncestorKeys(sidebarThreads, routeThreadKey);
-    if (ancestorKeys.size === 0) {
-      return;
-    }
-    setExpandedSubagentThreadKeys((current) => {
-      const next = new Set(current);
-      for (const key of ancestorKeys) {
-        next.add(key);
-      }
-      return next.size === current.size ? current : next;
-    });
-  }, [routeThreadKey, sidebarShowSubagentThreads, sidebarThreads]);
-  const toggleSubagentBranch = useCallback((threadKey: string) => {
-    setExpandedSubagentThreadKeys((current) => {
-      const next = new Set(current);
-      if (next.has(threadKey)) {
-        next.delete(threadKey);
-      } else {
-        next.add(threadKey);
-      }
-      return next;
-    });
-  }, []);
+    if (activeSubagentThreadAncestorKeys.size === 0) return;
+    setSubagentThreadExpanded([...activeSubagentThreadAncestorKeys], true);
+  }, [activeSubagentThreadAncestorKeys, setSubagentThreadExpanded]);
+  const toggleSubagentBranch = useCallback(
+    (threadKey: string) => {
+      const currentExpandedThreadKeys = new Set(
+        useUiStateStore.getState().expandedSubagentThreadKeys,
+      );
+      setSubagentThreadExpanded(
+        threadKey,
+        resolveSidebarSubagentBranchExpanded({
+          threadKey,
+          expandedThreadKeys: currentExpandedThreadKeys,
+          activeThreadAncestorKeys: activeSubagentThreadAncestorKeys,
+        }),
+      );
+    },
+    [activeSubagentThreadAncestorKeys, setSubagentThreadExpanded],
+  );
   // Resolve the active route's project key to a logical key so it matches the
   // sidebar's grouped project entries.
   const activeRouteProjectKey = useMemo(() => {
