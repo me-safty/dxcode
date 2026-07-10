@@ -36,13 +36,13 @@ describe("providerUsageLimits", () => {
     ).toEqual([
       {
         kind: "session",
-        label: "Session",
+        label: "Five hour",
         usedPercent: 10,
         windowDurationMins: 300,
       },
       {
         kind: "weekly",
-        label: "Weekly",
+        label: "Seven day",
         usedPercent: 20,
         windowDurationMins: 10080,
       },
@@ -181,19 +181,19 @@ describe("providerUsageLimits", () => {
     ).toEqual([
       {
         kind: "session",
-        label: "Session",
+        label: "Short",
         usedPercent: 10,
         windowDurationMins: 60,
       },
       {
         kind: "session",
-        label: "Session",
+        label: "Middle",
         usedPercent: 20,
         windowDurationMins: 1440,
       },
       {
         kind: "weekly",
-        label: "Weekly",
+        label: "Long",
         usedPercent: 30,
         windowDurationMins: 4320,
       },
