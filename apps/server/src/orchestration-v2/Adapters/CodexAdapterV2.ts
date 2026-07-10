@@ -1231,6 +1231,87 @@ export const layer: Layer.Layer<
   }),
 );
 
+export interface CodexTurnTerminalTrackingOptions<Context> {
+  readonly activeTurns: Ref.Ref<Map<string, Context>>;
+  readonly turnWaiters: Ref.Ref<Map<string, ReadonlySet<Deferred.Deferred<void, never>>>>;
+  readonly nativeTurnId: string;
+}
+
+export interface CodexTurnTerminalWaiter {
+  /** Resolves once the turn reaches a terminal state. */
+  readonly awaitTerminal: Effect.Effect<void>;
+  readonly unregister: Effect.Effect<void>;
+  /**
+   * The turn was already removed from the active set when the waiter was
+   * registered, so no terminal signal will arrive for it.
+   */
+  readonly alreadyTerminal: boolean;
+}
+
+/**
+ * Registers a terminal waiter for a native turn, then re-checks the active
+ * set. Because {@link settleCodexTurnTerminal} removes the active turn before
+ * draining waiters, a turn still active after registration is guaranteed to
+ * signal this waiter; a missing turn already reached a terminal state.
+ */
+export const registerCodexTurnTerminalWaiter = <Context>(
+  options: CodexTurnTerminalTrackingOptions<Context>,
+): Effect.Effect<CodexTurnTerminalWaiter> =>
+  Effect.gen(function* () {
+    const terminal = yield* Deferred.make<void>();
+    yield* Ref.update(options.turnWaiters, (current) => {
+      const updated = new Map(current);
+      const waiters = new Set(updated.get(options.nativeTurnId) ?? []);
+      waiters.add(terminal);
+      updated.set(options.nativeTurnId, waiters);
+      return updated;
+    });
+    const unregister = Ref.update(options.turnWaiters, (current) => {
+      const existing = current.get(options.nativeTurnId);
+      if (existing === undefined || !existing.has(terminal)) {
+        return current;
+      }
+      const updated = new Map(current);
+      const waiters = new Set(existing);
+      waiters.delete(terminal);
+      if (waiters.size === 0) {
+        updated.delete(options.nativeTurnId);
+      } else {
+        updated.set(options.nativeTurnId, waiters);
+      }
+      return updated;
+    });
+    const alreadyTerminal = !(yield* Ref.get(options.activeTurns)).has(options.nativeTurnId);
+    return { awaitTerminal: Deferred.await(terminal), unregister, alreadyTerminal };
+  });
+
+/**
+ * Marks a native turn terminal: removes it from the active set first, then
+ * drains and signals its waiters. The ordering pairs with
+ * {@link registerCodexTurnTerminalWaiter} so a completion racing an interrupt
+ * can never strand a waiter registered after the drain.
+ */
+export const settleCodexTurnTerminal = <Context>(
+  options: CodexTurnTerminalTrackingOptions<Context>,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    yield* Ref.update(options.activeTurns, (current) => {
+      const updated = new Map(current);
+      updated.delete(options.nativeTurnId);
+      return updated;
+    });
+    const waiters = yield* Ref.modify(options.turnWaiters, (current) => {
+      const matching =
+        current.get(options.nativeTurnId) ?? new Set<Deferred.Deferred<void, never>>();
+      const updated = new Map(current);
+      updated.delete(options.nativeTurnId);
+      return [matching, updated] as const;
+    });
+    yield* Effect.forEach(waiters, (waiter) => Deferred.succeed(waiter, undefined), {
+      discard: true,
+    });
+  });
+
 export interface CodexAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: CodexSettings;
@@ -3517,19 +3598,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                     },
               );
             }
-            const waiters = yield* Ref.modify(turnWaiters, (current) => {
-              const matching = current.get(payload.turn.id) ?? new Set();
-              const updated = new Map(current);
-              updated.delete(payload.turn.id);
-              return [matching, updated] as const;
-            });
-            yield* Effect.forEach(waiters, (waiter) => Deferred.succeed(waiter, undefined), {
-              discard: true,
-            });
-            yield* Ref.update(activeTurns, (current) => {
-              const updated = new Map(current);
-              updated.delete(payload.turn.id);
-              return updated;
+            yield* settleCodexTurnTerminal({
+              activeTurns,
+              turnWaiters,
+              nativeTurnId: payload.turn.id,
             });
           }),
         );
@@ -3702,38 +3774,25 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   `Provider turn ${turnInput.providerTurnId} is not active and cannot be interrupted.`,
                 );
               }
-              const terminal = yield* Deferred.make<void>();
-              yield* Ref.update(turnWaiters, (current) => {
-                const updated = new Map(current);
-                const waiters = new Set(updated.get(activeTurn.nativeTurnId));
-                waiters.add(terminal);
-                updated.set(activeTurn.nativeTurnId, waiters);
-                return updated;
+              const waiter = yield* registerCodexTurnTerminalWaiter({
+                activeTurns,
+                turnWaiters,
+                nativeTurnId: activeTurn.nativeTurnId,
               });
-              const unregisterTerminalWaiter = Ref.update(turnWaiters, (current) => {
-                const existing = current.get(activeTurn.nativeTurnId);
-                if (existing === undefined || !existing.has(terminal)) {
-                  return current;
-                }
-                const updated = new Map(current);
-                const waiters = new Set(existing);
-                waiters.delete(terminal);
-                if (waiters.size === 0) {
-                  updated.delete(activeTurn.nativeTurnId);
-                } else {
-                  updated.set(activeTurn.nativeTurnId, waiters);
-                }
-                return updated;
-              });
+              if (waiter.alreadyTerminal) {
+                // The turn settled between the active-turn lookup and waiter
+                // registration; there is nothing left to interrupt.
+                return yield* waiter.unregister;
+              }
               const stopped = yield* client
                 .request("turn/interrupt", {
                   threadId,
                   turnId: activeTurn.nativeTurnId,
                 })
                 .pipe(
-                  Effect.andThen(Deferred.await(terminal)),
+                  Effect.andThen(waiter.awaitTerminal),
                   Effect.timeoutOption("10 seconds"),
-                  Effect.ensuring(unregisterTerminalWaiter),
+                  Effect.ensuring(waiter.unregister),
                 );
               if (Option.isNone(stopped)) {
                 return yield* toProtocolError(

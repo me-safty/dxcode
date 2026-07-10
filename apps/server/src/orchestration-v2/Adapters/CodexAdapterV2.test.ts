@@ -15,6 +15,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import { TestClock } from "effect/testing";
@@ -31,7 +32,9 @@ import {
   makeCodexAppServerProtocolLogger,
   makeCodexAppServerSpawnCommand,
   projectCodexDynamicToolItem,
+  registerCodexTurnTerminalWaiter,
   resolveCodexRollbackTurnCount,
+  settleCodexTurnTerminal,
 } from "./CodexAdapterV2.ts";
 
 describe("CodexAdapterV2 assistant message streaming", () => {
@@ -432,6 +435,103 @@ describe("CodexAdapterV2 native protocol logging", () => {
 
     assert.equal(protocolLogger, undefined);
   });
+});
+
+describe("CodexAdapterV2 interrupt terminal tracking", () => {
+  const makeTracking = Effect.gen(function* () {
+    const activeTurns = yield* Ref.make(new Map([["turn-1", "context"]]));
+    const turnWaiters = yield* Ref.make(
+      new Map<string, ReadonlySet<Deferred.Deferred<void, never>>>(),
+    );
+    return { activeTurns, turnWaiters };
+  });
+
+  it.effect("signals a first-time terminal waiter once the turn settles", () =>
+    Effect.gen(function* () {
+      const { activeTurns, turnWaiters } = yield* makeTracking;
+
+      const waiter = yield* registerCodexTurnTerminalWaiter({
+        activeTurns,
+        turnWaiters,
+        nativeTurnId: "turn-1",
+      });
+
+      assert.isFalse(waiter.alreadyTerminal);
+      assert.equal((yield* Ref.get(turnWaiters)).get("turn-1")?.size, 1);
+
+      yield* settleCodexTurnTerminal({ activeTurns, turnWaiters, nativeTurnId: "turn-1" });
+      yield* waiter.awaitTerminal;
+
+      assert.isFalse((yield* Ref.get(activeTurns)).has("turn-1"));
+      assert.isUndefined((yield* Ref.get(turnWaiters)).get("turn-1"));
+    }),
+  );
+
+  it.effect("reports already-terminal when completion lands before registration", () =>
+    Effect.gen(function* () {
+      const { activeTurns, turnWaiters } = yield* makeTracking;
+
+      // turn/completed can run on another fiber between interruptTurn's
+      // active-turn lookup and its waiter registration; the registration
+      // re-check must detect the settled turn instead of waiting forever.
+      yield* settleCodexTurnTerminal({ activeTurns, turnWaiters, nativeTurnId: "turn-1" });
+      const waiter = yield* registerCodexTurnTerminalWaiter({
+        activeTurns,
+        turnWaiters,
+        nativeTurnId: "turn-1",
+      });
+
+      assert.isTrue(waiter.alreadyTerminal);
+      yield* waiter.unregister;
+      assert.isUndefined((yield* Ref.get(turnWaiters)).get("turn-1"));
+    }),
+  );
+
+  it.effect("signals every concurrently registered waiter for the same turn", () =>
+    Effect.gen(function* () {
+      const { activeTurns, turnWaiters } = yield* makeTracking;
+
+      const first = yield* registerCodexTurnTerminalWaiter({
+        activeTurns,
+        turnWaiters,
+        nativeTurnId: "turn-1",
+      });
+      const second = yield* registerCodexTurnTerminalWaiter({
+        activeTurns,
+        turnWaiters,
+        nativeTurnId: "turn-1",
+      });
+
+      assert.equal((yield* Ref.get(turnWaiters)).get("turn-1")?.size, 2);
+
+      yield* settleCodexTurnTerminal({ activeTurns, turnWaiters, nativeTurnId: "turn-1" });
+      yield* first.awaitTerminal;
+      yield* second.awaitTerminal;
+    }),
+  );
+
+  it.effect("unregistering one waiter keeps the remaining waiters registered", () =>
+    Effect.gen(function* () {
+      const { activeTurns, turnWaiters } = yield* makeTracking;
+
+      const abandoned = yield* registerCodexTurnTerminalWaiter({
+        activeTurns,
+        turnWaiters,
+        nativeTurnId: "turn-1",
+      });
+      const kept = yield* registerCodexTurnTerminalWaiter({
+        activeTurns,
+        turnWaiters,
+        nativeTurnId: "turn-1",
+      });
+
+      yield* abandoned.unregister;
+      assert.equal((yield* Ref.get(turnWaiters)).get("turn-1")?.size, 1);
+
+      yield* settleCodexTurnTerminal({ activeTurns, turnWaiters, nativeTurnId: "turn-1" });
+      yield* kept.awaitTerminal;
+    }),
+  );
 });
 
 describe("CodexAdapterV2 rollback mapping", () => {
