@@ -960,7 +960,7 @@ describe("MessagesTimeline", () => {
                 providerInstanceId: "codex",
                 childThreadId: "thread-subagent-1",
                 prompt: "Inspect the package",
-                progress: null,
+                progress: "Reading src/index.ts",
                 result: "Partial output before cancel",
               },
             } as never,
@@ -971,6 +971,7 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain('data-v2-item-type="subagent"');
     expect(markup).toContain("Partial output before cancel");
+    expect(markup).not.toContain("Reading src/index.ts");
     expect(markup).not.toContain('data-v2-subagent-result-disclosure="true"');
   });
 
