@@ -151,6 +151,13 @@ export function coordinateInterruptWithPendingStarts<
     interruptTurn: {
       label: commands.interruptTurn.label,
       run: async (registry, input) => {
+        // A start that settled before this interrupt was issued may still
+        // have its cleanup queued as a microtask. Yield once so those
+        // cleanups drain (they were queued earlier, so they run first) and
+        // the snapshot only contains starts genuinely in flight — a stale
+        // entry must not trigger a retry that could interrupt a later,
+        // unrelated start.
+        await Promise.resolve();
         const startsAtDispatch = Array.from(
           pendingStarts.get(registry)?.get(pendingKey(input)) ?? [],
         );

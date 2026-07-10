@@ -121,6 +121,33 @@ describe("interrupt coordination with pending starts", () => {
     expect(result._tag).toBe("Success");
   });
 
+  it("does not retry when the only pending start had already settled at dispatch", async () => {
+    let interruptAttempts = 0;
+    const commands = coordinateInterruptWithPendingStarts({
+      startTurn: {
+        label: "start-turn",
+        run: async () => AsyncResult.success("started"),
+      },
+      interruptTurn: {
+        label: "interrupt-turn",
+        run: async () => {
+          interruptAttempts += 1;
+          return notInterruptible();
+        },
+      },
+    });
+
+    // Dispatch a start that settles immediately, then dispatch the interrupt
+    // in the same tick — before the start's cleanup microtask has removed it
+    // from the pending set.
+    const started = commands.startTurn.run(registry, target);
+    const result = await commands.interruptTurn.run(registry, target);
+    await started;
+
+    expect(interruptAttempts).toBe(1);
+    expect(result._tag).toBe("Failure");
+  });
+
   it("surfaces the failure without retrying when no start is in flight", async () => {
     let interruptAttempts = 0;
     const commands = coordinateInterruptWithPendingStarts({
