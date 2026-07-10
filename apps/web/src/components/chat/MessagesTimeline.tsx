@@ -73,6 +73,7 @@ import {
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapHeightStyle,
+  resolveTimelineMinimapHitStripWidth,
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapTopPercent,
   type StableMessagesTimelineRowsState,
@@ -322,6 +323,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     null,
   );
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
+  const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -393,6 +395,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       setMinimapHasPersistentGutter((current) =>
         current === nextHasPersistentGutter ? current : nextHasPersistentGutter,
       );
+      setMinimapHitStripWidth(resolveTimelineMinimapHitStripWidth(viewportWidth));
     };
 
     const frame = requestAnimationFrame(measure);
@@ -506,6 +509,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             items={minimapItems}
             bottomInset={contentInsetEndAdjustment}
             hasPersistentGutter={minimapHasPersistentGutter}
+            hitStripWidth={minimapHitStripWidth}
             stripMap={minimapStripMap}
             onSelect={(item) => {
               onManualNavigation();
@@ -603,12 +607,14 @@ function resolveTimelineRowHeight(state: TimelinePositionState, rowIndex: number
 function TimelineMinimap({
   bottomInset,
   hasPersistentGutter,
+  hitStripWidth,
   items,
   stripMap,
   onSelect,
 }: {
   bottomInset: number;
   hasPersistentGutter: boolean;
+  hitStripWidth: number;
   items: ReadonlyArray<TimelineMinimapItem>;
   stripMap: Map<string, HTMLSpanElement>;
   onSelect: (item: TimelineMinimapItem) => void;
@@ -671,7 +677,7 @@ function TimelineMinimap({
   return (
     <div
       className={cn(
-        "group/minimap pointer-events-auto absolute top-0 left-0 z-40 hidden w-18 [@media(pointer:fine)]:block",
+        "group/minimap pointer-events-none absolute top-0 left-0 z-40 hidden w-18 [@media(pointer:fine)]:block",
         hasPersistentGutter
           ? "opacity-100"
           : "opacity-0 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100",
@@ -683,7 +689,12 @@ function TimelineMinimap({
       <div className="relative h-full w-full select-none">
         <button
           aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
-          className="pointer-events-auto absolute top-1/2 left-3 w-10 -translate-y-1/2 cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+          className={cn(
+            "absolute top-1/2 left-3 -translate-y-1/2 cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+            // The strip is width-capped to the side gutter so it never overlays
+            // the centered content column; with no usable gutter it goes inert.
+            hitStripWidth > 0 ? "pointer-events-auto" : "pointer-events-none",
+          )}
           onBlur={() => setActiveIndex(null)}
           onClick={(event) => {
             const nextIndex = resolveActiveIndexFromPointer(event);
@@ -719,7 +730,10 @@ function TimelineMinimap({
           onMouseDown={(event) => {
             event.preventDefault();
           }}
-          style={{ height: resolveTimelineMinimapHeightStyle(items.length) }}
+          style={{
+            height: resolveTimelineMinimapHeightStyle(items.length),
+            width: hitStripWidth,
+          }}
           type="button"
         >
           <div className="absolute top-0 left-3 h-full w-px bg-border/15" />
