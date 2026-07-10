@@ -37,6 +37,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import { buildCodexAppServerArgs } from "../codexAppServerArgs.ts";
 import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
@@ -721,7 +722,7 @@ export const makeCodexSessionRuntime = (
     const extendEnv = options.environment === undefined;
     const spawnCommand = yield* resolveSpawnCommand(
       options.binaryPath,
-      ["app-server", ...(options.appServerArgs ?? [])],
+      buildCodexAppServerArgs(options.appServerArgs),
       { env, extendEnv },
     );
     const child = yield* spawner
