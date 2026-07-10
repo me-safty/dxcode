@@ -1,8 +1,151 @@
 import type {
+  SidebarThreadSortOrder,
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadShell,
   ThreadId,
 } from "@t3tools/contracts";
+
+import { scopedThreadKey, scopeThreadRef } from "../environment/scoped.ts";
+import type { EnvironmentThreadShell } from "./models.ts";
+import { sortThreads, type ThreadSortInput } from "./threadSort.ts";
+
+export type SubagentThreadTreeInput = Pick<
+  EnvironmentThreadShell,
+  "environmentId" | "id" | "lineage"
+> &
+  ThreadSortInput;
+
+export interface SubagentThreadTreeRow<
+  Thread extends SubagentThreadTreeInput = SubagentThreadTreeInput,
+> {
+  readonly thread: Thread;
+  readonly depth: number;
+  readonly hasSubagentChildren: boolean;
+  readonly isSubagentBranchExpanded: boolean;
+}
+
+export function isSubagentThread(thread: Pick<SubagentThreadTreeInput, "lineage">): boolean {
+  return thread.lineage.relationshipToParent === "subagent";
+}
+
+export function subagentThreadKey(
+  thread: Pick<SubagentThreadTreeInput, "environmentId" | "id">,
+): string {
+  return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+}
+
+export function subagentParentThreadKey(thread: SubagentThreadTreeInput): string | null {
+  if (!isSubagentThread(thread)) return null;
+  const parentThreadId = thread.lineage.parentThreadId;
+  return parentThreadId === null
+    ? null
+    : scopedThreadKey(scopeThreadRef(thread.environmentId, parentThreadId));
+}
+
+function indexSubagentThreads<Thread extends SubagentThreadTreeInput>(threads: readonly Thread[]) {
+  const threadKeys = new Set(threads.map(subagentThreadKey));
+  const childrenByParentKey = new Map<string, Thread[]>();
+  for (const thread of threads) {
+    const parentKey = subagentParentThreadKey(thread);
+    if (parentKey === null || !threadKeys.has(parentKey)) continue;
+    const children = childrenByParentKey.get(parentKey);
+    if (children === undefined) childrenByParentKey.set(parentKey, [thread]);
+    else children.push(thread);
+  }
+  return { threadKeys, childrenByParentKey } as const;
+}
+
+/**
+ * Returns every subagent ancestor needed to reveal `threadKey` in a collapsed
+ * tree. Scoped keys prevent same-named threads in different environments from
+ * being joined. Malformed cycles stop at the first repeated node.
+ */
+export function getSubagentThreadAncestorKeys<Thread extends SubagentThreadTreeInput>(
+  threads: readonly Thread[],
+  threadKey: string | null,
+): ReadonlySet<string> {
+  if (threadKey === null) return new Set();
+
+  const threadByKey = new Map(
+    threads.map((thread) => [subagentThreadKey(thread), thread] as const),
+  );
+  const ancestors = new Set<string>();
+  const visited = new Set<string>([threadKey]);
+  let current = threadByKey.get(threadKey);
+
+  while (current !== undefined) {
+    const parentKey = subagentParentThreadKey(current);
+    if (parentKey === null || visited.has(parentKey)) break;
+    ancestors.add(parentKey);
+    visited.add(parentKey);
+    current = threadByKey.get(parentKey);
+  }
+
+  return ancestors;
+}
+
+/**
+ * Selects roots for the nested subagent presentation. Forks remain top-level.
+ * Orphans are roots. If malformed lineage forms a rootless cycle, the first
+ * unplaced thread becomes a deterministic synthetic root so every thread stays
+ * visible exactly once.
+ */
+export function getSubagentThreadTreeRoots<Thread extends SubagentThreadTreeInput>(
+  threads: readonly Thread[],
+): readonly Thread[] {
+  const { threadKeys, childrenByParentKey } = indexSubagentThreads(threads);
+
+  const roots = threads.filter((thread) => {
+    const parentKey = subagentParentThreadKey(thread);
+    return parentKey === null || !threadKeys.has(parentKey);
+  });
+  const placedKeys = new Set<string>();
+  const markPlaced = (thread: Thread) => {
+    const key = subagentThreadKey(thread);
+    if (placedKeys.has(key)) return;
+    placedKeys.add(key);
+    for (const child of childrenByParentKey.get(key) ?? []) markPlaced(child);
+  };
+  for (const root of roots) markPlaced(root);
+  for (const thread of threads) {
+    if (placedKeys.has(subagentThreadKey(thread))) continue;
+    roots.push(thread);
+    markPlaced(thread);
+  }
+  return roots;
+}
+
+export function flattenSubagentThreadTree<Thread extends SubagentThreadTreeInput>(input: {
+  readonly threads: readonly Thread[];
+  readonly roots: readonly Thread[];
+  readonly expandedThreadKeys: ReadonlySet<string>;
+  readonly threadSortOrder: SidebarThreadSortOrder;
+}): readonly SubagentThreadTreeRow<Thread>[] {
+  const { childrenByParentKey } = indexSubagentThreads(input.threads);
+
+  for (const [parentKey, children] of childrenByParentKey) {
+    childrenByParentKey.set(parentKey, sortThreads(children, input.threadSortOrder));
+  }
+
+  const rows: SubagentThreadTreeRow<Thread>[] = [];
+  const visited = new Set<string>();
+  const visit = (thread: Thread, depth: number) => {
+    const key = subagentThreadKey(thread);
+    if (visited.has(key)) return;
+    visited.add(key);
+    const children = (childrenByParentKey.get(key) ?? []).filter(
+      (child) => !visited.has(subagentThreadKey(child)),
+    );
+    const hasSubagentChildren = children.length > 0;
+    const isSubagentBranchExpanded = hasSubagentChildren && input.expandedThreadKeys.has(key);
+    rows.push({ thread, depth, hasSubagentChildren, isSubagentBranchExpanded });
+    if (!isSubagentBranchExpanded) return;
+    for (const child of children) visit(child, depth + 1);
+  };
+
+  for (const root of input.roots) visit(root, 0);
+  return rows;
+}
 
 export type ThreadRelationshipKind = "parent" | "fork" | "subagent" | "transfer";
 
