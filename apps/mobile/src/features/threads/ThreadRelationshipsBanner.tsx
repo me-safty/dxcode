@@ -20,6 +20,7 @@ import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadProjection } from "../../state/use-thread-detail";
 import { useArchivedThreadSnapshots } from "../archive/useArchivedThreadSnapshots";
+import { orderThreadRelationshipRows } from "./threadRelationshipRows";
 
 function relationshipLabel(edge: ThreadRelationshipEdge, currentThreadId: ThreadId): string {
   if (edge.kind === "transfer") {
@@ -78,10 +79,9 @@ export function ThreadRelationshipsBanner(props: {
   const mergeTargetThreadId = resolveMergeBackTargetThreadId(projection);
   const rows = useMemo(
     () =>
-      immediateThreadRelationships(graph, props.threadId).toSorted(
-        (left, right) =>
-          Number(right.threadId === mergeTargetThreadId) -
-          Number(left.threadId === mergeTargetThreadId),
+      orderThreadRelationshipRows(
+        immediateThreadRelationships(graph, props.threadId),
+        mergeTargetThreadId,
       ),
     [graph, mergeTargetThreadId, props.threadId],
   );

@@ -56,7 +56,7 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
   const capabilities = session?.capabilities.turns;
   const queuedRuns = projection.runs
     .filter((run) => run.status === "queued")
-    .toSorted(
+    .sort(
       (left, right) =>
         (left.queuePosition ?? left.ordinal) - (right.queuePosition ?? right.ordinal) ||
         left.ordinal - right.ordinal,
