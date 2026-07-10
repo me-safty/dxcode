@@ -41,6 +41,15 @@ import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export const ASSET_ROUTE_PREFIX = "/api/assets";
 export const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
+const REACT_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-11.5 -10.23174 23 20.46348" data-fallback="project-favicon-react"><circle cx="0" cy="0" r="2.05" fill="#61dafb"/><g fill="none" stroke="#61dafb" stroke-width="1"><ellipse rx="11" ry="4.2"/><ellipse rx="11" ry="4.2" transform="rotate(60)"/><ellipse rx="11" ry="4.2" transform="rotate(120)"/></g></svg>`;
+const ANDROID_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" data-fallback="project-favicon-android"><path fill="#3ddc84" d="M32 54h64v44c0 7.7-6.3 14-14 14H46c-7.7 0-14-6.3-14-14V54Z"/><path fill="#3ddc84" d="M39.5 48C42.8 34.2 52.2 26 64 26s21.2 8.2 24.5 22h-49Z"/><path stroke="#3ddc84" stroke-width="7" stroke-linecap="round" d="M46 24 36 8m46 16L92 8M22 62v31m84-31v31M49 112v10m30-10v10"/><circle cx="52" cy="40" r="4" fill="#173b2d"/><circle cx="76" cy="40" r="4" fill="#173b2d"/></svg>`;
+
+const ANDROID_PROJECT_MARKER_FILES = [
+  "settings.gradle",
+  "settings.gradle.kts",
+  "build.gradle",
+  "build.gradle.kts",
+];
 
 const SIGNING_SECRET_NAME = "asset-access-signing-key";
 const ASSET_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -93,7 +102,53 @@ const encodeAssetClaims = Schema.encodeSync(AssetClaimsJson);
 
 export type ResolvedAsset =
   | { readonly kind: "file"; readonly path: string }
-  | { readonly kind: "project-favicon-fallback" };
+  | { readonly kind: "project-favicon-fallback"; readonly svg: string };
+
+const PackageJsonDependenciesJson = Schema.fromJsonString(
+  Schema.Struct({
+    dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    devDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  }),
+);
+const decodePackageJsonDependencies = Schema.decodeUnknownOption(PackageJsonDependenciesJson);
+
+function parsePackageJsonDependencyNames(contents: string): ReadonlySet<string> {
+  const parsed = Option.getOrNull(decodePackageJsonDependencies(contents));
+  return new Set([
+    ...Object.keys(parsed?.dependencies ?? {}),
+    ...Object.keys(parsed?.devDependencies ?? {}),
+  ]);
+}
+
+// Detection failures degrade to the generic fallback icon rather than failing
+// the asset request.
+const resolveProjectFaviconFallbackSvg = Effect.fn("AssetAccess.resolveProjectFaviconFallbackSvg")(
+  function* (workspaceRoot: string) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+
+    const packageJsonContents = yield* fileSystem
+      .readFileString(path.join(workspaceRoot, "package.json"))
+      .pipe(Effect.orElseSucceed(() => null));
+    if (packageJsonContents !== null) {
+      const dependencyNames = parsePackageJsonDependencyNames(packageJsonContents);
+      if (dependencyNames.has("react") || dependencyNames.has("react-native")) {
+        return REACT_PROJECT_FAVICON_SVG;
+      }
+    }
+
+    for (const markerFile of ANDROID_PROJECT_MARKER_FILES) {
+      const markerExists = yield* fileSystem
+        .exists(path.join(workspaceRoot, markerFile))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (markerExists) {
+        return ANDROID_PROJECT_FAVICON_SVG;
+      }
+    }
+
+    return FALLBACK_PROJECT_FAVICON_SVG;
+  },
+);
 
 function decodeClaims(encodedPayload: string): AssetClaims | null {
   try {
@@ -392,7 +447,10 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
 
   if (claims.kind === "project-favicon") {
     if (claims.relativePath === null) {
-      return { kind: "project-favicon-fallback" } satisfies ResolvedAsset;
+      return {
+        kind: "project-favicon-fallback",
+        svg: yield* resolveProjectFaviconFallbackSvg(claims.workspaceRoot),
+      } satisfies ResolvedAsset;
     }
     const faviconPath = yield* resolveCanonicalWorkspaceFileForRequest({
       workspaceRoot: claims.workspaceRoot,

@@ -11,7 +11,12 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
-import { ASSET_ROUTE_PREFIX, issueAssetUrl, resolveAsset } from "./AssetAccess.ts";
+import {
+  ASSET_ROUTE_PREFIX,
+  FALLBACK_PROJECT_FAVICON_SVG,
+  issueAssetUrl,
+  resolveAsset,
+} from "./AssetAccess.ts";
 
 const configLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-asset-access-test-",
@@ -235,7 +240,56 @@ describe("AssetAccess", () => {
           fallbackSuffix.slice(0, fallbackSeparatorIndex),
           fallbackSuffix.slice(fallbackSeparatorIndex + 1),
         ),
-      ).toEqual({ kind: "project-favicon-fallback" });
+      ).toEqual({ kind: "project-favicon-fallback", svg: FALLBACK_PROJECT_FAVICON_SVG });
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("serves stack-specific fallback icons for projects without a favicon", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+
+      const resolveFallbackSvg = Effect.fnUntraced(function* (root: string) {
+        const result = yield* issueAssetUrl({
+          resource: { _tag: "project-favicon", cwd: root },
+        });
+        const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+        const separatorIndex = suffix.indexOf("/");
+        const resolved = yield* resolveAsset(
+          suffix.slice(0, separatorIndex),
+          suffix.slice(separatorIndex + 1),
+        );
+        expect(resolved?.kind).toBe("project-favicon-fallback");
+        return resolved?.kind === "project-favicon-fallback" ? resolved.svg : "";
+      });
+
+      const reactRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-react-",
+      });
+      yield* fileSystem.writeFileString(
+        path.join(reactRoot, "package.json"),
+        '{"dependencies":{"react":"^19.0.0"}}',
+      );
+      expect(yield* resolveFallbackSvg(reactRoot)).toContain(
+        'data-fallback="project-favicon-react"',
+      );
+
+      const androidRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-android-",
+      });
+      yield* fileSystem.writeFileString(path.join(androidRoot, "build.gradle"), "");
+      expect(yield* resolveFallbackSvg(androidRoot)).toContain(
+        'data-fallback="project-favicon-android"',
+      );
+
+      const plainRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-plain-",
+      });
+      yield* fileSystem.writeFileString(
+        path.join(plainRoot, "package.json"),
+        '{"dependencies":{"express":"^5.0.0"}}',
+      );
+      expect(yield* resolveFallbackSvg(plainRoot)).toBe(FALLBACK_PROJECT_FAVICON_SVG);
     }).pipe(Effect.provide(testLayer)),
   );
 
