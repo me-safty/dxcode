@@ -213,16 +213,26 @@ function providerConstraints(
 }
 
 /**
- * Checks requested option selections against the descriptors a model
- * advertises. Models without descriptors skip validation entirely (mirroring
- * how model slugs are only validated when the provider advertises models).
+ * Checks requested option selections for duplicates and, when the model
+ * advertises option descriptors, against those descriptors. Models without
+ * descriptors skip the descriptor checks (mirroring how model slugs are only
+ * validated when the provider advertises models), but duplicate ids always
+ * fail: downstream consumers disagree on whether the first or last value of
+ * a duplicated id wins.
  */
 function invalidOptionSelections(
   selections: ReadonlyArray<ProviderOptionSelection>,
-  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+  descriptors: ReadonlyArray<ProviderOptionDescriptor> | undefined,
 ): ReadonlyArray<string> {
   const problems: Array<string> = [];
+  const seen = new Set<string>();
   for (const selection of selections) {
+    if (seen.has(selection.id)) {
+      problems.push(`Option ${selection.id} was specified more than once.`);
+      continue;
+    }
+    seen.add(selection.id);
+    if (descriptors === undefined) continue;
     const descriptor = descriptors.find((candidate) => candidate.id === selection.id);
     if (descriptor === undefined) {
       const known = descriptors.map((candidate) => candidate.id).join(", ");
@@ -714,8 +724,7 @@ const make = Effect.gen(function* () {
       if (requestedOptions !== undefined) {
         const descriptors = provider.models.find((candidate) => candidate.slug === model)
           ?.capabilities?.optionDescriptors;
-        const invalid =
-          descriptors === undefined ? [] : invalidOptionSelections(requestedOptions, descriptors);
+        const invalid = invalidOptionSelections(requestedOptions, descriptors);
         if (invalid.length > 0) {
           return yield* failure(
             "invalid_request",

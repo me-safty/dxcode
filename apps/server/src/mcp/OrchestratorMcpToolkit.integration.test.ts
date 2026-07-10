@@ -797,6 +797,27 @@ describe("orchestrator MCP toolkit", () => {
               message: expect.stringContaining("rejected options"),
             });
 
+            // Duplicate option ids fail fast: downstream consumers disagree on
+            // whether the first or last value of a duplicated id wins.
+            const duplicateOptionsCall = yield* invoke("delegate_task", {
+              task: cancellationPrompt,
+              target: {
+                providerInstanceId: codexInstanceId,
+                model: codexModel,
+                options: [
+                  { id: "reasoning", value: "low" },
+                  { id: "reasoning", value: "high" },
+                ],
+              },
+              mode: "async",
+              clientRequestId: "delegate-duplicate-options-1",
+            });
+            expect(duplicateOptionsCall.structuredContent).toMatchObject({
+              _tag: "OrchestratorMcpFailure",
+              code: "invalid_request",
+              message: expect.stringContaining("more than once"),
+            });
+
             const cancellableCall = yield* invoke("delegate_task", {
               task: cancellationPrompt,
               target: {

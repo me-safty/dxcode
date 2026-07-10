@@ -80,6 +80,30 @@ describe("orchestrator MCP contracts", () => {
     ]);
   });
 
+  it("rejects target model options that are not strings or booleans", () => {
+    expect(() =>
+      decodeDelegateTaskInput({
+        task: "Say hello.",
+        target: {
+          providerInstanceId: "codex",
+          model: "gpt-5.6-luna",
+          // Must fail loudly instead of being dropped like legacy persistence.
+          options: { reasoning: 3 },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeDelegateTaskInput({
+        task: "Say hello.",
+        target: {
+          providerInstanceId: "codex",
+          model: "gpt-5.6-luna",
+          options: [{ id: "reasoning", value: null }],
+        },
+      }),
+    ).toThrow();
+  });
+
   it("decodes mixed prompted and empty thread batches", () => {
     const request = decodeCreateThreadsInput({
       clientRequestId: "threads-1",
