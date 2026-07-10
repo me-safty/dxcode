@@ -67,7 +67,13 @@ export interface AcpSessionRuntimeOptions {
     readonly name: string;
     readonly version: string;
   };
-  readonly authMethodId: string;
+  /**
+   * Auth method sent through `authenticate` during startup. When omitted the
+   * authenticate step is skipped entirely — some agents (e.g. Devin) treat
+   * `authenticate` as an interactive login trigger and expect clients to rely
+   * on the agent's stored credentials instead.
+   */
+  readonly authMethodId?: string;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -529,15 +535,17 @@ export const make = (
         acp.agent.initialize(initializePayload),
       );
 
-      const authenticatePayload = {
-        methodId: options.authMethodId,
-      } satisfies EffectAcpSchema.AuthenticateRequest;
+      if (options.authMethodId !== undefined) {
+        const authenticatePayload = {
+          methodId: options.authMethodId,
+        } satisfies EffectAcpSchema.AuthenticateRequest;
 
-      yield* runLoggedRequest(
-        "authenticate",
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
-      );
+        yield* runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        );
+      }
 
       let sessionId: string;
       let sessionSetupResult:
