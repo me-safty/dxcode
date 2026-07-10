@@ -1,5 +1,4 @@
 import * as Haptics from "expo-haptics";
-import { SymbolView, type SFSymbol } from "expo-symbols";
 import {
   deriveThreadRelationshipGraph,
   immediateThreadRelationships,
@@ -14,6 +13,7 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, View } from "react-nat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView, type SFSymbol } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useThreadShells } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";

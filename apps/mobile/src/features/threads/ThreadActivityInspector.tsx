@@ -1,11 +1,11 @@
 import * as Haptics from "expo-haptics";
-import { SymbolView } from "expo-symbols";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, type ColorValue, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import type { ThreadFeedActivity } from "../../lib/threadActivity";
 import { buildThreadActivityInspector } from "../../lib/threadActivityInspector";
 import { resolveWorkspaceRelativeFilePath } from "../files/filePath";

@@ -1,11 +1,11 @@
 import * as Haptics from "expo-haptics";
-import { SymbolView } from "expo-symbols";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
