@@ -158,7 +158,17 @@ export function coordinateInterruptWithPendingStarts<
         if (startsAtDispatch.length === 0 || !isThreadTurnNotInterruptibleFailure(result)) {
           return result;
         }
-        await Promise.allSettled(startsAtDispatch);
+        // The mutation lane is serial per thread, so only the earliest
+        // pending start is in flight; retry as soon as any start settles
+        // instead of waiting behind the whole queued send backlog.
+        await Promise.race(
+          startsAtDispatch.map((start) =>
+            start.then(
+              () => undefined,
+              () => undefined,
+            ),
+          ),
+        );
         return commands.interruptTurn.run(registry, input);
       },
     },

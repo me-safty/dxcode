@@ -74,6 +74,53 @@ describe("interrupt coordination with pending starts", () => {
     expect(result._tag).toBe("Success");
   });
 
+  it("retries as soon as the in-flight start settles without draining queued sends", async () => {
+    let releaseFirstStart = () => {};
+    const firstStartGate = new Promise<void>((resolve) => {
+      releaseFirstStart = resolve;
+    });
+    let startsBegun = 0;
+    let firstStartSettled = false;
+    const interruptAttempts: Array<"no-active-run" | "dispatched"> = [];
+    const commands = coordinateInterruptWithPendingStarts({
+      startTurn: {
+        label: "start-turn",
+        run: async () => {
+          startsBegun += 1;
+          if (startsBegun === 1) {
+            await firstStartGate;
+            firstStartSettled = true;
+            return AsyncResult.success("started");
+          }
+          // A queued send that never settles: the interrupt retry must not
+          // wait for it.
+          return new Promise<never>(() => {});
+        },
+      },
+      interruptTurn: {
+        label: "interrupt-turn",
+        run: async () => {
+          if (!firstStartSettled) {
+            interruptAttempts.push("no-active-run");
+            return notInterruptible();
+          }
+          interruptAttempts.push("dispatched");
+          return AsyncResult.success("interrupted");
+        },
+      },
+    });
+
+    const firstStart = commands.startTurn.run(registry, target);
+    void commands.startTurn.run(registry, target);
+    const interrupted = commands.interruptTurn.run(registry, target);
+    releaseFirstStart();
+    await firstStart;
+    const result = await interrupted;
+
+    expect(interruptAttempts).toEqual(["no-active-run", "dispatched"]);
+    expect(result._tag).toBe("Success");
+  });
+
   it("surfaces the failure without retrying when no start is in flight", async () => {
     let interruptAttempts = 0;
     const commands = coordinateInterruptWithPendingStarts({
