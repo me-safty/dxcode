@@ -50,6 +50,7 @@ import {
   toKiloQuestionAnswers,
   type KiloServerConnection,
 } from "../kiloRuntime.ts";
+import { isKiloSnapshotProgressText } from "../kiloSnapshotProgressFilter.ts";
 import type { KiloAdapterShape } from "../Services/KiloAdapter.ts";
 
 const PROVIDER = ProviderDriverKind.make("kilo");
@@ -227,6 +228,14 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
       const previous = context.emittedTextByPartId.get(part.id) ?? "";
       const delta = text.startsWith(previous) ? text.slice(previous.length) : text;
       context.emittedTextByPartId.set(part.id, text);
+      // The Kilo SDK emits synthetic spinner text parts while it initializes
+      // its file snapshot — suppress them so they never reach the ingestion
+      // layer or the chat UI. See `kiloSnapshotProgressFilter.ts`. The
+      // accumulator above is intentionally written before this check so that
+      // a hypothetical later non-progress edit on the same part id still
+      // computes its delta correctly. Do not add the part id to
+      // `completedAssistantPartIds` so a real completion is still surfaced.
+      if (isKiloSnapshotProgressText(text)) return;
       if (delta) {
         yield* emit({
           ...(yield* eventBase({
@@ -282,7 +291,12 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
           const part = context.partById.get(event.properties.partID);
           if (!part || (part.type !== "text" && part.type !== "reasoning")) break;
           const previous = context.emittedTextByPartId.get(part.id) ?? "";
-          context.emittedTextByPartId.set(part.id, previous + event.properties.delta);
+          const accumulated = previous + event.properties.delta;
+          context.emittedTextByPartId.set(part.id, accumulated);
+          // Suppress Kilo SDK synthetic snapshot-progress deltas. The
+          // accumulator above is still written so subsequent edits compute
+          // correct deltas. See `kiloSnapshotProgressFilter.ts`.
+          if (isKiloSnapshotProgressText(accumulated)) break;
           yield* emit({
             ...(yield* eventBase({
               threadId: context.session.threadId,
@@ -296,6 +310,17 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
               delta: event.properties.delta,
             },
           });
+          break;
+        }
+        case "message.part.removed": {
+          // The SDK removes parts when they are deleted from the message
+          // (e.g. when the snapshot-progress spinner finishes initializing).
+          // Drop our per-part bookkeeping so we don't leak entries over time.
+          // No runtime event is emitted here — removal is purely local state
+          // cleanup, matching how other adapters handle deleted parts.
+          context.partById.delete(event.properties.partID);
+          context.emittedTextByPartId.delete(event.properties.partID);
+          context.completedAssistantPartIds.delete(event.properties.partID);
           break;
         }
         case "message.part.updated": {
