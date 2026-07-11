@@ -117,6 +117,8 @@ import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+const EDITOR_DISCOVERY_TIMEOUT = Duration.millis(500);
+const EDITOR_DISCOVERY_FALLBACK = [] as const;
 
 function unexpectedCompatibilityError(error: never): never {
   throw new Error(`Unhandled compatibility error: ${String(error)}`);
@@ -923,7 +925,12 @@ const makeWsRpcLayer = (
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers,
-          availableEditors: yield* externalLauncher.resolveAvailableEditors(),
+          availableEditors: yield* externalLauncher
+            .resolveAvailableEditors()
+            .pipe(
+              Effect.timeoutOption(EDITOR_DISCOVERY_TIMEOUT),
+              Effect.map(Option.getOrElse(() => EDITOR_DISCOVERY_FALLBACK)),
+            ),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
