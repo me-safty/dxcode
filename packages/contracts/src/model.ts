@@ -143,7 +143,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CURSOR_DRIVER_KIND]: "auto",
   [GROK_DRIVER_KIND]: "grok-build",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  [KILO_DRIVER_KIND]: "kilo/anthropic/claude-sonnet-4-6",
+  [KILO_DRIVER_KIND]: "anthropic/claude-sonnet-4-6",
 };
 
 /** Per-provider text generation model defaults. */
@@ -154,7 +154,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
   [CURSOR_DRIVER_KIND]: "composer-2",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  [KILO_DRIVER_KIND]: "kilo/anthropic/claude-haiku-4-5",
+  [KILO_DRIVER_KIND]: "anthropic/claude-haiku-4-5",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<

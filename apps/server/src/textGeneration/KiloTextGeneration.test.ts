@@ -10,16 +10,9 @@ import { beforeEach } from "vite-plus/test";
 import { ServerConfig } from "../config.ts";
 import { KiloRuntime, KiloRuntimeError, type KiloRuntimeShape } from "../provider/kiloRuntime.ts";
 import * as TextGeneration from "./TextGeneration.ts";
-import { makeKiloTextGeneration, sanitizeKiloBranchName } from "./KiloTextGeneration.ts";
+import { makeKiloTextGeneration } from "./KiloTextGeneration.ts";
 
 const isTextGenerationError = Schema.is(TextGenerationError);
-
-describe("KiloTextGeneration", () => {
-  it("removes repeated quote and code-fence wrappers from branch names", () => {
-    expect(sanitizeKiloBranchName("```feature/kilo-provider```")).toBe("feature/kilo-provider");
-    expect(sanitizeKiloBranchName('""feature-name""')).toBe("feature-name");
-  });
-});
 
 const runtimeMock = {
   state: {

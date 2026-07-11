@@ -27,6 +27,7 @@ import * as Exit from "effect/Exit";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -146,6 +147,7 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
     const crypto = yield* Crypto.Crypto;
     const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, KiloSessionContext>();
+    const startSessionLocks = new Map<ThreadId, Semaphore.Semaphore>();
     const randomId = crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
@@ -565,95 +567,106 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
 
     const startSession: KiloAdapterShape["startSession"] = Effect.fn("startKiloSession")(
       function* (input) {
-        const existing = sessions.get(input.threadId);
-        if (existing) {
-          yield* stopContext(existing);
-          sessions.delete(input.threadId);
+        let lock = startSessionLocks.get(input.threadId);
+        if (!lock) {
+          lock = yield* Semaphore.make(1);
+          startSessionLocks.set(input.threadId, lock);
         }
-        const directory = input.cwd ?? serverConfig.cwd;
-        const scope = yield* Scope.make();
-        const started = yield* Effect.exit(
+        return yield* lock.withPermits(1)(
           Effect.gen(function* () {
-            const server = yield* runtime.startServer({
-              binaryPath: settings.binaryPath,
-              ...(options?.environment ? { environment: options.environment } : {}),
-            });
-            const client = runtime.createClient({ baseUrl: server.url, directory });
-            const model = parseKiloModelSlug(input.modelSelection?.model);
-            const created = yield* runKiloSdk("session.create", () =>
-              client.session.create(
-                {
-                  title: `T3 Code ${input.threadId}`,
-                  agent: FIXED_AGENT,
-                  ...(model ? { model: { id: model.modelID, providerID: model.providerID } } : {}),
-                  permission: buildKiloPermissionRules(input.runtimeMode),
-                  platform: "t3code",
-                },
-                { throwOnError: true },
-              ),
+            const existing = sessions.get(input.threadId);
+            if (existing) {
+              yield* stopContext(existing);
+              sessions.delete(input.threadId);
+            }
+            const directory = input.cwd ?? serverConfig.cwd;
+            const scope = yield* Scope.make();
+            const started = yield* Effect.exit(
+              Effect.gen(function* () {
+                const server = yield* runtime.startServer({
+                  binaryPath: settings.binaryPath,
+                  ...(options?.environment ? { environment: options.environment } : {}),
+                });
+                const client = runtime.createClient({ baseUrl: server.url, directory });
+                const model = parseKiloModelSlug(input.modelSelection?.model);
+                const created = yield* runKiloSdk("session.create", () =>
+                  client.session.create(
+                    {
+                      title: `T3 Code ${input.threadId}`,
+                      agent: FIXED_AGENT,
+                      ...(model
+                        ? { model: { id: model.modelID, providerID: model.providerID } }
+                        : {}),
+                      permission: buildKiloPermissionRules(input.runtimeMode),
+                      platform: "t3code",
+                    },
+                    { throwOnError: true },
+                  ),
+                );
+                if (!created.data) {
+                  return yield* new KiloRuntimeError({
+                    operation: "session.create",
+                    detail: "Kilo session.create returned no session payload.",
+                  });
+                }
+                return { server, client, session: created.data };
+              }).pipe(Effect.provideService(Scope.Scope, scope)),
             );
-            if (!created.data) {
-              return yield* new KiloRuntimeError({
-                operation: "session.create",
-                detail: "Kilo session.create returned no session payload.",
+            if (Exit.isFailure(started)) {
+              yield* Scope.close(scope, Exit.void).pipe(Effect.ignore);
+              const cause = Cause.squash(started.cause);
+              return yield* new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+                detail: kiloRuntimeErrorDetail(cause),
+                cause,
               });
             }
-            return { server, client, session: created.data };
-          }).pipe(Effect.provideService(Scope.Scope, scope)),
+            const createdAt = yield* nowIso;
+            const session: ProviderSession = {
+              provider: PROVIDER,
+              providerInstanceId: boundInstanceId,
+              threadId: input.threadId,
+              status: "ready",
+              runtimeMode: input.runtimeMode,
+              cwd: directory,
+              ...(input.modelSelection ? { model: input.modelSelection.model } : {}),
+              createdAt,
+              updatedAt: createdAt,
+            };
+            const context: KiloSessionContext = {
+              session,
+              client: started.value.client,
+              server: started.value.server,
+              directory,
+              kiloSessionId: started.value.session.id,
+              pendingPermissions: new Map(),
+              pendingQuestions: new Map(),
+              messageRoleById: new Map(),
+              partById: new Map(),
+              emittedTextByPartId: new Map(),
+              completedAssistantPartIds: new Set(),
+              interruptedTurnIds: new Set(),
+              turns: [],
+              activeTurnId: undefined,
+              stopped: yield* Ref.make(false),
+              scope,
+            };
+            sessions.set(input.threadId, context);
+            yield* startPump(context);
+            yield* emit({
+              ...(yield* eventBase({ threadId: input.threadId })),
+              type: "session.started",
+              payload: { message: "Kilo session started" },
+            });
+            yield* emit({
+              ...(yield* eventBase({ threadId: input.threadId })),
+              type: "thread.started",
+              payload: { providerThreadId: started.value.session.id },
+            });
+            return session;
+          }),
         );
-        if (Exit.isFailure(started)) {
-          yield* Scope.close(scope, Exit.void).pipe(Effect.ignore);
-          const cause = Cause.squash(started.cause);
-          return yield* new ProviderAdapterProcessError({
-            provider: PROVIDER,
-            threadId: input.threadId,
-            detail: kiloRuntimeErrorDetail(cause),
-            cause,
-          });
-        }
-        const createdAt = yield* nowIso;
-        const session: ProviderSession = {
-          provider: PROVIDER,
-          providerInstanceId: boundInstanceId,
-          threadId: input.threadId,
-          status: "ready",
-          runtimeMode: input.runtimeMode,
-          cwd: directory,
-          ...(input.modelSelection ? { model: input.modelSelection.model } : {}),
-          createdAt,
-          updatedAt: createdAt,
-        };
-        const context: KiloSessionContext = {
-          session,
-          client: started.value.client,
-          server: started.value.server,
-          directory,
-          kiloSessionId: started.value.session.id,
-          pendingPermissions: new Map(),
-          pendingQuestions: new Map(),
-          messageRoleById: new Map(),
-          partById: new Map(),
-          emittedTextByPartId: new Map(),
-          completedAssistantPartIds: new Set(),
-          interruptedTurnIds: new Set(),
-          turns: [],
-          activeTurnId: undefined,
-          stopped: yield* Ref.make(false),
-          scope,
-        };
-        sessions.set(input.threadId, context);
-        yield* startPump(context);
-        yield* emit({
-          ...(yield* eventBase({ threadId: input.threadId })),
-          type: "session.started",
-          payload: { message: "Kilo session started" },
-        });
-        yield* emit({
-          ...(yield* eventBase({ threadId: input.threadId })),
-          type: "thread.started",
-          payload: { providerThreadId: started.value.session.id },
-        });
-        return session;
       },
     );
 
@@ -743,6 +756,15 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
                   { status: "ready", lastError: requestError.detail },
                   true,
                 );
+                yield* emit({
+                  ...(yield* eventBase({
+                    threadId: input.threadId,
+                    turnId,
+                    raw: requestError,
+                  })),
+                  type: "turn.completed",
+                  payload: { state: "failed", errorMessage: requestError.detail },
+                });
               })
             : Effect.void,
         ),

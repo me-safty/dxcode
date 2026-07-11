@@ -5,7 +5,7 @@ import {
   type KiloSettings,
   type ModelSelection,
 } from "@t3tools/contracts";
-import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -66,10 +66,6 @@ function textFromParts(parts: ReadonlyArray<unknown>): string {
     .join("\n")
     .trim();
 }
-export function sanitizeKiloBranchName(value: string): string {
-  return value.replace(/^["'`]+|["'`]+$/g, "").trim();
-}
-
 const CommitOutput = Schema.Struct({
   subject: Schema.String,
   body: Schema.String,
@@ -239,7 +235,7 @@ export const makeKiloTextGeneration = Effect.fn("makeKiloTextGeneration")(functi
         modelSelection: input.modelSelection,
         ...(input.attachments ? { attachments: input.attachments } : {}),
         prompt: `Return only a concise lowercase kebab-case git branch name for: ${input.message}`,
-      }).pipe(Effect.map((branch) => ({ branch: sanitizeKiloBranchName(branch) }))),
+      }).pipe(Effect.map((branch) => ({ branch: sanitizeBranchFragment(branch) }))),
     generateThreadTitle: (input) =>
       run({
         operation: "generateThreadTitle",
