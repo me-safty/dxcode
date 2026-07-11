@@ -347,4 +347,74 @@ it.layer(KiloAdapterTestLayer)("KiloAdapterLive", (it) => {
       yield* stopDrain(drain);
     }),
   );
+
+  it.effect(
+    "backfills assistant text when message.part.updated arrives before message.updated",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* KiloAdapter;
+        const threadId = asThreadId("thread-kilo-backfill");
+        const assistantMessageId = "msg-kilo-backfill";
+        const backfillPartId = "part-kilo-backfill";
+
+        runtimeMock.state.subscribedEvents = [
+          {
+            // The part update arrives first, before the SDK has told us the
+            // role of the message it belongs to.
+            type: "message.part.updated",
+            properties: {
+              sessionID: "kilo-session-1",
+              time: 1,
+              part: {
+                id: backfillPartId,
+                sessionID: "kilo-session-1",
+                messageID: assistantMessageId,
+                type: "text",
+                text: "Hello there",
+                time: { start: 1, end: 2 },
+              },
+            },
+          },
+          {
+            type: "message.updated",
+            properties: {
+              sessionID: "kilo-session-1",
+              info: { id: assistantMessageId, role: "assistant" },
+            },
+          },
+        ];
+
+        const { collected, drain } = yield* collectThreadEvents(adapter, threadId);
+
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("kilo"),
+          threadId,
+          runtimeMode: "full-access",
+        });
+
+        yield* advanceTestClock(50);
+
+        const assistantTextDeltas = collected.filter(
+          (event) =>
+            event.type === "content.delta" && event.payload.streamKind === "assistant_text",
+        ) as Array<Extract<ProviderRuntimeEvent, { type: "content.delta" }>>;
+
+        NodeAssert.deepEqual(
+          assistantTextDeltas.map((event) => event.payload.delta),
+          ["Hello there"],
+          "the assistant text part must be surfaced once via backfill even when the role was unknown at update time",
+        );
+
+        const completed = collected.find(
+          (event) =>
+            event.type === "item.completed" && event.payload.itemType === "assistant_message",
+        );
+        NodeAssert.equal(completed?.type, "item.completed");
+        if (completed?.type === "item.completed") {
+          NodeAssert.equal(completed.payload.detail, "Hello there");
+        }
+
+        yield* stopDrain(drain);
+      }),
+  );
 });

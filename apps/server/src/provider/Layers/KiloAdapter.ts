@@ -91,10 +91,23 @@ export interface KiloAdapterOptions {
   readonly environment?: NodeJS.ProcessEnv;
 }
 
-function ensureContext(sessions: ReadonlyMap<ThreadId, KiloSessionContext>, threadId: ThreadId) {
+function ensureContext(
+  sessions: ReadonlyMap<ThreadId, KiloSessionContext>,
+  threadId: ThreadId,
+): KiloSessionContext {
   const context = sessions.get(threadId);
   if (!context) throw new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId });
   return context;
+}
+
+function lookupContext(
+  sessions: ReadonlyMap<ThreadId, KiloSessionContext>,
+  threadId: ThreadId,
+): Effect.Effect<KiloSessionContext, ProviderAdapterSessionNotFoundError> {
+  const context = sessions.get(threadId);
+  return context
+    ? Effect.succeed(context)
+    : Effect.fail(new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId }));
 }
 
 function textFromPart(part: Part): string | undefined {
@@ -304,9 +317,25 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
       if (event.properties.sessionID !== context.kiloSessionId) return;
       const turnId = context.activeTurnId;
       switch (event.type) {
-        case "message.updated":
-          context.messageRoleById.set(event.properties.info.id, event.properties.info.role);
+        case "message.updated": {
+          const messageId = event.properties.info.id;
+          const role = event.properties.info.role;
+          const learnedRole = !context.messageRoleById.has(messageId);
+          context.messageRoleById.set(messageId, role);
+          // Backfill any text/reasoning parts whose message role was still
+          // unknown when their initial message.part.updated arrived. emitText
+          // is delta-aware via the per-part accumulator, so re-emitting here
+          // only produces whatever text or completion we have not already
+          // surfaced.
+          if (role === "assistant" && learnedRole) {
+            for (const part of context.partById.values()) {
+              if (part.messageID !== messageId) continue;
+              if (part.type !== "text" && part.type !== "reasoning") continue;
+              yield* emitText(context, part, event);
+            }
+          }
           break;
+        }
         case "message.part.delta": {
           if (event.properties.field !== "text" || !event.properties.delta) break;
           const part = context.partById.get(event.properties.partID);
@@ -787,12 +816,12 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
       return { threadId: input.threadId, turnId };
     });
 
-    const interruptTurn: KiloAdapterShape["interruptTurn"] = (threadId) => {
-      const context = ensureContext(sessions, threadId);
-      return Effect.gen(function* () {
+    const interruptTurn: KiloAdapterShape["interruptTurn"] = (threadId) =>
+      Effect.gen(function* () {
+        const context = yield* lookupContext(sessions, threadId);
         const turnId = context.activeTurnId;
         if (turnId) context.interruptedTurnIds.add(turnId);
-        yield* runKiloSdk("session.abort", () =>
+        return yield* runKiloSdk("session.abort", () =>
           context.client.session.abort(
             { sessionID: context.kiloSessionId },
             { throwOnError: true },
@@ -812,76 +841,73 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
           ),
         );
       });
-    };
 
     const respondToRequest: KiloAdapterShape["respondToRequest"] = (
       threadId,
       requestId,
       decision,
-    ) => {
-      const context = ensureContext(sessions, threadId);
-      if (!context.pendingPermissions.has(requestId)) {
-        return Effect.fail(
-          new ProviderAdapterRequestError({
+    ) =>
+      Effect.gen(function* () {
+        const context = yield* lookupContext(sessions, threadId);
+        if (!context.pendingPermissions.has(requestId)) {
+          return yield* new ProviderAdapterRequestError({
             provider: PROVIDER,
             method: "permission.reply",
             detail: `Unknown pending permission request: ${requestId}`,
-          }),
+          });
+        }
+        return yield* runKiloSdk("permission.reply", () =>
+          context.client.permission.reply(
+            { requestID: requestId, reply: toKiloPermissionReply(decision) },
+            { throwOnError: true },
+          ),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: cause.operation,
+                detail: cause.detail,
+                cause,
+              }),
+          ),
+          Effect.asVoid,
         );
-      }
-      return runKiloSdk("permission.reply", () =>
-        context.client.permission.reply(
-          { requestID: requestId, reply: toKiloPermissionReply(decision) },
-          { throwOnError: true },
-        ),
-      ).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: cause.operation,
-              detail: cause.detail,
-              cause,
-            }),
-        ),
-        Effect.asVoid,
-      );
-    };
+      });
 
     const respondToUserInput: KiloAdapterShape["respondToUserInput"] = (
       threadId,
       requestId,
       answers,
-    ) => {
-      const context = ensureContext(sessions, threadId);
-      const request = context.pendingQuestions.get(requestId);
-      if (!request) {
-        return Effect.fail(
-          new ProviderAdapterRequestError({
+    ) =>
+      Effect.gen(function* () {
+        const context = yield* lookupContext(sessions, threadId);
+        const request = context.pendingQuestions.get(requestId);
+        if (!request) {
+          return yield* new ProviderAdapterRequestError({
             provider: PROVIDER,
             method: "question.reply",
             detail: `Unknown pending question request: ${requestId}`,
-          }),
+          });
+        }
+        return yield* runKiloSdk("question.reply", () =>
+          context.client.question.reply(
+            { requestID: requestId, answers: toKiloQuestionAnswers(request, answers) },
+            { throwOnError: true },
+          ),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: cause.operation,
+                detail: cause.detail,
+                cause,
+              }),
+          ),
+          Effect.asVoid,
         );
-      }
-      return runKiloSdk("question.reply", () =>
-        context.client.question.reply(
-          { requestID: requestId, answers: toKiloQuestionAnswers(request, answers) },
-          { throwOnError: true },
-        ),
-      ).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: cause.operation,
-              detail: cause.detail,
-              cause,
-            }),
-        ),
-        Effect.asVoid,
-      );
-    };
+      });
 
     const stopSession: KiloAdapterShape["stopSession"] = Effect.fn("stopKiloSession")(
       function* (threadId) {
