@@ -15,6 +15,10 @@ import {
 
 const decodeDevinSettings = Schema.decodeSync(DevinSettings);
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 describe("buildInitialDevinProviderSnapshot", () => {
   it.effect("returns a disabled snapshot when settings.enabled is false", () =>
     Effect.gen(function* () {
@@ -192,6 +196,56 @@ it.layer(NodeServices.layer)("checkDevinProviderStatus", (it) => {
       expect(snapshot.version).toBe("3000.1.27");
       expect(snapshot.auth.status).toBe("unauthenticated");
       expect(snapshot.message).toContain("devin auth login");
+    }),
+  );
+
+  it.effect("uses WINDSURF_API_KEY when no stored CLI login exists", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-devin-api-key-" });
+          const devinPath = path.join(dir, "devin");
+          const mockAgentPath = path.join(process.cwd(), "scripts", "acp-mock-agent.ts");
+          yield* fs.writeFileString(
+            devinPath,
+            [
+              "#!/bin/sh",
+              'if [ "$1" = "--version" ]; then',
+              '  printf "devin 3000.1.27 (0d4bf12e)\\n"',
+              "  exit 0",
+              "fi",
+              'if [ "$1" = "auth" ]; then',
+              '  printf "Not logged in.\\n"',
+              "  exit 0",
+              "fi",
+              'if [ "$1" = "acp" ]; then',
+              `  exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(mockAgentPath)}`,
+              "fi",
+              'printf "unexpected args: %s\\n" "$*" >&2',
+              "exit 11",
+              "",
+            ].join("\n"),
+          );
+          yield* fs.chmod(devinPath, 0o755);
+
+          return yield* checkDevinProviderStatus(
+            decodeDevinSettings({ enabled: true, binaryPath: devinPath }),
+            { ...process.env, WINDSURF_API_KEY: "test-api-key" },
+          );
+        }),
+      );
+
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.installed).toBe(true);
+      expect(snapshot.version).toBe("3000.1.27");
+      expect(snapshot.auth).toEqual({
+        status: "authenticated",
+        type: "apiKey",
+        label: "Devin API Key",
+      });
+      expect(snapshot.models.length).toBeGreaterThan(1);
     }),
   );
 

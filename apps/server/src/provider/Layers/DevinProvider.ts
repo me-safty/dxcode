@@ -50,6 +50,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
 const DEVIN_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
+const DEVIN_API_KEY_ENV = "WINDSURF_API_KEY";
 const DEVIN_LOGIN_HINT = "Run `devin auth login` in a terminal to authenticate.";
 
 const DEVIN_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
@@ -199,23 +200,29 @@ const probeDevinAuthStatus = (
   devinSettings: DevinSettings,
   environment: NodeJS.ProcessEnv,
 ): Effect.Effect<ServerProviderAuth, never, ChildProcessSpawner.ChildProcessSpawner> =>
-  runDevinCliCommand(devinSettings, ["auth", "status"], environment).pipe(
-    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
-    Effect.map(
-      Option.match({
-        onNone: (): ServerProviderAuth => ({ status: "unknown" }),
-        onSome: (result): ServerProviderAuth =>
-          result.code === 0
-            ? parseDevinAuthStatusOutput(`${result.stdout}\n${result.stderr}`)
-            : { status: "unknown" },
-      }),
-    ),
-    Effect.catch((error) =>
-      Effect.logWarning("Devin auth status probe failed.", { errorTag: error._tag }).pipe(
-        Effect.as({ status: "unknown" } satisfies ServerProviderAuth),
-      ),
-    ),
-  );
+  environment[DEVIN_API_KEY_ENV]?.trim()
+    ? Effect.succeed({
+        status: "authenticated",
+        type: "apiKey",
+        label: "Devin API Key",
+      } satisfies ServerProviderAuth)
+    : runDevinCliCommand(devinSettings, ["auth", "status"], environment).pipe(
+        Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
+        Effect.map(
+          Option.match({
+            onNone: (): ServerProviderAuth => ({ status: "unknown" }),
+            onSome: (result): ServerProviderAuth =>
+              result.code === 0
+                ? parseDevinAuthStatusOutput(`${result.stdout}\n${result.stderr}`)
+                : { status: "unknown" },
+          }),
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning("Devin auth status probe failed.", { errorTag: error._tag }).pipe(
+            Effect.as({ status: "unknown" } satisfies ServerProviderAuth),
+          ),
+        ),
+      );
 
 export const checkDevinProviderStatus = Effect.fn("checkDevinProviderStatus")(function* (
   devinSettings: DevinSettings,
