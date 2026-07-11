@@ -262,30 +262,32 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
       const previous = context.emittedTextByPartId.get(part.id) ?? "";
       // The Kilo SDK emits synthetic spinner text parts while it initializes
       // its file snapshot — suppress them so they never reach the ingestion
-      // layer or the chat UI. See `kiloSnapshotProgressFilter.ts`. The
-      // accumulator above is intentionally written before this check so that
-      // a hypothetical later non-progress edit on the same part id still
-      // computes its delta correctly. Do not add the part id to
+      // layer or the chat UI, and do NOT record them in the user-visible
+      // accumulator (the user never saw them). See
+      // `kiloSnapshotProgressFilter.ts`. Do not add the part id to
       // `completedAssistantPartIds` so a real completion is still surfaced.
       if (isKiloSnapshotProgressText(text)) return;
-      // Derive the next text delta. We must never overwrite `previous` with
-      // a stale snapshot: if deltas already streamed more than the current
-      // part.text can account for (because `message.part.updated` was
-      // captured before later deltas arrived, or because `message.updated`
-      // is re-emitting a stored part after the role was learned), the
-      // snapshot is older than the stream. In that case do not emit any
-      // content.delta and leave the accumulator alone — re-emitting a
-      // shorter text here would garble or duplicate the already-streamed
-      // output. Otherwise extend, or fall back to a full replacement when
-      // there is nothing to extend.
+      // Pick the next content.delta:
+      //   - If the snapshot extends the previously-emitted text, emit the
+      //     new tail and update the accumulator.
+      //   - If nothing has been emitted to the user yet (or the prior
+      //     content was suppressed as snapshot progress), emit the full
+      //     text as the initial visible chunk and update the accumulator.
+      //   - If the snapshot is a full replacement that is neither a strict
+      //     extension nor a stale snapshot, emit the full text as a
+      //     replacement and update the accumulator.
+      //   - If the snapshot is shorter than what we already streamed, it is
+      //     stale relative to the user-visible stream — drop it so we never
+      //     garble or duplicate the already-emitted output.
       let delta = "";
-      if (text.startsWith(previous) && text.length > previous.length) {
+      if (text.length < previous.length) {
+        delta = "";
+      } else if (text.startsWith(previous) && text.length > previous.length) {
         delta = text.slice(previous.length);
-        context.emittedTextByPartId.set(part.id, text);
-      } else if (previous.length === 0) {
+      } else {
         delta = text;
-        context.emittedTextByPartId.set(part.id, text);
       }
+      context.emittedTextByPartId.set(part.id, text);
       if (delta) {
         yield* emit({
           ...(yield* eventBase({
@@ -361,11 +363,13 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
           if (!part || (part.type !== "text" && part.type !== "reasoning")) break;
           const previous = context.emittedTextByPartId.get(part.id) ?? "";
           const accumulated = previous + event.properties.delta;
-          context.emittedTextByPartId.set(part.id, accumulated);
           // Suppress Kilo SDK synthetic snapshot-progress deltas. The
-          // accumulator above is still written so subsequent edits compute
-          // correct deltas. See `kiloSnapshotProgressFilter.ts`.
+          // accumulator is only updated when the new text is also emitted to
+          // the user, so subsequent edits compute deltas against the
+          // user-visible stream rather than the raw SDK truth. See
+          // `kiloSnapshotProgressFilter.ts`.
           if (isKiloSnapshotProgressText(accumulated)) break;
+          context.emittedTextByPartId.set(part.id, accumulated);
           yield* emit({
             ...(yield* eventBase({
               threadId: context.session.threadId,
