@@ -5,6 +5,7 @@ import {
   type KiloSettings,
   type ModelSelection,
 } from "@t3tools/contracts";
+import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -71,7 +72,11 @@ export function sanitizeKiloBranchName(value: string): string {
   return value.replace(/^["'`]+|["'`]+$/g, "").trim();
 }
 
-const CommitOutput = Schema.Struct({ subject: Schema.String, body: Schema.String });
+const CommitOutput = Schema.Struct({
+  subject: Schema.String,
+  body: Schema.String,
+  branch: Schema.optional(Schema.String),
+});
 const PrOutput = Schema.Struct({ title: Schema.String, body: Schema.String });
 const decodeCommitOutput = Schema.decodeEffect(Schema.fromJsonString(CommitOutput));
 const decodePrOutput = Schema.decodeEffect(Schema.fromJsonString(PrOutput));
@@ -171,10 +176,17 @@ export const makeKiloTextGeneration = Effect.fn("makeKiloTextGeneration")(functi
         operation: "generateCommitMessage",
         cwd: input.cwd,
         modelSelection: input.modelSelection,
-        prompt: `Return JSON with subject and body for this staged change.\nBranch: ${input.branch ?? "unknown"}\nSummary:\n${input.stagedSummary}\nPatch:\n${input.stagedPatch}`,
+        prompt: `Return JSON with ${input.includeBranch ? "subject, body, and a concise semantic branch name" : "subject and body"} for this staged change.\nBranch: ${input.branch ?? "unknown"}\nSummary:\n${input.stagedSummary}\nPatch:\n${input.stagedPatch}`,
       }).pipe(
         Effect.flatMap((text) =>
           decodeCommitOutput(extractJsonObject(text)).pipe(
+            Effect.map((output) => ({
+              subject: output.subject,
+              body: output.body,
+              ...(input.includeBranch && output.branch
+                ? { branch: sanitizeFeatureBranchName(output.branch) }
+                : {}),
+            })),
             Effect.mapError(
               (cause) =>
                 new TextGenerationError({

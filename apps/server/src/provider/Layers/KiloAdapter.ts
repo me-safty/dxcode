@@ -75,6 +75,7 @@ interface KiloSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  readonly interruptedTurnIds: Set<TurnId>;
   readonly turns: Array<KiloTurnSnapshot>;
   activeTurnId: TurnId | undefined;
   readonly stopped: Ref.Ref<boolean>;
@@ -439,12 +440,13 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
               },
             });
           } else if (turnId) {
+            const state = context.interruptedTurnIds.delete(turnId) ? "interrupted" : "completed";
             context.activeTurnId = undefined;
             yield* updateSession(context, { status: "ready" }, true);
             yield* emit({
               ...(yield* eventBase({ threadId: context.session.threadId, turnId, raw: event })),
               type: "turn.completed",
-              payload: { state: "completed" },
+              payload: { state },
             });
           }
           break;
@@ -608,6 +610,7 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
           partById: new Map(),
           emittedTextByPartId: new Map(),
           completedAssistantPartIds: new Set(),
+          interruptedTurnIds: new Set(),
           turns: [],
           activeTurnId: undefined,
           stopped: yield* Ref.make(false),
@@ -717,20 +720,29 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
 
     const interruptTurn: KiloAdapterShape["interruptTurn"] = (threadId) => {
       const context = ensureContext(sessions, threadId);
-      return runKiloSdk("session.abort", () =>
-        context.client.session.abort({ sessionID: context.kiloSessionId }, { throwOnError: true }),
-      ).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: cause.operation,
-              detail: cause.detail,
-              cause,
-            }),
-        ),
-        Effect.asVoid,
-      );
+      return Effect.gen(function* () {
+        const turnId = context.activeTurnId;
+        if (turnId) context.interruptedTurnIds.add(turnId);
+        yield* runKiloSdk("session.abort", () =>
+          context.client.session.abort(
+            { sessionID: context.kiloSessionId },
+            { throwOnError: true },
+          ),
+        ).pipe(
+          Effect.tapError(() =>
+            Effect.sync(() => turnId && context.interruptedTurnIds.delete(turnId)),
+          ),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: cause.operation,
+                detail: cause.detail,
+                cause,
+              }),
+          ),
+        );
+      });
     };
 
     const respondToRequest: KiloAdapterShape["respondToRequest"] = (
@@ -852,7 +864,21 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
     const rollbackThread: KiloAdapterShape["rollbackThread"] = Effect.fn("rollbackKiloThread")(
       function* (threadId, numTurns) {
         const context = ensureContext(sessions, threadId);
+        if (!Number.isInteger(numTurns) || numTurns < 1) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "rollbackThread",
+            issue: "numTurns must be an integer >= 1.",
+          });
+        }
         const snapshot = yield* readThread(threadId);
+        if (numTurns > snapshot.turns.length) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "rollbackThread",
+            issue: "numTurns must not exceed the number of turns.",
+          });
+        }
         const target = snapshot.turns[snapshot.turns.length - numTurns - 1];
         yield* runKiloSdk("session.revert", () =>
           context.client.session.revert(
