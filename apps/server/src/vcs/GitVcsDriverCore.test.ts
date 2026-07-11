@@ -528,6 +528,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         const cwd = yield* makeTmpDir();
         yield* initRepoWithCommit(cwd);
         const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
 
         yield* driver.createRef({ cwd, refName: "feature/original" });
         const switchRef = yield* driver.switchRef({ cwd, refName: "feature/original" });
@@ -542,6 +543,10 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/renamed");
 
         const refs = yield* driver.listRefs({ cwd });
+        assert.equal(
+          refs.mainCheckoutPath ? yield* fileSystem.realPath(refs.mainCheckoutPath) : null,
+          yield* fileSystem.realPath(cwd),
+        );
         assert.equal(
           refs.refs.find((refName) => refName.name === "feature/renamed")?.current,
           true,

@@ -2143,8 +2143,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           : null;
 
       const worktreeMap = new Map<string, string>();
+      let mainCheckoutPath: string | null = null;
       if (worktreeList.exitCode === 0) {
         let currentPath: string | null = null;
+        let sawMainCheckout = false;
         for (const line of worktreeList.stdout.split("\n")) {
           if (line.startsWith("worktree ")) {
             const candidatePath = line.slice("worktree ".length);
@@ -2153,6 +2155,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               Effect.orElseSucceed(() => false),
             );
             currentPath = exists ? candidatePath : null;
+            if (!sawMainCheckout) {
+              mainCheckoutPath = currentPath;
+              sawMainCheckout = true;
+            }
           } else if (line.startsWith("branch refs/heads/") && currentPath) {
             worktreeMap.set(line.slice("branch refs/heads/".length), currentPath);
           } else if (line === "") {
@@ -2163,6 +2169,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       const localBranches = Arr.filterMap(localBranchResult.stdout.split("\n"), (line) => {
         const refName = parseBranchLine(line);
+        const worktreePath = refName === null ? null : (worktreeMap.get(refName.name) ?? null);
         return refName === null
           ? Result.failVoid
           : Result.succeed({
@@ -2170,7 +2177,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               current: refName.current,
               isRemote: false,
               isDefault: refName.name === defaultBranch,
-              worktreePath: worktreeMap.get(refName.name) ?? null,
+              worktreePath,
             });
       }).toSorted((a, b) => {
         const aPriority = a.current ? 0 : a.isDefault ? 1 : 2;
@@ -2236,6 +2243,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         refs: [...refs.refs],
         isRepo: true,
         hasPrimaryRemote: remoteNames.includes("origin"),
+        mainCheckoutPath,
         nextCursor: refs.nextCursor,
         totalCount: refs.totalCount,
       };
