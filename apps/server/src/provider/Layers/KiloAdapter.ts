@@ -260,8 +260,6 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
       const text = textFromPart(part);
       if (text === undefined) return;
       const previous = context.emittedTextByPartId.get(part.id) ?? "";
-      const delta = text.startsWith(previous) ? text.slice(previous.length) : text;
-      context.emittedTextByPartId.set(part.id, text);
       // The Kilo SDK emits synthetic spinner text parts while it initializes
       // its file snapshot — suppress them so they never reach the ingestion
       // layer or the chat UI. See `kiloSnapshotProgressFilter.ts`. The
@@ -270,6 +268,24 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
       // computes its delta correctly. Do not add the part id to
       // `completedAssistantPartIds` so a real completion is still surfaced.
       if (isKiloSnapshotProgressText(text)) return;
+      // Derive the next text delta. We must never overwrite `previous` with
+      // a stale snapshot: if deltas already streamed more than the current
+      // part.text can account for (because `message.part.updated` was
+      // captured before later deltas arrived, or because `message.updated`
+      // is re-emitting a stored part after the role was learned), the
+      // snapshot is older than the stream. In that case do not emit any
+      // content.delta and leave the accumulator alone — re-emitting a
+      // shorter text here would garble or duplicate the already-streamed
+      // output. Otherwise extend, or fall back to a full replacement when
+      // there is nothing to extend.
+      let delta = "";
+      if (text.startsWith(previous) && text.length > previous.length) {
+        delta = text.slice(previous.length);
+        context.emittedTextByPartId.set(part.id, text);
+      } else if (previous.length === 0) {
+        delta = text;
+        context.emittedTextByPartId.set(part.id, text);
+      }
       if (delta) {
         yield* emit({
           ...(yield* eventBase({
@@ -323,10 +339,13 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
           const learnedRole = !context.messageRoleById.has(messageId);
           context.messageRoleById.set(messageId, role);
           // Backfill any text/reasoning parts whose message role was still
-          // unknown when their initial message.part.updated arrived. emitText
-          // is delta-aware via the per-part accumulator, so re-emitting here
-          // only produces whatever text or completion we have not already
-          // surfaced.
+          // unknown when their initial message.part.updated arrived. By the
+          // time the role arrives, deltas may have already streamed into
+          // `emittedTextByPartId`, so a stale `partById[id].text` snapshot
+          // must NOT replace that accumulated output. Only emit a
+          // content.delta when nothing has been streamed yet; in either case
+          // still surface a missing item.completed so the chat UI knows the
+          // turn has a finished assistant message.
           if (role === "assistant" && learnedRole) {
             for (const part of context.partById.values()) {
               if (part.messageID !== messageId) continue;

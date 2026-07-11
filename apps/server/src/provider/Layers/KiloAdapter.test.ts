@@ -417,4 +417,94 @@ it.layer(KiloAdapterTestLayer)("KiloAdapterLive", (it) => {
         yield* stopDrain(drain);
       }),
   );
+
+  it.effect("backfill never re-emits a stale snapshot that already streamed past it", () =>
+    Effect.gen(function* () {
+      const adapter = yield* KiloAdapter;
+      const threadId = asThreadId("thread-kilo-stale-backfill");
+      const assistantMessageId = "msg-kilo-stale-backfill";
+      const stalePartId = "part-kilo-stale-backfill";
+
+      // Sequence: a message.part.updated captures a stale "Hello" snapshot
+      // (no role yet — emitText is skipped). Later deltas stream past
+      // (" world" then "!"). When the role finally arrives via
+      // message.updated, the backfill walks partById and re-invokes
+      // emitText with the stale snapshot. Without the staleness guard
+      // emitText would fall back to `delta = text` and re-emit "Hello",
+      // garbling the already-streamed output. With the guard, the stale
+      // snapshot is dropped and only the deltas are surfaced.
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "kilo-session-1",
+            time: 1,
+            part: {
+              id: stalePartId,
+              sessionID: "kilo-session-1",
+              messageID: assistantMessageId,
+              type: "text",
+              text: "Hello",
+            },
+          },
+        },
+        {
+          type: "message.part.delta",
+          properties: {
+            sessionID: "kilo-session-1",
+            messageID: assistantMessageId,
+            partID: stalePartId,
+            field: "text",
+            delta: " world",
+          },
+        },
+        {
+          type: "message.part.delta",
+          properties: {
+            sessionID: "kilo-session-1",
+            messageID: assistantMessageId,
+            partID: stalePartId,
+            field: "text",
+            delta: "!",
+          },
+        },
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "kilo-session-1",
+            info: { id: assistantMessageId, role: "assistant" },
+          },
+        },
+      ];
+
+      const { collected, drain } = yield* collectThreadEvents(adapter, threadId);
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("kilo"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      yield* advanceTestClock(50);
+
+      const assistantTextDeltas = collected.filter(
+        (event) => event.type === "content.delta" && event.payload.streamKind === "assistant_text",
+      ) as Array<Extract<ProviderRuntimeEvent, { type: "content.delta" }>>;
+
+      // The streamed output must NOT contain a duplicate "Hello" prefix
+      // re-emitted from the stale snapshot.
+      NodeAssert.equal(
+        assistantTextDeltas.some((event) => event.payload.delta === "Hello"),
+        false,
+        "the stale 'Hello' snapshot must not be re-emitted over already-streamed text",
+      );
+      NodeAssert.deepEqual(
+        assistantTextDeltas.map((event) => event.payload.delta),
+        [" world", "!"],
+        "only the deltas after the stale snapshot must be surfaced",
+      );
+
+      yield* stopDrain(drain);
+    }),
+  );
 });
