@@ -1273,7 +1273,8 @@ const makeWsRpcLayer = (
                   : new ServerProviderSkillsError({
                       instanceId: input.instanceId,
                       cwd: input.cwd,
-                      message: cause.message,
+                      message: "Failed to list provider skills.",
+                      cause,
                     }),
               ),
             ),

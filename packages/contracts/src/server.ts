@@ -108,6 +108,7 @@ export class ServerProviderSkillsError extends Schema.TaggedErrorClass<ServerPro
     instanceId: ProviderInstanceId,
     cwd: TrimmedNonEmptyString,
     message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
