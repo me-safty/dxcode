@@ -24,11 +24,13 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -147,7 +149,24 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
     const crypto = yield* Crypto.Crypto;
     const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, KiloSessionContext>();
-    const startSessionLocks = new Map<ThreadId, Semaphore.Semaphore>();
+    const threadLocksRef = yield* SynchronizedRef.make(new Map<ThreadId, Semaphore.Semaphore>());
+    const getThreadSemaphore = (threadId: ThreadId) =>
+      SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
+        const existing = Option.fromNullishOr(current.get(threadId));
+        return Option.match(existing, {
+          onNone: () =>
+            Semaphore.make(1).pipe(
+              Effect.map((semaphore) => {
+                const next = new Map(current);
+                next.set(threadId, semaphore);
+                return [semaphore, next] as const;
+              }),
+            ),
+          onSome: (semaphore) => Effect.succeed([semaphore, current] as const),
+        });
+      });
+    const withThreadLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+      Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
     const randomId = crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
@@ -567,12 +586,8 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
 
     const startSession: KiloAdapterShape["startSession"] = Effect.fn("startKiloSession")(
       function* (input) {
-        let lock = startSessionLocks.get(input.threadId);
-        if (!lock) {
-          lock = yield* Semaphore.make(1);
-          startSessionLocks.set(input.threadId, lock);
-        }
-        return yield* lock.withPermits(1)(
+        return yield* withThreadLock(
+          input.threadId,
           Effect.gen(function* () {
             const existing = sessions.get(input.threadId);
             if (existing) {
@@ -870,20 +885,26 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
 
     const stopSession: KiloAdapterShape["stopSession"] = Effect.fn("stopKiloSession")(
       function* (threadId) {
-        const context = ensureContext(sessions, threadId);
-        const stopped = yield* stopContext(context);
-        sessions.delete(threadId);
-        if (stopped) {
-          yield* emit({
-            ...(yield* eventBase({ threadId })),
-            type: "session.exited",
-            payload: {
-              reason: "Session stopped.",
-              recoverable: false,
-              exitKind: "graceful",
-            },
-          });
-        }
+        return yield* withThreadLock(
+          threadId,
+          Effect.gen(function* () {
+            const context = sessions.get(threadId);
+            if (!context) return;
+            const stopped = yield* stopContext(context);
+            sessions.delete(threadId);
+            if (stopped) {
+              yield* emit({
+                ...(yield* eventBase({ threadId })),
+                type: "session.exited",
+                payload: {
+                  reason: "Session stopped.",
+                  recoverable: false,
+                  exitKind: "graceful",
+                },
+              });
+            }
+          }),
+        );
       },
     );
 
