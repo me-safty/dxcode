@@ -159,6 +159,7 @@ describe("GitHubCli.layer", () => {
 
   it.effect("skips invalid entries when parsing pr lists", () =>
     Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("pingdotgg/codething-mvp\n")));
       mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
@@ -205,6 +206,80 @@ describe("GitHubCli.layer", () => {
           state: "open",
         },
       ]);
+      expect(mockRun).toHaveBeenNthCalledWith(2, {
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "pr",
+          "list",
+          "--head",
+          "feature/pr-list",
+          "--state",
+          "open",
+          "--limit",
+          "1",
+          "--repo",
+          "pingdotgg/codething-mvp",
+          "--json",
+          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("creates pull requests against a fork's parent repository", () =>
+    Effect.gen(function* () {
+      mockRun
+        .mockReturnValueOnce(Effect.succeed(processOutput("pingdotgg/t3code\n")))
+        .mockReturnValueOnce(
+          Effect.succeed(processOutput("https://github.com/pingdotgg/t3code/pull/42\n")),
+        );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      yield* gh.createPullRequest({
+        cwd: "/repo",
+        baseBranch: "main",
+        headSelector: "octocat:feature/fork-pr",
+        title: "Target upstream",
+        bodyFile: "/tmp/pr-body.md",
+      });
+
+      expect(mockRun).toHaveBeenNthCalledWith(1, {
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "repo",
+          "view",
+          "--json",
+          "nameWithOwner,parent",
+          "--jq",
+          'if .parent then "\\(.parent.owner.login)/\\(.parent.name)" else .nameWithOwner end',
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+      expect(mockRun).toHaveBeenNthCalledWith(2, {
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "pr",
+          "create",
+          "--base",
+          "main",
+          "--head",
+          "octocat:feature/fork-pr",
+          "--title",
+          "Target upstream",
+          "--body-file",
+          "/tmp/pr-body.md",
+          "--repo",
+          "pingdotgg/t3code",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
     }).pipe(Effect.provide(layer)),
   );
 

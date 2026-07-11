@@ -1,5 +1,8 @@
 import * as Context from "effect/Context";
+import * as Cache from "effect/Cache";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
@@ -18,6 +21,8 @@ import {
 } from "./gitHubPullRequests.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const BASE_REPOSITORY_CACHE_CAPACITY = 2_048;
+const BASE_REPOSITORY_CACHE_TTL = Duration.seconds(5);
 
 const gitHubCliFailureFields = {
   command: Schema.Literal("gh"),
@@ -317,24 +322,50 @@ export const make = Effect.gen(function* () {
       })
       .pipe(Effect.mapError((error) => fromVcsError({ command: "gh", cwd: input.cwd }, error)));
 
+  const baseRepositoryCache = yield* Cache.makeWith(
+    (cwd: string) =>
+      execute({
+        cwd,
+        args: [
+          "repo",
+          "view",
+          "--json",
+          "nameWithOwner,parent",
+          "--jq",
+          'if .parent then "\\(.parent.owner.login)/\\(.parent.name)" else .nameWithOwner end',
+        ],
+      }).pipe(Effect.map((result) => result.stdout.trim())),
+    {
+      capacity: BASE_REPOSITORY_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? BASE_REPOSITORY_CACHE_TTL : Duration.zero),
+    },
+  );
+
+  const resolveBaseRepository = (cwd: string) => Cache.get(baseRepositoryCache, cwd);
+
   return GitHubCli.of({
     execute,
     listOpenPullRequests: (input) =>
-      execute({
-        cwd: input.cwd,
-        args: [
-          "pr",
-          "list",
-          "--head",
-          input.headSelector,
-          "--state",
-          "open",
-          "--limit",
-          String(input.limit ?? 1),
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
-        ],
-      }).pipe(
+      resolveBaseRepository(input.cwd).pipe(
+        Effect.flatMap((repository) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "pr",
+              "list",
+              "--head",
+              input.headSelector,
+              "--state",
+              "open",
+              "--limit",
+              String(input.limit ?? 1),
+              "--repo",
+              repository,
+              "--json",
+              "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            ],
+          }),
+        ),
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
           raw.length === 0
@@ -420,26 +451,44 @@ export const make = Effect.gen(function* () {
         ),
       ),
     createPullRequest: (input) =>
-      execute({
-        cwd: input.cwd,
-        args: [
-          "pr",
-          "create",
-          "--base",
-          input.baseBranch,
-          "--head",
-          input.headSelector,
-          "--title",
-          input.title,
-          "--body-file",
-          input.bodyFile,
-        ],
-      }).pipe(Effect.asVoid),
+      resolveBaseRepository(input.cwd).pipe(
+        Effect.flatMap((repository) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "pr",
+              "create",
+              "--base",
+              input.baseBranch,
+              "--head",
+              input.headSelector,
+              "--title",
+              input.title,
+              "--body-file",
+              input.bodyFile,
+              "--repo",
+              repository,
+            ],
+          }),
+        ),
+        Effect.asVoid,
+      ),
     getDefaultBranch: (input) =>
-      execute({
-        cwd: input.cwd,
-        args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
-      }).pipe(
+      resolveBaseRepository(input.cwd).pipe(
+        Effect.flatMap((repository) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "repo",
+              "view",
+              repository,
+              "--json",
+              "defaultBranchRef",
+              "--jq",
+              ".defaultBranchRef.name",
+            ],
+          }),
+        ),
         Effect.map((value) => {
           const trimmed = value.stdout.trim();
           return trimmed.length > 0 ? trimmed : null;

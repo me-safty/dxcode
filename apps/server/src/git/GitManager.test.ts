@@ -37,6 +37,7 @@ interface FakeGhScenario {
   prListSequenceByHeadSelector?: Record<string, string[]>;
   createdPrUrl?: string;
   defaultBranch?: string;
+  baseRepository?: string;
   pullRequest?: {
     number: number;
     title: string;
@@ -526,6 +527,8 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "open",
             "--limit",
             String(input.limit ?? 1),
+            "--repo",
+            scenario.baseRepository ?? "pingdotgg/codething-mvp",
             "--json",
             "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
           ],
@@ -551,12 +554,22 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             input.title,
             "--body-file",
             input.bodyFile,
+            "--repo",
+            scenario.baseRepository ?? "pingdotgg/codething-mvp",
           ],
         }).pipe(Effect.asVoid),
       getDefaultBranch: (input) =>
         execute({
           cwd: input.cwd,
-          args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+          args: [
+            "repo",
+            "view",
+            scenario.baseRepository ?? "pingdotgg/codething-mvp",
+            "--json",
+            "defaultBranchRef",
+            "--jq",
+            ".defaultBranchRef.name",
+          ],
         }).pipe(
           Effect.map((result) => {
             const value = result.stdout.trim();
@@ -1791,6 +1804,50 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           call.includes("pr create --base main --head feature/create-pr-only"),
         ),
       ).toBe(true);
+    }),
+  );
+
+  it.effect("create_pr targets the upstream repository when origin is a fork", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const forkDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", forkDir]);
+      yield* configureVisibleRemoteUrlWithLocalRewrite(
+        repoDir,
+        "origin",
+        "git@github.com:octocat/t3code.git",
+        forkDir,
+      );
+      yield* runGit(repoDir, ["config", "remote.origin.pushurl", forkDir]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/upstream-pr"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "upstream-pr.txt"), "upstream pr\n");
+      yield* runGit(repoDir, ["add", "upstream-pr.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Target upstream repository"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/upstream-pr"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          baseRepository: "pingdotgg/t3code",
+          prListSequence: ["[]", "[]"],
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+      });
+
+      expect(result.pr.status).toBe("created");
+      expect(
+        ghCalls.some((call) =>
+          call.includes(
+            "pr create --base main --head feature/upstream-pr --title Add stacked git actions",
+          ),
+        ),
+      ).toBe(true);
+      expect(ghCalls.some((call) => call.includes("--repo pingdotgg/t3code"))).toBe(true);
+      expect(ghCalls.some((call) => call.includes("--repo octocat/t3code"))).toBe(false);
     }),
   );
 
