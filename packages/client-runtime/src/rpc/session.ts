@@ -103,7 +103,9 @@ export const make = Effect.gen(function* () {
         // full session teardown, so the default 5s/5s heartbeat drops the
         // connection whenever the server stalls past 5 seconds. Ping often
         // enough to keep NAT/firewall state alive, but give the server room
-        // to stall before declaring the link dead.
+        // to stall before declaring the link dead. These options come from
+        // the effect patch (patches/effect@4.0.0-beta.78.patch); keep that
+        // patch in sync when bumping effect.
         pingInterval: "10 seconds",
         pingTimeout: "20 seconds",
       }),
