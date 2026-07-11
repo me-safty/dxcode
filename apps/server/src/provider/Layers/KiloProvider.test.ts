@@ -89,6 +89,7 @@ describe("KiloProvider", () => {
           expect(snapshot.installed).toBe(true);
           expect(snapshot.version).toBe("7.4.5");
           expect(snapshot.status).toBe("ready");
+          expect(snapshot.showInteractionModeToggle).toBe(true);
           expect(snapshot.models.map((model) => model.slug)).toEqual(["anthropic/claude-sonnet"]);
         }),
       ),

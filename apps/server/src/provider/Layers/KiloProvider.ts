@@ -19,7 +19,7 @@ import {
 import { KiloRuntime, kiloRuntimeErrorDetail } from "../kiloRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("kilo");
-const PRESENTATION = { displayName: "Kilo", showInteractionModeToggle: false } as const;
+const PRESENTATION = { displayName: "Kilo", showInteractionModeToggle: true } as const;
 const DEFAULT_CAPABILITIES: ModelCapabilities = { optionDescriptors: [] };
 
 export function flattenKiloModels(
