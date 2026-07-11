@@ -5,6 +5,7 @@ import {
   type KiloSettings,
   type ModelSelection,
 } from "@t3tools/contracts";
+import { extractJsonObject } from "@t3tools/shared/schemaJson";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -173,7 +174,7 @@ export const makeKiloTextGeneration = Effect.fn("makeKiloTextGeneration")(functi
         prompt: `Return JSON with subject and body for this staged change.\nBranch: ${input.branch ?? "unknown"}\nSummary:\n${input.stagedSummary}\nPatch:\n${input.stagedPatch}`,
       }).pipe(
         Effect.flatMap((text) =>
-          decodeCommitOutput(text).pipe(
+          decodeCommitOutput(extractJsonObject(text)).pipe(
             Effect.mapError(
               (cause) =>
                 new TextGenerationError({
@@ -193,7 +194,7 @@ export const makeKiloTextGeneration = Effect.fn("makeKiloTextGeneration")(functi
         prompt: `Return JSON with title and body for a pull request.\nBase: ${input.baseBranch}\nHead: ${input.headBranch}\nCommits:\n${input.commitSummary}\nDiff:\n${input.diffSummary}\nPatch:\n${input.diffPatch}`,
       }).pipe(
         Effect.flatMap((text) =>
-          decodePrOutput(text).pipe(
+          decodePrOutput(extractJsonObject(text)).pipe(
             Effect.mapError(
               (cause) =>
                 new TextGenerationError({

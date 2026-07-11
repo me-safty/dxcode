@@ -699,6 +699,18 @@ export function makeKiloAdapter(settings: KiloSettings, options?: KiloAdapterOpt
               cause,
             }),
         ),
+        Effect.tapError((requestError) =>
+          freshTurn
+            ? Effect.gen(function* () {
+                context.activeTurnId = undefined;
+                yield* updateSession(
+                  context,
+                  { status: "ready", lastError: requestError.detail },
+                  true,
+                );
+              })
+            : Effect.void,
+        ),
       );
       return { threadId: input.threadId, turnId };
     });
