@@ -99,6 +99,13 @@ export const make = Effect.gen(function* () {
       RpcClient.makeProtocolSocket({
         retryTransientErrors: false,
         retryPolicy: Schedule.recurs(0),
+        // With no protocol-level retry, a single missed pong escalates to a
+        // full session teardown, so the default 5s/5s heartbeat drops the
+        // connection whenever the server stalls past 5 seconds. Ping often
+        // enough to keep NAT/firewall state alive, but give the server room
+        // to stall before declaring the link dead.
+        pingInterval: "10 seconds",
+        pingTimeout: "20 seconds",
       }),
     ).pipe(
       Layer.provide(
