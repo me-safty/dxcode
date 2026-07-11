@@ -266,6 +266,291 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
     }),
   );
 
+  it.effect("cascades owned subagent lifecycle without crossing independent threads", () =>
+    Effect.gen(function* () {
+      const applicationEngine = yield* OrchestrationEngineService;
+      const orchestrator = yield* OrchestratorV2;
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = ProjectId.make("runtime-layer-subagent-lifecycle-project");
+      const rootThreadId = ThreadId.make("runtime-layer-subagent-lifecycle-root");
+      const independentThreadId = ThreadId.make("runtime-layer-subagent-lifecycle-independent");
+
+      yield* applicationEngine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("runtime-layer-subagent-lifecycle-project-create"),
+        projectId,
+        title: "Subagent lifecycle project",
+        workspaceRoot: "/tmp/runtime-layer-subagent-lifecycle-project",
+        defaultModelSelection: modelSelection,
+        scripts: [],
+        createdAt: "2026-07-09T00:00:00.000Z",
+      });
+
+      const createThread = (threadId: ThreadId, title: string) =>
+        orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:create:${threadId}`),
+          threadId,
+          projectId,
+          title,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+      const startRun = (threadId: ThreadId, suffix: string) =>
+        orchestrator.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:message:${suffix}`),
+          threadId,
+          messageId: MessageId.make(`message:${suffix}`),
+          text: `Run ${suffix}`,
+          attachments: [],
+          modelSelection,
+          dispatchMode: { type: "start_immediately" },
+        });
+
+      yield* createThread(rootThreadId, "Lifecycle root");
+      yield* createThread(independentThreadId, "Independent thread");
+      yield* startRun(rootThreadId, "root");
+      const rootBeforeDelegate = yield* orchestrator.getThreadProjection(rootThreadId);
+      const rootRun = rootBeforeDelegate.runs[0];
+      const rootNode = rootBeforeDelegate.nodes.find((node) => node.kind === "root_turn");
+      assert.isDefined(rootRun);
+      assert.isDefined(rootNode);
+
+      yield* orchestrator.dispatch({
+        type: "delegated_task.request",
+        createdBy: "agent",
+        creationSource: "mcp",
+        commandId: CommandId.make("command:delegate:child"),
+        parentThreadId: rootThreadId,
+        parentRunId: rootRun.id,
+        parentNodeId: rootNode.id,
+        task: "Create the child result",
+        title: "Owned child",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      });
+      const rootAfterDelegate = yield* orchestrator.getThreadProjection(rootThreadId);
+      const childThreadId = rootAfterDelegate.subagents[0]?.childThreadId;
+      assert.isNotNull(childThreadId);
+      assert.isDefined(childThreadId);
+
+      const childBeforeDelegate = yield* orchestrator.getThreadProjection(childThreadId);
+      const childRun = childBeforeDelegate.runs[0];
+      const childNode = childBeforeDelegate.nodes.find((node) => node.kind === "root_turn");
+      assert.isDefined(childRun);
+      assert.isDefined(childNode);
+      yield* orchestrator.dispatch({
+        type: "delegated_task.request",
+        createdBy: "agent",
+        creationSource: "mcp",
+        commandId: CommandId.make("command:delegate:grandchild"),
+        parentThreadId: childThreadId,
+        parentRunId: childRun.id,
+        parentNodeId: childNode.id,
+        task: "Create the grandchild result",
+        title: "Owned grandchild",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      });
+      const childAfterDelegate = yield* orchestrator.getThreadProjection(childThreadId);
+      const grandchildThreadId = childAfterDelegate.subagents[0]?.childThreadId;
+      assert.isNotNull(grandchildThreadId);
+      assert.isDefined(grandchildThreadId);
+
+      yield* orchestrator.dispatch({
+        type: "delegated_task.request",
+        createdBy: "agent",
+        creationSource: "mcp",
+        commandId: CommandId.make("command:delegate:deleted-grandchild"),
+        parentThreadId: childThreadId,
+        parentRunId: childRun.id,
+        parentNodeId: childNode.id,
+        task: "Create the grandchild that will be deleted directly",
+        title: "Deleted grandchild",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      });
+      const childWithDeletedGrandchild = yield* orchestrator.getThreadProjection(childThreadId);
+      const deletedGrandchildTask = childWithDeletedGrandchild.subagents.find(
+        (subagent) => subagent.childThreadId !== grandchildThreadId,
+      );
+      const deletedGrandchildThreadId = deletedGrandchildTask?.childThreadId;
+      assert.isDefined(deletedGrandchildTask);
+      assert.isNotNull(deletedGrandchildThreadId);
+      assert.isDefined(deletedGrandchildThreadId);
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("command:delete:grandchild-branch"),
+        threadId: deletedGrandchildThreadId,
+      });
+      const childAfterGrandchildDelete = yield* orchestrator.getThreadProjection(childThreadId);
+      assert.equal(
+        childAfterGrandchildDelete.subagents.find(
+          (subagent) => subagent.id === deletedGrandchildTask.id,
+        )?.status,
+        "cancelled",
+      );
+      assert.equal(
+        childAfterGrandchildDelete.nodes.find((node) => node.id === deletedGrandchildTask.id)
+          ?.status,
+        "cancelled",
+      );
+      assert.equal(
+        childAfterGrandchildDelete.turnItems.find(
+          (item) => item.type === "subagent" && item.subagentId === deletedGrandchildTask.id,
+        )?.status,
+        "cancelled",
+      );
+
+      yield* orchestrator.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("command:archive:grandchild"),
+        threadId: grandchildThreadId,
+      });
+      const legacyParentDeletedAt = "2026-07-09T01:00:00.000Z";
+      yield* sql`
+        UPDATE orchestration_v2_projection_threads
+        SET
+          deleted_at = ${legacyParentDeletedAt},
+          payload_json = json_set(payload_json, '$.deletedAt', ${legacyParentDeletedAt})
+        WHERE thread_id = ${childThreadId}
+      `;
+      const deletedParentUnarchiveError = yield* orchestrator
+        .dispatch({
+          type: "thread.unarchive",
+          commandId: CommandId.make("command:unarchive:deleted-parent-child"),
+          threadId: grandchildThreadId,
+        })
+        .pipe(Effect.flip);
+      assert.equal(deletedParentUnarchiveError._tag, "OrchestratorDispatchError");
+      yield* sql`
+        UPDATE orchestration_v2_projection_threads
+        SET
+          deleted_at = NULL,
+          payload_json = json_set(payload_json, '$.deletedAt', NULL)
+        WHERE thread_id = ${childThreadId}
+      `;
+      const rootArchive = yield* orchestrator.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("command:archive:root-subtree"),
+        threadId: rootThreadId,
+      });
+
+      const archivedRoot = yield* orchestrator.getThreadProjection(rootThreadId);
+      const archivedChild = yield* orchestrator.getThreadProjection(childThreadId);
+      const archivedGrandchild = yield* orchestrator.getThreadProjection(grandchildThreadId);
+      assert.isNotNull(archivedRoot.thread.archivedAt);
+      assert.deepEqual(archivedChild.thread.archivedAt, archivedRoot.thread.archivedAt);
+      assert.notDeepEqual(archivedGrandchild.thread.archivedAt, archivedRoot.thread.archivedAt);
+      assert.equal(archivedRoot.runs[0]?.status, "cancelled");
+      assert.equal(archivedChild.runs[0]?.status, "cancelled");
+      assert.equal(archivedGrandchild.runs[0]?.status, "cancelled");
+      assert.equal(archivedRoot.subagents[0]?.status, "cancelled");
+      assert.equal(
+        archivedRoot.nodes.find((node) => node.kind === "subagent")?.status,
+        "cancelled",
+      );
+      assert.equal(
+        archivedRoot.turnItems.find((item) => item.type === "subagent")?.status,
+        "cancelled",
+      );
+      assert.equal(archivedChild.subagents[0]?.status, "cancelled");
+      assert.deepEqual(
+        rootArchive.storedEvents
+          .filter((stored) => stored.event.type === "thread.archived")
+          .map((stored) => stored.event.threadId)
+          .toSorted(),
+        [childThreadId, rootThreadId].toSorted(),
+      );
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      assert.isFalse(
+        (yield* orchestrator.getThreadProjection(rootThreadId)).contextTransfers.some(
+          (transfer) => transfer.type === "subagent_result",
+        ),
+      );
+
+      const childUnarchiveError = yield* orchestrator
+        .dispatch({
+          type: "thread.unarchive",
+          commandId: CommandId.make("command:unarchive:managed-child"),
+          threadId: childThreadId,
+        })
+        .pipe(Effect.flip);
+      assert.equal(childUnarchiveError._tag, "OrchestratorDispatchError");
+
+      const grandchildUnarchiveError = yield* orchestrator
+        .dispatch({
+          type: "thread.unarchive",
+          commandId: CommandId.make("command:unarchive:independently-archived-grandchild"),
+          threadId: grandchildThreadId,
+        })
+        .pipe(Effect.flip);
+      assert.equal(grandchildUnarchiveError._tag, "OrchestratorDispatchError");
+
+      yield* orchestrator.dispatch({
+        type: "thread.unarchive",
+        commandId: CommandId.make("command:unarchive:root-subtree"),
+        threadId: rootThreadId,
+      });
+      assert.isNull((yield* orchestrator.getThreadProjection(rootThreadId)).thread.archivedAt);
+      assert.isNull((yield* orchestrator.getThreadProjection(childThreadId)).thread.archivedAt);
+      assert.isNotNull(
+        (yield* orchestrator.getThreadProjection(grandchildThreadId)).thread.archivedAt,
+      );
+      yield* startRun(childThreadId, "child-after-unarchive");
+      assert.equal(
+        (yield* orchestrator.getThreadProjection(childThreadId)).runs.at(-1)?.status,
+        "starting",
+      );
+
+      const deletion = yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("command:delete:root-subtree"),
+        threadId: rootThreadId,
+      });
+      assert.deepEqual(
+        deletion.storedEvents
+          .filter((stored) => stored.event.type === "thread.deleted")
+          .map((stored) => stored.event.threadId)
+          .toSorted(),
+        [rootThreadId, childThreadId, grandchildThreadId].toSorted(),
+      );
+      for (const threadId of [rootThreadId, childThreadId, grandchildThreadId]) {
+        assert.isNotNull((yield* orchestrator.getThreadProjection(threadId)).thread.deletedAt);
+      }
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      assert.isFalse(
+        (yield* orchestrator.getThreadProjection(rootThreadId)).contextTransfers.some(
+          (transfer) => transfer.type === "subagent_result",
+        ),
+      );
+      const shell = yield* orchestrator.getShellSnapshot();
+      assert.include(
+        [...shell.threads, ...shell.archivedThreads].map((thread) => thread.id),
+        independentThreadId,
+      );
+      assert.notInclude(
+        [...shell.threads, ...shell.archivedThreads].map((thread) => thread.id),
+        rootThreadId,
+      );
+    }).pipe(Effect.provide(SharedApplicationDataPlaneTestLayer)),
+  );
+
   it.effect("persists rejected command receipts across retries", () =>
     Effect.gen(function* () {
       const orchestrator = yield* OrchestratorV2;

@@ -38,6 +38,63 @@ const providerInstanceId = modelSelection.instanceId;
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 it.layer(TestLayer)("ProjectionStoreV2", (it) => {
+  it.effect("keeps deleted thread headers available for lifecycle repair", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:projection-lifecycle-records:deleted");
+      const thread = {
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+        id: threadId,
+        projectId: ProjectId.make("project:projection-lifecycle-records"),
+        title: "Deleted lifecycle record",
+        providerInstanceId,
+        modelSelection,
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: {
+          parentThreadId: null,
+          relationshipToParent: null,
+          rootThreadId: threadId,
+        },
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        deletedAt: null,
+      };
+
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-lifecycle-records:created"),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: thread,
+      });
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-lifecycle-records:deleted"),
+        type: "thread.deleted",
+        threadId,
+        occurredAt: now,
+        payload: { ...thread, deletedAt: now },
+      });
+
+      const shell = yield* projectionStore.getShellSnapshot();
+      assert.notInclude(
+        [...shell.threads, ...shell.archivedThreads].map((item) => item.id),
+        threadId,
+      );
+      assert.include(
+        (yield* projectionStore.getThreadLifecycleRecords()).map((item) => item.id),
+        threadId,
+      );
+    }),
+  );
+
   it.effect("projects one shared provider session into multiple thread bindings", () =>
     Effect.gen(function* () {
       const projectionStore = yield* ProjectionStoreV2;

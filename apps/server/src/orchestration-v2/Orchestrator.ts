@@ -24,6 +24,7 @@ import {
   type ProviderSessionId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as NodeCrypto from "node:crypto";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -39,9 +40,18 @@ import { CommandPolicyV2 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
-import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
+import {
+  PROCESS_BOUND_EFFECT_TYPES,
+  type OrchestrationEffectRequestV2,
+  type PendingOrchestrationEffectV2,
+} from "./EffectOutbox.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
 import { makeKeyedSerialExecutor } from "./KeyedSerialExecutor.ts";
+import {
+  type OwnedSubagentLifecycleRepair,
+  planOwnedSubagentLifecycleRepairs,
+} from "./OwnedSubagentLifecycleRepair.ts";
+import { ownedSubagentDescendants } from "./OwnedSubagentTree.ts";
 import { applyToProjection, emptyProjection, ProjectionStoreV2 } from "./ProjectionStore.ts";
 import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
@@ -411,6 +421,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* makeKeyedSerialExecutor<ThreadId>();
+  const graphDispatch = yield* makeKeyedSerialExecutor<ThreadId>();
+
+  const graphLockKeyForThread = (threadId: ThreadId) =>
+    Effect.option(projectionStore.getThreadProjection(threadId)).pipe(
+      Effect.map(
+        Option.match({
+          onNone: () => threadId,
+          onSome: (projection) => projection.thread.lineage.rootThreadId,
+        }),
+      ),
+    );
+
+  const graphLockKeyForCommand = (command: OrchestrationV2Command) => {
+    if (command.type === "thread.create") return Effect.succeed(command.threadId);
+    if (command.type === "thread.fork") {
+      return Effect.option(projectionStore.getThreadProjection(command.sourceThreadId)).pipe(
+        Effect.map(
+          Option.match({
+            onNone: () => command.targetThreadId,
+            onSome: (projection) => projection.thread.lineage.rootThreadId,
+          }),
+        ),
+      );
+    }
+    return graphLockKeyForThread(commandThreadId(command));
+  };
 
   const mapDispatchError =
     (command: OrchestrationV2Command) =>
@@ -544,6 +580,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const startNextQueuedRun = (threadId: ThreadId) =>
     Effect.gen(function* () {
       const projection = yield* projectionStore.getThreadProjection(threadId);
+      if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) {
+        return;
+      }
       if (projection.runs.some(isBlockingRun)) {
         return;
       }
@@ -706,7 +745,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         if (projection.runs.some(isBlockingRun) || nextQueuedRun(projection) === undefined) {
           return false;
         }
-        yield* threadDispatch.withLock(thread.id, startNextQueuedRun(thread.id));
+        const graphLockKey = yield* graphLockKeyForThread(thread.id);
+        yield* graphDispatch.withLock(
+          graphLockKey,
+          threadDispatch.withLock(thread.id, startNextQueuedRun(thread.id)),
+        );
         return true;
       }).pipe(
         Effect.catch((cause) =>
@@ -779,6 +822,453 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
+  const loadThreadProjection = (threadId: ThreadId) =>
+    projectionStore.getThreadProjection(threadId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OrchestratorProjectionError({
+            threadId,
+            cause,
+          }),
+      ),
+    );
+
+  const sameInstant = (left: DateTime.Utc, right: DateTime.Utc): boolean =>
+    DateTime.toEpochMillis(left) === DateTime.toEpochMillis(right);
+
+  const lifecycleArchiveTime = (
+    now: DateTime.Utc,
+    projections: ReadonlyArray<OrchestrationV2ThreadProjection>,
+  ): DateTime.Utc => {
+    const occupied = new Set(
+      projections.flatMap((projection) =>
+        projection.thread.archivedAt === null
+          ? []
+          : [DateTime.toEpochMillis(projection.thread.archivedAt)],
+      ),
+    );
+    let candidate = now;
+    while (occupied.has(DateTime.toEpochMillis(candidate))) {
+      candidate = DateTime.add(candidate, { milliseconds: 1 });
+    }
+    return candidate;
+  };
+
+  const dispatchOwnedThreadLifecycle = Effect.fn("orchestrationV2.dispatch.ownedThreadLifecycle")(
+    function* (
+      command: Extract<
+        OrchestrationV2Command,
+        { readonly type: "thread.archive" | "thread.unarchive" | "thread.delete" }
+      >,
+      rootProjection: OrchestrationV2ThreadProjection,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+      effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    ) {
+      const shell = yield* projectionStore.getShellSnapshot().pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestratorProjectionError({
+              threadId: command.threadId,
+              cause,
+            }),
+        ),
+      );
+      const descendants = ownedSubagentDescendants(command.threadId, [
+        ...shell.threads,
+        ...shell.archivedThreads,
+      ]);
+      const descendantProjections = yield* Effect.forEach(
+        descendants,
+        ({ thread, depth }) =>
+          loadThreadProjection(thread.id).pipe(Effect.map((projection) => ({ projection, depth }))),
+        { concurrency: 1 },
+      );
+      const subtree = [{ projection: rootProjection, depth: 0 }, ...descendantProjections];
+      const ancestryOrder = subtree.toSorted((left, right) => left.depth - right.depth);
+      const now = yield* DateTime.now;
+      const archiveAt =
+        command.type === "thread.archive"
+          ? (rootProjection.thread.archivedAt ??
+            lifecycleArchiveTime(
+              now,
+              subtree.map(({ projection }) => projection),
+            ))
+          : null;
+      const lifecycleAt = archiveAt ?? now;
+      const rootArchiveAt = rootProjection.thread.archivedAt;
+      const selected = new Set<ThreadId>([command.threadId]);
+      if (command.type === "thread.archive") {
+        for (const { projection } of ancestryOrder.slice(1)) {
+          const parentThreadId = projection.thread.lineage.parentThreadId;
+          if (
+            parentThreadId !== null &&
+            selected.has(parentThreadId) &&
+            projection.thread.deletedAt === null &&
+            projection.thread.archivedAt === null
+          ) {
+            selected.add(projection.thread.id);
+          }
+        }
+      } else if (command.type === "thread.unarchive" && rootArchiveAt !== null) {
+        for (const { projection } of ancestryOrder.slice(1)) {
+          const parentThreadId = projection.thread.lineage.parentThreadId;
+          if (
+            parentThreadId !== null &&
+            selected.has(parentThreadId) &&
+            projection.thread.deletedAt === null &&
+            projection.thread.archivedAt !== null &&
+            sameInstant(projection.thread.archivedAt, rootArchiveAt)
+          ) {
+            selected.add(projection.thread.id);
+          }
+        }
+      } else if (command.type === "thread.delete") {
+        for (const { projection } of ancestryOrder.slice(1)) {
+          selected.add(projection.thread.id);
+        }
+      }
+      const ordered = ancestryOrder
+        .filter(({ projection }) => selected.has(projection.thread.id))
+        .toSorted((left, right) =>
+          command.type === "thread.unarchive" ? left.depth - right.depth : right.depth - left.depth,
+        );
+      const affectedThreadIds = ordered.map(({ projection }) => projection.thread.id);
+      const emitEvent = emit(events, command);
+
+      if (
+        command.type !== "thread.unarchive" &&
+        rootProjection.thread.lineage.relationshipToParent === "subagent" &&
+        rootProjection.thread.lineage.parentThreadId !== null
+      ) {
+        const ownerParentThreadId = rootProjection.thread.lineage.parentThreadId;
+        const ownerProjection = yield* Effect.option(loadThreadProjection(ownerParentThreadId));
+        if (Option.isSome(ownerProjection) && ownerProjection.value.thread.deletedAt === null) {
+          const ownerTask = ownerProjection.value.subagents.find(
+            (candidate) =>
+              candidate.childThreadId === rootProjection.thread.id &&
+              ["pending", "running", "waiting"].includes(candidate.status),
+          );
+          if (ownerTask !== undefined) {
+            yield* emitEvent({
+              type: "subagent.updated",
+              threadId: ownerParentThreadId,
+              ...(ownerTask.runId === null ? {} : { runId: ownerTask.runId }),
+              nodeId: ownerTask.id,
+              driver: ownerTask.driver,
+              providerInstanceId: ownerTask.providerInstanceId,
+              occurredAt: lifecycleAt,
+              payload: {
+                ...ownerTask,
+                status: "cancelled",
+                completedAt: lifecycleAt,
+                updatedAt: lifecycleAt,
+              },
+            });
+            const ownerNode = ownerProjection.value.nodes.find(
+              (candidate) => candidate.id === ownerTask.id,
+            );
+            if (
+              ownerNode !== undefined &&
+              ["pending", "running", "waiting"].includes(ownerNode.status)
+            ) {
+              yield* emitEvent({
+                type: "node.updated",
+                threadId: ownerParentThreadId,
+                ...(ownerNode.runId === null ? {} : { runId: ownerNode.runId }),
+                nodeId: ownerNode.id,
+                driver: ownerTask.driver,
+                providerInstanceId: ownerTask.providerInstanceId,
+                occurredAt: lifecycleAt,
+                payload: { ...ownerNode, status: "cancelled", completedAt: lifecycleAt },
+              });
+            }
+            const ownerTurnItem = ownerProjection.value.turnItems.find(
+              (candidate) => candidate.type === "subagent" && candidate.subagentId === ownerTask.id,
+            );
+            if (
+              ownerTurnItem !== undefined &&
+              ["pending", "running", "waiting"].includes(ownerTurnItem.status)
+            ) {
+              yield* emitEvent({
+                type: "turn-item.updated",
+                threadId: ownerParentThreadId,
+                ...(ownerTurnItem.runId === null ? {} : { runId: ownerTurnItem.runId }),
+                ...(ownerTurnItem.nodeId === null ? {} : { nodeId: ownerTurnItem.nodeId }),
+                driver: ownerTask.driver,
+                providerInstanceId: ownerTask.providerInstanceId,
+                occurredAt: lifecycleAt,
+                payload: {
+                  ...ownerTurnItem,
+                  status: "cancelled",
+                  completedAt: lifecycleAt,
+                  updatedAt: lifecycleAt,
+                },
+              });
+            }
+          }
+        }
+      }
+
+      for (const { projection } of ordered) {
+        const thread = projection.thread;
+        const shouldEmitThreadMutation =
+          command.type === "thread.archive"
+            ? thread.archivedAt === null
+            : command.type === "thread.unarchive"
+              ? selected.has(thread.id)
+              : true;
+        if (shouldEmitThreadMutation) {
+          const updatedThread: OrchestrationV2AppThread =
+            command.type === "thread.archive"
+              ? { ...thread, archivedAt: archiveAt!, updatedAt: archiveAt! }
+              : command.type === "thread.unarchive"
+                ? { ...thread, archivedAt: null, updatedAt: lifecycleAt }
+                : {
+                    ...thread,
+                    deletedAt: thread.deletedAt ?? lifecycleAt,
+                    updatedAt: lifecycleAt,
+                  };
+          yield* emitEvent({
+            type:
+              command.type === "thread.archive"
+                ? "thread.archived"
+                : command.type === "thread.unarchive"
+                  ? "thread.unarchived"
+                  : "thread.deleted",
+            threadId: thread.id,
+            providerInstanceId: updatedThread.providerInstanceId,
+            occurredAt: lifecycleAt,
+            payload: updatedThread,
+          });
+        }
+
+        if (command.type === "thread.unarchive") continue;
+
+        const activeRunIds = new Set(
+          projection.runs
+            .filter((run) =>
+              ["preparing", "queued", "starting", "running", "waiting"].includes(run.status),
+            )
+            .map((run) => run.id),
+        );
+        for (const run of projection.runs.filter((candidate) => activeRunIds.has(candidate.id))) {
+          yield* emitEvent({
+            type: "run.updated",
+            threadId: thread.id,
+            runId: run.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: lifecycleAt,
+            payload: {
+              ...run,
+              status: "cancelled",
+              queuePosition: null,
+              completedAt: lifecycleAt,
+            },
+          });
+        }
+        for (const attempt of projection.attempts.filter(
+          (candidate) => candidate.status === "pending" || candidate.status === "running",
+        )) {
+          const run = projection.runs.find((candidate) => candidate.id === attempt.runId)!;
+          yield* emitEvent({
+            type: "run-attempt.updated",
+            threadId: thread.id,
+            runId: attempt.runId,
+            nodeId: attempt.rootNodeId,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: lifecycleAt,
+            payload: { ...attempt, status: "cancelled", completedAt: lifecycleAt },
+          });
+        }
+        for (const node of projection.nodes.filter(
+          (candidate) =>
+            candidate.runId !== null &&
+            ["pending", "running", "waiting"].includes(candidate.status),
+        )) {
+          const run = projection.runs.find((candidate) => candidate.id === node.runId)!;
+          yield* emitEvent({
+            type: "node.updated",
+            threadId: thread.id,
+            runId: run.id,
+            nodeId: node.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: lifecycleAt,
+            payload: { ...node, status: "cancelled", completedAt: lifecycleAt },
+          });
+        }
+        for (const subagent of projection.subagents.filter((candidate) =>
+          ["pending", "running", "waiting"].includes(candidate.status),
+        )) {
+          yield* emitEvent({
+            type: "subagent.updated",
+            threadId: thread.id,
+            ...(subagent.runId === null ? {} : { runId: subagent.runId }),
+            nodeId: subagent.id,
+            driver: subagent.driver,
+            providerInstanceId: subagent.providerInstanceId,
+            occurredAt: lifecycleAt,
+            payload: {
+              ...subagent,
+              status: "cancelled",
+              completedAt: lifecycleAt,
+              updatedAt: lifecycleAt,
+            },
+          });
+        }
+        for (const providerTurn of projection.providerTurns.filter(
+          (candidate) => candidate.status === "pending" || candidate.status === "running",
+        )) {
+          const attempt = projection.attempts.find(
+            (candidate) => candidate.id === providerTurn.runAttemptId,
+          );
+          const run = projection.runs.find((candidate) => candidate.id === attempt?.runId);
+          yield* emitEvent({
+            type: "provider-turn.updated",
+            threadId: thread.id,
+            ...(run === undefined ? {} : { runId: run.id }),
+            nodeId: providerTurn.nodeId,
+            ...(run === undefined ? {} : { providerInstanceId: run.providerInstanceId }),
+            occurredAt: lifecycleAt,
+            payload: { ...providerTurn, status: "cancelled", completedAt: lifecycleAt },
+          });
+        }
+        for (const message of projection.messages.filter((candidate) => candidate.streaming)) {
+          yield* emitEvent({
+            type: "message.updated",
+            threadId: thread.id,
+            ...(message.runId === null ? {} : { runId: message.runId }),
+            ...(message.nodeId === null ? {} : { nodeId: message.nodeId }),
+            occurredAt: lifecycleAt,
+            payload: { ...message, streaming: false, updatedAt: lifecycleAt },
+          });
+        }
+        for (const item of projection.turnItems.filter((candidate) =>
+          ["pending", "running", "waiting"].includes(candidate.status),
+        )) {
+          yield* emitEvent({
+            type: "turn-item.updated",
+            threadId: thread.id,
+            ...(item.runId === null ? {} : { runId: item.runId }),
+            ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
+            occurredAt: lifecycleAt,
+            payload: {
+              ...item,
+              status: "cancelled",
+              completedAt: lifecycleAt,
+              updatedAt: lifecycleAt,
+            },
+          });
+        }
+        for (const request of projection.runtimeRequests.filter(
+          (candidate) => candidate.status === "pending",
+        )) {
+          yield* emitEvent({
+            type: "runtime-request.updated",
+            threadId: thread.id,
+            nodeId: request.nodeId,
+            occurredAt: lifecycleAt,
+            payload: {
+              ...request,
+              status: "cancelled",
+              responseCapability: {
+                type: "not_resumable",
+                reason:
+                  command.type === "thread.archive"
+                    ? "The thread was archived."
+                    : "The thread was deleted.",
+              },
+              resolvedAt: lifecycleAt,
+            },
+          });
+        }
+        for (const providerThread of projection.providerThreads.filter(
+          (candidate) => candidate.status === "active",
+        )) {
+          yield* emitEvent({
+            type: "provider-thread.updated",
+            threadId: thread.id,
+            driver: providerThread.driver,
+            providerInstanceId: providerThread.providerInstanceId,
+            occurredAt: lifecycleAt,
+            payload: { ...providerThread, status: "idle", updatedAt: lifecycleAt },
+          });
+        }
+
+        const liveSessions = projection.providerSessions.filter(
+          (session) => session.status !== "stopped" && session.status !== "error",
+        );
+        for (const session of liveSessions) {
+          const detail = command.type === "thread.archive" ? "Thread archived." : "Thread deleted.";
+          yield* emitEvent({
+            type: "provider-session.detached",
+            threadId: thread.id,
+            driver: session.driver,
+            providerInstanceId: session.providerInstanceId,
+            occurredAt: lifecycleAt,
+            payload: {
+              providerSessionId: session.id,
+              detachedAt: lifecycleAt,
+              reason: detail,
+            },
+          });
+          yield* Ref.update(effects, (existing) => [
+            ...existing,
+            {
+              id: `effect:${command.commandId}:provider-session.detach:${thread.id}:${session.id}`,
+              commandId: command.commandId,
+              threadId: thread.id,
+              request: {
+                type: "provider-session.detach",
+                providerSessionId: session.id,
+                detail,
+              },
+            } satisfies PendingOrchestrationEffectV2,
+          ]);
+        }
+
+        yield* Ref.update(effects, (existing) => [
+          ...existing,
+          {
+            id: `effect:${command.commandId}:terminal.cleanup:${thread.id}`,
+            commandId: command.commandId,
+            threadId: thread.id,
+            request: { type: "terminal.cleanup" },
+          } satisfies PendingOrchestrationEffectV2,
+        ]);
+
+        if (command.type === "thread.delete") {
+          const attachmentIds = Array.from(
+            new Set(
+              projection.messages.flatMap((message) => message.attachments.map((item) => item.id)),
+            ),
+          );
+          if (attachmentIds.length > 0) {
+            yield* Ref.update(effects, (existing) => [
+              ...existing,
+              {
+                id: `effect:${command.commandId}:attachment.cleanup:${thread.id}`,
+                commandId: command.commandId,
+                threadId: thread.id,
+                request: { type: "attachment.cleanup", attachmentIds },
+              } satisfies PendingOrchestrationEffectV2,
+            ]);
+          }
+          yield* Ref.update(effects, (existing) => [
+            ...existing,
+            {
+              id: `effect:${command.commandId}:checkpoint.cleanup:${thread.id}`,
+              commandId: command.commandId,
+              threadId: thread.id,
+              request: { type: "checkpoint.cleanup" },
+            } satisfies PendingOrchestrationEffectV2,
+          ]);
+        }
+      }
+
+      return affectedThreadIds;
+    },
+  );
+
   const dispatchThreadMutation = Effect.fn("orchestrationV2.dispatch.threadMutation")(function* (
     command: Extract<
       OrchestrationV2Command,
@@ -797,15 +1287,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) {
-    const projection = yield* projectionStore.getThreadProjection(command.threadId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new OrchestratorProjectionError({
-            threadId: command.threadId,
-            cause,
-          }),
-      ),
-    );
+    const projection = yield* loadThreadProjection(command.threadId);
     const thread = projection.thread;
     if (thread.deletedAt !== null && command.type !== "thread.delete") {
       return yield* new OrchestratorDispatchError({
@@ -814,7 +1296,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is deleted.`,
       });
     }
-    if (command.type === "thread.archive" && thread.archivedAt !== null) {
+    if (
+      command.type === "thread.archive" &&
+      thread.archivedAt !== null &&
+      !String(command.commandId).startsWith("command:system:owned-subagent-lifecycle-repair:")
+    ) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
@@ -827,6 +1313,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandType: command.type,
         cause: `Thread ${command.threadId} is not archived.`,
       });
+    }
+
+    if (command.type === "thread.unarchive") {
+      const parentThreadId = thread.lineage.parentThreadId;
+      if (thread.lineage.relationshipToParent === "subagent" && parentThreadId !== null) {
+        const parentProjection = yield* Effect.option(loadThreadProjection(parentThreadId));
+        if (Option.isSome(parentProjection) && parentProjection.value.thread.deletedAt !== null) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `Parent thread ${parentThreadId} is deleted; child ${command.threadId} cannot be restored.`,
+          });
+        }
+        if (Option.isSome(parentProjection) && parentProjection.value.thread.archivedAt !== null) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `Parent thread ${parentThreadId} is archived; unarchive it before restoring child ${command.threadId}.`,
+          });
+        }
+      }
+    }
+
+    if (
+      command.type === "thread.archive" ||
+      command.type === "thread.unarchive" ||
+      command.type === "thread.delete"
+    ) {
+      return yield* dispatchOwnedThreadLifecycle(command, projection, events, effects);
     }
 
     const providerSwitchPlan =
@@ -854,12 +1369,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const now = yield* DateTime.now;
     const updatedThread: OrchestrationV2AppThread = (() => {
       switch (command.type) {
-        case "thread.archive":
-          return { ...thread, archivedAt: now, updatedAt: now };
-        case "thread.unarchive":
-          return { ...thread, archivedAt: null, updatedAt: now };
-        case "thread.delete":
-          return { ...thread, deletedAt: thread.deletedAt ?? now, updatedAt: now };
         case "thread.metadata.update":
           return {
             ...thread,
@@ -884,12 +1393,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     })();
     const eventType = (() => {
       switch (command.type) {
-        case "thread.archive":
-          return "thread.archived" as const;
-        case "thread.unarchive":
-          return "thread.unarchived" as const;
-        case "thread.delete":
-          return "thread.deleted" as const;
         case "thread.metadata.update":
           return "thread.metadata-updated" as const;
         case "thread.runtime-mode.set":
@@ -913,93 +1416,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       payload: updatedThread,
     });
 
-    if (command.type === "thread.delete") {
-      const emitEvent = emit(events, command);
-      const activeRunIds = new Set(
-        projection.runs
-          .filter((run) =>
-            ["preparing", "queued", "starting", "running", "waiting"].includes(run.status),
-          )
-          .map((run) => run.id),
-      );
-      for (const run of projection.runs.filter((candidate) => activeRunIds.has(candidate.id))) {
-        yield* emitEvent({
-          type: "run.updated",
-          threadId: command.threadId,
-          runId: run.id,
-          providerInstanceId: run.providerInstanceId,
-          occurredAt: now,
-          payload: { ...run, status: "cancelled", queuePosition: null, completedAt: now },
-        });
-      }
-      for (const attempt of projection.attempts.filter(
-        (candidate) =>
-          activeRunIds.has(candidate.runId) &&
-          (candidate.status === "pending" || candidate.status === "running"),
-      )) {
-        const run = projection.runs.find((candidate) => candidate.id === attempt.runId)!;
-        yield* emitEvent({
-          type: "run-attempt.updated",
-          threadId: command.threadId,
-          runId: attempt.runId,
-          nodeId: attempt.rootNodeId,
-          providerInstanceId: run.providerInstanceId,
-          occurredAt: now,
-          payload: { ...attempt, status: "cancelled", completedAt: now },
-        });
-      }
-      for (const node of projection.nodes.filter(
-        (candidate) =>
-          candidate.runId !== null &&
-          activeRunIds.has(candidate.runId) &&
-          ["pending", "running", "waiting"].includes(candidate.status),
-      )) {
-        const run = projection.runs.find((candidate) => candidate.id === node.runId)!;
-        yield* emitEvent({
-          type: "node.updated",
-          threadId: command.threadId,
-          runId: run.id,
-          nodeId: node.id,
-          providerInstanceId: run.providerInstanceId,
-          occurredAt: now,
-          payload: { ...node, status: "cancelled", completedAt: now },
-        });
-      }
-      for (const request of projection.runtimeRequests.filter(
-        (candidate) => candidate.status === "pending",
-      )) {
-        yield* emitEvent({
-          type: "runtime-request.updated",
-          threadId: command.threadId,
-          nodeId: request.nodeId,
-          occurredAt: now,
-          payload: {
-            ...request,
-            status: "cancelled",
-            responseCapability: {
-              type: "not_resumable",
-              reason: "The thread was deleted.",
-            },
-            resolvedAt: now,
-          },
-        });
-      }
-    }
-
     const detachSessionIds = new Set(
-      command.type === "thread.archive" || command.type === "thread.delete"
+      command.type === "thread.metadata.update" &&
+        command.worktreePath !== undefined &&
+        command.worktreePath !== thread.worktreePath
         ? projection.providerSessions.map((session) => session.id)
-        : command.type === "thread.metadata.update" &&
-            command.worktreePath !== undefined &&
-            command.worktreePath !== thread.worktreePath
-          ? projection.providerSessions.map((session) => session.id)
-          : command.type === "thread.runtime-mode.set"
-            ? projection.providerSessions
-                .filter(
-                  (session) => !session.capabilities.sessions.supportsRuntimeModeSwitchInSession,
-                )
-                .map((session) => session.id)
-            : (providerSwitchPlan?.releaseProviderSessionIds ?? []),
+        : command.type === "thread.runtime-mode.set"
+          ? projection.providerSessions
+              .filter(
+                (session) => !session.capabilities.sessions.supportsRuntimeModeSwitchInSession,
+              )
+              .map((session) => session.id)
+          : (providerSwitchPlan?.releaseProviderSessionIds ?? []),
     );
     if (detachSessionIds.size > 0) {
       const liveSessions = projection.providerSessions.filter(
@@ -1025,15 +1453,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 providerSessionId: session.id,
                 detachedAt: now,
                 reason:
-                  command.type === "thread.archive"
-                    ? "Thread archived."
-                    : command.type === "thread.delete"
-                      ? "Thread deleted."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
-                          : "Provider or model selection changed.",
+                  command.type === "thread.metadata.update"
+                    ? "Workspace changed."
+                    : command.type === "thread.runtime-mode.set"
+                      ? "Runtime mode changed."
+                      : "Provider or model selection changed.",
               },
             });
             const pendingEffect = {
@@ -1044,15 +1468,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 type: "provider-session.detach",
                 providerSessionId: session.id,
                 detail:
-                  command.type === "thread.archive"
-                    ? "Thread archived."
-                    : command.type === "thread.delete"
-                      ? "Thread deleted."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
-                          : "Provider or model selection changed.",
+                  command.type === "thread.metadata.update"
+                    ? "Workspace changed."
+                    : command.type === "thread.runtime-mode.set"
+                      ? "Runtime mode changed."
+                      : "Provider or model selection changed.",
               },
             } satisfies PendingOrchestrationEffectV2;
             yield* Ref.update(effects, (existing) => [...existing, pendingEffect]);
@@ -1061,36 +1481,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
     }
 
-    if (command.type === "thread.archive" || command.type === "thread.delete") {
-      yield* Ref.update(effects, (existing) => [
-        ...existing,
-        {
-          id: `effect:${command.commandId}:terminal.cleanup`,
-          commandId: command.commandId,
-          threadId: command.threadId,
-          request: { type: "terminal.cleanup" },
-        } satisfies PendingOrchestrationEffectV2,
-      ]);
-    }
-
-    if (command.type === "thread.delete") {
-      const attachmentIds = Array.from(
-        new Set(
-          projection.messages.flatMap((message) => message.attachments.map((item) => item.id)),
-        ),
-      );
-      if (attachmentIds.length > 0) {
-        yield* Ref.update(effects, (existing) => [
-          ...existing,
-          {
-            id: `effect:${command.commandId}:attachment.cleanup`,
-            commandId: command.commandId,
-            threadId: command.threadId,
-            request: { type: "attachment.cleanup", attachmentIds },
-          } satisfies PendingOrchestrationEffectV2,
-        ]);
-      }
-    }
+    return undefined;
   });
 
   const dispatchProviderSessionDetach = Effect.fn("orchestrationV2.dispatch.providerSessionDetach")(
@@ -3455,6 +3846,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               }),
           ),
         );
+      if (
+        parentProjection.thread.archivedAt !== null ||
+        parentProjection.thread.deletedAt !== null
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Parent thread ${command.parentThreadId} is not active.`,
+        });
+      }
       const parentRun = parentProjection.runs.find(
         (candidate) => candidate.id === command.parentRunId,
       );
@@ -3708,6 +4109,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               }),
           ),
         );
+      if (
+        parentProjection.thread.archivedAt !== null ||
+        parentProjection.thread.deletedAt !== null
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Parent thread ${command.parentThreadId} is not active.`,
+        });
+      }
       const targetProjection = yield* projectionStore
         .getThreadProjection(command.targetThreadId)
         .pipe(
@@ -4735,6 +5146,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const finalizeAppOwnedSubagent = (childThreadId: ThreadId) =>
     Effect.gen(function* () {
       const childProjection = yield* projectionStore.getThreadProjection(childThreadId);
+      if (childProjection.thread.deletedAt !== null) {
+        return;
+      }
       const forkedFrom = childProjection.thread.forkedFrom;
       if (
         childProjection.thread.lineage.relationshipToParent !== "subagent" ||
@@ -4754,6 +5168,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
       const parentThreadId = childProjection.thread.lineage.parentThreadId;
       const parentProjection = yield* projectionStore.getThreadProjection(parentThreadId);
+      if (
+        parentProjection.thread.archivedAt !== null ||
+        parentProjection.thread.deletedAt !== null
+      ) {
+        return;
+      }
       const task = parentProjection.subagents.find(
         (candidate) =>
           candidate.id === forkedFrom.nodeId &&
@@ -4950,6 +5370,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
       readonly effects: ReadonlyArray<PendingOrchestrationEffectV2>;
       readonly cancelUnsettledEffects?: {
+        readonly threadIds?: ReadonlyArray<ThreadId>;
         readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
         readonly reason: string;
       };
@@ -4966,6 +5387,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const effects = yield* Ref.make<Array<PendingOrchestrationEffectV2>>([]);
     let cancelUnsettledEffects:
       | {
+          readonly threadIds?: ReadonlyArray<ThreadId>;
           readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
           readonly reason: string;
         }
@@ -4974,9 +5396,27 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.create":
         yield* dispatchThreadCreate(command, events);
         break;
-      case "thread.archive":
+      case "thread.archive": {
+        const threadIds = yield* dispatchThreadMutation(command, events, effects);
+        cancelUnsettledEffects = {
+          threadIds: threadIds ?? [command.threadId],
+          effectTypes: PROCESS_BOUND_EFFECT_TYPES,
+          reason: "The owning thread subtree was archived.",
+        };
+        break;
+      }
+      case "thread.delete": {
+        const threadIds = yield* dispatchThreadMutation(command, events, effects);
+        cancelUnsettledEffects = {
+          threadIds: threadIds ?? [command.threadId],
+          effectTypes: [...PROCESS_BOUND_EFFECT_TYPES, "checkpoint.capture"],
+          reason: "The owning thread subtree was deleted.",
+        };
+        break;
+      }
       case "thread.unarchive":
-      case "thread.delete":
+        yield* dispatchThreadMutation(command, events, effects);
+        break;
       case "thread.metadata.update":
       case "thread.runtime-mode.set":
       case "thread.interaction-mode.set":
@@ -5160,7 +5600,121 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   });
 
   const dispatchWithReceipt = (command: OrchestrationV2Command) =>
-    threadDispatch.withLock(commandThreadId(command), dispatchWithReceiptEffect(command));
+    Effect.flatMap(graphLockKeyForCommand(command), (graphLockKey) =>
+      graphDispatch.withLock(
+        graphLockKey,
+        threadDispatch.withLock(commandThreadId(command), dispatchWithReceiptEffect(command)),
+      ),
+    );
+
+  const lifecycleRepairCommand = (
+    repair: OwnedSubagentLifecycleRepair,
+    discriminator: string,
+  ): Extract<OrchestrationV2Command, { readonly type: "thread.archive" | "thread.delete" }> => {
+    const commandId = CommandId.make(
+      `command:system:owned-subagent-lifecycle-repair:${repair.type}:${repair.parentThreadId}:${discriminator}`,
+    );
+    return repair.type === "delete"
+      ? { type: "thread.delete", commandId, threadId: repair.parentThreadId }
+      : { type: "thread.archive", commandId, threadId: repair.parentThreadId };
+  };
+
+  const lifecycleRepairFingerprint = (repair: OwnedSubagentLifecycleRepair): string =>
+    NodeCrypto.createHash("sha256")
+      .update(repair.childThreadIds.join("\n"))
+      .digest("hex")
+      .slice(0, 24);
+
+  const dispatchLifecycleRepair = (repair: OwnedSubagentLifecycleRepair, discriminator: string) =>
+    dispatchWithReceipt(lifecycleRepairCommand(repair, discriminator)).pipe(Effect.asVoid);
+
+  const repairCreatedSubagentLifecycle = (stored: OrchestrationV2StoredEvent) =>
+    Effect.gen(function* () {
+      if (stored.event.type !== "thread.created") return;
+      const childThreadId = stored.event.threadId;
+      const graphLockKey = yield* graphLockKeyForThread(childThreadId);
+      yield* graphDispatch.withLock(
+        graphLockKey,
+        Effect.gen(function* () {
+          const child = yield* loadThreadProjection(childThreadId);
+          const parentThreadId = child.thread.lineage.parentThreadId;
+          if (
+            child.thread.deletedAt !== null ||
+            child.thread.lineage.relationshipToParent !== "subagent" ||
+            parentThreadId === null
+          ) {
+            return;
+          }
+          const parent = yield* Effect.option(loadThreadProjection(parentThreadId));
+          if (Option.isNone(parent)) return;
+          const repairType =
+            parent.value.thread.deletedAt !== null
+              ? "delete"
+              : parent.value.thread.archivedAt !== null && child.thread.archivedAt === null
+                ? "archive"
+                : null;
+          if (repairType === null) return;
+
+          const repair: OwnedSubagentLifecycleRepair = {
+            type: repairType,
+            parentThreadId,
+            childThreadIds: [childThreadId],
+          };
+          yield* threadDispatch.withLock(
+            parentThreadId,
+            dispatchWithReceiptEffect(lifecycleRepairCommand(repair, stored.event.id)).pipe(
+              Effect.asVoid,
+            ),
+          );
+        }),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Failed to repair newly-created owned subagent lifecycle", {
+          threadId: stored.event.threadId,
+          cause,
+        }),
+      ),
+    );
+
+  // Capture the live boundary before reading projections. Threads created
+  // during startup reconciliation are then replayed by the live subscription.
+  const lifecycleRepairAfterSequence = yield* eventSink.latestSequence().pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Failed to read owned subagent lifecycle repair boundary", {
+        cause,
+      }).pipe(Effect.as(0)),
+    ),
+  );
+  const lifecycleRecords = yield* projectionStore
+    .getThreadLifecycleRecords()
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Failed to read owned subagent lifecycle records", { cause }).pipe(
+          Effect.as([]),
+        ),
+      ),
+    );
+  yield* Effect.forEach(
+    planOwnedSubagentLifecycleRepairs(lifecycleRecords),
+    (repair) =>
+      dispatchLifecycleRepair(repair, lifecycleRepairFingerprint(repair)).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Failed to reconcile owned subagent lifecycle", {
+            threadId: repair.parentThreadId,
+            lifecycle: repair.type,
+            cause,
+          }),
+        ),
+      ),
+    { concurrency: 1, discard: true },
+  );
+
+  yield* eventSink.stream({ afterSequence: lifecycleRepairAfterSequence }).pipe(
+    Stream.filter((stored) => stored.event.type === "thread.created"),
+    Stream.runForEach(repairCreatedSubagentLifecycle),
+    Effect.forkDetach,
+  );
 
   yield* eventSink.stream().pipe(
     Stream.filter(
@@ -5174,14 +5728,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           stored.event.payload.status === "rolled_back"),
     ),
     Stream.runForEach((stored) =>
-      threadDispatch
-        .withLock(
-          stored.event.threadId,
-          finalizeAppOwnedSubagent(stored.event.threadId).pipe(
-            Effect.andThen(startNextQueuedRun(stored.event.threadId)),
+      Effect.flatMap(graphLockKeyForThread(stored.event.threadId), (graphLockKey) =>
+        graphDispatch.withLock(
+          graphLockKey,
+          threadDispatch.withLock(
+            stored.event.threadId,
+            finalizeAppOwnedSubagent(stored.event.threadId).pipe(
+              Effect.andThen(startNextQueuedRun(stored.event.threadId)),
+            ),
           ),
-        )
-        .pipe(Effect.catchCause(() => Effect.void)),
+        ),
+      ).pipe(Effect.catchCause(() => Effect.void)),
     ),
     Effect.forkDetach,
   );

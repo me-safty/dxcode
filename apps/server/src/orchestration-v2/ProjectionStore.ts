@@ -1,4 +1,5 @@
 import type {
+  OrchestrationV2AppThread,
   OrchestrationV2ConversationMessage,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProjectedTurnItem,
@@ -102,6 +103,11 @@ export interface ProjectionStoreV2Shape {
   ) => Effect.Effect<void, ProjectionStoreV2Error>;
   readonly getShellSnapshot: () => Effect.Effect<
     OrchestrationV2ThreadShellSnapshot,
+    ProjectionStoreV2Error
+  >;
+  /** Returns lifecycle headers for every thread, including archived and deleted records. */
+  readonly getThreadLifecycleRecords: () => Effect.Effect<
+    ReadonlyArray<OrchestrationV2AppThread>,
     ProjectionStoreV2Error
   >;
   readonly getThreadProjection: (
@@ -1998,6 +2004,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const getThreadProjection: ProjectionStoreV2Shape["getThreadProjection"] = (threadId) =>
       readProjection(threadId, new Set());
 
+    const getThreadLifecycleRecords: ProjectionStoreV2Shape["getThreadLifecycleRecords"] = () =>
+      sql<{ readonly payload_json: string }>`
+        SELECT payload_json
+        FROM orchestration_v2_projection_threads
+        ORDER BY created_at ASC, thread_id ASC
+      `.pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => decodeThreadPayload(row.payload_json)),
+        ),
+        Effect.mapError(
+          (cause) =>
+            new ProjectionStoreReadError({
+              threadId: ThreadId.make("thread:lifecycle-records"),
+              cause,
+            }),
+        ),
+      );
+
     const getThreadSnapshot: ProjectionStoreV2Shape["getThreadSnapshot"] = (threadId) =>
       sql
         .withTransaction(
@@ -2200,6 +2224,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     return {
       apply,
       getShellSnapshot,
+      getThreadLifecycleRecords,
       getThreadProjection,
       getThreadSnapshot,
     } satisfies ProjectionStoreV2Shape;
@@ -2252,6 +2277,18 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             archivedThreads: visible.filter((thread) => thread.archivedAt !== null),
           };
         }),
+      getThreadLifecycleRecords: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()]
+              .map((projection) => projection.thread)
+              .toSorted(
+                (left, right) =>
+                  DateTime.toEpochMillis(left.createdAt) -
+                    DateTime.toEpochMillis(right.createdAt) || left.id.localeCompare(right.id),
+              ),
+          ),
+        ),
       getThreadProjection: (threadId) =>
         Effect.gen(function* () {
           const existing = (yield* Ref.get(replayState)).projections;

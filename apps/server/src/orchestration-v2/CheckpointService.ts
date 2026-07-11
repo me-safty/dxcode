@@ -103,6 +103,18 @@ export class CheckpointDeleteStaleRefsError extends Schema.TaggedErrorClass<Chec
   }
 }
 
+export class CheckpointDeleteScopeRefsError extends Schema.TaggedErrorClass<CheckpointDeleteScopeRefsError>()(
+  "CheckpointDeleteScopeRefsError",
+  {
+    scopeId: CheckpointScopeId,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to delete checkpoint refs for scope ${this.scopeId}.`;
+  }
+}
+
 export const CheckpointServiceV2Error = Schema.Union([
   CheckpointRootScopePrepareError,
   CheckpointScopeEnsureError,
@@ -110,6 +122,7 @@ export const CheckpointServiceV2Error = Schema.Union([
   CheckpointCaptureError,
   CheckpointRestoreError,
   CheckpointDeleteStaleRefsError,
+  CheckpointDeleteScopeRefsError,
 ]);
 export type CheckpointServiceV2Error = typeof CheckpointServiceV2Error.Type;
 
@@ -149,6 +162,16 @@ export interface CheckpointServiceV2Shape {
   readonly deleteStaleRefs: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
     readonly checkpoints: ReadonlyArray<OrchestrationV2Checkpoint>;
+  }) => Effect.Effect<void, CheckpointServiceV2Error>;
+  readonly deleteScopeRefs: (input: {
+    readonly scope: OrchestrationV2CheckpointScope;
+    readonly checkpoints: ReadonlyArray<OrchestrationV2Checkpoint>;
+    /**
+     * Baselines can be captured before their projection event is committed.
+     * Include every deterministic ordinal through this value so deletion also
+     * cleans refs left by an interrupted capture.
+     */
+    readonly throughOrdinal: number;
   }) => Effect.Effect<void, CheckpointServiceV2Error>;
 }
 
@@ -541,6 +564,40 @@ export const layer: Layer.Layer<
         ),
       );
 
+    const deleteScopeRefs: CheckpointServiceV2Shape["deleteScopeRefs"] = (input) => {
+      const checkpointRefs = new Set<CheckpointRef>(
+        input.checkpoints.map((checkpoint) => checkpoint.ref),
+      );
+      for (
+        let ordinalWithinScope = 0;
+        ordinalWithinScope <= input.throughOrdinal;
+        ordinalWithinScope += 1
+      ) {
+        checkpointRefs.add(
+          checkpointRefForScopeOrdinal({
+            scopeId: input.scope.id,
+            ordinalWithinScope,
+          }),
+        );
+      }
+
+      return withWorkspaceLock(
+        input.scope.cwd,
+        checkpointStore.deleteCheckpointRefs({
+          cwd: input.scope.cwd,
+          checkpointRefs: Array.from(checkpointRefs),
+        }),
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new CheckpointDeleteScopeRefsError({
+              scopeId: input.scope.id,
+              cause,
+            }),
+        ),
+      );
+    };
+
     return CheckpointServiceV2.of({
       prepareRootRunScope: (input) =>
         makeRootRunScope({ ...input, idAllocator }).pipe(
@@ -559,6 +616,7 @@ export const layer: Layer.Layer<
       capture,
       restore,
       deleteStaleRefs,
+      deleteScopeRefs,
     } satisfies CheckpointServiceV2Shape);
   }),
 );

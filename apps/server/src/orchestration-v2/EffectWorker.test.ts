@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
+import { CheckpointCleanupServiceV2 } from "./CheckpointCleanupService.ts";
 import { CheckpointRollbackServiceV2 } from "./CheckpointRollbackService.ts";
 import type { OrchestrationEffectV2 } from "./EffectOutbox.ts";
 import { executorLayer, OrchestrationEffectExecutorV2 } from "./EffectWorker.ts";
@@ -124,6 +125,10 @@ function makeExecutorLayer(input: {
     Layer.succeed(
       CheckpointRollbackServiceV2,
       CheckpointRollbackServiceV2.of({ execute: () => Effect.void }),
+    ),
+    Layer.succeed(
+      CheckpointCleanupServiceV2,
+      CheckpointCleanupServiceV2.of({ cleanup: () => Effect.void }),
     ),
     Layer.succeed(
       RuntimeRequestServiceV2,

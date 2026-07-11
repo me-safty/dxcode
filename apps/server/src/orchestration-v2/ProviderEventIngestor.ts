@@ -79,7 +79,10 @@ export interface ProviderEventIngestorV2Shape {
       readonly writeIfRunCurrent?: {
         readonly runId: RunId;
         readonly activeAttemptId: RunAttemptId;
-        readonly expectedStatus: OrchestrationV2Run["status"];
+        readonly expectedStatus:
+          | OrchestrationV2Run["status"]
+          | ReadonlyArray<OrchestrationV2Run["status"]>;
+        readonly allowSupersededAttemptTerminalArtifacts?: boolean;
       };
     },
   ) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, ProviderEventIngestorV2Error>;

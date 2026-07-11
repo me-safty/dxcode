@@ -17,6 +17,7 @@ import {
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
+  ProviderTurnId,
   RunAttemptId,
   RunId,
   ThreadId,
@@ -680,6 +681,567 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
       assert.equal(yield* Ref.get(providerStartCount), 0);
       const projection = yield* projectionStore.getThreadProjection(threadId);
       assert.equal(projection.runs[0]?.status, "cancelled");
+    }),
+  );
+
+  it.effect("admits only terminal provider updates from an exact superseded attempt", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSinkV2;
+      const projectionStore = yield* ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:foundation-superseded-terminal-guard");
+      const runId = RunId.make("run:foundation-superseded-terminal-guard");
+      const oldAttemptId = RunAttemptId.make(
+        "run-attempt:foundation-superseded-terminal-guard:old",
+      );
+      const replacementAttemptId = RunAttemptId.make(
+        "run-attempt:foundation-superseded-terminal-guard:replacement",
+      );
+      const rootNodeId = NodeId.make("node:foundation-superseded-terminal-guard");
+      const providerThreadId = ProviderThreadId.make(
+        "provider-thread:foundation-superseded-terminal-guard",
+      );
+      const providerTurnId = ProviderTurnId.make(
+        "provider-turn:foundation-superseded-terminal-guard",
+      );
+      const thread = makeThread(threadId, now);
+      const runningRun: OrchestrationV2Run = {
+        id: runId,
+        threadId,
+        ordinal: 1,
+        providerInstanceId,
+        modelSelection,
+        providerThreadId,
+        userMessageId: MessageId.make("message:foundation-superseded-terminal-guard"),
+        rootNodeId,
+        activeAttemptId: oldAttemptId,
+        status: "running",
+        queuePosition: null,
+        requestedAt: now,
+        startedAt: now,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      };
+      const oldAttempt = {
+        id: oldAttemptId,
+        runId,
+        attemptOrdinal: 1,
+        rootNodeId,
+        providerInstanceId,
+        providerThreadId,
+        providerTurnId,
+        reason: "initial" as const,
+        status: "running" as const,
+        startedAt: now,
+        completedAt: null,
+      };
+      const providerThread = {
+        id: providerThreadId,
+        driver: providerDriver,
+        providerInstanceId,
+        providerSessionId: ProviderSessionId.make(
+          "provider-session:foundation-superseded-terminal-guard",
+        ),
+        appThreadId: threadId,
+        ownerNodeId: null,
+        nativeThreadRef: null,
+        nativeConversationHeadRef: null,
+        status: "active" as const,
+        firstRunOrdinal: 1,
+        lastRunOrdinal: 1,
+        handoffIds: [],
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const runningProviderTurn = {
+        id: providerTurnId,
+        providerThreadId,
+        nodeId: rootNodeId,
+        runAttemptId: oldAttemptId,
+        nativeTurnRef: null,
+        ordinal: 1,
+        status: "running" as const,
+        startedAt: now,
+        completedAt: null,
+      };
+      yield* eventSink.write({
+        events: [
+          threadCreatedEvent({
+            id: "event:foundation-superseded-terminal-guard:thread",
+            thread,
+            now,
+          }),
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:run"),
+            type: "run.created",
+            threadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: runningRun,
+          },
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:old-attempt"),
+            type: "run-attempt.created",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: oldAttempt,
+          },
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:provider-thread"),
+            type: "provider-thread.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            driver: providerDriver,
+            providerInstanceId,
+            occurredAt: now,
+            payload: providerThread,
+          },
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:provider-turn"),
+            type: "provider-turn.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            driver: providerDriver,
+            providerInstanceId,
+            occurredAt: now,
+            payload: runningProviderTurn,
+          },
+        ],
+      });
+
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:replacement-run"),
+            type: "run.updated",
+            threadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...runningRun,
+              activeAttemptId: replacementAttemptId,
+              status: "starting",
+            },
+          },
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:superseded-attempt"),
+            type: "run-attempt.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...oldAttempt, status: "superseded", completedAt: now },
+          },
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:new-attempt"),
+            type: "run-attempt.created",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...oldAttempt,
+              id: replacementAttemptId,
+              attemptOrdinal: 2,
+              providerTurnId: null,
+              status: "pending",
+              startedAt: null,
+              completedAt: null,
+            },
+          },
+        ],
+      });
+
+      const nonterminal = yield* eventSink.writeIfRunCurrent({
+        threadId,
+        runId,
+        activeAttemptId: oldAttemptId,
+        expectedStatus: ["running", "waiting"],
+        allowSupersededAttemptTerminalArtifacts: true,
+        events: [
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:late-running"),
+            type: "provider-turn.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            driver: providerDriver,
+            providerInstanceId,
+            occurredAt: now,
+            payload: runningProviderTurn,
+          },
+        ],
+      });
+      assert.isFalse(nonterminal.committed);
+
+      const terminal = yield* eventSink.writeIfRunCurrent({
+        threadId,
+        runId,
+        activeAttemptId: oldAttemptId,
+        expectedStatus: ["running", "waiting"],
+        allowSupersededAttemptTerminalArtifacts: true,
+        events: [
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:interrupted"),
+            type: "provider-turn.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            driver: providerDriver,
+            providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...runningProviderTurn,
+              status: "interrupted",
+              completedAt: now,
+            },
+          },
+        ],
+      });
+      assert.isTrue(terminal.committed);
+      assert.equal(
+        (yield* projectionStore.getThreadProjection(threadId)).providerTurns[0]?.status,
+        "interrupted",
+      );
+      const interruptArtifact = {
+        id: TurnItemId.make("turn-item:foundation-superseded-terminal-guard:interrupt"),
+        threadId,
+        runId,
+        nodeId: rootNodeId,
+        providerThreadId,
+        providerTurnId,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 198,
+        status: "interrupted" as const,
+        title: "Interrupted",
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+        type: "run_interrupt_result" as const,
+        message: "Run interrupted by restart",
+      };
+      const activeArtifact = yield* eventSink.writeIfRunCurrent({
+        threadId,
+        runId,
+        activeAttemptId: oldAttemptId,
+        expectedStatus: ["running", "waiting"],
+        allowSupersededAttemptTerminalArtifacts: true,
+        events: [
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:interrupt-artifact"),
+            type: "turn-item.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: interruptArtifact,
+          },
+        ],
+      });
+      assert.isTrue(activeArtifact.committed);
+
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:archive"),
+            type: "thread.archived",
+            threadId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...thread, archivedAt: now, updatedAt: now },
+          },
+        ],
+      });
+      const inactiveArtifact = yield* eventSink.writeIfRunCurrent({
+        threadId,
+        runId,
+        activeAttemptId: oldAttemptId,
+        expectedStatus: ["running", "waiting"],
+        allowSupersededAttemptTerminalArtifacts: true,
+        events: [
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:late-interrupt-artifact"),
+            type: "turn-item.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...interruptArtifact,
+              id: TurnItemId.make("turn-item:foundation-superseded-terminal-guard:late-interrupt"),
+              ordinal: 199,
+            },
+          },
+        ],
+      });
+      assert.isFalse(inactiveArtifact.committed);
+
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:cleanup-run"),
+            type: "run.updated",
+            threadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...runningRun,
+              activeAttemptId: replacementAttemptId,
+              status: "cancelled",
+              completedAt: now,
+            },
+          },
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:cleanup-attempt"),
+            type: "run-attempt.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...oldAttempt,
+              id: replacementAttemptId,
+              attemptOrdinal: 2,
+              providerTurnId: null,
+              status: "cancelled",
+              startedAt: null,
+              completedAt: now,
+            },
+          },
+          {
+            id: EventId.make("event:foundation-superseded-terminal-guard:cleanup-thread"),
+            type: "provider-thread.updated",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            driver: providerDriver,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...providerThread, status: "idle", updatedAt: now },
+          },
+        ],
+      });
+    }),
+  );
+
+  it.effect("does not publish run events after the owning thread is archived", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSinkV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:foundation-archived-run-guard");
+      const runId = RunId.make("run:foundation-archived-run-guard");
+      const attemptId = RunAttemptId.make("run-attempt:foundation-archived-run-guard");
+      const thread = makeThread(threadId, now);
+      const startingRun: OrchestrationV2Run = {
+        id: runId,
+        threadId,
+        ordinal: 1,
+        providerInstanceId,
+        modelSelection,
+        providerThreadId: null,
+        userMessageId: MessageId.make("message:foundation-archived-run-guard"),
+        rootNodeId: null,
+        activeAttemptId: attemptId,
+        status: "starting",
+        queuePosition: null,
+        requestedAt: now,
+        startedAt: null,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      };
+      yield* eventSink.write({
+        events: [
+          threadCreatedEvent({ id: "event:foundation-archived-run-guard:thread", thread, now }),
+          {
+            id: EventId.make("event:foundation-archived-run-guard:run"),
+            type: "run.created",
+            threadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: startingRun,
+          },
+        ],
+      });
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("event:foundation-archived-run-guard:archived"),
+            type: "thread.archived",
+            threadId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...thread, archivedAt: now, updatedAt: now },
+          },
+        ],
+      });
+
+      const result = yield* eventSink.writeIfRunCurrent({
+        threadId,
+        runId,
+        activeAttemptId: attemptId,
+        expectedStatus: ["starting", "waiting"],
+        events: [
+          {
+            id: EventId.make("event:foundation-archived-run-guard:late-running"),
+            type: "run.updated",
+            threadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...startingRun, status: "running", startedAt: now },
+          },
+        ],
+      });
+
+      assert.isFalse(result.committed);
+      assert.deepEqual(result.storedEvents, []);
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("event:foundation-archived-run-guard:cleanup"),
+            type: "run.updated",
+            threadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...startingRun, status: "cancelled", completedAt: now },
+          },
+        ],
+      });
+    }),
+  );
+
+  it.effect("does not publish a routed event into an archived child thread", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSinkV2;
+      const now = yield* DateTime.now;
+      const rootThreadId = ThreadId.make("thread:foundation-archived-target-guard:root");
+      const childThreadId = ThreadId.make("thread:foundation-archived-target-guard:child");
+      const runId = RunId.make("run:foundation-archived-target-guard");
+      const attemptId = RunAttemptId.make("run-attempt:foundation-archived-target-guard");
+      const rootNodeId = NodeId.make("node:foundation-archived-target-guard");
+      const rootThread = makeThread(rootThreadId, now);
+      const childThread = {
+        ...makeThread(childThreadId, now),
+        lineage: {
+          parentThreadId: rootThreadId,
+          relationshipToParent: "subagent" as const,
+          rootThreadId,
+        },
+      };
+      const runningRun: OrchestrationV2Run = {
+        id: runId,
+        threadId: rootThreadId,
+        ordinal: 1,
+        providerInstanceId,
+        modelSelection,
+        providerThreadId: null,
+        userMessageId: MessageId.make("message:foundation-archived-target-guard:user"),
+        rootNodeId,
+        activeAttemptId: attemptId,
+        status: "running",
+        queuePosition: null,
+        requestedAt: now,
+        startedAt: now,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      };
+      yield* eventSink.write({
+        events: [
+          threadCreatedEvent({
+            id: "event:foundation-archived-target-guard:root-thread",
+            thread: rootThread,
+            now,
+          }),
+          threadCreatedEvent({
+            id: "event:foundation-archived-target-guard:child-thread",
+            thread: childThread,
+            now,
+          }),
+          {
+            id: EventId.make("event:foundation-archived-target-guard:run"),
+            type: "run.created",
+            threadId: rootThreadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: runningRun,
+          },
+          {
+            id: EventId.make("event:foundation-archived-target-guard:archive-child"),
+            type: "thread.archived",
+            threadId: childThreadId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...childThread, archivedAt: now, updatedAt: now },
+          },
+        ],
+      });
+
+      const result = yield* eventSink.writeIfRunCurrent({
+        threadId: rootThreadId,
+        runId,
+        activeAttemptId: attemptId,
+        expectedStatus: ["running", "waiting"],
+        events: [
+          {
+            id: EventId.make("event:foundation-archived-target-guard:late-child-message"),
+            type: "message.updated",
+            threadId: childThreadId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: {
+              createdBy: "agent",
+              creationSource: "provider",
+              id: MessageId.make("message:foundation-archived-target-guard:late-child"),
+              threadId: childThreadId,
+              runId: null,
+              nodeId: null,
+              role: "assistant",
+              text: "This late event must not revive the archived child.",
+              attachments: [],
+              streaming: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+        ],
+      });
+      assert.isFalse(result.committed);
+      assert.deepEqual(result.storedEvents, []);
+
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("event:foundation-archived-target-guard:cleanup-run"),
+            type: "run.updated",
+            threadId: rootThreadId,
+            runId,
+            providerInstanceId,
+            occurredAt: now,
+            payload: { ...runningRun, status: "cancelled", completedAt: now },
+          },
+        ],
+      });
     }),
   );
 

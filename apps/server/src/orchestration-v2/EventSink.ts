@@ -90,7 +90,16 @@ export interface EventSinkV2Shape {
     readonly threadId: ThreadId;
     readonly runId: RunId;
     readonly activeAttemptId: RunAttemptId;
-    readonly expectedStatus: OrchestrationV2Run["status"];
+    readonly expectedStatus:
+      | OrchestrationV2Run["status"]
+      | ReadonlyArray<OrchestrationV2Run["status"]>;
+    /**
+     * Admit only terminal provider-turn or interrupt-result artifacts for this
+     * exact attempt after a restart has superseded it. The transactional
+     * thread lifecycle guard is still required, so archival and deletion
+     * always win.
+     */
+    readonly allowSupersededAttemptTerminalArtifacts?: boolean;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
   }) => Effect.Effect<
     {
@@ -107,6 +116,7 @@ export interface EventSinkV2Shape {
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
     readonly effects: ReadonlyArray<PendingOrchestrationEffectV2>;
     readonly cancelUnsettledEffects?: {
+      readonly threadIds?: ReadonlyArray<ThreadId>;
       readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
       readonly reason: string;
     };
@@ -258,23 +268,82 @@ const baseLayer: Layer.Layer<
 
         const result = yield* sql.withTransaction(
           Effect.gen(function* () {
+            const createdThreadIds = new Set(
+              input.events.flatMap((event) =>
+                event.type === "thread.created" ? [event.threadId] : [],
+              ),
+            );
+            const targetThreadIds = Array.from(
+              new Set([
+                input.threadId,
+                ...input.events.flatMap((event) =>
+                  createdThreadIds.has(event.threadId) ? [] : [event.threadId],
+                ),
+              ]),
+            );
+            const activeTargetThreads = yield* sql<{ readonly thread_id: string }>`
+              SELECT thread_id
+              FROM orchestration_v2_projection_threads
+              WHERE thread_id IN ${sql.in(targetThreadIds)}
+                AND archived_at IS NULL
+                AND deleted_at IS NULL
+            `;
+            if (activeTargetThreads.length !== targetThreadIds.length) {
+              return {
+                committed: false as const,
+                storedEvents: [] as ReadonlyArray<OrchestrationV2StoredEvent>,
+              };
+            }
             const rows = yield* sql<{
               readonly status: string;
               readonly active_attempt_id: string | null;
+              readonly supplied_attempt_status: string | null;
             }>`
             SELECT
-              status,
-              json_extract(payload_json, '$.activeAttemptId') AS active_attempt_id
-            FROM orchestration_v2_projection_runs
-            WHERE run_id = ${input.runId}
-              AND thread_id = ${input.threadId}
+              runs.status,
+              json_extract(runs.payload_json, '$.activeAttemptId') AS active_attempt_id,
+              supplied_attempt.status AS supplied_attempt_status
+            FROM orchestration_v2_projection_runs AS runs
+            INNER JOIN orchestration_v2_projection_threads AS threads
+              ON threads.thread_id = runs.thread_id
+            LEFT JOIN orchestration_v2_projection_run_attempts AS supplied_attempt
+              ON supplied_attempt.attempt_id = ${input.activeAttemptId}
+              AND supplied_attempt.run_id = runs.run_id
+              AND supplied_attempt.thread_id = runs.thread_id
+            WHERE runs.run_id = ${input.runId}
+              AND runs.thread_id = ${input.threadId}
+              AND threads.archived_at IS NULL
+              AND threads.deleted_at IS NULL
             LIMIT 1
           `;
             const current = rows[0];
+            const expectedStatuses = Array.isArray(input.expectedStatus)
+              ? input.expectedStatus
+              : [input.expectedStatus];
+            const currentRunOwnsAttempt =
+              current !== undefined &&
+              expectedStatuses.includes(current.status as OrchestrationV2Run["status"]) &&
+              current.active_attempt_id === input.activeAttemptId;
+            const isSupersededAttemptTerminalArtifactWrite =
+              input.allowSupersededAttemptTerminalArtifacts === true &&
+              current?.supplied_attempt_status === "superseded" &&
+              input.events.length > 0 &&
+              input.events.every(
+                (event) =>
+                  (event.type === "provider-turn.updated" &&
+                    event.payload.runAttemptId === input.activeAttemptId &&
+                    (event.payload.status === "completed" ||
+                      event.payload.status === "interrupted" ||
+                      event.payload.status === "failed" ||
+                      event.payload.status === "cancelled")) ||
+                  (event.type === "turn-item.updated" &&
+                    event.runId === input.runId &&
+                    event.payload.runId === input.runId &&
+                    event.payload.type === "run_interrupt_result"),
+              );
             if (
               current === undefined ||
-              current.status !== input.expectedStatus ||
-              current.active_attempt_id !== input.activeAttemptId
+              (!currentRunOwnsAttempt && !isSupersededAttemptTerminalArtifactWrite)
             ) {
               return {
                 committed: false as const,
@@ -359,10 +428,16 @@ const baseLayer: Layer.Layer<
           const cancelledEffectIds =
             input.cancelUnsettledEffects === undefined
               ? []
-              : yield* effectOutbox.cancelUnsettled({
-                  threadId: input.threadId,
-                  ...input.cancelUnsettledEffects,
-                });
+              : yield* Effect.forEach(
+                  Array.from(new Set(input.cancelUnsettledEffects.threadIds ?? [input.threadId])),
+                  (threadId) =>
+                    effectOutbox.cancelUnsettled({
+                      threadId,
+                      effectTypes: input.cancelUnsettledEffects!.effectTypes,
+                      reason: input.cancelUnsettledEffects!.reason,
+                    }),
+                  { concurrency: 1 },
+                ).pipe(Effect.map((effectIds) => effectIds.flat()));
           return { receipt, storedEvents, committed: true as const, cancelledEffectIds };
         }),
       );
