@@ -230,6 +230,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveEffectiveServerThreadWorktreePath,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -1139,6 +1140,9 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
+  const [pendingServerThreadWorktreePath, setPendingServerThreadWorktreePath] = useState<
+    string | null
+  >();
   const [
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
@@ -3562,12 +3566,7 @@ function ChatViewContent(props: ChatViewProps) {
     setExpandedImage(null);
   }, []);
 
-  const activeWorktreePath = activeThread?.worktreePath ?? null;
-  const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
-    activeWorktreePath,
-    hasServerThread: isServerThread,
-    draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
-  });
+  const persistedWorktreePath = activeThread?.worktreePath ?? null;
   const canOverrideServerThreadEnvMode = Boolean(
     isServerThread &&
     activeThread &&
@@ -3575,6 +3574,16 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread.worktreePath === null &&
     !envLocked,
   );
+  const activeWorktreePath = resolveEffectiveServerThreadWorktreePath({
+    canOverride: canOverrideServerThreadEnvMode,
+    persistedWorktreePath,
+    pendingWorktreePath: pendingServerThreadWorktreePath,
+  });
+  const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
+    activeWorktreePath,
+    hasServerThread: isServerThread,
+    draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
+  });
   const envMode: DraftThreadEnvMode = canOverrideServerThreadEnvMode
     ? (pendingServerThreadEnvMode ?? draftThread?.envMode ?? derivedEnvMode)
     : derivedEnvMode;
@@ -3596,6 +3605,7 @@ function ChatViewContent(props: ChatViewProps) {
   useEffect(() => {
     setPendingServerThreadEnvMode(null);
     setPendingServerThreadBranch(undefined);
+    setPendingServerThreadWorktreePath(undefined);
   }, [activeThread?.id]);
 
   useEffect(() => {
@@ -3604,6 +3614,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     setPendingServerThreadEnvMode(null);
     setPendingServerThreadBranch(undefined);
+    setPendingServerThreadWorktreePath(undefined);
   }, [canOverrideServerThreadEnvMode]);
 
   useEffect(() => {
@@ -3967,14 +3978,14 @@ function ChatViewContent(props: ChatViewProps) {
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
+      isFirstMessage && sendEnvMode === "worktree" && !activeWorktreePath
         ? activeThreadBranch
         : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
+      isFirstMessage && sendEnvMode === "worktree" && !activeWorktreePath;
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
@@ -4144,7 +4155,7 @@ function ChatViewContent(props: ChatViewProps) {
                       runtimeMode,
                       interactionMode,
                       branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
+                      worktreePath: activeWorktreePath,
                       createdAt: activeThread.createdAt,
                     },
                   }
@@ -4840,6 +4851,7 @@ function ChatViewContent(props: ChatViewProps) {
     (mode: DraftThreadEnvMode) => {
       if (canOverrideServerThreadEnvMode) {
         setPendingServerThreadEnvMode(mode);
+        setPendingServerThreadWorktreePath(null);
         scheduleComposerFocus();
         return;
       }
@@ -4876,6 +4888,7 @@ function ChatViewContent(props: ChatViewProps) {
       if (canOverrideServerThreadEnvMode && activeThread) {
         setPendingServerThreadEnvMode("worktree");
         setPendingServerThreadBranch(worktree.branch);
+        setPendingServerThreadWorktreePath(worktree.path);
         void updateThreadMetadata({
           environmentId: activeThread.environmentId,
           input: {
