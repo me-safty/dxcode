@@ -314,6 +314,7 @@ export function useHandleNewThread() {
     defaultNewWorktreesStartFromOrigin: defaultProjectSettings.newWorktreesStartFromOrigin,
     handleNewThread,
     resolveDefaultMainCheckout,
+    resolveNewThreadDefaults,
     routeThreadRef,
   };
 }

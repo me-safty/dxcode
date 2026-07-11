@@ -3168,6 +3168,7 @@ export default function Sidebar() {
     defaultThreadEnvMode,
     handleNewThread: handleNewThreadRaw,
     resolveDefaultMainCheckout,
+    resolveNewThreadDefaults,
   } = useHandleNewThread();
   const handleNewThread = useCallback(
     (projectRef: ScopedProjectRef) =>
@@ -3180,6 +3181,7 @@ export default function Sidebar() {
           defaultThreadEnvMode,
           handleNewThread: handleNewThreadRaw,
           resolveDefaultMainCheckout,
+          resolveNewThreadDefaults,
         },
         projectRef,
       ),
@@ -3188,6 +3190,7 @@ export default function Sidebar() {
       defaultThreadEnvMode,
       handleNewThreadRaw,
       resolveDefaultMainCheckout,
+      resolveNewThreadDefaults,
     ],
   );
   const { archiveThread, deleteThread } = useThreadActions();
