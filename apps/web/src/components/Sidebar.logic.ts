@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -25,6 +26,21 @@ type SidebarProject = {
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
+
+export function buildMultiSelectThreadContextMenuItems(input: {
+  count: number;
+  hasRunningThread: boolean;
+}): readonly ContextMenuItem<"mark-unread" | "archive" | "delete">[] {
+  return [
+    { id: "mark-unread", label: `Mark unread (${input.count})` },
+    {
+      id: "archive",
+      label: `Archive (${input.count})`,
+      disabled: input.hasRunningThread,
+    },
+    { id: "delete", label: `Delete (${input.count})`, destructive: true },
+  ];
+}
 
 export interface ThreadStatusPill {
   label:

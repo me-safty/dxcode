@@ -184,6 +184,7 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
 import {
+  buildMultiSelectThreadContextMenuItems,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
@@ -1772,21 +1773,56 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const threadKeys = [...useThreadSelectionStore.getState().selectedThreadKeys];
       if (threadKeys.length === 0) return;
       const count = threadKeys.length;
+      const selectedThreadEntries = threadKeys.flatMap((threadKey) => {
+        const threadRef = parseScopedThreadKey(threadKey);
+        const thread = threadRef ? readThreadShell(threadRef) : null;
+        return threadRef && thread ? [{ threadKey, threadRef, thread }] : [];
+      });
+      const hasRunningThread = selectedThreadEntries.some(
+        ({ thread }) => thread.session?.status === "running" && thread.session.activeTurnId != null,
+      );
 
       const clicked = await api.contextMenu.show(
-        [
-          { id: "mark-unread", label: `Mark unread (${count})` },
-          { id: "delete", label: `Delete (${count})`, destructive: true },
-        ],
+        buildMultiSelectThreadContextMenuItems({ count, hasRunningThread }),
         position,
       );
 
       if (clicked === "mark-unread") {
-        for (const threadKey of threadKeys) {
-          const thread = sidebarThreadByKeyRef.current.get(threadKey);
-          markThreadUnread(threadKey, thread?.latestTurn?.completedAt);
+        for (const { threadKey, thread } of selectedThreadEntries) {
+          markThreadUnread(threadKey, thread.latestTurn?.completedAt);
         }
         clearSelection();
+        return;
+      }
+
+      if (clicked === "archive") {
+        if (appSettingsConfirmThreadArchive) {
+          const confirmed = await api.dialogs.confirm(
+            `Archive ${count} thread${count === 1 ? "" : "s"}?`,
+          );
+          if (!confirmed) return;
+        }
+
+        const archivedThreadKeys: string[] = [];
+        for (const { threadKey, threadRef } of selectedThreadEntries) {
+          const result = await archiveThread(threadRef);
+          if (result._tag === "Failure") {
+            removeFromSelection(archivedThreadKeys);
+            if (!isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to archive threads",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
+          archivedThreadKeys.push(threadKey);
+        }
+        removeFromSelection(archivedThreadKeys);
         return;
       }
 
@@ -1803,10 +1839,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       const deletedThreadKeys = new Set(threadKeys);
-      for (const threadKey of threadKeys) {
-        const thread = sidebarThreadByKeyRef.current.get(threadKey);
-        if (!thread) continue;
-        const result = await deleteThread(scopeThreadRef(thread.environmentId, thread.id), {
+      for (const { threadRef } of selectedThreadEntries) {
+        const result = await deleteThread(threadRef, {
           deletedThreadKeys,
         });
         if (result._tag === "Failure") {
@@ -1826,7 +1860,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       removeFromSelection(threadKeys);
     },
     [
+      appSettingsConfirmThreadArchive,
       appSettingsConfirmThreadDelete,
+      archiveThread,
       clearSelection,
       deleteThread,
       markThreadUnread,
