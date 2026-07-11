@@ -43,26 +43,33 @@ if (gateContextMenuOnPointerRelease) {
   window.addEventListener("blur", () => (pointerButtonsHeld = 0));
 }
 
-function waitForPointerRelease(): Promise<void> {
+// Resolves true once every button held at request time is released (buttons
+// pressed mid-gesture don't keep the menu waiting), or false when the gesture
+// is cancelled (pointercancel / focus loss) — opening a menu then would either
+// land mid-hold (re-triggering #3698) or appear at stale coordinates the user
+// no longer expects.
+function waitForPointerRelease(): Promise<boolean> {
   return new Promise((resolve) => {
-    if (pointerButtonsHeld === 0) {
-      resolve();
+    const buttonsAtRequest = pointerButtonsHeld;
+    if (buttonsAtRequest === 0) {
+      resolve(true);
       return;
     }
-    const settle = () => {
+    const finish = (proceed: boolean) => {
       window.removeEventListener("pointerup", onPointerUp, true);
-      window.removeEventListener("pointercancel", settle, true);
-      window.removeEventListener("blur", settle);
-      resolve();
+      window.removeEventListener("pointercancel", onAbort, true);
+      window.removeEventListener("blur", onAbort);
+      resolve(proceed);
     };
     const onPointerUp = (event: PointerEvent) => {
-      if (event.buttons === 0) {
-        settle();
+      if ((event.buttons & buttonsAtRequest) === 0) {
+        finish(true);
       }
     };
+    const onAbort = () => finish(false);
     window.addEventListener("pointerup", onPointerUp, true);
-    window.addEventListener("pointercancel", settle, true);
-    window.addEventListener("blur", settle);
+    window.addEventListener("pointercancel", onAbort, true);
+    window.addEventListener("blur", onAbort);
   });
 }
 
@@ -139,8 +146,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   confirm: (message) => ipcRenderer.invoke(IpcChannels.CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(IpcChannels.SET_THEME_CHANNEL, theme),
   showContextMenu: async (items, position) => {
-    if (gateContextMenuOnPointerRelease) {
-      await waitForPointerRelease();
+    if (gateContextMenuOnPointerRelease && !(await waitForPointerRelease())) {
+      return null;
     }
     return ipcRenderer.invoke(IpcChannels.CONTEXT_MENU_CHANNEL, {
       items,
