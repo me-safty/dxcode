@@ -79,10 +79,11 @@ export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "sessi
   threadId: ThreadId;
   turnId?: TurnId;
 } {
-  // Root-thread steering can advance the provider runtime's active turn before
-  // the projected session catches up. Omitting the turn id lets the adapter
-  // interrupt its authoritative current turn instead of rejecting a stale id.
-  return { threadId: thread.id };
+  const runningTurnId = thread.session?.status === "running" ? thread.session.activeTurnId : null;
+  return {
+    threadId: thread.id,
+    ...(runningTurnId !== null ? { turnId: runningTurnId } : {}),
+  };
 }
 
 export function reconcileMountedTerminalThreadIds(input: {

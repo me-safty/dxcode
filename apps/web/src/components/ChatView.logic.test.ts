@@ -78,7 +78,7 @@ const readySession = {
 };
 
 describe("buildThreadTurnInterruptInput", () => {
-  it("lets the provider resolve the current running root turn", () => {
+  it("targets the session's active running turn", () => {
     const activeTurnId = TurnId.make("turn-running");
 
     expect(
@@ -91,7 +91,7 @@ describe("buildThreadTurnInterruptInput", () => {
           },
         }),
       ),
-    ).toEqual({ threadId });
+    ).toEqual({ threadId, turnId: activeTurnId });
   });
 
   it("omits a turn id when the session is not running", () => {
