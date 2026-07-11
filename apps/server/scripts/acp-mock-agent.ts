@@ -40,6 +40,7 @@ const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
+const foreignSessionResponseText = process.env.T3_ACP_FOREIGN_SESSION_RESPONSE_TEXT;
 const cancelPromptAfterResponse = process.env.T3_ACP_CANCEL_PROMPT_AFTER_RESPONSE === "1";
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
 const permissionOptionIds = {
@@ -858,6 +859,16 @@ const program = Effect.gen(function* () {
         writeJsonRpcNotification("_cognition.ai/thinking_complete", {
           sessionId: requestedSessionId,
           durationMs: 1200,
+        });
+      }
+
+      if (foreignSessionResponseText !== undefined) {
+        yield* agent.client.sessionUpdate({
+          sessionId: "mock-child-session-1",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: foreignSessionResponseText },
+          },
         });
       }
 

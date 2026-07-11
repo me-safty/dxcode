@@ -59,6 +59,7 @@ export const makeDevinTextGeneration = Effect.fn("makeDevinTextGeneration")(func
     Effect.gen(function* () {
       const resolvedModel = resolveDevinAcpBaseModelId(modelSelection.model);
       const outputRef = yield* Ref.make("");
+      const sessionIdRef = yield* Ref.make<string | undefined>(undefined);
       const runtime = yield* makeDevinAcpRuntime({
         devinSettings,
         environment,
@@ -67,20 +68,27 @@ export const makeDevinTextGeneration = Effect.fn("makeDevinTextGeneration")(func
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
       });
 
-      yield* runtime.handleSessionUpdate((notification) => {
-        const update = notification.update;
-        if (update.sessionUpdate !== "agent_message_chunk") {
-          return Effect.void;
-        }
-        const content = update.content;
-        if (content.type !== "text") {
-          return Effect.void;
-        }
-        return Ref.update(outputRef, (current) => current + content.text);
-      });
+      yield* runtime.handleSessionUpdate((notification) =>
+        Effect.gen(function* () {
+          const sessionId = yield* Ref.get(sessionIdRef);
+          if (notification.sessionId !== sessionId) {
+            return;
+          }
+          const update = notification.update;
+          if (update.sessionUpdate !== "agent_message_chunk") {
+            return;
+          }
+          const content = update.content;
+          if (content.type !== "text") {
+            return;
+          }
+          yield* Ref.update(outputRef, (current) => current + content.text);
+        }),
+      );
 
       const promptResult = yield* Effect.gen(function* () {
         const started = yield* runtime.start();
+        yield* Ref.set(sessionIdRef, started.sessionId);
         yield* applyDevinAcpModelSelection({
           runtime,
           currentModelId: currentDevinModelIdFromSessionSetup(started.sessionSetupResult),

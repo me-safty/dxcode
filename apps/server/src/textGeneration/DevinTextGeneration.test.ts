@@ -51,6 +51,30 @@ const DevinTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 it.layer(DevinTextGenerationTestLayer)("DevinTextGeneration", (it) => {
+  it.effect("ignores message chunks from foreign sessions", () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-devin-text-acp-"));
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          NodeFS.rmSync(tempDir, { recursive: true, force: true });
+        }),
+      );
+      const binaryPath = makeAcpDevinWrapper(tempDir, {
+        T3_ACP_PROMPT_RESPONSE_TEXT: '{"title":"Root title"}',
+        T3_ACP_FOREIGN_SESSION_RESPONSE_TEXT: '{"title":"Child title"}',
+      });
+      const textGeneration = yield* makeDevinTextGeneration(decodeDevinSettings({ binaryPath }));
+
+      const generated = yield* textGeneration.generateThreadTitle({
+        cwd: process.cwd(),
+        message: "title the root session",
+        modelSelection: createModelSelection(ProviderInstanceId.make("devin"), "composer-2"),
+      });
+
+      expect(generated.title).toBe("Root title");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("reports cancellation even when the agent emitted valid partial output", () =>
     Effect.gen(function* () {
       const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-devin-text-acp-"));

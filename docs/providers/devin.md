@@ -39,8 +39,8 @@ the Devin provider instance in T3 Code Settings under Environment variables:
 WINDSURF_API_KEY  <your key>   Sensitive
 ```
 
-Mark the value as sensitive. The Devin CLI picks up `WINDSURF_API_KEY` when no stored credentials
-exist.
+Mark the value as sensitive. `WINDSURF_API_KEY` takes precedence over credentials stored by
+`devin auth login`.
 
 Do **not** set `ACP_BACKEND` on the provider instance. When that variable is set, the CLI ignores
 its stored credentials and expects the host application to supply them, which T3 Code does not do.
