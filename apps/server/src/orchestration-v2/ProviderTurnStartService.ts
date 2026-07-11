@@ -12,6 +12,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { EventSinkV2 } from "./EventSink.ts";
@@ -78,15 +79,28 @@ export const layer: Layer.Layer<
       if (run === undefined) {
         return yield* new ProviderTurnStartError({ runId, cause: `Run ${runId} was not found.` });
       }
+      const providerThread = projection.providerThreads.find(
+        (candidate) => candidate.id === run.providerThreadId,
+      );
+      if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) {
+        if (
+          providerThread?.providerSessionId !== null &&
+          providerThread?.providerSessionId !== undefined
+        ) {
+          yield* providerSessions.detach({
+            providerSessionId: providerThread.providerSessionId,
+            threadId: projection.thread.id,
+            detail: "Provider turn start skipped because the thread is archived or deleted.",
+          });
+        }
+        return;
+      }
       if (run.status !== "starting") {
         // The effect is idempotent once the run has advanced or terminalized.
         return;
       }
       const rootNode = projection.nodes.find((candidate) => candidate.id === run.rootNodeId);
       const attempt = projection.attempts.find((candidate) => candidate.id === run.activeAttemptId);
-      const providerThread = projection.providerThreads.find(
-        (candidate) => candidate.id === run.providerThreadId,
-      );
       const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
       const checkpointScope = projection.checkpointScopes.find(
         (candidate) => candidate.id === rootNode?.checkpointScopeId,
@@ -125,19 +139,48 @@ export const layer: Layer.Layer<
         });
       }
       const providerSessionId = providerThread.providerSessionId;
-      const isCurrentAttemptInStatus = (
-        expectedStatus: OrchestrationV2Run["status"],
-      ): Effect.Effect<boolean, never> =>
-        projectionStore.getThreadProjection(projection.thread.id).pipe(
-          Effect.map((current) => {
-            const currentRun = current.runs.find((candidate) => candidate.id === run.id);
-            return (
-              currentRun?.activeAttemptId === attempt.id && currentRun.status === expectedStatus
+      type CurrentAttemptState = "current" | "run_stale" | "thread_inactive";
+      const getCurrentAttemptState = Effect.fn(
+        "orchestrationV2.providerTurnStart.getCurrentAttemptState",
+      )(
+        function* (
+          expectedStatus: OrchestrationV2Run["status"],
+        ): Effect.fn.Return<CurrentAttemptState, never> {
+          const currentOption = yield* Effect.option(
+            projectionStore.getThreadProjection(projection.thread.id),
+          );
+          if (Option.isNone(currentOption)) return "run_stale";
+          const current = currentOption.value;
+          if (current.thread.archivedAt !== null || current.thread.deletedAt !== null) {
+            return "thread_inactive";
+          }
+          const currentRun = current.runs.find((candidate) => candidate.id === run.id);
+          return currentRun?.activeAttemptId === attempt.id && currentRun.status === expectedStatus
+            ? "current"
+            : "run_stale";
+        },
+        Effect.catchCause(() => Effect.succeed("run_stale" as const)),
+      );
+      const detachInactiveThreadSession = Effect.fn(
+        "orchestrationV2.providerTurnStart.detachInactiveThreadSession",
+      )(function* (detail: string) {
+        yield* providerSessions.detach({
+          providerSessionId,
+          threadId: projection.thread.id,
+          detail,
+        });
+      });
+      const continueIfCurrent = Effect.fn("orchestrationV2.providerTurnStart.continueIfCurrent")(
+        function* (expectedStatus: OrchestrationV2Run["status"]) {
+          const state = yield* getCurrentAttemptState(expectedStatus);
+          if (state === "thread_inactive") {
+            yield* detachInactiveThreadSession(
+              "Provider turn start aborted because the thread was archived or deleted.",
             );
-          }),
-          Effect.catchCause(() => Effect.succeed(false)),
-        );
-
+          }
+          return state === "current";
+        },
+      );
       const resolvedRuntimePolicy = yield* runtimePolicy.resolve({
         thread: projection.thread,
         modelSelection: run.modelSelection,
@@ -154,6 +197,9 @@ export const layer: Layer.Layer<
           ? {}
           : { resumeFromSession: existingSessionProjection }),
       });
+      if (!(yield* continueIfCurrent("starting"))) {
+        return;
+      }
       let effectiveHandoffs = handoffs;
       const loadedProviderThread = yield* Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
@@ -279,7 +325,7 @@ export const layer: Layer.Layer<
         });
         return replacement;
       });
-      if (!(yield* isCurrentAttemptInStatus("starting"))) {
+      if (!(yield* continueIfCurrent("starting"))) {
         return;
       }
       const now = yield* DateTime.now;
@@ -401,6 +447,12 @@ export const layer: Layer.Layer<
         events,
       });
       if (!runningWrite.committed) {
+        const state = yield* getCurrentAttemptState("starting");
+        if (state === "thread_inactive") {
+          yield* detachInactiveThreadSession(
+            "Provider turn start lost a race with thread archival or deletion.",
+          );
+        }
         return;
       }
       yield* runExecution.startRootRun({
@@ -427,12 +479,15 @@ export const layer: Layer.Layer<
               .filter((turn) => turn.providerThreadId === providerThread.id)
               .map((turn) => turn.ordinal),
           ) + 1,
-        shouldStartProviderTurn: () => isCurrentAttemptInStatus("running"),
+        shouldStartProviderTurn: () =>
+          getCurrentAttemptState("running").pipe(Effect.map((state) => state === "current")),
         shouldFinalizeRun: () =>
           projectionStore.getThreadProjection(projection.thread.id).pipe(
             Effect.map((current) => {
               const currentRun = current.runs.find((candidate) => candidate.id === run.id);
               return (
+                current.thread.archivedAt === null &&
+                current.thread.deletedAt === null &&
                 currentRun?.activeAttemptId === attempt.id &&
                 (currentRun.status === "starting" || currentRun.status === "running")
               );

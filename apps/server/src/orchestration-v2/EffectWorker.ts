@@ -7,10 +7,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { CheckpointCleanupServiceV2 } from "./CheckpointCleanupService.ts";
+import { CheckpointRollbackServiceV2 } from "./CheckpointRollbackService.ts";
+import { EffectOutboxV2, type OrchestrationEffectV2 } from "./EffectOutbox.ts";
 import { RunFinalizationService } from "./RunFinalizationService.ts";
 import { ResourceCleanupService } from "./ResourceCleanupService.ts";
-import { EffectOutboxV2, type OrchestrationEffectV2 } from "./EffectOutbox.ts";
-import { CheckpointRollbackServiceV2 } from "./CheckpointRollbackService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderTurnControlServiceV2 } from "./ProviderTurnControlService.ts";
 import { ProviderTurnStartServiceV2 } from "./ProviderTurnStartService.ts";
@@ -41,6 +42,7 @@ export const executorLayer: Layer.Layer<
   never,
   | ProviderSessionManagerV2
   | RunFinalizationService
+  | CheckpointCleanupServiceV2
   | CheckpointRollbackServiceV2
   | ProviderTurnControlServiceV2
   | ProviderTurnStartServiceV2
@@ -50,6 +52,7 @@ export const executorLayer: Layer.Layer<
   Effect.gen(function* () {
     const runFinalization = yield* RunFinalizationService;
     const resourceCleanup = yield* ResourceCleanupService;
+    const checkpointCleanup = yield* CheckpointCleanupServiceV2;
     const checkpointRollback = yield* CheckpointRollbackServiceV2;
     const providerSessions = yield* ProviderSessionManagerV2;
     const providerTurnControl = yield* ProviderTurnControlServiceV2;
@@ -229,6 +232,17 @@ export const executorLayer: Layer.Layer<
                     }),
                 ),
               );
+          case "checkpoint.cleanup":
+            return checkpointCleanup.cleanup(effect.threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: effect.request.type,
+                    cause,
+                  }),
+              ),
+            );
           case "terminal.cleanup":
             return resourceCleanup.cleanupTerminals(effect.threadId).pipe(
               Effect.mapError(

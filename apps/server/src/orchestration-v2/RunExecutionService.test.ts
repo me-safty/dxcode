@@ -272,7 +272,20 @@ it.effect("keeps ingesting owned child events after the root turn terminalizes",
     const childNodeId = NodeId.make("node:run-execution-late-child:child");
     const subagentNodeId = NodeId.make("node:run-execution-late-child:subagent");
     const childMessageIngested = yield* Deferred.make<void>();
+    const allEventsIngested = yield* Deferred.make<void>();
     const order = yield* Ref.make<ReadonlyArray<string>>([]);
+    const guardedEvents = yield* Ref.make<
+      ReadonlyArray<{
+        readonly type: ProviderAdapterV2Event["type"];
+        readonly runId: RunId | undefined;
+        readonly activeAttemptId: RunAttemptId | undefined;
+        readonly expectedStatus:
+          | OrchestrationV2Run["status"]
+          | ReadonlyArray<OrchestrationV2Run["status"]>
+          | undefined;
+        readonly allowSupersededAttemptTerminalArtifacts: boolean | undefined;
+      }>
+    >([]);
     const testLayer = runExecutionServiceLayer.pipe(
       Layer.provide(
         Layer.mergeAll(
@@ -296,12 +309,29 @@ it.effect("keeps ingesting owned child events after the root turn terminalizes",
           Layer.mock(ProviderEventIngestorV2)({
             ingestNormalized: (input) =>
               Effect.gen(function* () {
+                yield* Ref.update(guardedEvents, (current) => [
+                  ...current,
+                  {
+                    type: input.event.type,
+                    runId: input.writeIfRunCurrent?.runId,
+                    activeAttemptId: input.writeIfRunCurrent?.activeAttemptId,
+                    expectedStatus: input.writeIfRunCurrent?.expectedStatus,
+                    allowSupersededAttemptTerminalArtifacts:
+                      input.writeIfRunCurrent?.allowSupersededAttemptTerminalArtifacts,
+                  },
+                ]);
                 if (
                   input.event.type === "message.updated" &&
                   input.event.message.threadId === childThreadId
                 ) {
                   yield* Ref.update(order, (current) => [...current, "child-message"]);
                   yield* Deferred.succeed(childMessageIngested, undefined).pipe(Effect.ignore);
+                }
+                if (
+                  input.event.type === "subagent.updated" &&
+                  input.event.subagent.status === "completed"
+                ) {
+                  yield* Deferred.succeed(allEventsIngested, undefined).pipe(Effect.ignore);
                 }
                 return [];
               }),
@@ -311,6 +341,18 @@ it.effect("keeps ingesting owned child events after the root turn terminalizes",
       ),
     );
     const events: ReadonlyArray<ProviderAdapterV2Event> = [
+      {
+        type: "provider_turn.updated",
+        driver,
+        threadId,
+        providerTurn: {
+          id: rootProviderTurnId,
+          providerThreadId,
+          nodeId: rootNodeId,
+          runAttemptId: attemptId,
+          status: "running",
+        },
+      } as ProviderAdapterV2Event,
       {
         type: "app_thread.created",
         driver,
@@ -351,6 +393,18 @@ it.effect("keeps ingesting owned child events after the root turn terminalizes",
           nodeId: childNodeId,
           runAttemptId: null,
           status: "running",
+        },
+      } as ProviderAdapterV2Event,
+      {
+        type: "provider_turn.updated",
+        driver,
+        threadId,
+        providerTurn: {
+          id: rootProviderTurnId,
+          providerThreadId,
+          nodeId: rootNodeId,
+          runAttemptId: attemptId,
+          status: "completed",
         },
       } as ProviderAdapterV2Event,
       {
@@ -455,7 +509,32 @@ it.effect("keeps ingesting owned child events after the root turn terminalizes",
     const observed = yield* Deferred.await(childMessageIngested).pipe(
       Effect.timeoutOption("2 seconds"),
     );
+    const completed = yield* Deferred.await(allEventsIngested).pipe(
+      Effect.timeoutOption("2 seconds"),
+    );
     assert.isTrue(Option.isSome(observed), "child message was not ingested after root terminal");
+    assert.isTrue(Option.isSome(completed), "provider event stream did not finish ingesting");
     assert.deepEqual(yield* Ref.get(order), ["root-finalized", "child-message"]);
+    const guards = yield* Ref.get(guardedEvents);
+    assert.equal(guards.length, events.length);
+    for (const guard of guards) {
+      assert.equal(guard.runId, runId, `${guard.type} must retain root run ownership`);
+      assert.equal(guard.activeAttemptId, attemptId, `${guard.type} must retain attempt ownership`);
+      assert.deepEqual(
+        guard.expectedStatus,
+        ["running", "waiting"],
+        `${guard.type} must require an active root`,
+      );
+      const matchingEvent = events[guards.indexOf(guard)];
+      const isExactTerminalRootUpdate =
+        matchingEvent?.type === "provider_turn.updated" &&
+        matchingEvent.providerTurn.runAttemptId === attemptId &&
+        matchingEvent.providerTurn.status === "completed";
+      assert.equal(
+        guard.allowSupersededAttemptTerminalArtifacts === true,
+        isExactTerminalRootUpdate,
+        `${guard.type} must narrowly mark only an exact terminal root update`,
+      );
+    }
   }),
 );

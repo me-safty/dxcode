@@ -82,6 +82,9 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     scopeId: CheckpointScopeId,
   }),
   Schema.Struct({
+    type: Schema.Literal("checkpoint.cleanup"),
+  }),
+  Schema.Struct({
     type: Schema.Literal("terminal.cleanup"),
   }),
   Schema.Struct({
@@ -95,6 +98,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "provider-session.detach",
   "provider-thread.rollback",
   "checkpoint.capture",
+  "checkpoint.cleanup",
   "terminal.cleanup",
   "attachment.cleanup",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;

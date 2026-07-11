@@ -321,7 +321,12 @@ export const layer: Layer.Layer<
           // it terminalized this attempt as superseded. Preserve that domain
           // status while retaining the provider's interruption artifact.
           if (input.terminal.status === "interrupted") {
-            yield* eventSink.write({
+            yield* eventSink.writeIfRunCurrent({
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              activeAttemptId: input.attempt.id,
+              expectedStatus: ["running", "waiting"],
+              allowSupersededAttemptTerminalArtifacts: true,
               events: [
                 {
                   id: yield* idAllocator.allocate.event({ threadId: input.run.threadId }),
@@ -648,16 +653,16 @@ export const layer: Layer.Layer<
                     runId: input.run.id,
                     nodeId: input.rootNode.id,
                     event,
-                    ...(event.type === "provider_thread.updated" &&
-                    event.providerThread.id === input.providerThread.id
-                      ? {
-                          writeIfRunCurrent: {
-                            runId: input.run.id,
-                            activeAttemptId: input.attempt.id,
-                            expectedStatus: "running" as const,
-                          },
-                        }
-                      : {}),
+                    writeIfRunCurrent: {
+                      runId: input.run.id,
+                      activeAttemptId: input.attempt.id,
+                      expectedStatus: ["running", "waiting"],
+                      ...(event.type === "provider_turn.updated" &&
+                      event.providerTurn.runAttemptId === input.attempt.id &&
+                      isTerminalProviderTurnStatus(event.providerTurn.status)
+                        ? { allowSupersededAttemptTerminalArtifacts: true }
+                        : {}),
+                    },
                   });
                   storedEventCount = storedEvents.length;
                 }

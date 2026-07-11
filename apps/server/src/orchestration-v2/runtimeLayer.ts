@@ -7,6 +7,7 @@ import { ProjectionProjectRepositoryLive } from "../persistence/Layers/Projectio
 import { layer as projectServiceLayer } from "../project/ProjectService.ts";
 import { layer as projectSetupScriptRunnerLayer } from "../project/ProjectSetupScriptRunner.ts";
 import { layer as checkpointCaptureServiceLayer } from "./CheckpointCaptureService.ts";
+import { layer as checkpointCleanupServiceLayer } from "./CheckpointCleanupService.ts";
 import { layer as checkpointServiceLayer } from "./CheckpointService.ts";
 import { layer as checkpointRollbackServiceLayer } from "./CheckpointRollbackService.ts";
 import { layer as commandPolicyLayer } from "./CommandPolicy.ts";
@@ -72,6 +73,9 @@ const providerEventIngestorProvided = providerEventIngestorLayer.pipe(
 );
 
 const checkpointServiceProvided = checkpointServiceLayer.pipe(Layer.provide(idAllocatorLayer));
+const checkpointCleanupServiceProvided = checkpointCleanupServiceLayer.pipe(
+  Layer.provide(Layer.merge(checkpointServiceProvided, projectionStoreLayer)),
+);
 const contextHandoffServiceProvided = contextHandoffServiceLayer.pipe(
   Layer.provide(idAllocatorLayer),
 );
@@ -153,6 +157,7 @@ const effectExecutorProvided = effectExecutorLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
       runFinalizationServiceProvided,
+      checkpointCleanupServiceProvided,
       checkpointRollbackServiceProvided,
       providerSessionManagerProvided,
       providerTurnControlServiceProvided,
