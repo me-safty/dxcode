@@ -7,16 +7,14 @@ import {
 } from "@t3tools/contracts";
 import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
-import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import {
   KiloRuntime,
-  kiloRuntimeErrorDetail,
+  KiloRuntimeError,
   parseKiloModelSlug,
   runKiloSdk,
   toKiloFileParts,
@@ -102,72 +100,88 @@ export const makeKiloTextGeneration = Effect.fn("makeKiloTextGeneration")(functi
         detail: "Kilo model selection must use the 'provider/model' format.",
       });
     }
-    const result = yield* Effect.exit(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const server = yield* runtime.startServer({
-            binaryPath: settings.binaryPath,
-            ...(environment ? { environment } : {}),
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const server = yield* runtime.startServer({
+          binaryPath: settings.binaryPath,
+          ...(environment ? { environment } : {}),
+        });
+        const client = runtime.createClient({ baseUrl: server.url, directory: input.cwd });
+        const session = yield* runKiloSdk("session.create", () =>
+          client.session.create(
+            {
+              title: `T3 Code ${input.operation}`,
+              agent: FIXED_AGENT,
+              model: { id: model.modelID, providerID: model.providerID },
+              permission: [{ permission: "*", pattern: "*", action: "deny" }],
+              platform: "t3code",
+            },
+            { throwOnError: true },
+          ),
+        );
+        if (!session.data) {
+          return yield* new KiloTextGenerationSessionPayloadError({
+            operation: input.operation,
+            cwd: input.cwd,
           });
-          const client = runtime.createClient({ baseUrl: server.url, directory: input.cwd });
-          const session = yield* runKiloSdk("session.create", () =>
-            client.session.create(
-              {
-                title: `T3 Code ${input.operation}`,
-                agent: FIXED_AGENT,
-                model: { id: model.modelID, providerID: model.providerID },
-                permission: [{ permission: "*", pattern: "*", action: "deny" }],
-                platform: "t3code",
-              },
-              { throwOnError: true },
-            ),
-          );
-          if (!session.data) {
-            return yield* new KiloTextGenerationSessionPayloadError({
-              operation: input.operation,
-              cwd: input.cwd,
-            });
-          }
-          const files = toKiloFileParts({
-            attachments: input.attachments,
-            resolveAttachmentPath: (attachment) =>
-              resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment }),
+        }
+        const files = toKiloFileParts({
+          attachments: input.attachments,
+          resolveAttachmentPath: (attachment) =>
+            resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment }),
+        });
+        const response = yield* runKiloSdk("session.prompt", () =>
+          client.session.prompt(
+            {
+              sessionID: session.data.id,
+              model,
+              agent: FIXED_AGENT,
+              parts: [{ type: "text", text: input.prompt }, ...files],
+            },
+            { throwOnError: true },
+          ),
+        );
+        const responseParts = response.data?.parts ?? [];
+        const text = textFromParts(responseParts);
+        if (!text) {
+          return yield* new KiloTextGenerationEmptyOutputError({
+            operation: input.operation,
+            cwd: input.cwd,
+            sessionId: session.data.id,
+            responsePartCount: responseParts.length,
+            textPartCount: responseParts.filter((part) => part.type === "text").length,
           });
-          const response = yield* runKiloSdk("session.prompt", () =>
-            client.session.prompt(
-              {
-                sessionID: session.data.id,
-                model,
-                agent: FIXED_AGENT,
-                parts: [{ type: "text", text: input.prompt }, ...files],
-              },
-              { throwOnError: true },
-            ),
-          );
-          const responseParts = response.data?.parts ?? [];
-          const text = textFromParts(responseParts);
-          if (!text) {
-            return yield* new KiloTextGenerationEmptyOutputError({
+        }
+        return text;
+      }),
+    ).pipe(
+      Effect.catchTags({
+        KiloRuntimeError: (cause) =>
+          Effect.fail(
+            new TextGenerationError({
               operation: input.operation,
-              cwd: input.cwd,
-              sessionId: session.data.id,
-              responsePartCount: responseParts.length,
-              textPartCount: responseParts.filter((part) => part.type === "text").length,
-            });
-          }
-          return text;
-        }),
-      ),
+              detail: `Kilo text generation request failed (${cause.operation}).`,
+              cause,
+            }),
+          ),
+        KiloTextGenerationSessionPayloadError: (cause) =>
+          Effect.fail(
+            new TextGenerationError({
+              operation: cause.operation,
+              detail: "Kilo session.create returned no session payload.",
+              cause,
+            }),
+          ),
+        KiloTextGenerationEmptyOutputError: (cause) =>
+          Effect.fail(
+            new TextGenerationError({
+              operation: cause.operation,
+              detail: "Kilo returned empty output.",
+              cause,
+            }),
+          ),
+      }),
     );
-    if (Exit.isFailure(result)) {
-      const cause = Cause.squash(result.cause);
-      return yield* new TextGenerationError({
-        operation: input.operation,
-        detail: kiloRuntimeErrorDetail(cause),
-        cause,
-      });
-    }
-    return result.value;
   });
 
   return TextGeneration.TextGeneration.of({
