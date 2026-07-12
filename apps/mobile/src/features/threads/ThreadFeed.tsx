@@ -41,7 +41,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { TouchableOpacity } from "react-native-gesture-handler";
 import ImageViewing from "react-native-image-viewing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
@@ -155,18 +154,26 @@ function MessageAttachmentImage(props: {
     attachmentId: props.attachmentId,
   });
 
-  if (uri === null) {
-    return (
-      <View className={`${props.className} items-center justify-center`}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
   return (
-    <TouchableOpacity activeOpacity={0.7} onPress={() => props.onPressImage(uri)}>
-      <Image source={{ uri }} className={props.className} resizeMode="cover" />
-    </TouchableOpacity>
+    <View className={`${props.className} items-center justify-center overflow-hidden`}>
+      {uri === null ? (
+        <ActivityIndicator />
+      ) : (
+        <Pressable
+          accessibilityLabel="Open attached image"
+          accessibilityRole="button"
+          onPress={() => props.onPressImage(uri)}
+          style={({ pressed }) => ({ height: "100%", opacity: pressed ? 0.7 : 1, width: "100%" })}
+        >
+          <Image
+            accessible={false}
+            source={{ uri }}
+            resizeMode="cover"
+            style={{ height: "100%", width: "100%" }}
+          />
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -1271,7 +1278,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foldSettleFrameRef = useRef<number | null>(null);
   const foldSettleSecondFrameRef = useRef<number | null>(null);
+  const initialEndCorrectionFrameRef = useRef<number | null>(null);
   const underflowCorrectionFrameRef = useRef<number | null>(null);
+  const initialEndCorrectionKeyRef = useRef<string | null>(null);
   const previousContentUnderflowsViewportRef = useRef(false);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const headerMaterialVisibleRef = useRef(false);
@@ -1497,6 +1506,41 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
   }, [listMountKey, props.contentInsetEndAdjustment, props.listRef]);
 
+  useEffect(() => {
+    if (initialEndCorrectionFrameRef.current !== null) {
+      cancelAnimationFrame(initialEndCorrectionFrameRef.current);
+      initialEndCorrectionFrameRef.current = null;
+    }
+
+    if (
+      initialEndCorrectionKeyRef.current === listMountKey ||
+      props.contentPresentation.kind !== "ready" ||
+      contentHeight <= 0 ||
+      viewportHeight <= 0
+    ) {
+      return;
+    }
+
+    initialEndCorrectionKeyRef.current = listMountKey;
+    if (contentUnderflowsViewport) {
+      return;
+    }
+
+    initialEndCorrectionFrameRef.current = requestAnimationFrame(() => {
+      initialEndCorrectionFrameRef.current = requestAnimationFrame(() => {
+        initialEndCorrectionFrameRef.current = null;
+        void props.listRef.current?.scrollToEnd({ animated: false });
+      });
+    });
+  }, [
+    contentHeight,
+    contentUnderflowsViewport,
+    listMountKey,
+    props.contentPresentation.kind,
+    props.listRef,
+    viewportHeight,
+  ]);
+
   const anchoredEndSpace = useMemo(
     () =>
       resolveChatListAnchoredEndSpace(
@@ -1561,6 +1605,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       }
       if (underflowCorrectionFrameRef.current !== null) {
         cancelAnimationFrame(underflowCorrectionFrameRef.current);
+      }
+      if (initialEndCorrectionFrameRef.current !== null) {
+        cancelAnimationFrame(initialEndCorrectionFrameRef.current);
       }
     };
   }, []);
