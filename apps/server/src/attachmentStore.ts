@@ -270,6 +270,36 @@ export function claimTextAttachment(input: {
   return true;
 }
 
+export function writeClaimedTextAttachment(
+  input: {
+    readonly attachmentsDir: string;
+    readonly fileName: string;
+    readonly contents: string;
+    readonly draftOwnerId: string;
+  },
+  claim: typeof claimTextAttachment = claimTextAttachment,
+): string {
+  const attachmentPath = createTextAttachmentPath(input);
+  const directory = NodePath.dirname(attachmentPath);
+  try {
+    NodeFS.mkdirSync(directory, { recursive: true });
+    NodeFS.writeFileSync(attachmentPath, input.contents);
+    if (
+      !claim({
+        attachmentsDir: input.attachmentsDir,
+        path: attachmentPath,
+        draftOwnerId: input.draftOwnerId,
+      })
+    ) {
+      throw new Error("Failed to create the initial text attachment claim.");
+    }
+    return attachmentPath;
+  } catch (cause) {
+    NodeFS.rmSync(directory, { recursive: true, force: true });
+    throw cause;
+  }
+}
+
 export function releaseTextAttachment(input: {
   readonly attachmentsDir: string;
   readonly path: string;

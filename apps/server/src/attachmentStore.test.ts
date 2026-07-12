@@ -15,6 +15,7 @@ import {
   releaseTextAttachment,
   resolveAttachmentPathById,
   TEXT_ATTACHMENT_DELETE_GRACE_MS,
+  writeClaimedTextAttachment,
   textAttachmentDirectory,
 } from "./attachmentStore.ts";
 
@@ -96,6 +97,28 @@ describe("attachmentStore", () => {
       /^text[/\\][0-9a-f-]+[/\\]\.\.-unsafe-name\.ts$/,
     );
     expect(attachmentPath).not.toContain(`${NodePath.sep}..${NodePath.sep}`);
+  });
+
+  it("removes a written attachment when its initial claim fails", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-text-write-claim-"),
+    );
+    try {
+      expect(() =>
+        writeClaimedTextAttachment(
+          {
+            attachmentsDir,
+            fileName: "context.md",
+            contents: "context",
+            draftOwnerId: "draft-owner",
+          },
+          () => false,
+        ),
+      ).toThrow(/initial text attachment claim/);
+      expect(NodeFS.readdirSync(NodePath.join(attachmentsDir, "text"))).toEqual([]);
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
   });
 
   it("bounds text attachment basenames and avoids Windows reserved names", () => {

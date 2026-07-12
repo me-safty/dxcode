@@ -92,8 +92,8 @@ import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import {
   claimTextAttachment,
-  createTextAttachmentPath,
   releaseTextAttachment,
+  writeClaimedTextAttachment,
 } from "./attachmentStore.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
@@ -1538,34 +1538,17 @@ const makeWsRpcLayer = (
         [WS_METHODS.assetsWriteTextAttachment]: (input) =>
           observeRpcEffect(
             WS_METHODS.assetsWriteTextAttachment,
-            Effect.gen(function* () {
-              const attachmentPath = createTextAttachmentPath({
-                attachmentsDir: config.attachmentsDir,
-                fileName: input.fileName,
-              });
-              yield* fileSystem
-                .makeDirectory(path.dirname(attachmentPath), { recursive: true })
-                .pipe(
-                  Effect.andThen(fileSystem.writeFileString(attachmentPath, input.contents)),
-                  Effect.mapError(
-                    (cause) =>
-                      new AssetTextAttachmentWriteError({
-                        fileName: input.fileName,
-                        cause,
-                      }),
-                  ),
-                );
-              yield* Effect.try({
-                try: () =>
-                  claimTextAttachment({
-                    attachmentsDir: config.attachmentsDir,
-                    path: attachmentPath,
-                    draftOwnerId: input.draftOwnerId,
-                  }),
-                catch: (cause) =>
-                  new AssetTextAttachmentWriteError({ fileName: input.fileName, cause }),
-              });
-              return { path: attachmentPath };
+            Effect.try({
+              try: () => ({
+                path: writeClaimedTextAttachment({
+                  attachmentsDir: config.attachmentsDir,
+                  fileName: input.fileName,
+                  contents: input.contents,
+                  draftOwnerId: input.draftOwnerId,
+                }),
+              }),
+              catch: (cause) =>
+                new AssetTextAttachmentWriteError({ fileName: input.fileName, cause }),
             }),
             { "rpc.aggregate": "workspace" },
           ),
