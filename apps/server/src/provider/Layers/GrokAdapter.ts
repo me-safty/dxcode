@@ -164,6 +164,9 @@ const resolveNotificationTurnId = (ctx: GrokSessionContext): TurnId | undefined 
 
 const resolveCallbackTurnId = (ctx: GrokSessionContext): TurnId | undefined => ctx.activeTurnId;
 
+const scopeAssistantItemIdToTurn = (turnId: TurnId, itemId: string): string =>
+  `${itemId}:turn:${turnId}`;
+
 const resolveSessionCallbackTurnId = (
   sessions: ReadonlyMap<ThreadId, GrokSessionContext>,
   threadId: ThreadId,
@@ -816,7 +819,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: notificationTurnId,
-                        itemId: event.itemId,
+                        itemId: scopeAssistantItemIdToTurn(notificationTurnId, event.itemId),
                         lifecycle: "item.started",
                       }),
                     );
@@ -828,7 +831,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: notificationTurnId,
-                        itemId: event.itemId,
+                        itemId: scopeAssistantItemIdToTurn(notificationTurnId, event.itemId),
                         lifecycle: "item.completed",
                       }),
                     );
@@ -862,7 +865,11 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: notificationTurnId,
-                        ...(event.itemId ? { itemId: event.itemId } : {}),
+                        ...(event.itemId
+                          ? {
+                              itemId: scopeAssistantItemIdToTurn(notificationTurnId, event.itemId),
+                            }
+                          : {}),
                         text: event.text,
                         rawPayload: event.rawPayload,
                       }),
