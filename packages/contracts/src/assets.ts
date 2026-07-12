@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 const ASSET_PATH_MAX_LENGTH = 1024;
+const TEXT_ATTACHMENT_CONTENT_MAX_LENGTH = 1024 * 1024;
 
 export const AssetResource = Schema.Union([
   Schema.TaggedStruct("workspace-file", {
@@ -28,6 +29,29 @@ export const AssetCreateUrlResult = Schema.Struct({
   expiresAt: Schema.Number,
 });
 export type AssetCreateUrlResult = typeof AssetCreateUrlResult.Type;
+
+export const AssetWriteTextAttachmentInput = Schema.Struct({
+  fileName: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  contents: Schema.String.check(Schema.isMaxLength(TEXT_ATTACHMENT_CONTENT_MAX_LENGTH)),
+});
+export type AssetWriteTextAttachmentInput = typeof AssetWriteTextAttachmentInput.Type;
+
+export const AssetWriteTextAttachmentResult = Schema.Struct({
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+});
+export type AssetWriteTextAttachmentResult = typeof AssetWriteTextAttachmentResult.Type;
+
+export class AssetTextAttachmentWriteError extends Schema.TaggedErrorClass<AssetTextAttachmentWriteError>()(
+  "AssetTextAttachmentWriteError",
+  {
+    fileName: TrimmedNonEmptyString,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to store text attachment '${this.fileName}'.`;
+  }
+}
 
 export class AssetWorkspaceContextNotFoundError extends Schema.TaggedErrorClass<AssetWorkspaceContextNotFoundError>()(
   "AssetWorkspaceContextNotFoundError",

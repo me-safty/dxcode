@@ -20,7 +20,12 @@ import type {
 } from "./git.ts";
 import type { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
-import type { AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
+import type {
+  AssetCreateUrlInput,
+  AssetCreateUrlResult,
+  AssetWriteTextAttachmentInput,
+  AssetWriteTextAttachmentResult,
+} from "./assets.ts";
 import type {
   ProjectListEntriesInput,
   ProjectListEntriesResult,
@@ -1165,6 +1170,9 @@ export interface EnvironmentApi {
   };
   assets: {
     createUrl: (input: AssetCreateUrlInput) => Promise<AssetCreateUrlResult>;
+    writeTextAttachment: (
+      input: AssetWriteTextAttachmentInput,
+    ) => Promise<AssetWriteTextAttachmentResult>;
   };
   sourceControl: {
     lookupRepository: (

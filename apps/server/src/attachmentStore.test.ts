@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   createAttachmentId,
+  createTextAttachmentPath,
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
 } from "./attachmentStore.ts";
@@ -76,5 +77,18 @@ describe("attachmentStore", () => {
     } finally {
       NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
     }
+  });
+
+  it("creates normalized text attachment paths under the environment attachment store", () => {
+    const attachmentsDir = NodePath.join(NodeOS.tmpdir(), "t3code-attachments");
+    const attachmentPath = createTextAttachmentPath({
+      attachmentsDir,
+      fileName: "../unsafe name.ts",
+    });
+
+    expect(NodePath.relative(attachmentsDir, attachmentPath)).toMatch(
+      /^text[/\\][0-9a-f-]+[/\\]\.\.-unsafe-name\.ts$/,
+    );
+    expect(attachmentPath).not.toContain(`${NodePath.sep}..${NodePath.sep}`);
   });
 });

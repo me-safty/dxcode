@@ -124,7 +124,7 @@ import {
 } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
-import { projectEnvironment } from "~/state/projects";
+import { assetEnvironment } from "~/state/assets";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { resolvePathLinkTarget } from "~/terminal-links";
 
@@ -136,10 +136,6 @@ function composerAttachmentTargetKey(target: ScopedThreadRef | DraftId): string 
     : `thread:${target.environmentId}:${target.threadId}`;
 }
 
-function textAttachmentStorageCwd(projectCwd: string): string {
-  const separator = projectCwd.includes("\\") ? "\\" : "/";
-  return `${projectCwd.replace(/[\\/]+$/, "")}${separator}..${separator}.t3${separator}attachments`;
-}
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
@@ -630,7 +626,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Store subscriptions (prompt / images / terminal contexts)
   // ------------------------------------------------------------------
   const composerDraft = useComposerThreadDraft(composerDraftTarget);
-  const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
+  const writeTextAttachment = useAtomCommand(assetEnvironment.writeTextAttachment, {
+    reportFailure: false,
+  });
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
   const composerTerminalContexts = composerDraft.terminalContexts;
@@ -1797,18 +1795,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (file.size > TEXT_ATTACHMENT_MAX_BYTES) {
       return `'${file.name}' exceeds the 1 MB text attachment limit.`;
     }
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-") || "context.md";
-    const attachmentCwd = textAttachmentStorageCwd(gitCwd);
-    const relativePath = `${randomUUID()}/${safeName}`;
     const result = await file
       .arrayBuffer()
       .then((buffer) => {
         const bytes = new Uint8Array(buffer);
         if (bytes.includes(0)) return null;
         const contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        return writeProjectFile({
+        return writeTextAttachment({
           environmentId,
-          input: { cwd: attachmentCwd, relativePath, contents },
+          input: { fileName: file.name || "context.txt", contents },
         });
       })
       .catch(() => null);
@@ -1820,7 +1815,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setComposerDraftPrompt(
       composerDraftTarget,
       `${currentPrompt}${separator}${serializeComposerFileLink(
-        resolvePathLinkTarget(relativePath, attachmentCwd),
+        resolvePathLinkTarget(result.value.path, gitCwd),
       )} `,
     );
     return null;

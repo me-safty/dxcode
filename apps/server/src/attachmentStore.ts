@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 import type { ChatAttachment } from "@t3tools/contracts";
 
@@ -11,6 +12,7 @@ import {
 import { inferImageExtension, SAFE_IMAGE_FILE_EXTENSIONS } from "./imageMime.ts";
 
 const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
+const TEXT_ATTACHMENT_DIRECTORY = "text";
 const ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS = 80;
 const ATTACHMENT_ID_THREAD_SEGMENT_PATTERN = "[a-z0-9_]+(?:-[a-z0-9_]+)*";
 const ATTACHMENT_ID_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -107,4 +109,21 @@ export function parseAttachmentIdFromRelativePath(relativePath: string): string 
   }
   const id = normalized.slice(0, extensionIndex);
   return id.length > 0 && !id.includes(".") ? id : null;
+}
+
+export function createTextAttachmentPath(input: {
+  readonly attachmentsDir: string;
+  readonly fileName: string;
+}): string {
+  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const safeName =
+    sanitizedName.length > 0 && sanitizedName !== "." && sanitizedName !== ".."
+      ? sanitizedName
+      : "context.txt";
+  return NodePath.join(
+    input.attachmentsDir,
+    TEXT_ATTACHMENT_DIRECTORY,
+    NodeCrypto.randomUUID(),
+    safeName,
+  );
 }
