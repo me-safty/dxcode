@@ -921,6 +921,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
   const attachmentQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const composerAttachmentKeyRef = useRef(composerAttachmentKey);
+  composerAttachmentKeyRef.current = composerAttachmentKey;
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -1812,12 +1814,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
     const currentPrompt = getComposerDraft(composerDraftTarget)?.prompt ?? "";
     const separator = currentPrompt.length > 0 && !/\s$/.test(currentPrompt) ? " " : "";
-    setComposerDraftPrompt(
-      composerDraftTarget,
-      `${currentPrompt}${separator}${serializeComposerFileLink(
-        resolvePathLinkTarget(result.value.path, gitCwd),
-      )} `,
-    );
+    const nextPrompt = `${currentPrompt}${separator}${serializeComposerFileLink(
+      resolvePathLinkTarget(result.value.path, gitCwd),
+    )} `;
+    if (composerAttachmentKeyRef.current === composerAttachmentKey) {
+      promptRef.current = nextPrompt;
+    }
+    setComposerDraftPrompt(composerDraftTarget, nextPrompt);
     return null;
   };
 
