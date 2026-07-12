@@ -1,0 +1,151 @@
+name: Mobile APK Build
+
+# Build standalone APK for Android
+# Supports manual trigger and automatic builds on tags
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "App variant to build"
+        required: true
+        type: choice
+        default: development
+        options:
+          - development
+          - preview
+          - production
+      build-type:
+        description: "Build type (debug or release)"
+        required: true
+        type: choice
+        default: debug
+        options:
+          - debug
+          - release
+  push:
+    tags:
+      - "v*"
+      - "android-*"
+
+concurrency:
+  group: apk-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build APK (${{ inputs.variant || 'preview' }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      APP_VARIANT: ${{ inputs.variant || 'preview' }}
+      BUILD_TYPE: ${{ inputs.build-type || 'debug' }}
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Expose pnpm
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
+          "$vp_pnpm_bin" --version
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set ANDROID_HOME
+        run: echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Install Android build tools
+        run: |
+          sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Prebuild Android
+        working-directory: apps/mobile
+        run: |
+          EXPO_NO_GIT_STATUS=1 npx expo prebuild \
+            --clean \
+            --platform android \
+            --no-install
+
+      - name: Setup Gradle
+        working-directory: apps/mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --version
+
+      - name: Build APK (Debug)
+        if: env.BUILD_TYPE == 'debug'
+        working-directory: apps/mobile/android
+        run: |
+          ./gradlew assembleDebug \
+            -Dorg.gradle.java.home=$JAVA_HOME
+
+      - name: Build APK (Release)
+        if: env.BUILD_TYPE == 'release'
+        working-directory: apps/mobile/android
+        run: |
+          ./gradlew assembleRelease \
+            -Dorg.gradle.java.home=$JAVA_HOME
+        # Note: Release builds may require signing configuration
+        # Set KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD secrets for production
+
+      - name: Locate built APK
+        id: apk-location
+        working-directory: apps/mobile/android
+        run: |
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          else
+            APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk"
+          fi
+          if [ -f "$APK_PATH" ]; then
+            echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+            ls -lh "$APK_PATH"
+          else
+            echo "APK not found at $APK_PATH"
+            exit 1
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: t3code-apk-${{ env.APP_VARIANT }}-${{ env.BUILD_TYPE }}
+          path: apps/mobile/android/${{ steps.apk-location.outputs.apk_path }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Generate build summary
+        if: always()
+        run: |
+          echo "## APK Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Variant**: ${{ env.APP_VARIANT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Type**: ${{ env.BUILD_TYPE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ APK built successfully" >> $GITHUB_STEP_SUMMARY
+            echo "📦 Download from artifacts" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ APK build failed" >> $GITHUB_STEP_SUMMARY
+          fi
