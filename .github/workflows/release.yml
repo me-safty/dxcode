@@ -1,10 +1,6 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-      - "!v*-nightly.*"
   schedule:
     - cron: "0 */3 * * *"
   workflow_dispatch:
@@ -140,13 +136,14 @@ jobs:
             echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "tag=v$version" >> "$GITHUB_OUTPUT"
             echo "name=T3 Code v$version" >> "$GITHUB_OUTPUT"
-            echo "cli_dist_tag=latest" >> "$GITHUB_OUTPUT"
             if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
               echo "make_latest=true" >> "$GITHUB_OUTPUT"
+              echo "cli_dist_tag=latest" >> "$GITHUB_OUTPUT"
             else
               echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
               echo "make_latest=false" >> "$GITHUB_OUTPUT"
+              echo "cli_dist_tag=prerelease" >> "$GITHUB_OUTPUT"
             fi
           fi
 
