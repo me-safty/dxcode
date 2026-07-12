@@ -599,7 +599,7 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
           const claims = composerDraftEntriesEnvironment(environmentId).flatMap(
             ({ target, prompt }) => textAttachmentClaims(target, prompt),
           );
-          const releaseResult = yield* Effect.result(
+          const releaseResult = yield* Effect.exit(
             Effect.forEach(
               claims,
               ({ path, draftOwnerId }) =>
