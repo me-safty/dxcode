@@ -13,3 +13,15 @@ export function isTextAttachmentPath(path: string): boolean {
     TEXT_ATTACHMENT_PATH_PATTERN.test(path) || LEGACY_FLAT_TEXT_ATTACHMENT_PATH_PATTERN.test(path)
   );
 }
+
+export function textAttachmentPaths(prompt: string): string[] {
+  return [
+    ...new Set(
+      collectComposerInlineTokens(prompt).flatMap((token) =>
+        token.type === "mention" && isTextAttachmentPath(token.value) ? [token.value] : [],
+      ),
+    ),
+  ];
+}
+
+import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";

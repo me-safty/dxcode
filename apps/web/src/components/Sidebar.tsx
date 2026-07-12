@@ -114,10 +114,12 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { projectEnvironment } from "../state/projects";
+import { assetEnvironment } from "../state/assets";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { textAttachmentPaths } from "../textAttachmentPaths";
 import {
   buildThreadRouteParams,
   resolveThreadRouteRef,
@@ -1113,6 +1115,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
   });
+  const deleteTextAttachment = useAtomCommand(assetEnvironment.deleteTextAttachment, {
+    reportFailure: false,
+  });
   const updateProject = useAtomCommand(projectEnvironment.update, {
     reportFailure: false,
   });
@@ -1437,6 +1442,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const removeProject = useCallback(
     async (member: SidebarProjectGroupMember, options: { force?: boolean } = {}) => {
       const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
+      const draftStore = useComposerDraftStore.getState();
+      const projectDraftThread = draftStore.getDraftThreadByProjectRef(memberProjectRef);
+      const discardedPrompt = projectDraftThread
+        ? (draftStore.getComposerDraft(projectDraftThread.draftId)?.prompt ?? "")
+        : "";
       const result = await deleteProject({
         environmentId: member.environmentId,
         input: {
@@ -1447,15 +1457,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (result._tag === "Failure") {
         return result;
       }
-      const draftStore = useComposerDraftStore.getState();
-      const projectDraftThread = draftStore.getDraftThreadByProjectRef(memberProjectRef);
       if (projectDraftThread) {
+        await Promise.all(
+          textAttachmentPaths(discardedPrompt).map((path) =>
+            deleteTextAttachment({
+              environmentId: member.environmentId,
+              input: { path },
+            }),
+          ),
+        );
         draftStore.clearDraftThread(projectDraftThread.draftId);
       }
       draftStore.clearProjectDraftThreadId(memberProjectRef);
       return result;
     },
-    [deleteProject],
+    [deleteProject, deleteTextAttachment],
   );
 
   const handleRemoveProject = useCallback(

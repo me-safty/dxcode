@@ -15,6 +15,7 @@ import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
+import { assetEnvironment } from "../state/assets";
 import { vcsEnvironment } from "../state/vcs";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
@@ -26,6 +27,7 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
+import { textAttachmentPaths } from "../textAttachmentPaths";
 
 export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
@@ -48,6 +50,9 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const deleteThreadMutation = useAtomCommand(threadEnvironment.delete, {
+    reportFailure: false,
+  });
+  const deleteTextAttachment = useAtomCommand(assetEnvironment.deleteTextAttachment, {
     reportFailure: false,
   });
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession);
@@ -233,6 +238,8 @@ export function useThreadActions() {
         deletedThreadIds,
         sortOrder: sidebarThreadSortOrder,
       });
+      const discardedPrompt =
+        useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt ?? "";
       const deleteResult = await deleteThreadMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId },
@@ -240,6 +247,14 @@ export function useThreadActions() {
       if (deleteResult._tag === "Failure") {
         return deleteResult;
       }
+      await Promise.all(
+        textAttachmentPaths(discardedPrompt).map((path) =>
+          deleteTextAttachment({
+            environmentId: threadRef.environmentId,
+            input: { path },
+          }),
+        ),
+      );
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       clearComposerDraftForThread(threadRef);
       clearProjectDraftThreadById(
@@ -334,6 +349,7 @@ export function useThreadActions() {
       clearProjectDraftThreadById,
       clearTerminalUiState,
       closeTerminal,
+      deleteTextAttachment,
       deleteThreadMutation,
       getCurrentRouteThreadRef,
       refreshVcsStatus,
