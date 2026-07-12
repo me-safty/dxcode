@@ -331,7 +331,6 @@ interface SidebarThreadRowProps {
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
   jumpLabel: string | null;
-  threadDropId: string;
   isPinned: boolean;
   togglePinned: (threadKey: string, pinned: boolean) => void;
   appSettingsConfirmThreadArchive: boolean;
@@ -371,7 +370,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     orderedProjectThreadKeys,
     isActive,
     jumpLabel,
-    threadDropId,
     isPinned,
     togglePinned,
     appSettingsConfirmThreadArchive,
@@ -398,14 +396,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const threadDrag = useDraggable({ id: threadKey });
-  const threadPinDrop = useDroppable({ id: threadDropId });
-  const setThreadDragDropRef = useCallback(
-    (node: HTMLLIElement | null) => {
-      threadDrag.setNodeRef(node);
-      threadPinDrop.setNodeRef(node);
-    },
-    [threadDrag, threadPinDrop],
-  );
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -702,7 +692,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
 
   return (
     <SidebarMenuSubItem
-      ref={setThreadDragDropRef}
+      ref={threadDrag.setNodeRef}
       style={{
         transform: CSS.Translate.toString(threadDrag.transform),
         opacity: threadDrag.isDragging ? 0.55 : undefined,
@@ -1005,9 +995,9 @@ function SidebarPinnedDivider({ id, flow }: { id: string; flow: ThreadPinDropAct
   const { setNodeRef } = useDroppable({ id });
   const colorClass =
     flow === "pin"
-      ? "text-emerald-500 before:bg-emerald-500/70 after:bg-emerald-500/70"
+      ? "text-amber-400 before:bg-amber-400/75 after:bg-amber-400/75"
       : flow === "unpin"
-        ? "text-amber-500 before:bg-amber-500/70 after:bg-amber-500/70"
+        ? "text-rose-500 before:bg-rose-500/75 after:bg-rose-500/75"
         : "text-muted-foreground/45 before:bg-border/80 after:bg-border/80";
   return (
     <SidebarMenuSubItem
@@ -1016,6 +1006,15 @@ function SidebarPinnedDivider({ id, flow }: { id: string; flow: ThreadPinDropAct
       className={`flex h-3 w-full items-center gap-1.5 px-2 transition-colors before:h-px before:flex-1 after:h-px after:flex-1 ${colorClass}`}
     >
       <PinIcon className="size-2.5 shrink-0 transition-colors" />
+    </SidebarMenuSubItem>
+  );
+}
+
+function SidebarThreadDropSection({ id, children }: { id: string; children: React.ReactNode }) {
+  const { setNodeRef } = useDroppable({ id });
+  return (
+    <SidebarMenuSubItem ref={setNodeRef} className="w-full">
+      <ul className="flex w-full flex-col gap-0.5">{children}</ul>
     </SidebarMenuSubItem>
   );
 }
@@ -2295,10 +2294,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         thread.worktreePath ?? threadProject?.workspaceRoot ?? project.workspaceRoot ?? null;
       const clicked = await api.contextMenu.show(
         [
-          {
-            id: "toggle-pin",
-            label: pinnedThreadKeys.includes(threadKey) ? "Unpin from project" : "Pin in project",
-          },
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
@@ -2307,11 +2302,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         ],
         position,
       );
-
-      if (clicked === "toggle-pin") {
-        setThreadPinned(project.projectKey, threadKey, !pinnedThreadKeys.includes(threadKey));
-        return;
-      }
 
       if (clicked === "rename") {
         startThreadRename(threadKey, thread.title);
@@ -2371,10 +2361,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       deleteThread,
       markThreadUnread,
       memberProjectByScopedKey,
-      pinnedThreadKeys,
-      project.projectKey,
       project.workspaceRoot,
-      setThreadPinned,
       startThreadRename,
     ],
   );
