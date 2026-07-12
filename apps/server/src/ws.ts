@@ -117,7 +117,7 @@ import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-const EDITOR_DISCOVERY_TIMEOUT = Duration.millis(500);
+const EDITOR_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const EDITOR_DISCOVERY_FALLBACK = [] as const;
 
 function unexpectedCompatibilityError(error: never): never {
