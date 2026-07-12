@@ -905,6 +905,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
   const mobileComposerExpandInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
+  const attachmentQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -1844,6 +1845,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError(activeThreadId, error);
   };
 
+  const enqueueComposerAttachments = (files: File[]) => {
+    const pending = attachmentQueueRef.current.then(() => addComposerAttachments(files));
+    attachmentQueueRef.current = pending.catch(() => undefined);
+    return pending;
+  };
+
   const removeComposerImage = (imageId: string) => {
     removeComposerImageFromDraft(imageId);
   };
@@ -1857,7 +1864,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     if (imageFiles.length === 0) return;
     event.preventDefault();
-    void addComposerAttachments(imageFiles);
+    void enqueueComposerAttachments(imageFiles);
   };
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -1891,7 +1898,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     const files = Array.from(event.dataTransfer.files);
-    void addComposerAttachments(files);
+    void enqueueComposerAttachments(files);
     focusComposer();
   };
   const handleInterruptPrimaryAction = useCallback(() => {
