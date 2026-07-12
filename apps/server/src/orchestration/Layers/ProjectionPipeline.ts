@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -57,6 +58,8 @@ import {
   parseAttachmentIdFromRelativePath,
   parseThreadSegmentFromAttachmentId,
   reconcileTextAttachments,
+  TEXT_ATTACHMENT_METADATA_FILE,
+  TEXT_ATTACHMENT_PENDING_DIRECTORY,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
 
@@ -581,6 +584,113 @@ const reconcileGeneratedAttachments = Effect.fn("reconcileGeneratedAttachments")
   );
 });
 
+interface DueTextAttachment {
+  readonly directory: string;
+  readonly markerPath: string;
+  readonly relativeDirectory: string;
+}
+
+const readDueTextAttachments = Effect.fn("readDueTextAttachments")(function* (
+  attachmentsDir: string,
+  nowMs: number,
+) {
+  const fileSystem = yield* Effect.service(FileSystem.FileSystem);
+  const path = yield* Effect.service(Path.Path);
+  const pendingDirectory = path.join(attachmentsDir, "text", TEXT_ATTACHMENT_PENDING_DIRECTORY);
+  const entries = yield* fileSystem
+    .readDirectory(pendingDirectory, { recursive: false })
+    .pipe(Effect.orElseSucceed(() => [] as Array<string>));
+  const candidates = yield* Effect.forEach(
+    entries,
+    (entry) =>
+      Effect.gen(function* () {
+        const match =
+          /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json$/i.exec(entry);
+        if (!match?.[1]) return null;
+        const markerPath = path.join(pendingDirectory, entry);
+        const marker = yield* fileSystem
+          .readFileString(markerPath)
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)));
+        if (
+          typeof marker !== "object" ||
+          marker === null ||
+          !("deleteAfter" in marker) ||
+          typeof marker.deleteAfter !== "number" ||
+          marker.deleteAfter > nowMs
+        ) {
+          return null;
+        }
+        return {
+          directory: path.join(attachmentsDir, "text", match[1]),
+          markerPath,
+          relativeDirectory: `text/${match[1]}`,
+        } satisfies DueTextAttachment;
+      }).pipe(Effect.orElseSucceed(() => null)),
+    { concurrency: 16 },
+  );
+  return candidates.filter((candidate): candidate is DueTextAttachment => candidate !== null);
+});
+
+const removeDueTextAttachments = Effect.fn("removeDueTextAttachments")(function* (
+  attachmentsDir: string,
+  candidates: ReadonlyArray<DueTextAttachment>,
+  retainedRelativePaths: ReadonlySet<string>,
+  nowMs: number,
+) {
+  const fileSystem = yield* Effect.service(FileSystem.FileSystem);
+  const path = yield* Effect.service(Path.Path);
+  const retainedDirectories = new Set(
+    [...retainedRelativePaths].map((relativePath) =>
+      path.dirname(relativePath).replace(/\\/g, "/"),
+    ),
+  );
+  yield* Effect.forEach(
+    candidates,
+    (candidate) =>
+      Effect.gen(function* () {
+        if (retainedDirectories.has(candidate.relativeDirectory)) {
+          yield* fileSystem.remove(candidate.markerPath, { force: true });
+          return;
+        }
+        const metadata = yield* fileSystem
+          .readFileString(path.join(candidate.directory, TEXT_ATTACHMENT_METADATA_FILE))
+          .pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+            Effect.orElseSucceed(() => null),
+          );
+        if (typeof metadata === "object" && metadata !== null) {
+          const claims =
+            "claims" in metadata && Array.isArray(metadata.claims) ? metadata.claims : [];
+          const deleteAfter =
+            "deleteAfter" in metadata && typeof metadata.deleteAfter === "number"
+              ? metadata.deleteAfter
+              : null;
+          if (claims.length > 0 || deleteAfter === null) {
+            yield* fileSystem.remove(candidate.markerPath, { force: true });
+            return;
+          }
+          if (deleteAfter > nowMs) return;
+        }
+        yield* fileSystem.remove(candidate.directory, { recursive: true, force: true });
+        yield* fileSystem.remove(candidate.markerPath, { force: true });
+      }),
+    { concurrency: 4 },
+  );
+});
+
+export function reconcileDueTextAttachments<E, R>(
+  attachmentsDir: string,
+  loadRetainedRelativePaths: Effect.Effect<ReadonlySet<string>, E, R>,
+) {
+  return Effect.gen(function* () {
+    const nowMs = yield* Clock.currentTimeMillis;
+    const dueCandidates = yield* readDueTextAttachments(attachmentsDir, nowMs);
+    if (dueCandidates.length === 0) return;
+    const retainedRelativePaths = yield* loadRetainedRelativePaths;
+    yield* removeDueTextAttachments(attachmentsDir, dueCandidates, retainedRelativePaths, nowMs);
+  });
+}
+
 const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjectionPipeline")(
   function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -600,21 +710,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const serverConfig = yield* ServerConfig;
     const bootstrapComplete = yield* Ref.make(false);
 
-    const reconcileTextAttachmentStore = Effect.gen(function* () {
-      const retainedMessages = yield* projectionThreadMessageRepository.listRetained();
-      const retainedRelativePaths = collectThreadTextAttachmentRelativePaths(
-        serverConfig.attachmentsDir,
-        retainedMessages,
-      );
-      const nowMs = yield* Clock.currentTimeMillis;
-      yield* Effect.sync(() =>
-        reconcileTextAttachments({
-          attachmentsDir: serverConfig.attachmentsDir,
-          retainedRelativePaths,
-          nowMs,
-        }),
-      );
-    }).pipe(
+    const reconcileTextAttachmentStore = reconcileDueTextAttachments(
+      serverConfig.attachmentsDir,
+      projectionThreadMessageRepository
+        .listRetained()
+        .pipe(
+          Effect.map((retainedMessages) =>
+            collectThreadTextAttachmentRelativePaths(serverConfig.attachmentsDir, retainedMessages),
+          ),
+        ),
+    ).pipe(
       Effect.catch((cause) => Effect.logWarning("failed to reconcile text attachments", { cause })),
     );
     yield* Effect.forkScoped(

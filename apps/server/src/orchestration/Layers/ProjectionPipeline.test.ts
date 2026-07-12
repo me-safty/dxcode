@@ -29,6 +29,7 @@ import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import {
   ORCHESTRATION_PROJECTOR_NAMES,
   OrchestrationProjectionPipelineLive,
+  reconcileDueTextAttachments,
 } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -37,7 +38,9 @@ import { ServerConfig } from "../../config.ts";
 import {
   claimTextAttachment,
   reconcileTextAttachments,
+  releaseTextAttachment,
   textAttachmentRelativePath,
+  TEXT_ATTACHMENT_DELETE_GRACE_MS,
 } from "../../attachmentStore.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -56,6 +59,52 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-text-expiry-sweep-")))(
+  "text attachment expiry sweep",
+  (it) => {
+    it.effect("loads retained messages only when a pending attachment is due", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { attachmentsDir } = yield* ServerConfig;
+        let retainedLoads = 0;
+        const loadRetained = Effect.sync(() => {
+          retainedLoads += 1;
+          return new Set<string>();
+        });
+
+        yield* reconcileDueTextAttachments(attachmentsDir, loadRetained);
+        assert.equal(retainedLoads, 0);
+
+        const attachmentPath = path.join(
+          attachmentsDir,
+          "text",
+          "00000000-0000-4000-8000-000000000010",
+          "orphan.txt",
+        );
+        yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+        yield* fileSystem.writeFileString(attachmentPath, "orphan");
+        claimTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "expiry-owner",
+        });
+        releaseTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "expiry-owner",
+          nowMs: -TEXT_ATTACHMENT_DELETE_GRACE_MS - 1,
+        });
+
+        yield* reconcileDueTextAttachments(attachmentsDir, loadRetained);
+
+        assert.equal(retainedLoads, 1);
+        assert.isFalse(yield* exists(attachmentPath));
+      }),
+    );
+  },
+);
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   it.effect("bootstraps all projection states and writes projection rows", () =>

@@ -13,7 +13,8 @@ import { inferImageExtension, SAFE_IMAGE_FILE_EXTENSIONS } from "./imageMime.ts"
 
 const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
 const TEXT_ATTACHMENT_DIRECTORY = "text";
-const TEXT_ATTACHMENT_METADATA_FILE = ".t3-attachment.json";
+export const TEXT_ATTACHMENT_METADATA_FILE = ".t3-attachment.json";
+export const TEXT_ATTACHMENT_PENDING_DIRECTORY = ".pending";
 export const TEXT_ATTACHMENT_DELETE_GRACE_MS = 60_000;
 const TEXT_ATTACHMENT_FILE_NAME_MAX_CHARS = 120;
 const WINDOWS_RESERVED_FILE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
@@ -227,6 +228,31 @@ function writeTextAttachmentMetadata(directory: string, metadata: TextAttachment
   NodeFS.renameSync(temporaryPath, metadataPath);
 }
 
+function textAttachmentPendingPath(attachmentsDir: string, directory: string): string {
+  return NodePath.join(
+    attachmentsDir,
+    TEXT_ATTACHMENT_DIRECTORY,
+    TEXT_ATTACHMENT_PENDING_DIRECTORY,
+    `${NodePath.basename(directory)}.json`,
+  );
+}
+
+function removeTextAttachmentPendingMarker(attachmentsDir: string, directory: string): void {
+  NodeFS.rmSync(textAttachmentPendingPath(attachmentsDir, directory), { force: true });
+}
+
+function writeTextAttachmentPendingMarker(
+  attachmentsDir: string,
+  directory: string,
+  deleteAfter: number,
+): void {
+  const pendingPath = textAttachmentPendingPath(attachmentsDir, directory);
+  NodeFS.mkdirSync(NodePath.dirname(pendingPath), { recursive: true });
+  const temporaryPath = `${pendingPath}.${NodeCrypto.randomUUID()}.tmp`;
+  NodeFS.writeFileSync(temporaryPath, JSON.stringify({ deleteAfter }));
+  NodeFS.renameSync(temporaryPath, pendingPath);
+}
+
 export function claimTextAttachment(input: {
   readonly attachmentsDir: string;
   readonly path: string;
@@ -240,6 +266,7 @@ export function claimTextAttachment(input: {
     claims: [...new Set([...metadata.claims, input.draftOwnerId])],
     deleteAfter: null,
   });
+  removeTextAttachmentPendingMarker(input.attachmentsDir, directory);
   return true;
 }
 
@@ -259,6 +286,15 @@ export function releaseTextAttachment(input: {
     claims,
     deleteAfter: claims.length === 0 ? input.nowMs + TEXT_ATTACHMENT_DELETE_GRACE_MS : null,
   });
+  if (claims.length === 0) {
+    writeTextAttachmentPendingMarker(
+      input.attachmentsDir,
+      directory,
+      input.nowMs + TEXT_ATTACHMENT_DELETE_GRACE_MS,
+    );
+  } else {
+    removeTextAttachmentPendingMarker(input.attachmentsDir, directory);
+  }
   return true;
 }
 
@@ -298,6 +334,7 @@ export function reconcileTextAttachments(input: {
       if (metadata.deleteAfter !== null) {
         writeTextAttachmentMetadata(directory, { ...metadata, deleteAfter: null });
       }
+      removeTextAttachmentPendingMarker(input.attachmentsDir, directory);
       continue;
     }
     if (metadata.deleteAfter === null) {
@@ -305,14 +342,21 @@ export function reconcileTextAttachments(input: {
         ...metadata,
         deleteAfter: nowMs + TEXT_ATTACHMENT_DELETE_GRACE_MS,
       });
+      writeTextAttachmentPendingMarker(
+        input.attachmentsDir,
+        directory,
+        nowMs + TEXT_ATTACHMENT_DELETE_GRACE_MS,
+      );
       pending += 1;
       continue;
     }
     if (metadata.deleteAfter > nowMs) {
+      writeTextAttachmentPendingMarker(input.attachmentsDir, directory, metadata.deleteAfter);
       pending += 1;
       continue;
     }
     NodeFS.rmSync(directory, { recursive: true, force: true });
+    removeTextAttachmentPendingMarker(input.attachmentsDir, directory);
     removed += 1;
   }
   return { pending, removed };
