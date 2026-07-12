@@ -63,11 +63,36 @@ describe("markdownLinkDestinations", () => {
           "    [paragraph-continuation](/paragraph)",
           "- list item",
           "\t[list-continuation](/list)",
-          "",
-          "    [actual-code](/code)",
-          "\t[more-code](/more-code)",
         ].join("\n"),
       ),
     ).toEqual(["/paragraph", "/list"]);
+    expect(markdownLinkDestinations("    [actual-code](/code)\n\t[more-code](/more-code)")).toEqual(
+      [],
+    );
+  });
+
+  it("keeps block constructs from activating paragraph continuation", () => {
+    expect(
+      markdownLinkDestinations(
+        [
+          "# heading",
+          "    [after-heading-code](/after-heading-code)",
+          "",
+          "---",
+          "    [after-break-code](/after-break-code)",
+          "",
+          ">     [quoted-code](/quoted-code)",
+          "",
+          "- list item",
+          "",
+          "      [list-code](/list-code)",
+          "- next item",
+          "  [list-paragraph](/list-paragraph)",
+          "",
+          "paragraph",
+          "    [paragraph-continuation](/paragraph-continuation)",
+        ].join("\n"),
+      ),
+    ).toEqual(["/list-paragraph", "/paragraph-continuation"]);
   });
 });

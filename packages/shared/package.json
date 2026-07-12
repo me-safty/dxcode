@@ -198,6 +198,7 @@
     "@t3tools/contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
+    "mdast-util-from-markdown": "^2.0.3",
     "yaml": "catalog:"
   },
   "devDependencies": {
