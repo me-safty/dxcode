@@ -123,7 +123,7 @@ describe("active-turn primary action", () => {
     expect(markup).not.toContain("steer active turn");
   });
 
-  it("replaces stop with send while the active composer has content", () => {
+  it("keeps stop available alongside send while the active composer has content", () => {
     const markup = renderToStaticMarkup(
       createElement(ComposerPrimaryActions, {
         ...activeTurnProps,
@@ -133,6 +133,6 @@ describe("active-turn primary action", () => {
     );
 
     expect(markup).toContain('aria-label="Send message to steer active turn"');
-    expect(markup).not.toContain('aria-label="Stop generation"');
+    expect(markup).toContain('aria-label="Stop generation"');
   });
 });

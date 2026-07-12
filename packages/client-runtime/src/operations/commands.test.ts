@@ -39,11 +39,13 @@ import {
   archiveThread,
   createProject,
   forkThreadFromRun,
+  interruptThreadTurn,
   mergeThreadBack,
   promoteQueuedRun,
   reorderQueuedRun,
   revertThreadCheckpoint,
   startThreadTurn,
+  ThreadTurnNotInterruptibleError,
   updateThreadMetadata,
 } from "./commands.ts";
 
@@ -67,6 +69,7 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
   readonly projects: ProjectMutation[];
   readonly launches?: OrchestrationV2ThreadLaunchInput[];
   readonly projection?: OrchestrationV2ThreadProjection;
+  readonly projectionReads?: { count: number };
 }) {
   const client = {
     [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
@@ -75,7 +78,10 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
         return { sequence: input.commands.length };
       }),
     [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: () =>
-      Effect.succeed(input.projection ?? v2Projection),
+      Effect.sync(() => {
+        if (input.projectionReads) input.projectionReads.count += 1;
+        return input.projection ?? v2Projection;
+      }),
     [ORCHESTRATION_V2_WS_METHODS.launchThread]: (launchInput: OrchestrationV2ThreadLaunchInput) =>
       Effect.sync(() => {
         input.launches?.push(launchInput);
@@ -160,6 +166,51 @@ describe("V2 environment commands", () => {
       expect(commands).toEqual([
         { type: "thread.archive", commandId: "queued-command", threadId: "thread-1" },
       ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("interrupts an explicitly targeted run without a projection round trip", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const projectionReads = { count: 0 };
+      const supervisor = yield* makeSupervisor({ commands, projects: [], projectionReads });
+
+      yield* interruptThreadTurn({
+        commandId: CommandId.make("interrupt-explicit-run"),
+        threadId: v2ThreadId,
+        runId: RunId.make("run-explicit"),
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(projectionReads.count).toBe(0);
+      expect(commands).toEqual([
+        {
+          type: "run.interrupt",
+          commandId: "interrupt-explicit-run",
+          threadId: v2ThreadId,
+          runId: "run-explicit",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("fails instead of reporting success when no active run can be interrupted", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({
+        commands,
+        projects: [],
+        projection: { ...v2Projection, runs: [] },
+      });
+
+      const error = yield* Effect.flip(
+        interruptThreadTurn({
+          commandId: CommandId.make("interrupt-missing-run"),
+          threadId: v2ThreadId,
+        }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor)),
+      );
+
+      expect(error).toBeInstanceOf(ThreadTurnNotInterruptibleError);
+      expect(commands).toEqual([]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 
