@@ -164,6 +164,59 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-text-expiry-swe
         assert.isTrue(yield* exists(markerPath));
       }),
     );
+
+    it.effect("clears pending expiry when a due attachment becomes retained", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { attachmentsDir } = yield* ServerConfig;
+        const attachmentPath = path.join(
+          attachmentsDir,
+          "text",
+          "00000000-0000-4000-8000-000000000012",
+          "retained.txt",
+        );
+        yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+        yield* fileSystem.writeFileString(attachmentPath, "retained");
+        claimTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "retained-owner",
+        });
+        releaseTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "retained-owner",
+          nowMs: -TEXT_ATTACHMENT_DELETE_GRACE_MS - 1,
+        });
+        const relativePath = textAttachmentRelativePath({
+          attachmentsDir,
+          path: attachmentPath,
+        });
+        assert.isNotNull(relativePath);
+
+        yield* reconcileDueTextAttachments(
+          attachmentsDir,
+          Effect.succeed(new Set(relativePath ? [relativePath] : [])),
+        );
+
+        assert.isFalse(
+          releaseTextAttachment({
+            attachmentsDir,
+            path: attachmentPath,
+            draftOwnerId: "retained-owner",
+            nowMs: 0,
+          }),
+        );
+        reconcileTextAttachments({
+          attachmentsDir,
+          retainedRelativePaths: new Set(),
+          nowMs: 0,
+        });
+        yield* reconcileDueTextAttachments(attachmentsDir, Effect.succeed(new Set()));
+        assert.isTrue(yield* exists(attachmentPath));
+      }),
+    );
   },
 );
 

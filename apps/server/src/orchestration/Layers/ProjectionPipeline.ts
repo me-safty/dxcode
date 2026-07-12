@@ -590,6 +590,18 @@ interface DueTextAttachment {
   readonly relativeDirectory: string;
 }
 
+const TextAttachmentMetadataSchema = Schema.Struct({
+  version: Schema.Literal(1),
+  claims: Schema.Array(Schema.String),
+  deleteAfter: Schema.NullOr(Schema.Number),
+});
+const decodeTextAttachmentMetadata = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(TextAttachmentMetadataSchema),
+);
+const encodeTextAttachmentMetadata = Schema.encodeEffect(
+  Schema.fromJsonString(TextAttachmentMetadataSchema),
+);
+
 const readDueTextAttachments = Effect.fn("readDueTextAttachments")(function* (
   attachmentsDir: string,
   nowMs: number,
@@ -649,27 +661,26 @@ const removeDueTextAttachments = Effect.fn("removeDueTextAttachments")(function*
     (candidate) =>
       Effect.gen(function* () {
         if (retainedDirectories.has(candidate.relativeDirectory)) {
+          const metadataPath = path.join(candidate.directory, TEXT_ATTACHMENT_METADATA_FILE);
+          const metadataResult = yield* fileSystem
+            .readFileString(metadataPath)
+            .pipe(Effect.flatMap(decodeTextAttachmentMetadata), Effect.result);
+          if (metadataResult._tag === "Failure") return;
+          if (metadataResult.success.deleteAfter !== null) {
+            const encoded = yield* encodeTextAttachmentMetadata({
+              ...metadataResult.success,
+              deleteAfter: null,
+            });
+            yield* fileSystem.writeFileString(metadataPath, encoded);
+          }
           yield* fileSystem.remove(candidate.markerPath, { force: true });
           return;
         }
         const metadataResult = yield* fileSystem
           .readFileString(path.join(candidate.directory, TEXT_ATTACHMENT_METADATA_FILE))
-          .pipe(
-            Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
-            Effect.result,
-          );
+          .pipe(Effect.flatMap(decodeTextAttachmentMetadata), Effect.result);
         if (metadataResult._tag === "Failure") return;
         const metadata = metadataResult.success;
-        if (
-          typeof metadata !== "object" ||
-          metadata === null ||
-          !("claims" in metadata) ||
-          !Array.isArray(metadata.claims) ||
-          !("deleteAfter" in metadata) ||
-          (metadata.deleteAfter !== null && typeof metadata.deleteAfter !== "number")
-        ) {
-          return;
-        }
         if (metadata.claims.length > 0 || metadata.deleteAfter === null) {
           yield* fileSystem.remove(candidate.markerPath, { force: true });
           return;
