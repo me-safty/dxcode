@@ -279,7 +279,11 @@ export function releaseTextAttachment(input: {
   const directory = textAttachmentDirectory(input);
   if (!directory || !NodeFS.existsSync(input.path)) return false;
   const metadata = readTextAttachmentMetadata(directory);
-  if (!metadata.claims.includes(input.draftOwnerId)) return false;
+  if (!metadata.claims.includes(input.draftOwnerId)) {
+    if (metadata.deleteAfter === null) return false;
+    writeTextAttachmentPendingMarker(input.attachmentsDir, directory, metadata.deleteAfter);
+    return true;
+  }
   const claims = metadata.claims.filter((claim) => claim !== input.draftOwnerId);
   writeTextAttachmentMetadata(directory, {
     version: 1,

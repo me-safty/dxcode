@@ -41,6 +41,7 @@ import {
   releaseTextAttachment,
   textAttachmentRelativePath,
   TEXT_ATTACHMENT_DELETE_GRACE_MS,
+  TEXT_ATTACHMENT_PENDING_DIRECTORY,
 } from "../../attachmentStore.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -90,12 +91,31 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-text-expiry-swe
           path: attachmentPath,
           draftOwnerId: "expiry-owner",
         });
-        releaseTextAttachment({
+        assert.isTrue(
+          releaseTextAttachment({
+            attachmentsDir,
+            path: attachmentPath,
+            draftOwnerId: "expiry-owner",
+            nowMs: -TEXT_ATTACHMENT_DELETE_GRACE_MS - 1,
+          }),
+        );
+        const pendingMarkerPath = path.join(
           attachmentsDir,
-          path: attachmentPath,
-          draftOwnerId: "expiry-owner",
-          nowMs: -TEXT_ATTACHMENT_DELETE_GRACE_MS - 1,
-        });
+          "text",
+          TEXT_ATTACHMENT_PENDING_DIRECTORY,
+          "00000000-0000-4000-8000-000000000010.json",
+        );
+        yield* fileSystem.remove(pendingMarkerPath, { force: true });
+        assert.isFalse(yield* exists(pendingMarkerPath));
+        assert.isTrue(
+          releaseTextAttachment({
+            attachmentsDir,
+            path: attachmentPath,
+            draftOwnerId: "expiry-owner",
+            nowMs: 0,
+          }),
+        );
+        assert.isTrue(yield* exists(pendingMarkerPath));
 
         yield* reconcileDueTextAttachments(attachmentsDir, loadRetained);
 
