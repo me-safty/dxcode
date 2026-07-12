@@ -30,8 +30,9 @@ function SidebarControl() {
       toggleSidebar();
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    // Capture before focused editors consume commands such as Mod+B for rich-text formatting.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, toggleSidebar]);
 
   return (
