@@ -63,6 +63,11 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 
+// Contributors building outside the T3 Tools Apple team must also override the
+// bundle ID: the widgets app group is derived from it (`group.<bundle id>`),
+// and app group identifiers are globally unique across Apple teams.
+const iosBundleIdentifier = process.env.T3CODE_IOS_BUNDLE_ID ?? variant.iosBundleIdentifier;
+
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
   medium: "@expo-google-fonts/dm-sans/500Medium/DMSans_500Medium.ttf",
@@ -98,11 +103,12 @@ const config: ExpoConfig = {
   ios: {
     icon: variant.iosIcon,
     supportsTablet: true,
-    bundleIdentifier: variant.iosBundleIdentifier,
+    bundleIdentifier: iosBundleIdentifier,
     // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
     // does not fall back to a personal team (which cannot sign app groups,
-    // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
+    // Sign in with Apple, or push notification entitlements). Contributors
+    // without T3 Tools membership can override with their own (paid) team.
+    appleTeamId: process.env.T3CODE_APPLE_TEAM_ID ?? "ARK85ZXQ4Z",
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
@@ -202,8 +208,8 @@ const config: ExpoConfig = {
     [
       "expo-widgets",
       {
-        bundleIdentifier: `${variant.iosBundleIdentifier}.widgets`,
-        groupIdentifier: `group.${variant.iosBundleIdentifier}`,
+        bundleIdentifier: `${iosBundleIdentifier}.widgets`,
+        groupIdentifier: `group.${iosBundleIdentifier}`,
         enablePushNotifications: true,
         // Agent activity can update many times an hour; without the
         // frequent-updates entitlement iOS throttles the update budget sooner.
