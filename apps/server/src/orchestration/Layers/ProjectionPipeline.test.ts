@@ -944,7 +944,7 @@ it.layer(
       assert.isTrue(yield* exists(keepPath));
       assert.isFalse(yield* exists(removePath));
       assert.isFalse(yield* exists(removeTextAttachmentPath));
-      assert.isTrue(yield* exists(otherThreadPath));
+      assert.isFalse(yield* exists(otherThreadPath));
     }),
   );
 });
@@ -1107,9 +1107,9 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
         yield* projectionPipeline.bootstrap;
 
         assert.isFalse(yield* exists(threadAttachmentPath));
-        assert.isTrue(yield* exists(otherThreadAttachmentPath));
+        assert.isFalse(yield* exists(otherThreadAttachmentPath));
         assert.isFalse(yield* exists(textAttachmentPath));
-        assert.isTrue(yield* exists(unrelatedTextAttachmentPath));
+        assert.isFalse(yield* exists(unrelatedTextAttachmentPath));
       }),
     );
   },
@@ -1283,9 +1283,18 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
         const now = "2026-01-01T00:00:00.000Z";
         const { attachmentsDir: attachmentsRootDir, stateDir } = yield* ServerConfig;
         const attachmentsSentinelPath = path.join(attachmentsRootDir, "sentinel.txt");
+        const unknownAttachmentPath = path.join(
+          attachmentsRootDir,
+          "unknown-00000000-0000-4000-8000-000000000009.txt",
+        );
+        const unknownTextDirectoryPath = path.join(attachmentsRootDir, "text", "manual");
+        const unknownTextPath = path.join(unknownTextDirectoryPath, "notes.txt");
         const stateDirSentinelPath = path.join(stateDir, "state-sentinel.txt");
         yield* fileSystem.makeDirectory(attachmentsRootDir, { recursive: true });
+        yield* fileSystem.makeDirectory(unknownTextDirectoryPath, { recursive: true });
         yield* fileSystem.writeFileString(attachmentsSentinelPath, "keep-attachments-root");
+        yield* fileSystem.writeFileString(unknownAttachmentPath, "keep-unknown-attachment");
+        yield* fileSystem.writeFileString(unknownTextPath, "keep-unknown-text");
         yield* fileSystem.writeFileString(stateDirSentinelPath, "keep-state-dir");
 
         yield* eventStore.append({
@@ -1308,6 +1317,8 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
 
         assert.isTrue(yield* exists(attachmentsRootDir));
         assert.isTrue(yield* exists(attachmentsSentinelPath));
+        assert.isTrue(yield* exists(unknownAttachmentPath));
+        assert.isTrue(yield* exists(unknownTextPath));
         assert.isTrue(yield* exists(stateDirSentinelPath));
       }),
     );

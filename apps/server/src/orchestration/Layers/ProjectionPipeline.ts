@@ -44,6 +44,7 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
+import { SAFE_IMAGE_FILE_EXTENSIONS } from "../../imageMime.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -511,6 +512,88 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
         }),
       { concurrency: 1 },
     );
+  }
+});
+
+const GENERATED_IMAGE_ATTACHMENT_EXTENSIONS = new Set([...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"]);
+const GENERATED_TEXT_ATTACHMENT_DIRECTORY_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isGeneratedImageAttachmentEntry(entry: string): boolean {
+  const normalizedEntry = entry.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+  if (normalizedEntry.length === 0 || normalizedEntry.includes("/")) {
+    return false;
+  }
+  const attachmentId = parseAttachmentIdFromRelativePath(normalizedEntry);
+  if (!attachmentId || !parseThreadSegmentFromAttachmentId(attachmentId)) {
+    return false;
+  }
+  const extension = normalizedEntry.slice(attachmentId.length).toLowerCase();
+  return GENERATED_IMAGE_ATTACHMENT_EXTENSIONS.has(extension);
+}
+
+const reconcileGeneratedAttachments = Effect.fn("reconcileGeneratedAttachments")(function* (
+  projectionThreadMessageRepository: ProjectionThreadMessageRepository["Service"],
+) {
+  const serverConfig = yield* Effect.service(ServerConfig);
+  const fileSystem = yield* Effect.service(FileSystem.FileSystem);
+  const path = yield* Effect.service(Path.Path);
+  const attachmentsRootDir = serverConfig.attachmentsDir;
+  const retainedMessages = yield* projectionThreadMessageRepository.listRetained();
+  const retainedImagePaths = new Set<string>();
+  for (const message of retainedMessages) {
+    for (const attachment of message.attachments ?? []) {
+      if (attachment.type === "image") {
+        retainedImagePaths.add(attachmentRelativePath(attachment));
+      }
+    }
+  }
+  const retainedTextDirectories = new Set(
+    [...collectThreadTextAttachmentRelativePaths(attachmentsRootDir, retainedMessages)].map(
+      (relativePath) => path.dirname(relativePath).replace(/\\/g, "/"),
+    ),
+  );
+  const rootEntries = yield* fileSystem
+    .readDirectory(attachmentsRootDir, { recursive: false })
+    .pipe(Effect.orElseSucceed(() => [] as Array<string>));
+
+  for (const entry of rootEntries) {
+    const normalizedEntry = entry.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+    if (normalizedEntry === "text") {
+      const textRoot = path.join(attachmentsRootDir, normalizedEntry);
+      const textEntries = yield* fileSystem
+        .readDirectory(textRoot, { recursive: false })
+        .pipe(Effect.orElseSucceed(() => [] as Array<string>));
+      for (const textEntry of textEntries) {
+        const normalizedTextEntry = textEntry.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+        if (
+          normalizedTextEntry.includes("/") ||
+          !GENERATED_TEXT_ATTACHMENT_DIRECTORY_PATTERN.test(normalizedTextEntry)
+        ) {
+          continue;
+        }
+        const relativeDirectory = `text/${normalizedTextEntry}`;
+        if (retainedTextDirectories.has(relativeDirectory)) {
+          continue;
+        }
+        const absoluteDirectory = path.join(textRoot, normalizedTextEntry);
+        const fileInfo = yield* fileSystem
+          .stat(absoluteDirectory)
+          .pipe(Effect.orElseSucceed(() => null));
+        if (fileInfo?.type === "Directory") {
+          yield* fileSystem.remove(absoluteDirectory, { recursive: true, force: true });
+        }
+      }
+      continue;
+    }
+    if (!isGeneratedImageAttachmentEntry(normalizedEntry)) {
+      continue;
+    }
+    const absolutePath = path.join(attachmentsRootDir, normalizedEntry);
+    const fileInfo = yield* fileSystem.stat(absolutePath).pipe(Effect.orElseSucceed(() => null));
+    if (fileInfo?.type === "File" && !retainedImagePaths.has(normalizedEntry)) {
+      yield* fileSystem.remove(absolutePath, { force: true });
+    }
   }
 });
 
@@ -1623,63 +1706,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           ),
         );
 
-    const collectBootstrapAttachmentSideEffects = Effect.fn(
-      "collectBootstrapAttachmentSideEffects",
-    )(function* () {
-      const attachmentSideEffects = makeAttachmentSideEffects();
-      const messageTextsByThread = new Map<string, Map<string, string>>();
-
-      yield* Stream.runForEach(eventStore.readFromSequence(0), (event) =>
-        Effect.sync(() => {
-          if (event.type === "thread.message-sent") {
-            const messageTexts =
-              messageTextsByThread.get(event.payload.threadId) ?? new Map<string, string>();
-            const previousText = messageTexts.get(event.payload.messageId);
-            const nextText =
-              previousText === undefined
-                ? event.payload.text
-                : event.payload.streaming
-                  ? `${previousText}${event.payload.text}`
-                  : event.payload.text.length === 0
-                    ? previousText
-                    : event.payload.text;
-            messageTexts.set(event.payload.messageId, nextText);
-            messageTextsByThread.set(event.payload.threadId, messageTexts);
-            return;
-          }
-
-          if (event.type !== "thread.deleted" && event.type !== "thread.reverted") {
-            return;
-          }
-          if (event.type === "thread.deleted") {
-            attachmentSideEffects.deletedThreadIds.add(event.payload.threadId);
-          } else {
-            attachmentSideEffects.prunedThreadRelativePaths.set(event.payload.threadId, new Set());
-          }
-          for (const text of messageTextsByThread.get(event.payload.threadId)?.values() ?? []) {
-            for (const relativePath of collectTextAttachmentRelativePaths({
-              attachmentsDir: serverConfig.attachmentsDir,
-              text,
-            })) {
-              attachmentSideEffects.textAttachmentRelativePathsToRemove.add(relativePath);
-            }
-          }
-        }),
-      );
-
-      for (const threadId of attachmentSideEffects.prunedThreadRelativePaths.keys()) {
-        const messages = yield* projectionThreadMessageRepository.listByThreadId({
-          threadId: ThreadId.make(threadId),
-        });
-        attachmentSideEffects.prunedThreadRelativePaths.set(
-          threadId,
-          collectThreadAttachmentRelativePaths(threadId, messages),
-        );
-      }
-
-      return attachmentSideEffects;
-    });
-
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
       Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event, true), {
         concurrency: 1,
@@ -1696,13 +1722,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
     const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.gen(function* () {
       yield* Effect.forEach(projectors, bootstrapProjector, { concurrency: 1 });
-      const attachmentSideEffects = yield* collectBootstrapAttachmentSideEffects();
-      yield* runAttachmentSideEffects(
-        attachmentSideEffects,
-        projectionThreadMessageRepository,
-      ).pipe(
+      yield* reconcileGeneratedAttachments(projectionThreadMessageRepository).pipe(
         Effect.catch((cause) =>
-          Effect.logWarning("failed to reconcile projected attachment side-effects", { cause }),
+          Effect.logWarning("failed to reconcile generated attachments", { cause }),
         ),
       );
     }).pipe(
