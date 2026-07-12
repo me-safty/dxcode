@@ -120,6 +120,15 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const EDITOR_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const EDITOR_DISCOVERY_FALLBACK = [] as const;
 
+export const withEditorDiscoveryTimeout = <A, E, R>(
+  discovery: Effect.Effect<ReadonlyArray<A>, E, R>,
+  timeout: Duration.Input = EDITOR_DISCOVERY_TIMEOUT,
+) =>
+  discovery.pipe(
+    Effect.timeoutOption(timeout),
+    Effect.map(Option.getOrElse(() => EDITOR_DISCOVERY_FALLBACK)),
+  );
+
 function unexpectedCompatibilityError(error: never): never {
   throw new Error(`Unhandled compatibility error: ${String(error)}`);
 }
@@ -925,12 +934,9 @@ const makeWsRpcLayer = (
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers,
-          availableEditors: yield* externalLauncher
-            .resolveAvailableEditors()
-            .pipe(
-              Effect.timeoutOption(EDITOR_DISCOVERY_TIMEOUT),
-              Effect.map(Option.getOrElse(() => EDITOR_DISCOVERY_FALLBACK)),
-            ),
+          availableEditors: yield* withEditorDiscoveryTimeout(
+            externalLauncher.resolveAvailableEditors(),
+          ),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,

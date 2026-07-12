@@ -250,6 +250,9 @@ describe("ProcessDiagnostics", () => {
       expect(
         script.match(/Get-CimInstance Win32_PerfFormattedData_PerfProc_Process/g),
       ).toHaveLength(1);
+      expect(script).toMatch(
+        /Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue/,
+      );
       expect(script).toContain("$perfById[[int]$_.ProcessId]");
       expect(script).not.toContain("-Filter");
     }),

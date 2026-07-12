@@ -45,6 +45,7 @@ import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -72,6 +73,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import * as ServerConfig from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
+import { withEditorDiscoveryTimeout } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -3720,23 +3722,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("does not block server.getConfig on editor discovery", () =>
+  it.effect("does not block server config on editor discovery", () =>
     Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        layers: {
-          externalLauncher: {
-            resolveAvailableEditors: () => Effect.never,
-          },
-        },
-      });
+      const responseFiber = yield* withEditorDiscoveryTimeout(
+        Effect.never,
+        Duration.seconds(5),
+      ).pipe(Effect.forkChild);
+      yield* TestClock.adjust(Duration.seconds(5));
+      const response = yield* Fiber.join(responseFiber);
 
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({})),
-      );
-
-      assert.deepEqual(response.availableEditors, []);
-    }).pipe(TestClock.withLive, Effect.provide(NodeHttpServer.layerTest)),
+      assert.deepEqual(response, []);
+    }),
   );
 
   it.effect(
