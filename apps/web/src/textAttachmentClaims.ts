@@ -155,12 +155,19 @@ export class TextAttachmentClaimReconciler {
 
 export async function retryTextAttachmentOperation(
   operation: () => Promise<boolean>,
-  options: { retryDelayMs?: number; maxRetryDelayMs?: number; signal?: AbortSignal } = {},
+  options: {
+    retryDelayMs?: number;
+    maxRetryDelayMs?: number;
+    maxAttempts?: number;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<boolean> {
   const retryDelayMs = options.retryDelayMs ?? 100;
   const maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
-  for (let attempt = 0; !options.signal?.aborted; attempt += 1) {
+  const maxAttempts = options.maxAttempts ?? 5;
+  for (let attempt = 0; attempt < maxAttempts && !options.signal?.aborted; attempt += 1) {
     if (await operation()) return true;
+    if (attempt + 1 >= maxAttempts) return false;
     const delay = Math.min(retryDelayMs * 2 ** Math.min(attempt, 30), maxRetryDelayMs);
     await new Promise<void>((resolve) => setTimeout(resolve, delay));
   }

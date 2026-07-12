@@ -188,6 +188,19 @@ describe("text attachment claims", () => {
     expect(operation).toHaveBeenCalledTimes(5);
   });
 
+  it("bounds permanently failing destructive releases", async () => {
+    vi.useFakeTimers();
+    const operation = vi.fn().mockResolvedValue(false);
+    const result = retryTextAttachmentOperation(operation, {
+      retryDelayMs: 10,
+      maxRetryDelayMs: 10,
+      maxAttempts: 3,
+    });
+    await vi.advanceTimersByTimeAsync(30);
+    await expect(result).resolves.toBe(false);
+    expect(operation).toHaveBeenCalledTimes(3);
+  });
+
   it("waits for an in-flight claim before detaching a destructively cleared owner", async () => {
     const environmentId = EnvironmentId.make("destructive-environment");
     const draftOwnerId = "draft:destructive";
