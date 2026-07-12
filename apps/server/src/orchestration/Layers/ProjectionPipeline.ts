@@ -48,6 +48,7 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
 import { SAFE_IMAGE_FILE_EXTENSIONS } from "../../imageMime.ts";
+import { withTextAttachmentMutationLock } from "../../textAttachmentMutationLock.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -725,15 +726,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const serverConfig = yield* ServerConfig;
     const bootstrapComplete = yield* Ref.make(false);
 
-    const reconcileTextAttachmentStore = reconcileDueTextAttachments(
-      serverConfig.attachmentsDir,
-      projectionThreadMessageRepository
-        .listRetained()
-        .pipe(
-          Effect.map((retainedMessages) =>
-            collectThreadTextAttachmentRelativePaths(serverConfig.attachmentsDir, retainedMessages),
+    const reconcileTextAttachmentStore = withTextAttachmentMutationLock(
+      reconcileDueTextAttachments(
+        serverConfig.attachmentsDir,
+        projectionThreadMessageRepository
+          .listRetained()
+          .pipe(
+            Effect.map((retainedMessages) =>
+              collectThreadTextAttachmentRelativePaths(
+                serverConfig.attachmentsDir,
+                retainedMessages,
+              ),
+            ),
           ),
-        ),
+      ),
     ).pipe(
       Effect.catch((cause) => Effect.logWarning("failed to reconcile text attachments", { cause })),
     );
@@ -1809,9 +1815,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       );
 
       if (applyAttachmentSideEffects) {
-        yield* runAttachmentSideEffects(
-          attachmentSideEffects,
-          projectionThreadMessageRepository,
+        yield* withTextAttachmentMutationLock(
+          runAttachmentSideEffects(attachmentSideEffects, projectionThreadMessageRepository),
         ).pipe(
           Effect.catch((cause) =>
             Effect.logWarning("failed to apply projected attachment side-effects", {
@@ -1858,7 +1863,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.gen(function* () {
       yield* Effect.forEach(projectors, bootstrapProjector, { concurrency: 1 });
       yield* Ref.set(bootstrapComplete, true);
-      yield* reconcileGeneratedAttachments(projectionThreadMessageRepository).pipe(
+      yield* withTextAttachmentMutationLock(
+        reconcileGeneratedAttachments(projectionThreadMessageRepository),
+      ).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("failed to reconcile generated attachments", { cause }),
         ),

@@ -11,7 +11,9 @@ import {
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -35,6 +37,7 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQu
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ServerConfig } from "../../config.ts";
+import { withTextAttachmentMutationLock } from "../../textAttachmentMutationLock.ts";
 import {
   claimTextAttachment,
   reconcileTextAttachments,
@@ -214,6 +217,55 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-text-expiry-swe
           nowMs: 0,
         });
         yield* reconcileDueTextAttachments(attachmentsDir, Effect.succeed(new Set()));
+        assert.isTrue(yield* exists(attachmentPath));
+      }),
+    );
+
+    it.effect("serializes a concurrent claim ahead of due deletion", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { attachmentsDir } = yield* ServerConfig;
+        const attachmentPath = path.join(
+          attachmentsDir,
+          "text",
+          "00000000-0000-4000-8000-000000000013",
+          "race.txt",
+        );
+        yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+        yield* fileSystem.writeFileString(attachmentPath, "race");
+        claimTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "original-race-owner",
+        });
+        releaseTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "original-race-owner",
+          nowMs: -TEXT_ATTACHMENT_DELETE_GRACE_MS - 1,
+        });
+        const claimStarted = yield* Deferred.make<void>();
+        const finishClaim = yield* Deferred.make<void>();
+        const claimFiber = yield* withTextAttachmentMutationLock(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(claimStarted, undefined);
+            yield* Deferred.await(finishClaim);
+            return claimTextAttachment({
+              attachmentsDir,
+              path: attachmentPath,
+              draftOwnerId: "concurrent-race-owner",
+            });
+          }),
+        ).pipe(Effect.forkScoped);
+        yield* Deferred.await(claimStarted);
+        const sweepFiber = yield* withTextAttachmentMutationLock(
+          reconcileDueTextAttachments(attachmentsDir, Effect.succeed(new Set())),
+        ).pipe(Effect.forkScoped);
+        yield* Deferred.succeed(finishClaim, undefined);
+
+        assert.isTrue(yield* Fiber.join(claimFiber));
+        yield* Fiber.join(sweepFiber);
         assert.isTrue(yield* exists(attachmentPath));
       }),
     );

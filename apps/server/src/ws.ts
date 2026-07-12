@@ -4,10 +4,8 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -110,6 +108,7 @@ import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import { withTextAttachmentMutationLock } from "./textAttachmentMutationLock.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -409,8 +408,6 @@ const makeWsRpcLayer = (
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const crypto = yield* Crypto.Crypto;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
@@ -1538,52 +1535,59 @@ const makeWsRpcLayer = (
         [WS_METHODS.assetsWriteTextAttachment]: (input) =>
           observeRpcEffect(
             WS_METHODS.assetsWriteTextAttachment,
-            Effect.try({
-              try: () => ({
-                path: writeClaimedTextAttachment({
-                  attachmentsDir: config.attachmentsDir,
-                  fileName: input.fileName,
-                  contents: input.contents,
-                  draftOwnerId: input.draftOwnerId,
+            withTextAttachmentMutationLock(
+              Effect.try({
+                try: () => ({
+                  path: writeClaimedTextAttachment({
+                    attachmentsDir: config.attachmentsDir,
+                    fileName: input.fileName,
+                    contents: input.contents,
+                    draftOwnerId: input.draftOwnerId,
+                  }),
                 }),
+                catch: (cause) =>
+                  new AssetTextAttachmentWriteError({ fileName: input.fileName, cause }),
               }),
-              catch: (cause) =>
-                new AssetTextAttachmentWriteError({ fileName: input.fileName, cause }),
-            }),
+            ),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.assetsClaimTextAttachment]: (input) =>
           observeRpcEffect(
             WS_METHODS.assetsClaimTextAttachment,
-            Effect.try({
-              try: () => ({
-                claimed: claimTextAttachment({
-                  attachmentsDir: config.attachmentsDir,
-                  path: input.path,
-                  draftOwnerId: input.draftOwnerId,
+            withTextAttachmentMutationLock(
+              Effect.try({
+                try: () => ({
+                  claimed: claimTextAttachment({
+                    attachmentsDir: config.attachmentsDir,
+                    path: input.path,
+                    draftOwnerId: input.draftOwnerId,
+                  }),
                 }),
+                catch: (cause) => new AssetTextAttachmentClaimError({ path: input.path, cause }),
               }),
-              catch: (cause) => new AssetTextAttachmentClaimError({ path: input.path, cause }),
-            }),
+            ),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.assetsReleaseTextAttachment]: (input) =>
           observeRpcEffect(
             WS_METHODS.assetsReleaseTextAttachment,
-            Effect.gen(function* () {
-              const nowMs = yield* Clock.currentTimeMillis;
-              return yield* Effect.try({
-                try: () => ({
-                  released: releaseTextAttachment({
-                    attachmentsDir: config.attachmentsDir,
-                    path: input.path,
-                    draftOwnerId: input.draftOwnerId,
-                    nowMs,
+            withTextAttachmentMutationLock(
+              Effect.gen(function* () {
+                const nowMs = yield* Clock.currentTimeMillis;
+                return yield* Effect.try({
+                  try: () => ({
+                    released: releaseTextAttachment({
+                      attachmentsDir: config.attachmentsDir,
+                      path: input.path,
+                      draftOwnerId: input.draftOwnerId,
+                      nowMs,
+                    }),
                   }),
-                }),
-                catch: (cause) => new AssetTextAttachmentReleaseError({ path: input.path, cause }),
-              });
-            }),
+                  catch: (cause) =>
+                    new AssetTextAttachmentReleaseError({ path: input.path, cause }),
+                });
+              }),
+            ),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.subscribeVcsStatus]: (input) =>
