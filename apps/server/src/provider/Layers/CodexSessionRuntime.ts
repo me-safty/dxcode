@@ -703,13 +703,15 @@ export function findActiveCodexTurnId(
     }
     if (
       activeTurn === undefined ||
+      turn.startedAt === undefined ||
+      turn.startedAt === null ||
+      activeTurn.startedAt === undefined ||
+      activeTurn.startedAt === null ||
       (turn.startedAt !== undefined &&
         turn.startedAt !== null &&
-        (activeTurn.startedAt === undefined ||
-          activeTurn.startedAt === null ||
-          turn.startedAt >= activeTurn.startedAt)) ||
-      ((turn.startedAt === undefined || turn.startedAt === null) &&
-        (activeTurn.startedAt === undefined || activeTurn.startedAt === null))
+        activeTurn.startedAt !== undefined &&
+        activeTurn.startedAt !== null &&
+        turn.startedAt >= activeTurn.startedAt)
     ) {
       activeTurn = turn;
     }

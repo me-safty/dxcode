@@ -228,6 +228,24 @@ describe("findActiveCodexTurnId", () => {
     NodeAssert.equal(findActiveCodexTurnId(snapshot), "turn-active-new");
   });
 
+  it("selects a later in-progress turn without a start timestamp", () => {
+    const snapshot = makeThreadReadResponse([
+      { id: "turn-active-old", status: "inProgress", startedAt: 10, items: [] },
+      { id: "turn-active-new", status: "inProgress", items: [] },
+    ]);
+
+    NodeAssert.equal(findActiveCodexTurnId(snapshot), "turn-active-new");
+  });
+
+  it("selects a later timestamped turn after one without a timestamp", () => {
+    const snapshot = makeThreadReadResponse([
+      { id: "turn-active-old", status: "inProgress", items: [] },
+      { id: "turn-active-new", status: "inProgress", startedAt: 10, items: [] },
+    ]);
+
+    NodeAssert.equal(findActiveCodexTurnId(snapshot), "turn-active-new");
+  });
+
   it("returns undefined when no turn is active", () => {
     const response = makeThreadReadResponse([]);
     NodeAssert.equal(findActiveCodexTurnId(response), undefined);
