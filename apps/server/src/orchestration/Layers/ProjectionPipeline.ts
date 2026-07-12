@@ -5,6 +5,7 @@ import {
   type OrchestrationSessionStatus,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -506,10 +507,12 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
         (message) => !sideEffects.deletedThreadIds.has(message.threadId),
       ),
     );
+    const nowMs = yield* Clock.currentTimeMillis;
     yield* Effect.sync(() =>
       reconcileTextAttachments({
         attachmentsDir: attachmentsRootDir,
         retainedRelativePaths: retainedTextAttachmentPaths,
+        nowMs,
       }),
     );
   }
@@ -568,10 +571,12 @@ const reconcileGeneratedAttachments = Effect.fn("reconcileGeneratedAttachments")
       yield* fileSystem.remove(absolutePath, { force: true });
     }
   }
+  const nowMs = yield* Clock.currentTimeMillis;
   yield* Effect.sync(() =>
     reconcileTextAttachments({
       attachmentsDir: attachmentsRootDir,
       retainedRelativePaths: retainedTextAttachmentPaths,
+      nowMs,
     }),
   );
 });
@@ -601,10 +606,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         serverConfig.attachmentsDir,
         retainedMessages,
       );
+      const nowMs = yield* Clock.currentTimeMillis;
       yield* Effect.sync(() =>
         reconcileTextAttachments({
           attachmentsDir: serverConfig.attachmentsDir,
           retainedRelativePaths,
+          nowMs,
         }),
       );
     }).pipe(

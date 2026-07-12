@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -1586,15 +1587,19 @@ const makeWsRpcLayer = (
         [WS_METHODS.assetsReleaseTextAttachment]: (input) =>
           observeRpcEffect(
             WS_METHODS.assetsReleaseTextAttachment,
-            Effect.try({
-              try: () => ({
-                released: releaseTextAttachment({
-                  attachmentsDir: config.attachmentsDir,
-                  path: input.path,
-                  draftOwnerId: input.draftOwnerId,
+            Effect.gen(function* () {
+              const nowMs = yield* Clock.currentTimeMillis;
+              return yield* Effect.try({
+                try: () => ({
+                  released: releaseTextAttachment({
+                    attachmentsDir: config.attachmentsDir,
+                    path: input.path,
+                    draftOwnerId: input.draftOwnerId,
+                    nowMs,
+                  }),
                 }),
-              }),
-              catch: (cause) => new AssetTextAttachmentReleaseError({ path: input.path, cause }),
+                catch: (cause) => new AssetTextAttachmentReleaseError({ path: input.path, cause }),
+              });
             }),
             { "rpc.aggregate": "workspace" },
           ),

@@ -247,7 +247,7 @@ export function releaseTextAttachment(input: {
   readonly attachmentsDir: string;
   readonly path: string;
   readonly draftOwnerId: string;
-  readonly nowMs?: number;
+  readonly nowMs: number;
 }): boolean {
   const directory = textAttachmentDirectory(input);
   if (!directory || !NodeFS.existsSync(input.path)) return false;
@@ -257,8 +257,7 @@ export function releaseTextAttachment(input: {
   writeTextAttachmentMetadata(directory, {
     version: 1,
     claims,
-    deleteAfter:
-      claims.length === 0 ? (input.nowMs ?? Date.now()) + TEXT_ATTACHMENT_DELETE_GRACE_MS : null,
+    deleteAfter: claims.length === 0 ? input.nowMs + TEXT_ATTACHMENT_DELETE_GRACE_MS : null,
   });
   return true;
 }
@@ -266,7 +265,7 @@ export function releaseTextAttachment(input: {
 export function reconcileTextAttachments(input: {
   readonly attachmentsDir: string;
   readonly retainedRelativePaths: ReadonlySet<string>;
-  readonly nowMs?: number;
+  readonly nowMs: number;
 }): { readonly pending: number; readonly removed: number } {
   const textRoot = NodePath.join(input.attachmentsDir, TEXT_ATTACHMENT_DIRECTORY);
   let pending = 0;
@@ -280,7 +279,7 @@ export function reconcileTextAttachments(input: {
   const retainedDirectories = new Set(
     [...input.retainedRelativePaths].map((relativePath) => NodePath.dirname(relativePath)),
   );
-  const nowMs = input.nowMs ?? Date.now();
+  const nowMs = input.nowMs;
   for (const entry of entries) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry)) {
       continue;

@@ -38,7 +38,6 @@ import {
   claimTextAttachment,
   reconcileTextAttachments,
   textAttachmentRelativePath,
-  TEXT_ATTACHMENT_DELETE_GRACE_MS,
 } from "../../attachmentStore.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -954,7 +953,7 @@ it.layer(
       reconcileTextAttachments({
         attachmentsDir,
         retainedRelativePaths: new Set(),
-        nowMs: Date.now() + TEXT_ATTACHMENT_DELETE_GRACE_MS + 1,
+        nowMs: Number.MAX_SAFE_INTEGER,
       });
 
       assert.isTrue(yield* exists(keepPath));
@@ -1291,7 +1290,7 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
         reconcileTextAttachments({
           attachmentsDir,
           retainedRelativePaths: new Set(retainedSharedPath ? [retainedSharedPath] : []),
-          nowMs: Date.now() + TEXT_ATTACHMENT_DELETE_GRACE_MS + 1,
+          nowMs: Number.MAX_SAFE_INTEGER,
         });
 
         assert.isTrue(yield* exists(textAttachmentPath));
