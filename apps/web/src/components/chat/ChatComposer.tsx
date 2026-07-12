@@ -1823,7 +1823,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (nextImageCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
         error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
-        break;
+        continue;
       }
       const previewUrl = URL.createObjectURL(file);
       nextImages.push({
