@@ -11,8 +11,10 @@ import {
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
   getTextAttachmentClaimReconciler,
+  pauseTextAttachmentClaimEnvironment,
   reconcileTextAttachmentClaimsEnvironment,
   resetTextAttachmentClaimRegistryForTest,
+  resumeTextAttachmentClaimEnvironment,
   retryTextAttachmentOperation,
 } from "./textAttachmentClaims";
 
@@ -292,5 +294,62 @@ describe("text attachment claims", () => {
     await background.settled();
 
     expect(background.snapshot().confirmed).toEqual(new Set([PATH]));
+  });
+
+  it("waits for an in-flight claim before environment release preparation", async () => {
+    const environmentId = EnvironmentId.make("preparing-environment");
+    let finishClaim: (claimed: boolean) => void = () => undefined;
+    const operations = {
+      claim: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finishClaim = resolve;
+          }),
+      ),
+      release: vi.fn(async () => true),
+    };
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId: "draft:preparing",
+      operations,
+    });
+    reconciler.setDesiredPaths([PATH]);
+    await vi.waitFor(() => expect(operations.claim).toHaveBeenCalledOnce());
+
+    let prepared = false;
+    const prepare = pauseTextAttachmentClaimEnvironment(environmentId).then(() => {
+      prepared = true;
+    });
+    await Promise.resolve();
+    expect(prepared).toBe(false);
+
+    finishClaim(true);
+    await prepare;
+    expect(prepared).toBe(true);
+    expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
+  });
+
+  it("resumes claim reconciliation after environment preparation fails", async () => {
+    vi.useFakeTimers();
+    const environmentId = EnvironmentId.make("recoverable-environment");
+    let online = false;
+    const operations = {
+      claim: vi.fn(async () => online),
+      release: vi.fn(async () => online),
+    };
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId: "draft:recoverable",
+      operations,
+    });
+    reconciler.setDesiredPaths([PATH]);
+    await reconciler.settled();
+    await pauseTextAttachmentClaimEnvironment(environmentId);
+
+    online = true;
+    resumeTextAttachmentClaimEnvironment(environmentId);
+    await reconciler.settled();
+
+    expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
   });
 });

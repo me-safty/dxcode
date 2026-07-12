@@ -146,6 +146,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   const shellCache = yield* Ref.make(new Map([[TARGET.environmentId, CACHED_SNAPSHOT]]));
   const cacheClears = yield* Ref.make<ReadonlyArray<EnvironmentId>>([]);
   const ownedDataClears = yield* Ref.make<ReadonlyArray<EnvironmentId>>([]);
+  const ownedDataResumes = yield* Ref.make<ReadonlyArray<EnvironmentId>>([]);
   const sessions = yield* Ref.make<ReadonlyArray<SessionControl>>([]);
   const releasedSessions = yield* Ref.make(0);
   const storedProfiles = yield* Ref.make(
@@ -267,6 +268,8 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   });
   const ownedDataCleanup = Persistence.EnvironmentOwnedDataCleanup.of({
     prepare: (environmentId) => options?.beforeOwnedDataClear?.(environmentId) ?? Effect.void,
+    resume: (environmentId) =>
+      Ref.update(ownedDataResumes, (environmentIds) => [...environmentIds, environmentId]),
     clear: (environmentId) =>
       Ref.update(ownedDataClears, (environmentIds) => [...environmentIds, environmentId]),
   });
@@ -394,6 +397,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     shellCache,
     cacheClears,
     ownedDataClears,
+    ownedDataResumes,
     sessions,
     releasedSessions,
     storedProfiles,
@@ -618,6 +622,7 @@ describe("EnvironmentRegistry", () => {
         expect((yield* Ref.get(harness.storedTargets)).has(TARGET.environmentId)).toBe(true);
         expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(true);
         expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
+        expect(yield* Ref.get(harness.ownedDataResumes)).toEqual([TARGET.environmentId]);
       }).pipe(Effect.provide(harness.layer));
     }),
   );

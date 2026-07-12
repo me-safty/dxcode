@@ -114,10 +114,12 @@ export class EnvironmentOwnedDataCleanup extends Context.Reference<{
     environmentId: EnvironmentId,
     supervisor: EnvironmentSupervisor["Service"] | undefined,
   ) => Effect.Effect<void, ConnectionPersistenceError>;
+  readonly resume: (environmentId: EnvironmentId) => Effect.Effect<void>;
   readonly clear: (environmentId: EnvironmentId) => Effect.Effect<void>;
 }>("@t3tools/client-runtime/platform/persistence/EnvironmentOwnedDataCleanup", {
   defaultValue: () => ({
     prepare: () => Effect.void,
+    resume: () => Effect.void,
     clear: () => Effect.void,
   }),
 }) {}

@@ -40,6 +40,7 @@ export class TextAttachmentClaimReconciler {
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #retryCount = 0;
   #disposed = false;
+  #paused = false;
 
   constructor(options: {
     claim: (path: string) => Promise<boolean>;
@@ -62,7 +63,7 @@ export class TextAttachmentClaimReconciler {
     this.#desired = new Set(paths);
     this.#retryCount = 0;
     this.#clearRetry();
-    this.#enqueueReconcile();
+    if (!this.#paused) this.#enqueueReconcile();
   }
 
   confirmPaths(paths: Iterable<string>): void {
@@ -71,7 +72,7 @@ export class TextAttachmentClaimReconciler {
   }
 
   reconcileNow(): void {
-    if (this.#disposed) return;
+    if (this.#disposed || this.#paused) return;
     this.#retryCount = 0;
     this.#clearRetry();
     this.#enqueueReconcile();
@@ -80,6 +81,19 @@ export class TextAttachmentClaimReconciler {
   dispose(): void {
     this.#disposed = true;
     this.#clearRetry();
+  }
+
+  async pause(): Promise<void> {
+    if (this.#disposed) return;
+    this.#paused = true;
+    this.#clearRetry();
+    await this.#queue;
+  }
+
+  resume(): void {
+    if (this.#disposed || !this.#paused) return;
+    this.#paused = false;
+    this.reconcileNow();
   }
 
   snapshot(): { desired: Set<string>; confirmed: Set<string> } {
@@ -94,7 +108,7 @@ export class TextAttachmentClaimReconciler {
   }
 
   #enqueueReconcile(): void {
-    if (this.#disposed) return;
+    if (this.#disposed || this.#paused) return;
     this.#queue = this.#queue.catch(() => undefined).then(() => this.#reconcile());
   }
 
@@ -115,7 +129,7 @@ export class TextAttachmentClaimReconciler {
       this.#retryCount = 0;
       return;
     }
-    if (this.#retryTimer !== null || this.#disposed) return;
+    if (this.#retryTimer !== null || this.#disposed || this.#paused) return;
     const delay = Math.min(
       this.#retryDelayMs * 2 ** Math.min(this.#retryCount, 30),
       this.#maxRetryDelayMs,
@@ -217,6 +231,24 @@ export function disposeTextAttachmentClaimEnvironment(environmentId: Environment
     if (!key.startsWith(prefix)) continue;
     reconciler.dispose();
     textAttachmentClaimReconcilerRegistry.delete(key);
+  }
+}
+
+export async function pauseTextAttachmentClaimEnvironment(
+  environmentId: EnvironmentId,
+): Promise<void> {
+  const prefix = `${environmentId}:`;
+  await Promise.all(
+    [...textAttachmentClaimReconcilerRegistry.entries()].flatMap(([key, reconciler]) =>
+      key.startsWith(prefix) ? [reconciler.pause()] : [],
+    ),
+  );
+}
+
+export function resumeTextAttachmentClaimEnvironment(environmentId: EnvironmentId): void {
+  const prefix = `${environmentId}:`;
+  for (const [key, reconciler] of textAttachmentClaimReconcilerRegistry) {
+    if (key.startsWith(prefix)) reconciler.resume();
   }
 }
 

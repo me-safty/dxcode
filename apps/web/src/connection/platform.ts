@@ -57,6 +57,8 @@ import {
 } from "../composerDraftStore";
 import {
   disposeTextAttachmentClaimEnvironment,
+  pauseTextAttachmentClaimEnvironment,
+  resumeTextAttachmentClaimEnvironment,
   textAttachmentClaims,
 } from "../textAttachmentClaims";
 import { isHostedStaticApp } from "../hostedPairing";
@@ -588,6 +590,7 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
   EnvironmentOwnedDataCleanup.of({
     prepare: (environmentId, supervisor) =>
       Effect.gen(function* () {
+        yield* Effect.promise(() => pauseTextAttachmentClaimEnvironment(environmentId));
         if (supervisor) {
           const claims = composerDraftEntriesEnvironment(environmentId).flatMap(
             ({ target, prompt }) => textAttachmentClaims(target, prompt),
@@ -604,6 +607,7 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
             ),
           );
           if (releaseResult._tag === "Failure") {
+            resumeTextAttachmentClaimEnvironment(environmentId);
             return yield* new ConnectionPersistenceError({
               operation: "clear-environment",
               message: "Could not release text attachment draft claims.",
@@ -611,6 +615,8 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
           }
         }
       }),
+    resume: (environmentId) =>
+      Effect.sync(() => resumeTextAttachmentClaimEnvironment(environmentId)),
     clear: (environmentId) =>
       Effect.sync(() => {
         disposeTextAttachmentClaimEnvironment(environmentId);

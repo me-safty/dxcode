@@ -479,7 +479,13 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const entry = (yield* SubscriptionRef.get(entries)).get(environmentId);
           const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
-          yield* ownedDataCleanup.prepare(environmentId, serviceScope?.supervisor);
+          yield* ownedDataCleanup
+            .prepare(environmentId, serviceScope?.supervisor)
+            .pipe(
+              Effect.catch((error) =>
+                ownedDataCleanup.resume(environmentId).pipe(Effect.andThen(Effect.fail(error))),
+              ),
+            );
           yield* Ref.update(platformEnvironmentIds, (current) => {
             const next = new Set(current);
             next.delete(environmentId);
@@ -561,8 +567,20 @@ export const make = Effect.gen(function* () {
             : Option.none();
 
         const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
-        yield* ownedDataCleanup.prepare(environmentId, serviceScope?.supervisor);
-        yield* registrations.remove(target);
+        yield* ownedDataCleanup
+          .prepare(environmentId, serviceScope?.supervisor)
+          .pipe(
+            Effect.catch((error) =>
+              ownedDataCleanup.resume(environmentId).pipe(Effect.andThen(Effect.fail(error))),
+            ),
+          );
+        yield* registrations
+          .remove(target)
+          .pipe(
+            Effect.catch((error) =>
+              ownedDataCleanup.resume(environmentId).pipe(Effect.andThen(Effect.fail(error))),
+            ),
+          );
         yield* Ref.update(persistedTargetsByEnvironment, (current) => {
           const next = new Map(current);
           next.delete(environmentId);
