@@ -60,6 +60,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
   clearComposerDraftsEnvironment,
+  composerDraftPromptsEnvironment,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThread,
   markPromotedDraftThreadByRef,
@@ -715,6 +716,8 @@ describe("composerDraftStore project draft thread mapping", () => {
       store.addImage(localDraftId, makeImage({ id: "img-local", previewUrl: "blob:local-draft" }));
       store.setPrompt(localThreadRef, "local thread draft");
       store.setPrompt(remoteThreadRef, "remote thread draft");
+
+      expect(composerDraftPromptsEnvironment(TEST_ENVIRONMENT_ID)).toEqual(["local thread draft"]);
 
       clearComposerDraftsEnvironment(TEST_ENVIRONMENT_ID);
 

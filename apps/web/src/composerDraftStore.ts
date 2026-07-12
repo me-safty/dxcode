@@ -3374,27 +3374,39 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
 export const useComposerDraftStore = composerDraftStore;
 
+function composerDraftKeysEnvironment(
+  state: ComposerDraftStoreState,
+  environmentId: EnvironmentId,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const [threadKey, draftThread] of Object.entries(state.draftThreadsByThreadKey)) {
+    if (draftThread.environmentId === environmentId) keys.add(threadKey);
+  }
+  for (const threadKey of Object.keys(state.draftsByThreadKey)) {
+    if (parseScopedThreadKey(threadKey)?.environmentId === environmentId) keys.add(threadKey);
+  }
+  for (const [logicalProjectKey, threadKey] of Object.entries(
+    state.logicalProjectDraftThreadKeyByLogicalProjectKey,
+  )) {
+    if (parseScopedProjectKey(logicalProjectKey)?.environmentId === environmentId) {
+      keys.add(threadKey);
+    }
+  }
+  return keys;
+}
+
+export function composerDraftPromptsEnvironment(environmentId: EnvironmentId): string[] {
+  const state = useComposerDraftStore.getState();
+  const keys = composerDraftKeysEnvironment(state, environmentId);
+  return [...keys].flatMap((key) => {
+    const draft = state.draftsByThreadKey[key];
+    return draft ? [draft.prompt] : [];
+  });
+}
+
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
   useComposerDraftStore.setState((state) => {
-    const removedThreadKeys = new Set<string>();
-
-    for (const [threadKey, draftThread] of Object.entries(state.draftThreadsByThreadKey)) {
-      if (draftThread.environmentId === environmentId) {
-        removedThreadKeys.add(threadKey);
-      }
-    }
-    for (const threadKey of Object.keys(state.draftsByThreadKey)) {
-      if (parseScopedThreadKey(threadKey)?.environmentId === environmentId) {
-        removedThreadKeys.add(threadKey);
-      }
-    }
-    for (const [logicalProjectKey, threadKey] of Object.entries(
-      state.logicalProjectDraftThreadKeyByLogicalProjectKey,
-    )) {
-      if (parseScopedProjectKey(logicalProjectKey)?.environmentId === environmentId) {
-        removedThreadKeys.add(threadKey);
-      }
-    }
+    const removedThreadKeys = composerDraftKeysEnvironment(state, environmentId);
 
     const nextLogicalMappings = Object.fromEntries(
       Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(

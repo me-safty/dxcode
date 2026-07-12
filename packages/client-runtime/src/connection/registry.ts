@@ -481,6 +481,8 @@ export const make = Effect.gen(function* () {
             next.delete(environmentId);
             return next;
           });
+          const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+          yield* ownedDataCleanup.clear(environmentId, serviceScope?.supervisor);
           yield* closeServiceScope(environmentId);
           yield* SubscriptionRef.update(entries, (current) => {
             const next = new Map(current);
@@ -507,7 +509,6 @@ export const make = Effect.gen(function* () {
                   }),
                 ),
               ),
-              ownedDataCleanup.clear(environmentId),
             ],
             { concurrency: "unbounded", discard: true },
           );
@@ -562,6 +563,8 @@ export const make = Effect.gen(function* () {
           next.delete(environmentId);
           return next;
         });
+        const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        yield* ownedDataCleanup.clear(environmentId, serviceScope?.supervisor);
         yield* closeServiceScope(environmentId);
         yield* SubscriptionRef.update(entries, (current) => {
           const next = new Map(current);
@@ -578,7 +581,6 @@ export const make = Effect.gen(function* () {
                 }),
               ),
             ),
-            ownedDataCleanup.clear(environmentId),
           ],
           { concurrency: "unbounded", discard: true },
         );

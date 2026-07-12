@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema";
 
 import type { ConnectionRegistration } from "../connection/catalog.ts";
 import type { ConnectionTarget } from "../connection/model.ts";
+import type { EnvironmentSupervisor } from "../connection/supervisor.ts";
 
 export class ConnectionPersistenceError extends Schema.TaggedErrorClass<ConnectionPersistenceError>()(
   "ConnectionPersistenceError",
@@ -109,7 +110,10 @@ export class EnvironmentCacheStore extends Context.Service<
 >()("@t3tools/client-runtime/platform/persistence/EnvironmentCacheStore") {}
 
 export class EnvironmentOwnedDataCleanup extends Context.Reference<{
-  readonly clear: (environmentId: EnvironmentId) => Effect.Effect<void>;
+  readonly clear: (
+    environmentId: EnvironmentId,
+    supervisor: EnvironmentSupervisor["Service"] | undefined,
+  ) => Effect.Effect<void>;
 }>("@t3tools/client-runtime/platform/persistence/EnvironmentOwnedDataCleanup", {
   defaultValue: () => ({
     clear: () => Effect.void,

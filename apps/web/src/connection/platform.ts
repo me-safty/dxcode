@@ -20,17 +20,19 @@ import {
   PrimaryConnectionRegistration,
   PrimaryConnectionTarget,
   Wakeups,
+  EnvironmentSupervisor,
 } from "@t3tools/client-runtime/connection";
 import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
 import { managedRelayAccountChanges, managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
-import { EnvironmentRpcRequestObserver } from "@t3tools/client-runtime/rpc";
+import { EnvironmentRpcRequestObserver, request } from "@t3tools/client-runtime/rpc";
 import {
   AuthStandardClientScopes,
   type DesktopBridge,
   type DesktopEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
+  WS_METHODS,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -48,7 +50,11 @@ import {
   readPrimaryEnvironmentTarget,
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
-import { clearComposerDraftsEnvironment } from "../composerDraftStore";
+import {
+  clearComposerDraftsEnvironment,
+  composerDraftPromptsEnvironment,
+} from "../composerDraftStore";
+import { textAttachmentPaths } from "../textAttachmentPaths";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
@@ -576,8 +582,22 @@ const platformConnectionSourceLayer = Layer.effect(
 const environmentOwnedDataCleanupLayer = Layer.succeed(
   EnvironmentOwnedDataCleanup,
   EnvironmentOwnedDataCleanup.of({
-    clear: (environmentId) =>
-      Effect.sync(() => {
+    clear: (environmentId, supervisor) =>
+      Effect.gen(function* () {
+        if (supervisor) {
+          const paths = [
+            ...new Set(composerDraftPromptsEnvironment(environmentId).flatMap(textAttachmentPaths)),
+          ];
+          yield* Effect.forEach(
+            paths,
+            (path) =>
+              request(WS_METHODS.assetsDeleteTextAttachment, { path }).pipe(
+                Effect.provideService(EnvironmentSupervisor, supervisor),
+                Effect.ignoreCause({ log: true }),
+              ),
+            { concurrency: 1, discard: true },
+          );
+        }
         clearComposerDraftsEnvironment(environmentId);
       }),
   }),
