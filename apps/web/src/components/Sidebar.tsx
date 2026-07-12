@@ -197,6 +197,7 @@ import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
 import {
   getSidebarThreadIdsToPrewarm,
   getProjectRemovalThreadRefs,
+  getProjectRemovalConfirmationMessage,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   isTrailingDoubleClick,
@@ -1557,35 +1558,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                     window.setTimeout(resolve, 180);
                   });
 
-                  const latestProjectThreads = Array.from(
-                    sidebarThreadByKeyRef.current.values(),
-                  ).filter(
-                    (thread) =>
-                      thread.environmentId === memberProjectRef.environmentId &&
-                      thread.projectId === memberProjectRef.projectId,
-                  );
+                  const latestProjectThreads = Array.from(sidebarThreadByKeyRef.current.values());
+                  const latestProjectThreadRefs = getProjectRemovalThreadRefs({
+                    environmentId: memberProjectRef.environmentId,
+                    projectId: memberProjectRef.projectId,
+                    liveThreads: latestProjectThreads,
+                    archivedThreads,
+                  });
                   const confirmed = await api.dialogs.confirm(
-                    latestProjectThreads.length > 0
-                      ? [
-                          `Remove project "${member.title}" and delete its ${latestProjectThreads.length} thread${
-                            latestProjectThreads.length === 1 ? "" : "s"
-                          }?`,
-                          `Path: ${member.workspaceRoot}`,
-                          ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
-                            : []),
-                          "This permanently clears conversation history for those threads.",
-                          "This removes only this project entry.",
-                          "This action cannot be undone.",
-                        ].join("\n")
-                      : [
-                          `Remove project "${member.title}"?`,
-                          `Path: ${member.workspaceRoot}`,
-                          ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
-                            : []),
-                          "This removes only this project entry.",
-                        ].join("\n"),
+                    getProjectRemovalConfirmationMessage({
+                      title: member.title,
+                      workspaceRoot: member.workspaceRoot,
+                      environmentLabel: member.environmentLabel,
+                      threadCount: latestProjectThreadRefs.length,
+                    }),
                   );
                   if (!confirmed) {
                     return;
@@ -1659,6 +1645,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
     [
       archivedThreadsError,
+      archivedThreads,
       isLoadingArchivedThreads,
       memberThreadCountByPhysicalKey,
       refreshArchivedThreads,

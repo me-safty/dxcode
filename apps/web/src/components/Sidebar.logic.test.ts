@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   createThreadJumpHintVisibilityController,
   getProjectRemovalThreadRefs,
+  getProjectRemovalConfirmationMessage,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
@@ -64,6 +65,19 @@ describe("getProjectRemovalThreadRefs", () => {
       scopeThreadRef(localEnvironmentId, liveThreadId),
       scopeThreadRef(localEnvironmentId, archivedThreadId),
     ]);
+  });
+
+  it("uses permanent-history copy for an archived-only project", () => {
+    const message = getProjectRemovalConfirmationMessage({
+      title: "Archived project",
+      workspaceRoot: "/workspace/archived",
+      environmentLabel: null,
+      threadCount: 1,
+    });
+
+    expect(message).toContain("delete its 1 thread?");
+    expect(message).toContain("permanently clears conversation history");
+    expect(message).toContain("cannot be undone");
   });
 });
 

@@ -53,6 +53,34 @@ export function getProjectRemovalThreadRefs(input: {
   return [...refs.values()];
 }
 
+export function getProjectRemovalConfirmationMessage(input: {
+  title: string;
+  workspaceRoot: string;
+  environmentLabel: string | null;
+  threadCount: number;
+}): string {
+  const context = [
+    `Path: ${input.workspaceRoot}`,
+    ...(input.environmentLabel ? [`Environment: ${input.environmentLabel}`] : []),
+  ];
+  if (input.threadCount > 0) {
+    return [
+      `Remove project "${input.title}" and delete its ${input.threadCount} thread${
+        input.threadCount === 1 ? "" : "s"
+      }?`,
+      ...context,
+      "This permanently clears conversation history for those threads.",
+      "This removes only this project entry.",
+      "This action cannot be undone.",
+    ].join("\n");
+  }
+  return [
+    `Remove project "${input.title}"?`,
+    ...context,
+    "This removes only this project entry.",
+  ].join("\n");
+}
+
 export interface ThreadStatusPill {
   label:
     | "Working"
