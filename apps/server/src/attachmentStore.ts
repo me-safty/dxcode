@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import type { ChatAttachment } from "@t3tools/contracts";
+import { markdownLinkDestinations } from "@t3tools/shared/markdownLinks";
 
 import {
   normalizeAttachmentRelativePath,
@@ -164,16 +165,12 @@ export function textAttachmentDirectory(input: {
   return relativePath ? NodePath.join(input.attachmentsDir, NodePath.dirname(relativePath)) : null;
 }
 
-const MARKDOWN_LINK_DESTINATION_PATTERN = /\]\(([^)\s]+)\)/g;
-
 export function collectTextAttachmentRelativePaths(input: {
   readonly attachmentsDir: string;
   readonly text: string;
 }): Set<string> {
   const paths = new Set<string>();
-  for (const match of input.text.matchAll(MARKDOWN_LINK_DESTINATION_PATTERN)) {
-    const encodedPath = match[1];
-    if (!encodedPath) continue;
+  for (const encodedPath of markdownLinkDestinations(input.text)) {
     let path = encodedPath;
     try {
       path = decodeURIComponent(encodedPath);

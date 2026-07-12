@@ -7,8 +7,6 @@ const LEGACY_FLAT_TEXT_ATTACHMENT_PATH_PATTERN = new RegExp(
   `(?:^|[\\\\/])\\.t3[\\\\/]attachments[\\\\/]${UUID_PATH_SEGMENT}-[^\\\\/]+$`,
   "i",
 );
-const MARKDOWN_LINK_DESTINATION_PATTERN = /(?:^|\s)\[(?:\\.|[^\]\\])*\]\(([^)\s]+)\)(?=\s|$)/g;
-
 export function isTextAttachmentPath(path: string): boolean {
   return (
     TEXT_ATTACHMENT_PATH_PATTERN.test(path) || LEGACY_FLAT_TEXT_ATTACHMENT_PATH_PATTERN.test(path)
@@ -17,9 +15,7 @@ export function isTextAttachmentPath(path: string): boolean {
 
 export function textAttachmentPaths(prompt: string): string[] {
   const paths = new Set<string>();
-  for (const match of prompt.matchAll(MARKDOWN_LINK_DESTINATION_PATTERN)) {
-    const encodedPath = match[1];
-    if (!encodedPath) continue;
+  for (const encodedPath of markdownLinkDestinations(prompt)) {
     let path = encodedPath;
     try {
       path = decodeURIComponent(encodedPath);
@@ -47,3 +43,4 @@ export function unreferencedTextAttachmentPaths(
     ),
   ];
 }
+import { markdownLinkDestinations } from "@t3tools/shared/markdownLinks";

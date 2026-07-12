@@ -135,7 +135,7 @@ describe("attachmentStore", () => {
   });
 
   it("validates and collects server-owned text attachment paths", () => {
-    const attachmentsDir = NodePath.join(NodeOS.tmpdir(), "t3code-attachments");
+    const attachmentsDir = NodePath.join(NodeOS.tmpdir(), "t3code-(attachments)");
     const attachmentPath = createTextAttachmentPath({ attachmentsDir, fileName: "notes.txt" });
     const encodedPath = encodeURI(attachmentPath).replaceAll("\\", "%5C");
 
@@ -145,7 +145,7 @@ describe("attachmentStore", () => {
     expect(
       collectTextAttachmentRelativePaths({
         attachmentsDir,
-        text: `[notes.txt](${encodedPath})`,
+        text: `before[notes.txt](${encodedPath}),after`,
       }),
     ).toEqual(new Set([NodePath.relative(attachmentsDir, attachmentPath).replaceAll("\\", "/")]));
     expect(

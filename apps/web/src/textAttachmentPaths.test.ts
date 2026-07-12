@@ -19,6 +19,12 @@ describe("textAttachmentPaths", () => {
 
     expect(textAttachmentPaths(`[notes.txt](${path})`)).toEqual([path]);
   });
+
+  it("collects adjacent links whose absolute paths contain parentheses", () => {
+    const path = "/var/t3-(data)/attachments/text/12345678-1234-1234-1234-123456789abc/notes.txt";
+
+    expect(textAttachmentPaths(`before[notes.txt](${path}),after`)).toEqual([path]);
+  });
 });
 
 describe("removedTextAttachmentPaths", () => {
