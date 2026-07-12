@@ -142,6 +142,36 @@ describe("text attachment claims", () => {
     await vi.waitFor(() => expect(operations.claim).toHaveBeenCalledTimes(2));
   });
 
+  it("runs one immediate follow-up when reconnect arrives during an in-flight claim", async () => {
+    vi.useFakeTimers();
+    const environmentId = EnvironmentId.make("in-flight-reconnect-environment");
+    const draft = DraftId.make("in-flight-reconnect-draft");
+    let finishFirstClaim: (claimed: boolean) => void = () => undefined;
+    const operations = {
+      claim: vi
+        .fn<(path: string, draftOwnerId: string) => Promise<boolean>>()
+        .mockImplementationOnce(
+          () =>
+            new Promise<boolean>((resolve) => {
+              finishFirstClaim = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(true),
+      release: vi.fn(async () => true),
+    };
+    const entries = [{ target: draft, prompt: `[shared.txt](${PATH})` }];
+
+    reconcileTextAttachmentClaimsEnvironment(environmentId, entries, operations);
+    await vi.waitFor(() => expect(operations.claim).toHaveBeenCalledOnce());
+    reconcileTextAttachmentClaimsEnvironment(environmentId, entries, operations, { force: true });
+    finishFirstClaim(false);
+
+    await vi.waitFor(() => expect(operations.claim).toHaveBeenCalledTimes(2));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(operations.claim).toHaveBeenCalledTimes(2);
+  });
+
   it("reconciles immediately when a connection resumes", async () => {
     vi.useFakeTimers();
     const claim = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);

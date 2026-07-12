@@ -105,9 +105,12 @@ export class TextAttachmentClaimReconciler {
 
   reconcileNow(): void {
     if (this.#disposed || this.#paused) return;
-    if (this.#reconcilePending) return;
     this.#retryCount = 0;
     this.#clearRetry();
+    if (this.#reconcilePending) {
+      this.#reconcileRequested = true;
+      return;
+    }
     this.#enqueueReconcile(true);
   }
 
