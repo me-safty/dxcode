@@ -120,9 +120,11 @@ import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
+  clearTextAttachmentUploadOwner,
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
   fenceTextAttachmentUploadOwner,
+  resumeTextAttachmentUploadOwner,
   retryTextAttachmentOperation,
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
@@ -1473,6 +1475,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       });
       if (result._tag === "Failure") {
+        for (const target of discardedTargets) {
+          resumeTextAttachmentUploadOwner(member.environmentId, textAttachmentDraftOwnerId(target));
+        }
         return result;
       }
       await Promise.all(
@@ -1493,6 +1498,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
       for (const target of discardedTargets) {
         draftStore.clearDraftThread(target);
+        clearTextAttachmentUploadOwner(member.environmentId, textAttachmentDraftOwnerId(target));
       }
       draftStore.clearProjectDraftThreadId(memberProjectRef);
       return result;

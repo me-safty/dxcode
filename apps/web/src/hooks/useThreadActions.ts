@@ -28,9 +28,11 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
+  clearTextAttachmentUploadOwner,
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
   fenceTextAttachmentUploadOwner,
+  resumeTextAttachmentUploadOwner,
   retryTextAttachmentOperation,
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
@@ -257,6 +259,10 @@ export function useThreadActions() {
         input: { threadId: threadRef.threadId },
       });
       if (deleteResult._tag === "Failure") {
+        resumeTextAttachmentUploadOwner(
+          threadRef.environmentId,
+          textAttachmentDraftOwnerId(threadRef),
+        );
         return deleteResult;
       }
       await detachTextAttachmentClaimOwner(
@@ -281,6 +287,10 @@ export function useThreadActions() {
         threadRef,
       );
       clearTerminalUiState(threadRef);
+      clearTextAttachmentUploadOwner(
+        threadRef.environmentId,
+        textAttachmentDraftOwnerId(threadRef),
+      );
 
       if (shouldNavigateToFallback) {
         if (fallbackThreadId) {

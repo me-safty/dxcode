@@ -322,6 +322,23 @@ export async function fenceTextAttachmentUploadOwner(
   await Promise.all(state.pending);
 }
 
+export function resumeTextAttachmentUploadOwner(
+  environmentId: EnvironmentId,
+  draftOwnerId: string,
+): void {
+  const state = textAttachmentUploadRegistry.get(
+    textAttachmentClaimRegistryKey(environmentId, draftOwnerId),
+  );
+  if (state) state.fenced = false;
+}
+
+export function clearTextAttachmentUploadOwner(
+  environmentId: EnvironmentId,
+  draftOwnerId: string,
+): void {
+  textAttachmentUploadRegistry.delete(textAttachmentClaimRegistryKey(environmentId, draftOwnerId));
+}
+
 export async function fenceTextAttachmentUploadEnvironment(
   environmentId: EnvironmentId,
 ): Promise<void> {

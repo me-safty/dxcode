@@ -10,6 +10,7 @@ import {
   TextAttachmentClaimReconciler,
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
+  clearTextAttachmentUploadOwner,
   fenceTextAttachmentUploadEnvironment,
   fenceTextAttachmentUploadOwner,
   getTextAttachmentClaimReconciler,
@@ -18,6 +19,7 @@ import {
   resetTextAttachmentClaimRegistryForTest,
   resumeTextAttachmentClaimEnvironment,
   resumeTextAttachmentUploadEnvironment,
+  resumeTextAttachmentUploadOwner,
   runTextAttachmentUpload,
   retryTextAttachmentOperation,
 } from "./textAttachmentClaims";
@@ -459,5 +461,41 @@ describe("text attachment claims", () => {
         release: vi.fn(async () => undefined),
       }),
     ).resolves.toEqual({ path: PATH });
+  });
+
+  it("resumes an owner upload fence after thread or project deletion fails", async () => {
+    const environmentId = EnvironmentId.make("failed-owner-delete");
+    const draftOwnerId = "draft:failed-delete";
+    await fenceTextAttachmentUploadOwner(environmentId, draftOwnerId);
+    resumeTextAttachmentUploadOwner(environmentId, draftOwnerId);
+
+    await expect(
+      runTextAttachmentUpload({
+        environmentId,
+        draftOwnerId,
+        upload: async () => ({ path: PATH }),
+        path: (result) => result.path,
+        release: vi.fn(async () => undefined),
+      }),
+    ).resolves.toEqual({ path: PATH });
+  });
+
+  it("removes successful destruction owner fence state", async () => {
+    const environmentId = EnvironmentId.make("successful-owner-delete");
+    const draftOwnerId = "draft:successful-delete";
+    await fenceTextAttachmentUploadOwner(environmentId, draftOwnerId);
+    clearTextAttachmentUploadOwner(environmentId, draftOwnerId);
+    const upload = vi.fn(async () => ({ path: PATH }));
+
+    await expect(
+      runTextAttachmentUpload({
+        environmentId,
+        draftOwnerId,
+        upload,
+        path: (result) => result.path,
+        release: vi.fn(async () => undefined),
+      }),
+    ).resolves.toEqual({ path: PATH });
+    expect(upload).toHaveBeenCalledOnce();
   });
 });
