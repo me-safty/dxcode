@@ -10,7 +10,7 @@ import {
   TextAttachmentClaimReconciler,
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
-  clearTextAttachmentUploadOwner,
+  tombstoneTextAttachmentUploadOwner,
   fenceTextAttachmentUploadEnvironment,
   fenceTextAttachmentUploadOwner,
   getTextAttachmentClaimReconciler,
@@ -480,11 +480,11 @@ describe("text attachment claims", () => {
     ).resolves.toEqual({ path: PATH });
   });
 
-  it("removes successful destruction owner fence state", async () => {
+  it("keeps a successful destruction owner tombstoned", async () => {
     const environmentId = EnvironmentId.make("successful-owner-delete");
     const draftOwnerId = "draft:successful-delete";
     await fenceTextAttachmentUploadOwner(environmentId, draftOwnerId);
-    clearTextAttachmentUploadOwner(environmentId, draftOwnerId);
+    tombstoneTextAttachmentUploadOwner(environmentId, draftOwnerId);
     const upload = vi.fn(async () => ({ path: PATH }));
 
     await expect(
@@ -495,7 +495,7 @@ describe("text attachment claims", () => {
         path: (result) => result.path,
         release: vi.fn(async () => undefined),
       }),
-    ).resolves.toEqual({ path: PATH });
-    expect(upload).toHaveBeenCalledOnce();
+    ).resolves.toBeNull();
+    expect(upload).not.toHaveBeenCalled();
   });
 });

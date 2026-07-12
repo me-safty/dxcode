@@ -28,7 +28,7 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
-  clearTextAttachmentUploadOwner,
+  tombstoneTextAttachmentUploadOwner,
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
   fenceTextAttachmentUploadOwner,
@@ -287,7 +287,7 @@ export function useThreadActions() {
         threadRef,
       );
       clearTerminalUiState(threadRef);
-      clearTextAttachmentUploadOwner(
+      tombstoneTextAttachmentUploadOwner(
         threadRef.environmentId,
         textAttachmentDraftOwnerId(threadRef),
       );

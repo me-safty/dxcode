@@ -120,7 +120,7 @@ import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
-  clearTextAttachmentUploadOwner,
+  tombstoneTextAttachmentUploadOwner,
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
   fenceTextAttachmentUploadOwner,
@@ -1498,7 +1498,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
       for (const target of discardedTargets) {
         draftStore.clearDraftThread(target);
-        clearTextAttachmentUploadOwner(member.environmentId, textAttachmentDraftOwnerId(target));
+        tombstoneTextAttachmentUploadOwner(
+          member.environmentId,
+          textAttachmentDraftOwnerId(target),
+        );
       }
       draftStore.clearProjectDraftThreadId(memberProjectRef);
       return result;

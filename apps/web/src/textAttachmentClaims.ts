@@ -332,11 +332,13 @@ export function resumeTextAttachmentUploadOwner(
   if (state) state.fenced = false;
 }
 
-export function clearTextAttachmentUploadOwner(
+export function tombstoneTextAttachmentUploadOwner(
   environmentId: EnvironmentId,
   draftOwnerId: string,
 ): void {
-  textAttachmentUploadRegistry.delete(textAttachmentClaimRegistryKey(environmentId, draftOwnerId));
+  const state = textAttachmentUploadOwnerState(environmentId, draftOwnerId);
+  state.fenced = true;
+  state.pending.clear();
 }
 
 export async function fenceTextAttachmentUploadEnvironment(
