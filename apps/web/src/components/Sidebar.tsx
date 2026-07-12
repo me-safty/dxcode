@@ -76,7 +76,10 @@ import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstra
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL } from "../branding";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
-import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
+import {
+  refreshAndReadArchivedThreadSnapshots,
+  useArchivedThreadSnapshots,
+} from "../lib/archivedThreadsState";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
 import {
@@ -1223,6 +1226,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     [archivedSnapshots],
   );
+  const readLatestArchivedThreads = useCallback(async () => {
+    const result = await refreshAndReadArchivedThreadSnapshots(archivedEnvironmentIds);
+    if (result.error !== null) {
+      refreshArchivedThreads();
+      toastManager.add({
+        type: "warning",
+        title: "Could not refresh archived threads",
+        description: "Try removing the project again in a moment.",
+      });
+      return null;
+    }
+    return result.snapshots.flatMap(({ environmentId, snapshot }) =>
+      snapshot.threads.map((thread) => ({ ...thread, environmentId })),
+    );
+  }, [archivedEnvironmentIds, refreshArchivedThreads]);
   const projectPreferenceKeys = useMemo(() => projectExpansionPreferenceKeys(project), [project]);
   const projectExpanded = useUiStateStore((state) =>
     resolveProjectExpanded(state.projectExpandedById, projectPreferenceKeys),
@@ -1468,14 +1486,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
 
   const removeProject = useCallback(
-    async (member: SidebarProjectGroupMember, options: { force?: boolean } = {}) => {
+    async (
+      member: SidebarProjectGroupMember,
+      options: {
+        force?: boolean;
+        archivedThreads?: Parameters<typeof getProjectRemovalThreadRefs>[0]["archivedThreads"];
+      } = {},
+    ) => {
       const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
       const draftStore = useComposerDraftStore.getState();
       const projectThreadRefs = getProjectRemovalThreadRefs({
         environmentId: member.environmentId,
         projectId: member.id,
         liveThreads: projectThreads,
-        archivedThreads,
+        archivedThreads: options.archivedThreads ?? archivedThreads,
       });
       const discardedTargets = composerDraftTargetsProject(memberProjectRef, projectThreadRefs);
       const discardedClaims = discardedTargets.flatMap((target) =>
@@ -1558,12 +1582,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                     window.setTimeout(resolve, 180);
                   });
 
+                  const archivedThreadsBeforeConfirmation = await readLatestArchivedThreads();
+                  if (archivedThreadsBeforeConfirmation === null) return;
+
                   const latestProjectThreads = Array.from(sidebarThreadByKeyRef.current.values());
                   const latestProjectThreadRefs = getProjectRemovalThreadRefs({
                     environmentId: memberProjectRef.environmentId,
                     projectId: memberProjectRef.projectId,
                     liveThreads: latestProjectThreads,
-                    archivedThreads,
+                    archivedThreads: archivedThreadsBeforeConfirmation,
                   });
                   const confirmed = await api.dialogs.confirm(
                     getProjectRemovalConfirmationMessage({
@@ -1577,7 +1604,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                     return;
                   }
 
-                  const result = await removeProject(member, { force: true });
+                  const archivedThreadsBeforeRemoval = await readLatestArchivedThreads();
+                  if (archivedThreadsBeforeRemoval === null) return;
+                  const result = await removeProject(member, {
+                    force: true,
+                    archivedThreads: archivedThreadsBeforeRemoval,
+                  });
                   if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
                     const error = squashAtomCommandFailure(result);
                     toastManager.add(
@@ -1625,7 +1657,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
-      const result = await removeProject(member);
+      const archivedThreadsBeforeRemoval = await readLatestArchivedThreads();
+      if (archivedThreadsBeforeRemoval === null) return;
+      const result = await removeProject(member, {
+        archivedThreads: archivedThreadsBeforeRemoval,
+      });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         const message = error instanceof Error ? error.message : "Unknown error removing project.";
@@ -1645,9 +1681,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
     [
       archivedThreadsError,
-      archivedThreads,
       isLoadingArchivedThreads,
       memberThreadCountByPhysicalKey,
+      readLatestArchivedThreads,
       refreshArchivedThreads,
       removeProject,
     ],

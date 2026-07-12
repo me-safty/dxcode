@@ -4,6 +4,7 @@ import {
   createArchivedThreadSnapshotsAtomFamily,
   makeArchivedThreadsEnvironmentKey,
 } from "@t3tools/client-runtime/state/threads";
+import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback, useMemo } from "react";
 
@@ -24,6 +25,32 @@ const archivedSnapshotsAtom = createArchivedThreadSnapshotsAtomFamily({
 
 export function refreshArchivedThreadsForEnvironment(environmentId: EnvironmentId): void {
   appAtomRegistry.refresh(archivedSnapshotAtom(environmentId));
+}
+
+export async function refreshAndReadArchivedThreadSnapshots(
+  environmentIds: ReadonlyArray<EnvironmentId>,
+): Promise<{
+  readonly snapshots: ReadonlyArray<ArchivedSnapshotEntry>;
+  readonly error: string | null;
+}> {
+  const results = await Promise.all(
+    environmentIds.map(async (environmentId) => {
+      const atom = archivedSnapshotAtom(environmentId);
+      appAtomRegistry.refresh(atom);
+      const result = await executeAtomQuery(appAtomRegistry, atom, {
+        reportDefect: false,
+        reportFailure: false,
+      });
+      return { environmentId, result };
+    }),
+  );
+  const snapshots: ArchivedSnapshotEntry[] = [];
+  let error: string | null = null;
+  for (const { environmentId, result } of results) {
+    if (result._tag === "Success") snapshots.push({ environmentId, snapshot: result.value });
+    else error = "Failed to load archived threads.";
+  }
+  return { snapshots, error };
 }
 
 export function useArchivedThreadSnapshots(environmentIds: ReadonlyArray<EnvironmentId>): {

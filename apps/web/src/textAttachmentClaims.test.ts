@@ -1,8 +1,9 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { DraftId, useComposerDraftStore } from "./composerDraftStore";
+import { composerDraftTargetsProject, DraftId, useComposerDraftStore } from "./composerDraftStore";
+import { getProjectRemovalThreadRefs } from "./components/Sidebar.logic";
 import {
   textAttachmentClaimChanges,
   textAttachmentClaims,
@@ -411,6 +412,64 @@ describe("text attachment claims", () => {
 
     expect(release).toHaveBeenCalledWith(PATH, draftOwnerId);
     expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual([]);
+  });
+
+  it("cleans a draft owner when its thread archives between click and confirmation", async () => {
+    const environmentId = EnvironmentId.make("project-removal-archive-race");
+    const projectId = ProjectId.make("project-removal-archive-race");
+    const threadId = ThreadId.make("thread-archived-before-confirm");
+    const threadRef = scopeThreadRef(environmentId, threadId);
+    const ownerId = textAttachmentDraftOwnerId(threadRef);
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, `[shared.txt](${PATH})`);
+
+    // The thread was live when removal was clicked, then moved into the fresh
+    // archived snapshot while the final confirmation dialog was open.
+    const latestThreadRefs = getProjectRemovalThreadRefs({
+      environmentId,
+      projectId,
+      liveThreads: [],
+      archivedThreads: [{ environmentId, projectId, id: threadId }],
+    });
+    const targets = composerDraftTargetsProject(
+      scopeProjectRef(environmentId, projectId),
+      latestThreadRefs,
+    );
+    const claims = targets.flatMap((target) =>
+      textAttachmentClaims(target, store.getComposerDraft(target)?.prompt ?? ""),
+    );
+    const release = vi.fn(async (_path: string, _draftOwnerId: string) => true);
+
+    await Promise.all(
+      targets.map((target) =>
+        fenceTextAttachmentUploadOwner(environmentId, textAttachmentDraftOwnerId(target)),
+      ),
+    );
+    await releaseTextAttachmentClaimsInBackground({
+      environmentId,
+      claims,
+      draftOwnerIds: targets.map(textAttachmentDraftOwnerId),
+      release: ({ path, draftOwnerId }) => release(path, draftOwnerId),
+    });
+    for (const target of targets) {
+      store.clearDraftThread(target);
+      tombstoneTextAttachmentUploadOwner(environmentId, textAttachmentDraftOwnerId(target));
+    }
+
+    expect(targets).toEqual([threadRef]);
+    expect(release).toHaveBeenCalledWith(PATH, ownerId);
+    expect(store.getComposerDraft(threadRef)).toBeNull();
+    const upload = vi.fn(async () => ({ path: PATH }));
+    await expect(
+      runTextAttachmentUpload({
+        environmentId,
+        draftOwnerId: ownerId,
+        upload,
+        path: (result) => result.path,
+        release: vi.fn(async () => undefined),
+      }),
+    ).resolves.toBeNull();
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("reconstructs the release outbox after a module restart and retries on reconnect", async () => {
