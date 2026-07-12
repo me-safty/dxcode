@@ -69,6 +69,8 @@ import {
   markPromotedDraftThreadByRef,
   markPromotedDraftThreads,
   markPromotedDraftThreadsByRef,
+  MAX_PENDING_TEXT_ATTACHMENT_RELEASES,
+  persistPendingTextAttachmentReleases,
   type ComposerImageAttachment,
   useComposerDraftStore,
   DraftId,
@@ -154,6 +156,55 @@ function providerModelOptions(
 }
 
 const TEST_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+
+describe("composerDraftStore text attachment release outbox capacity", () => {
+  beforeEach(() => {
+    useComposerDraftStore.setState({ pendingTextAttachmentReleases: [] });
+    removeLocalStorageItem(COMPOSER_DRAFT_STORAGE_KEY);
+  });
+
+  afterEach(() => {
+    useComposerDraftStore.setState({ pendingTextAttachmentReleases: [] });
+    removeLocalStorageItem(COMPOSER_DRAFT_STORAGE_KEY);
+    vi.restoreAllMocks();
+  });
+
+  it("rejects the newest live append without truncating durable records", async () => {
+    const existing = Array.from({ length: MAX_PENDING_TEXT_ATTACHMENT_RELEASES }, (_, index) => ({
+      environmentId: TEST_ENVIRONMENT_ID,
+      path: `/tmp/attachment-${index}.txt`,
+      draftOwnerId: `thread:env:${index}`,
+    }));
+    expect(persistPendingTextAttachmentReleases(existing).accepted).toBe(true);
+    const rejected = {
+      environmentId: TEST_ENVIRONMENT_ID,
+      path: "/tmp/rejected-attachment.txt",
+      draftOwnerId: "thread:env:rejected",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = persistPendingTextAttachmentReleases([rejected]);
+
+    expect(result).toEqual({ accepted: false, rejected: [rejected] });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(useComposerDraftStore.getState().pendingTextAttachmentReleases).toEqual(existing);
+
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        storage: {
+          getItem: (key: string) => Promise<unknown> | unknown;
+        };
+      };
+    };
+    const stored = (await persistApi.getOptions().storage.getItem(COMPOSER_DRAFT_STORAGE_KEY)) as {
+      state: { pendingTextAttachmentReleases: unknown[] };
+    };
+    expect(stored.state.pendingTextAttachmentReleases).toHaveLength(
+      MAX_PENDING_TEXT_ATTACHMENT_RELEASES,
+    );
+    expect(stored.state.pendingTextAttachmentReleases).not.toContainEqual(rejected);
+  });
+});
 const OTHER_TEST_ENVIRONMENT_ID = EnvironmentId.make("environment-remote");
 const LEGACY_TEST_ENVIRONMENT_ID = EnvironmentId.make("__legacy__");
 

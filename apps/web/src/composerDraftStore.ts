@@ -238,7 +238,7 @@ const PersistedTextAttachmentRelease = Schema.Struct({
   path: Schema.String,
   draftOwnerId: Schema.String,
 });
-const MAX_PENDING_TEXT_ATTACHMENT_RELEASES = 10_000;
+export const MAX_PENDING_TEXT_ATTACHMENT_RELEASES = 1_000;
 const MAX_PENDING_TEXT_ATTACHMENT_ENVIRONMENT_LENGTH = 1_024;
 const MAX_PENDING_TEXT_ATTACHMENT_PATH_LENGTH = 8_192;
 const MAX_PENDING_TEXT_ATTACHMENT_OWNER_LENGTH = 1_024;
@@ -3531,8 +3531,9 @@ export function pendingTextAttachmentReleasesEnvironment(
 
 export function persistPendingTextAttachmentReleases(
   releases: ReadonlyArray<PendingTextAttachmentRelease>,
-): void {
-  if (releases.length === 0) return;
+): { readonly accepted: boolean; readonly rejected: ReadonlyArray<PendingTextAttachmentRelease> } {
+  if (releases.length === 0) return { accepted: true, rejected: [] };
+  const rejected: PendingTextAttachmentRelease[] = [];
   useComposerDraftStore.setState((state) => {
     const next = [...state.pendingTextAttachmentReleases];
     const seen = new Set(next.map(pendingTextAttachmentReleaseKey));
@@ -3541,12 +3542,22 @@ export function persistPendingTextAttachmentReleases(
       if (!normalized) continue;
       const key = pendingTextAttachmentReleaseKey(normalized);
       if (seen.has(key)) continue;
+      if (next.length >= MAX_PENDING_TEXT_ATTACHMENT_RELEASES) {
+        rejected.push(normalized);
+        continue;
+      }
       seen.add(key);
       next.push(normalized);
     }
     return { pendingTextAttachmentReleases: next };
   });
   composerDebouncedStorage.flush();
+  if (rejected.length > 0) {
+    console.warn("Text attachment release outbox is full; new releases remain memory-only.", {
+      rejectedCount: rejected.length,
+    });
+  }
+  return { accepted: rejected.length === 0, rejected };
 }
 
 export function completePendingTextAttachmentRelease(release: PendingTextAttachmentRelease): void {

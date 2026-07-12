@@ -1876,7 +1876,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 });
                 return released._tag === "Success";
               },
-            }),
+            }).then(() => undefined),
         });
       })
       .catch(() => null);

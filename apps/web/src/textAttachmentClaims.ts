@@ -267,7 +267,10 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
   retryDelayMs?: number;
   maxRetryDelayMs?: number;
   operationTimeoutMs?: number;
-}): Promise<void> {
+}): Promise<{
+  readonly durable: boolean;
+  readonly rejected: ReadonlyArray<TextAttachmentClaimRelease>;
+}> {
   const claimsByOwner = new Map<string, Set<string>>();
   for (const draftOwnerId of input.draftOwnerIds ?? []) {
     claimsByOwner.set(draftOwnerId, new Set());
@@ -299,7 +302,7 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
     for (const path of reconciler.snapshot().confirmed) paths.add(path);
     return { draftOwnerId, paths, reconciler };
   });
-  persistPendingTextAttachmentReleases(
+  const persistence = persistPendingTextAttachmentReleases(
     owners.flatMap(({ draftOwnerId, paths }) =>
       [...paths].map((path) => ({
         environmentId: input.environmentId,
@@ -313,7 +316,12 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
     reconciler.setDesiredPaths([]);
     return reconciler.settled();
   });
-  if (reconciliations.length === 0) return;
+  if (reconciliations.length === 0) {
+    return {
+      durable: persistence.accepted,
+      rejected: persistence.rejected.map(({ path, draftOwnerId }) => ({ path, draftOwnerId })),
+    };
+  }
   let timeout: ReturnType<typeof setTimeout> | null = null;
   await Promise.race([
     Promise.all(reconciliations),
@@ -323,6 +331,10 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
   ]).finally(() => {
     if (timeout !== null) clearTimeout(timeout);
   });
+  return {
+    durable: persistence.accepted,
+    rejected: persistence.rejected.map(({ path, draftOwnerId }) => ({ path, draftOwnerId })),
+  };
 }
 
 export function pendingTextAttachmentClaimReleases(
