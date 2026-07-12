@@ -135,6 +135,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     readonly beforeRegistrationRemove?: (
       target: ConnectionTarget,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
+    readonly beforeOwnedDataClear?: (
+      environmentId: EnvironmentId,
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
   },
 ) {
   const storedTargets = yield* Ref.make(
@@ -263,6 +266,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
       ),
   });
   const ownedDataCleanup = Persistence.EnvironmentOwnedDataCleanup.of({
+    prepare: (environmentId) => options?.beforeOwnedDataClear?.(environmentId) ?? Effect.void,
     clear: (environmentId) =>
       Ref.update(ownedDataClears, (environmentIds) => [...environmentIds, environmentId]),
   });
@@ -591,6 +595,29 @@ describe("EnvironmentRegistry", () => {
           RELAY_TARGET,
         );
         expect(yield* Ref.get(harness.sessions)).toHaveLength(1);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("keeps an environment registered when owned-data cleanup fails", () =>
+    Effect.gen(function* () {
+      const cleanupError = new Persistence.ConnectionPersistenceError({
+        operation: "clear-environment",
+        message: "Attachment claims could not be released.",
+      });
+      const harness = yield* makeHarness([TARGET], [], [], {
+        beforeOwnedDataClear: () => Effect.fail(cleanupError),
+      });
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+
+        const error = yield* Effect.flip(registry.remove(TARGET.environmentId));
+        expect(error).toBe(cleanupError);
+        expect((yield* Ref.get(harness.storedTargets)).has(TARGET.environmentId)).toBe(true);
+        expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(true);
+        expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
       }).pipe(Effect.provide(harness.layer));
     }),
   );

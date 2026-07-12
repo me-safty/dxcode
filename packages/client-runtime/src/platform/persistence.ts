@@ -110,12 +110,14 @@ export class EnvironmentCacheStore extends Context.Service<
 >()("@t3tools/client-runtime/platform/persistence/EnvironmentCacheStore") {}
 
 export class EnvironmentOwnedDataCleanup extends Context.Reference<{
-  readonly clear: (
+  readonly prepare: (
     environmentId: EnvironmentId,
     supervisor: EnvironmentSupervisor["Service"] | undefined,
-  ) => Effect.Effect<void>;
+  ) => Effect.Effect<void, ConnectionPersistenceError>;
+  readonly clear: (environmentId: EnvironmentId) => Effect.Effect<void>;
 }>("@t3tools/client-runtime/platform/persistence/EnvironmentOwnedDataCleanup", {
   defaultValue: () => ({
+    prepare: () => Effect.void,
     clear: () => Effect.void,
   }),
 }) {}

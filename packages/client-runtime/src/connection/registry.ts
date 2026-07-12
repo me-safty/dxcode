@@ -70,10 +70,12 @@ export class EnvironmentRegistry extends Context.Service<
     readonly register: (
       registration: ConnectionRegistration,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
-    readonly registerPlatform: (registration: PrimaryConnectionRegistration) => Effect.Effect<void>;
+    readonly registerPlatform: (
+      registration: PrimaryConnectionRegistration,
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
     readonly reconcilePlatform: (
       registrations: ReadonlyArray<PlatformConnectionRegistration>,
-    ) => Effect.Effect<void>;
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
     readonly remove: (
       environmentId: EnvironmentId,
     ) => Effect.Effect<
@@ -476,19 +478,20 @@ export const make = Effect.gen(function* () {
         environmentId,
         Effect.gen(function* () {
           const entry = (yield* SubscriptionRef.get(entries)).get(environmentId);
+          const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+          yield* ownedDataCleanup.prepare(environmentId, serviceScope?.supervisor);
           yield* Ref.update(platformEnvironmentIds, (current) => {
             const next = new Set(current);
             next.delete(environmentId);
             return next;
           });
-          const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
-          yield* ownedDataCleanup.clear(environmentId, serviceScope?.supervisor);
           yield* closeServiceScope(environmentId);
           yield* SubscriptionRef.update(entries, (current) => {
             const next = new Map(current);
             next.delete(environmentId);
             return next;
           });
+          yield* ownedDataCleanup.clear(environmentId);
           if (entry !== undefined && entry.target._tag === "BearerConnectionTarget") {
             yield* credentials.remove(entry.target.connectionId).pipe(
               Effect.catch((error) =>
@@ -557,20 +560,21 @@ export const make = Effect.gen(function* () {
             ? yield* profiles.get(target.connectionId)
             : Option.none();
 
+        const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        yield* ownedDataCleanup.prepare(environmentId, serviceScope?.supervisor);
         yield* registrations.remove(target);
         yield* Ref.update(persistedTargetsByEnvironment, (current) => {
           const next = new Map(current);
           next.delete(environmentId);
           return next;
         });
-        const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
-        yield* ownedDataCleanup.clear(environmentId, serviceScope?.supervisor);
         yield* closeServiceScope(environmentId);
         yield* SubscriptionRef.update(entries, (current) => {
           const next = new Map(current);
           next.delete(environmentId);
           return next;
         });
+        yield* ownedDataCleanup.clear(environmentId);
         yield* Effect.all(
           [
             cache.clear(environmentId).pipe(

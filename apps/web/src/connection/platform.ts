@@ -1,6 +1,7 @@
 import {
   ClientPresentation,
   CloudSession,
+  ConnectionPersistenceError,
   EnvironmentOwnedDataCleanup,
   PlatformConnectionSource,
   PrimaryEnvironmentAuth,
@@ -54,7 +55,10 @@ import {
   clearComposerDraftsEnvironment,
   composerDraftEntriesEnvironment,
 } from "../composerDraftStore";
-import { textAttachmentClaims } from "../textAttachmentClaims";
+import {
+  disposeTextAttachmentClaimEnvironment,
+  textAttachmentClaims,
+} from "../textAttachmentClaims";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
@@ -582,7 +586,7 @@ const platformConnectionSourceLayer = Layer.effect(
 const environmentOwnedDataCleanupLayer = Layer.succeed(
   EnvironmentOwnedDataCleanup,
   EnvironmentOwnedDataCleanup.of({
-    clear: (environmentId, supervisor) =>
+    prepare: (environmentId, supervisor) =>
       Effect.gen(function* () {
         if (supervisor) {
           const claims = composerDraftEntriesEnvironment(environmentId).flatMap(
@@ -600,12 +604,16 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
             ),
           );
           if (releaseResult._tag === "Failure") {
-            yield* Effect.logWarning("Could not release text attachment draft claims.", {
-              environmentId,
+            return yield* new ConnectionPersistenceError({
+              operation: "clear-environment",
+              message: "Could not release text attachment draft claims.",
             });
-            return;
           }
         }
+      }),
+    clear: (environmentId) =>
+      Effect.sync(() => {
+        disposeTextAttachmentClaimEnvironment(environmentId);
         clearComposerDraftsEnvironment(environmentId);
       }),
   }),
