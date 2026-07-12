@@ -41,6 +41,7 @@ import {
   releaseTextAttachment,
   textAttachmentRelativePath,
   TEXT_ATTACHMENT_DELETE_GRACE_MS,
+  TEXT_ATTACHMENT_METADATA_FILE,
   TEXT_ATTACHMENT_PENDING_DIRECTORY,
 } from "../../attachmentStore.ts";
 
@@ -121,6 +122,46 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-text-expiry-swe
 
         assert.equal(retainedLoads, 1);
         assert.isFalse(yield* exists(attachmentPath));
+      }),
+    );
+
+    it.effect("preserves a due attachment when metadata cannot be decoded", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { attachmentsDir } = yield* ServerConfig;
+        const attachmentPath = path.join(
+          attachmentsDir,
+          "text",
+          "00000000-0000-4000-8000-000000000011",
+          "corrupt.txt",
+        );
+        yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+        yield* fileSystem.writeFileString(attachmentPath, "preserve");
+        claimTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "corrupt-owner",
+        });
+        releaseTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "corrupt-owner",
+          nowMs: -TEXT_ATTACHMENT_DELETE_GRACE_MS - 1,
+        });
+        const metadataPath = path.join(path.dirname(attachmentPath), TEXT_ATTACHMENT_METADATA_FILE);
+        const markerPath = path.join(
+          attachmentsDir,
+          "text",
+          TEXT_ATTACHMENT_PENDING_DIRECTORY,
+          "00000000-0000-4000-8000-000000000011.json",
+        );
+        yield* fileSystem.writeFileString(metadataPath, "not-json");
+
+        yield* reconcileDueTextAttachments(attachmentsDir, Effect.succeed(new Set()));
+
+        assert.isTrue(yield* exists(attachmentPath));
+        assert.isTrue(yield* exists(markerPath));
       }),
     );
   },

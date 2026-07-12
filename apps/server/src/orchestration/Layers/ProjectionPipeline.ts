@@ -652,25 +652,29 @@ const removeDueTextAttachments = Effect.fn("removeDueTextAttachments")(function*
           yield* fileSystem.remove(candidate.markerPath, { force: true });
           return;
         }
-        const metadata = yield* fileSystem
+        const metadataResult = yield* fileSystem
           .readFileString(path.join(candidate.directory, TEXT_ATTACHMENT_METADATA_FILE))
           .pipe(
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
-            Effect.orElseSucceed(() => null),
+            Effect.result,
           );
-        if (typeof metadata === "object" && metadata !== null) {
-          const claims =
-            "claims" in metadata && Array.isArray(metadata.claims) ? metadata.claims : [];
-          const deleteAfter =
-            "deleteAfter" in metadata && typeof metadata.deleteAfter === "number"
-              ? metadata.deleteAfter
-              : null;
-          if (claims.length > 0 || deleteAfter === null) {
-            yield* fileSystem.remove(candidate.markerPath, { force: true });
-            return;
-          }
-          if (deleteAfter > nowMs) return;
+        if (metadataResult._tag === "Failure") return;
+        const metadata = metadataResult.success;
+        if (
+          typeof metadata !== "object" ||
+          metadata === null ||
+          !("claims" in metadata) ||
+          !Array.isArray(metadata.claims) ||
+          !("deleteAfter" in metadata) ||
+          (metadata.deleteAfter !== null && typeof metadata.deleteAfter !== "number")
+        ) {
+          return;
         }
+        if (metadata.claims.length > 0 || metadata.deleteAfter === null) {
+          yield* fileSystem.remove(candidate.markerPath, { force: true });
+          return;
+        }
+        if (metadata.deleteAfter > nowMs) return;
         yield* fileSystem.remove(candidate.directory, { recursive: true, force: true });
         yield* fileSystem.remove(candidate.markerPath, { force: true });
       }),
