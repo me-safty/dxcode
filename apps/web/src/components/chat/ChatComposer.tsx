@@ -468,6 +468,7 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
+  connectionPhase: EnvironmentConnectionPresentation["phase"];
   isConnecting: boolean;
   isSendBusy: boolean;
   isPreparingWorktree: boolean;
@@ -577,6 +578,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     phase,
+    connectionPhase,
     isConnecting,
     isSendBusy,
     isPreparingWorktree,
@@ -950,6 +952,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const key = `${environmentId}:${draftOwnerId}`;
     const existing = textAttachmentClaimReconcilerRef.current;
     if (existing?.key === key) return existing.value;
+    existing?.value.dispose();
     const value = new TextAttachmentClaimReconciler({
       claim: async (path) => {
         const result = await claimTextAttachment({
@@ -974,6 +977,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (textAttachmentClaimsHeld) return;
     getTextAttachmentClaimReconciler().setDesiredPrompt(prompt);
   }, [getTextAttachmentClaimReconciler, prompt, textAttachmentClaimsHeld]);
+
+  useEffect(() => {
+    if (connectionPhase === "connected") {
+      textAttachmentClaimReconcilerRef.current?.value.reconcileNow();
+    }
+  }, [connectionPhase]);
+
+  useEffect(
+    () => () => {
+      const current = textAttachmentClaimReconcilerRef.current;
+      current?.value.dispose();
+      if (textAttachmentClaimReconcilerRef.current === current) {
+        textAttachmentClaimReconcilerRef.current = null;
+      }
+    },
+    [],
+  );
 
   // ------------------------------------------------------------------
   // Derived: composer send state

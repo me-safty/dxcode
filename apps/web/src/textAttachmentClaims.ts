@@ -33,23 +33,24 @@ export class TextAttachmentClaimReconciler {
   readonly #claim: (path: string) => Promise<boolean>;
   readonly #release: (path: string) => Promise<boolean>;
   readonly #retryDelayMs: number;
-  readonly #maxRetries: number;
+  readonly #maxRetryDelayMs: number;
   #desired = new Set<string>();
   #confirmed = new Set<string>();
   #queue: Promise<void> = Promise.resolve();
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #retryCount = 0;
+  #disposed = false;
 
   constructor(options: {
     claim: (path: string) => Promise<boolean>;
     release: (path: string) => Promise<boolean>;
     retryDelayMs?: number;
-    maxRetries?: number;
+    maxRetryDelayMs?: number;
   }) {
     this.#claim = options.claim;
     this.#release = options.release;
     this.#retryDelayMs = options.retryDelayMs ?? 250;
-    this.#maxRetries = options.maxRetries ?? 3;
+    this.#maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
   }
 
   setDesiredPrompt(prompt: string): void {
@@ -57,6 +58,7 @@ export class TextAttachmentClaimReconciler {
   }
 
   setDesiredPaths(paths: Iterable<string>): void {
+    if (this.#disposed) return;
     this.#desired = new Set(paths);
     this.#retryCount = 0;
     this.#clearRetry();
@@ -64,7 +66,20 @@ export class TextAttachmentClaimReconciler {
   }
 
   confirmPaths(paths: Iterable<string>): void {
+    if (this.#disposed) return;
     for (const path of paths) this.#confirmed.add(path);
+  }
+
+  reconcileNow(): void {
+    if (this.#disposed) return;
+    this.#retryCount = 0;
+    this.#clearRetry();
+    this.#enqueueReconcile();
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+    this.#clearRetry();
   }
 
   snapshot(): { desired: Set<string>; confirmed: Set<string> } {
@@ -79,10 +94,12 @@ export class TextAttachmentClaimReconciler {
   }
 
   #enqueueReconcile(): void {
+    if (this.#disposed) return;
     this.#queue = this.#queue.catch(() => undefined).then(() => this.#reconcile());
   }
 
   async #reconcile(): Promise<void> {
+    if (this.#disposed) return;
     let failed = false;
     for (const path of this.#desired) {
       if (this.#confirmed.has(path)) continue;
@@ -98,8 +115,11 @@ export class TextAttachmentClaimReconciler {
       this.#retryCount = 0;
       return;
     }
-    if (this.#retryCount >= this.#maxRetries || this.#retryTimer !== null) return;
-    const delay = this.#retryDelayMs * 2 ** this.#retryCount;
+    if (this.#retryTimer !== null || this.#disposed) return;
+    const delay = Math.min(
+      this.#retryDelayMs * 2 ** Math.min(this.#retryCount, 30),
+      this.#maxRetryDelayMs,
+    );
     this.#retryCount += 1;
     this.#retryTimer = setTimeout(() => {
       this.#retryTimer = null;
@@ -116,15 +136,14 @@ export class TextAttachmentClaimReconciler {
 
 export async function retryTextAttachmentOperation(
   operation: () => Promise<boolean>,
-  options: { maxAttempts?: number; retryDelayMs?: number } = {},
+  options: { retryDelayMs?: number; maxRetryDelayMs?: number; signal?: AbortSignal } = {},
 ): Promise<boolean> {
-  const maxAttempts = options.maxAttempts ?? 3;
   const retryDelayMs = options.retryDelayMs ?? 100;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+  const maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
+  for (let attempt = 0; !options.signal?.aborted; attempt += 1) {
     if (await operation()) return true;
-    if (attempt + 1 < maxAttempts) {
-      await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs * 2 ** attempt));
-    }
+    const delay = Math.min(retryDelayMs * 2 ** Math.min(attempt, 30), maxRetryDelayMs);
+    await new Promise<void>((resolve) => setTimeout(resolve, delay));
   }
   return false;
 }

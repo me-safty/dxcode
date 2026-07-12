@@ -5175,6 +5175,7 @@ function ChatViewContent(props: ChatViewProps) {
                       isServerThread={isServerThread}
                       isLocalDraftThread={isLocalDraftThread}
                       phase={phase}
+                      connectionPhase={activeEnvironmentConnectionPhase}
                       isConnecting={isConnecting}
                       isSendBusy={isSendBusy}
                       isPreparingWorktree={isPreparingWorktree}

@@ -70,6 +70,49 @@ describe("text attachment claims", () => {
     expect(claim).toHaveBeenCalledTimes(2);
   });
 
+  it("continues retrying claims beyond three failures with capped backoff", async () => {
+    vi.useFakeTimers();
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const reconciler = new TextAttachmentClaimReconciler({
+      claim,
+      release: vi.fn().mockResolvedValue(true),
+      retryDelayMs: 100,
+      maxRetryDelayMs: 200,
+    });
+
+    reconciler.setDesiredPaths([PATH]);
+    await reconciler.settled();
+    await vi.advanceTimersByTimeAsync(700);
+    await reconciler.settled();
+
+    expect(claim).toHaveBeenCalledTimes(5);
+    expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
+  });
+
+  it("reconciles immediately when a connection resumes", async () => {
+    vi.useFakeTimers();
+    const claim = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const reconciler = new TextAttachmentClaimReconciler({
+      claim,
+      release: vi.fn().mockResolvedValue(true),
+      retryDelayMs: 10_000,
+    });
+
+    reconciler.setDesiredPaths([PATH]);
+    await reconciler.settled();
+    reconciler.reconcileNow();
+    await reconciler.settled();
+
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
+  });
+
   it("retries a failed imperative release without forgetting the claim", async () => {
     vi.useFakeTimers();
     const release = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
@@ -111,14 +154,40 @@ describe("text attachment claims", () => {
     expect(release).not.toHaveBeenCalled();
   });
 
-  it("retries destructive bulk releases", async () => {
+  it("retries destructive bulk releases beyond three failures", async () => {
     vi.useFakeTimers();
-    const operation = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const operation = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
 
-    const result = retryTextAttachmentOperation(operation, { retryDelayMs: 100 });
-    await vi.advanceTimersByTimeAsync(100);
+    const result = retryTextAttachmentOperation(operation, {
+      retryDelayMs: 100,
+      maxRetryDelayMs: 200,
+    });
+    await vi.advanceTimersByTimeAsync(700);
 
     await expect(result).resolves.toBe(true);
-    expect(operation).toHaveBeenCalledTimes(2);
+    expect(operation).toHaveBeenCalledTimes(5);
+  });
+
+  it("cancels pending retry timers when disposed on unmount", async () => {
+    vi.useFakeTimers();
+    const claim = vi.fn().mockResolvedValue(false);
+    const reconciler = new TextAttachmentClaimReconciler({
+      claim,
+      release: vi.fn().mockResolvedValue(true),
+      retryDelayMs: 100,
+    });
+
+    reconciler.setDesiredPaths([PATH]);
+    await reconciler.settled();
+    reconciler.dispose();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(claim).toHaveBeenCalledOnce();
   });
 });

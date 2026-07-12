@@ -588,16 +588,23 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
           const claims = composerDraftEntriesEnvironment(environmentId).flatMap(
             ({ target, prompt }) => textAttachmentClaims(target, prompt),
           );
-          yield* Effect.forEach(
-            claims,
-            ({ path, draftOwnerId }) =>
-              request(WS_METHODS.assetsReleaseTextAttachment, { path, draftOwnerId }).pipe(
-                Effect.provideService(EnvironmentSupervisor, supervisor),
-                Effect.retry({ times: 2 }),
-                Effect.ignoreCause({ log: true }),
-              ),
-            { concurrency: 1, discard: true },
+          const releaseResult = yield* Effect.result(
+            Effect.forEach(
+              claims,
+              ({ path, draftOwnerId }) =>
+                request(WS_METHODS.assetsReleaseTextAttachment, { path, draftOwnerId }).pipe(
+                  Effect.provideService(EnvironmentSupervisor, supervisor),
+                  Effect.retry({ times: 2 }),
+                ),
+              { concurrency: 1, discard: true },
+            ),
           );
+          if (releaseResult._tag === "Failure") {
+            yield* Effect.logWarning("Could not release text attachment draft claims.", {
+              environmentId,
+            });
+            return;
+          }
         }
         clearComposerDraftsEnvironment(environmentId);
       }),
