@@ -495,7 +495,10 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
     { concurrency: 1 },
   );
 
-  if (sideEffects.textAttachmentRelativePathsToRemove.size > 0) {
+  if (
+    sideEffects.textAttachmentRelativePathsToRemove.size > 0 ||
+    sideEffects.deletedThreadIds.size > 0
+  ) {
     const retainedTextAttachmentPaths = collectThreadTextAttachmentRelativePaths(
       attachmentsRootDir,
       (yield* projectionThreadMessageRepository.listRetained()).filter(
