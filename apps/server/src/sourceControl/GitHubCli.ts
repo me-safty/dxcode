@@ -277,6 +277,10 @@ export class GitHubCli extends Context.Service<
       readonly repository: string;
     }) => Effect.Effect<GitHubRepositoryCloneUrls, GitHubCliError>;
 
+    readonly getPullRequestBaseRepositoryCloneUrls: (input: {
+      readonly cwd: string;
+    }) => Effect.Effect<GitHubRepositoryCloneUrls, GitHubCliError>;
+
     readonly createRepository: (input: {
       readonly cwd: string;
       readonly repository: string;
@@ -409,6 +413,27 @@ export const make = Effect.gen(function* () {
   const resolvePullRequestRepositoryContext = (cwd: string) =>
     Cache.get(pullRequestRepositoryContextCache, cwd);
 
+  const getRepositoryCloneUrls: GitHubCli["Service"]["getRepositoryCloneUrls"] = (input) =>
+    execute({
+      cwd: input.cwd,
+      args: ["repo", "view", input.repository, "--json", "nameWithOwner,url,sshUrl"],
+    }).pipe(
+      Effect.map((result) => result.stdout.trim()),
+      Effect.flatMap((raw) =>
+        decodeRawGitHubRepositoryCloneUrls(raw).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GitHubRepositoryDecodeError({
+                command: "gh",
+                cwd: input.cwd,
+                cause,
+              }),
+          ),
+        ),
+      ),
+      Effect.map(normalizeRepositoryCloneUrls),
+    );
+
   return GitHubCli.of({
     execute,
     listPullRequests: (input) =>
@@ -490,25 +515,12 @@ export const make = Effect.gen(function* () {
           ),
         ),
       ),
-    getRepositoryCloneUrls: (input) =>
-      execute({
-        cwd: input.cwd,
-        args: ["repo", "view", input.repository, "--json", "nameWithOwner,url,sshUrl"],
-      }).pipe(
-        Effect.map((result) => result.stdout.trim()),
-        Effect.flatMap((raw) =>
-          decodeRawGitHubRepositoryCloneUrls(raw).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GitHubRepositoryDecodeError({
-                  command: "gh",
-                  cwd: input.cwd,
-                  cause,
-                }),
-            ),
-          ),
+    getRepositoryCloneUrls,
+    getPullRequestBaseRepositoryCloneUrls: (input) =>
+      resolvePullRequestRepositoryContext(input.cwd).pipe(
+        Effect.flatMap((context) =>
+          getRepositoryCloneUrls({ cwd: input.cwd, repository: context.baseRepository }),
         ),
-        Effect.map(normalizeRepositoryCloneUrls),
       ),
     createRepository: (input) =>
       execute({

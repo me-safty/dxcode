@@ -181,6 +181,20 @@ export const make = Effect.gen(function* () {
             }),
         ),
       ),
+    getTargetRepositoryCloneUrls: (input) =>
+      github.getPullRequestBaseRepositoryCloneUrls(input).pipe(
+        Effect.mapError(
+          (error) =>
+            new SourceControlProviderError({
+              provider: "github",
+              operation: "getRepositoryCloneUrls",
+              command: error.command,
+              cwd: input.cwd,
+              detail: error.detail,
+              cause: error,
+            }),
+        ),
+      ),
     createRepository: (input) =>
       github.createRepository(input).pipe(
         Effect.mapError(

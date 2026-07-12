@@ -543,6 +543,17 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           cwd: input.cwd,
           args: ["repo", "view", input.repository, "--json", "nameWithOwner,url,sshUrl"],
         }).pipe(Effect.map((result) => JSON.parse(result.stdout))),
+      getPullRequestBaseRepositoryCloneUrls: (input) =>
+        execute({
+          cwd: input.cwd,
+          args: [
+            "repo",
+            "view",
+            scenario.baseRepository ?? "pingdotgg/codething-mvp",
+            "--json",
+            "nameWithOwner,url,sshUrl",
+          ],
+        }).pipe(Effect.map((result) => JSON.parse(result.stdout))),
       createRepository: (input) =>
         Effect.fail(
           new GitHubCli.GitHubCliCommandError({
@@ -2417,6 +2428,71 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.pr.status).toBe("created");
       expect(generatedCommitSummary).toContain("Feature commit");
       expect(generatedCommitSummary).not.toContain("Remote base commit");
+    }),
+  );
+
+  it.effect("generates PR content against upstream when origin is a stale fork", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const forkDir = yield* createBareRemote();
+      const upstreamDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", forkDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      yield* runGit(repoDir, ["remote", "add", "seed-upstream", upstreamDir]);
+      yield* runGit(repoDir, ["push", "seed-upstream", "main"]);
+      yield* runGit(upstreamDir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+      const upstreamPeerDir = yield* makeTempDir("t3code-upstream-peer-");
+      yield* runGit(upstreamPeerDir, ["clone", upstreamDir, "."]);
+      yield* runGit(upstreamPeerDir, ["config", "user.email", "peer@example.com"]);
+      yield* runGit(upstreamPeerDir, ["config", "user.name", "Peer User"]);
+      NodeFS.writeFileSync(NodePath.join(upstreamPeerDir, "upstream.txt"), "upstream\n");
+      yield* runGit(upstreamPeerDir, ["add", "upstream.txt"]);
+      yield* runGit(upstreamPeerDir, ["commit", "-m", "Upstream base commit"]);
+      yield* runGit(upstreamPeerDir, ["push", "origin", "main"]);
+
+      yield* configureVisibleRemoteUrlWithLocalRewrite(
+        repoDir,
+        "origin",
+        "git@github.com:octocat/t3code.git",
+        forkDir,
+      );
+      yield* runGit(repoDir, ["config", "remote.origin.pushurl", forkDir]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/upstream-range"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "feature.txt"), "feature\n");
+      yield* runGit(repoDir, ["add", "feature.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/upstream-range"]);
+
+      let generatedCommitSummary = "";
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          baseRepository: "pingdotgg/t3code",
+          repositoryCloneUrls: {
+            "pingdotgg/t3code": {
+              url: upstreamDir,
+              sshUrl: upstreamDir,
+            },
+          },
+          prListSequence: ["[]", "[]"],
+        },
+        textGeneration: {
+          generatePrContent: (input) => {
+            generatedCommitSummary = input.commitSummary;
+            return Effect.succeed({ title: "Feature PR", body: "Feature body" });
+          },
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+      });
+
+      expect(result.pr.status).toBe("created");
+      expect(generatedCommitSummary).toContain("Feature commit");
+      expect(generatedCommitSummary).not.toContain("Upstream base commit");
     }),
   );
 
