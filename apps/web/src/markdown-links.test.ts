@@ -107,6 +107,17 @@ describe("resolveMarkdownFileLinkTarget", () => {
     });
   });
 
+  it("recognizes extensionless generated attachments outside standard posix roots", () => {
+    const attachmentPath =
+      "/srv/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/extensionless-test";
+
+    expect(resolveMarkdownFileLinkMeta(attachmentPath, "/repo/project")).toMatchObject({
+      filePath: attachmentPath,
+      basename: "extensionless-test",
+      workspaceRelativePath: null,
+    });
+  });
+
   it("normalizes slash-prefixed windows drive paths before resolving", () => {
     expect(
       resolveMarkdownFileLinkTarget(

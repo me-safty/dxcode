@@ -1,4 +1,5 @@
 import { inferEntryKindFromPath } from "../../pierre-icons";
+import { isTextAttachmentPath } from "../../textAttachmentPaths";
 import {
   CHAT_INLINE_CHIP_CLASS_NAME,
   CHAT_INLINE_CHIP_LABEL_CLASS_NAME,
@@ -11,10 +12,8 @@ import { PierreEntryIcon } from "./PierreEntryIcon";
 export const FILE_TAG_CHIP_CLASS_NAME = COMPOSER_INLINE_CHIP_CLASS_NAME;
 export const CHAT_FILE_TAG_CHIP_CLASS_NAME = CHAT_INLINE_CHIP_CLASS_NAME;
 
-const TEXT_ATTACHMENT_PATH_PATTERN = /(?:^|[\\/])\.t3[\\/]attachments[\\/]/;
-
 export function inferFileTagEntryKind(path: string): "file" | "directory" {
-  return TEXT_ATTACHMENT_PATH_PATTERN.test(path) ? "file" : inferEntryKindFromPath(path);
+  return isTextAttachmentPath(path) ? "file" : inferEntryKindFromPath(path);
 }
 
 export function FileTagChipContent(props: {
