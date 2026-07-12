@@ -1871,6 +1871,60 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("create_pr reuses an existing upstream PR from a GitHub Enterprise fork", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const forkDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", forkDir]);
+      yield* configureVisibleRemoteUrlWithLocalRewrite(
+        repoDir,
+        "origin",
+        "git@github.company.com:octocat/t3code.git",
+        forkDir,
+      );
+      yield* runGit(repoDir, ["config", "remote.origin.pushurl", forkDir]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/enterprise-pr"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/enterprise-pr"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          baseRepository: "github.company.com/pingdotgg/t3code",
+          headRepositoryOwner: "octocat",
+          prListByHeadSelector: {
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            "octocat:feature/enterprise-pr": JSON.stringify([
+              {
+                number: 3901,
+                title: "Existing enterprise PR",
+                url: "https://github.company.com/pingdotgg/t3code/pull/3901",
+                baseRefName: "main",
+                headRefName: "feature/enterprise-pr",
+                state: "OPEN",
+                isCrossRepository: true,
+                headRepository: {
+                  nameWithOwner: "octocat/t3code",
+                },
+                headRepositoryOwner: {
+                  login: "octocat",
+                },
+              },
+            ]),
+          },
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+      });
+
+      expect(result.pr.status).toBe("opened_existing");
+      expect(result.pr.number).toBe(3901);
+      expect(ghCalls.some((call) => call.startsWith("pr create "))).toBe(false);
+    }),
+  );
+
   it.effect("create_pr falls back to main when source control provider detection fails", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
