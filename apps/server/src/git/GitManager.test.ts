@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
+import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expect } from "vite-plus/test";
@@ -21,6 +22,7 @@ import type {
 
 import { GitCommandError, TextGenerationError } from "@t3tools/contracts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import { decodeGitHubPullRequestListJson } from "../sourceControl/gitHubPullRequests.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -98,72 +100,6 @@ interface FakeGitTextGeneration {
 }
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
-
-function normalizeFakePullRequestSummary(raw: unknown): GitHubCli.GitHubPullRequestSummary | null {
-  if (!raw || typeof raw !== "object") {
-    return null;
-  }
-
-  const record = raw as Record<string, unknown>;
-  const number = record.number;
-  const title = record.title;
-  const url = record.url;
-  const baseRefName = record.baseRefName;
-  const headRefName = record.headRefName;
-  const headRepository =
-    typeof record.headRepository === "object" && record.headRepository !== null
-      ? (record.headRepository as Record<string, unknown>)
-      : null;
-  const headRepositoryOwner =
-    typeof record.headRepositoryOwner === "object" && record.headRepositoryOwner !== null
-      ? (record.headRepositoryOwner as Record<string, unknown>)
-      : null;
-
-  if (
-    typeof number !== "number" ||
-    typeof title !== "string" ||
-    typeof url !== "string" ||
-    typeof baseRefName !== "string" ||
-    typeof headRefName !== "string"
-  ) {
-    return null;
-  }
-
-  const state =
-    typeof record.state === "string"
-      ? record.state === "OPEN" || record.state === "open"
-        ? "open"
-        : record.state === "CLOSED" || record.state === "closed"
-          ? "closed"
-          : "merged"
-      : undefined;
-  const isCrossRepository =
-    typeof record.isCrossRepository === "boolean" ? record.isCrossRepository : undefined;
-  const headRepositoryNameWithOwner =
-    typeof record.headRepositoryNameWithOwner === "string"
-      ? record.headRepositoryNameWithOwner
-      : typeof headRepository?.nameWithOwner === "string"
-        ? headRepository.nameWithOwner
-        : undefined;
-  const headRepositoryOwnerLogin =
-    typeof record.headRepositoryOwnerLogin === "string"
-      ? record.headRepositoryOwnerLogin
-      : typeof headRepositoryOwner?.login === "string"
-        ? headRepositoryOwner.login
-        : undefined;
-
-  return {
-    number,
-    title,
-    url,
-    baseRefName,
-    headRefName,
-    ...(state ? { state } : {}),
-    ...(isCrossRepository !== undefined ? { isCrossRepository } : {}),
-    ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
-    ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
-  };
-}
 
 function runGitSyncForFakeGh(cwd: string, args: readonly string[]): void {
   const result = NodeChildProcess.spawnSync("git", args, {
@@ -520,7 +456,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
   return {
     service: {
       execute,
-      listOpenPullRequests: (input) =>
+      listPullRequests: (input) =>
         execute({
           cwd: input.cwd,
           args: [
@@ -529,21 +465,27 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "--head",
             qualifyHeadSelector(input.headSelector),
             "--state",
-            "open",
+            input.state,
             "--limit",
-            String(input.limit ?? 1),
+            String(input.limit ?? (input.state === "open" ? 1 : 20)),
             "--repo",
             scenario.baseRepository ?? "pingdotgg/codething-mvp",
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
           ],
         }).pipe(
-          Effect.map((result) => JSON.parse(result.stdout) as unknown[]),
-          Effect.map((raw) =>
-            raw
-              .map((entry) => normalizeFakePullRequestSummary(entry))
-              .filter((entry): entry is GitHubCli.GitHubPullRequestSummary => entry !== null),
-          ),
+          Effect.flatMap((result) => {
+            const decoded = decodeGitHubPullRequestListJson(result.stdout);
+            return Result.isSuccess(decoded)
+              ? Effect.succeed(decoded.success)
+              : Effect.fail(
+                  new GitHubCli.GitHubPullRequestListDecodeError({
+                    command: "gh",
+                    cwd: input.cwd,
+                    cause: decoded.failure,
+                  }),
+                );
+          }),
         ),
       createPullRequest: (input) =>
         execute({
@@ -588,6 +530,8 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "pr",
             "view",
             input.reference,
+            "--repo",
+            scenario.baseRepository ?? "pingdotgg/codething-mvp",
             "--json",
             "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
           ],
@@ -610,7 +554,14 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
       checkoutPullRequest: (input) =>
         execute({
           cwd: input.cwd,
-          args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
+          args: [
+            "pr",
+            "checkout",
+            input.reference,
+            ...(input.force ? ["--force"] : []),
+            "--repo",
+            scenario.baseRepository ?? "pingdotgg/codething-mvp",
+          ],
         }).pipe(Effect.asVoid),
     },
     ghCalls,
@@ -1089,7 +1040,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           state: "open",
         });
         expect(ghCalls).toContain(
-          "pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "pr list --head jasonLaster:statemachine --state all --limit 20 --repo pingdotgg/codething-mvp --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
         );
       }),
     20_000,
@@ -2642,7 +2593,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.worktreePath).toBeNull();
       const branch = (yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim();
       expect(branch).toBe("feature/pr-local");
-      expect(ghCalls).toContain("pr checkout 64 --force");
+      expect(ghCalls).toContain("pr checkout 64 --force --repo pingdotgg/codething-mvp");
     }),
   );
 

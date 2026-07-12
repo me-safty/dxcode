@@ -1,6 +1,7 @@
 import { assert, it, afterEach, describe, expect, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { VcsProcessExitError, VcsProcessSpawnError } from "@t3tools/contracts";
@@ -55,6 +56,9 @@ describe("GitHubCli.layer", () => {
   it.effect("parses pull request view output", () =>
     Effect.gen(function* () {
       mockRun.mockReturnValueOnce(
+        Effect.succeed(processOutput("pingdotgg/codething-mvp\tpingdotgg/codething-mvp\n")),
+      );
+      mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
             // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -95,13 +99,15 @@ describe("GitHubCli.layer", () => {
         headRepositoryNameWithOwner: "octocat/codething-mvp",
         headRepositoryOwnerLogin: "octocat",
       });
-      expect(mockRun).toHaveBeenCalledWith({
+      expect(mockRun).toHaveBeenNthCalledWith(2, {
         operation: "GitHubCli.execute",
         command: "gh",
         args: [
           "pr",
           "view",
           "#42",
+          "--repo",
+          "pingdotgg/codething-mvp",
           "--json",
           "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
         ],
@@ -113,6 +119,9 @@ describe("GitHubCli.layer", () => {
 
   it.effect("trims pull request fields decoded from gh json", () =>
     Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(processOutput("pingdotgg/codething-mvp\tpingdotgg/codething-mvp\n")),
+      );
       mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
@@ -193,9 +202,10 @@ describe("GitHubCli.layer", () => {
       );
 
       const gh = yield* GitHubCli.GitHubCli;
-      const result = yield* gh.listOpenPullRequests({
+      const result = yield* gh.listPullRequests({
         cwd: "/repo",
         headSelector: "feature/pr-list",
+        state: "open",
       });
 
       assert.deepStrictEqual(result, [
@@ -206,6 +216,7 @@ describe("GitHubCli.layer", () => {
           baseRefName: "main",
           headRefName: "feature/pr-list",
           state: "open",
+          updatedAt: Option.none(),
         },
       ]);
       expect(mockRun).toHaveBeenNthCalledWith(2, {
@@ -223,7 +234,7 @@ describe("GitHubCli.layer", () => {
           "--repo",
           "pingdotgg/codething-mvp",
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
         ],
         cwd: "/repo",
         timeoutMs: 30_000,
@@ -377,7 +388,11 @@ describe("GitHubCli.layer", () => {
         detail:
           "GraphQL: Could not resolve to a PullRequest with the number of 4888. (repository.pullRequest)",
       });
-      mockRun.mockReturnValueOnce(Effect.fail(cause));
+      mockRun
+        .mockReturnValueOnce(
+          Effect.succeed(processOutput("pingdotgg/codething-mvp\tpingdotgg/codething-mvp\n")),
+        )
+        .mockReturnValueOnce(Effect.fail(cause));
 
       const gh = yield* GitHubCli.GitHubCli;
       const error = yield* gh

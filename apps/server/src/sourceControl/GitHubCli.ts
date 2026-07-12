@@ -1,15 +1,18 @@
 import * as Context from "effect/Context";
 import * as Cache from "effect/Cache";
+import type * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
 import {
   TrimmedNonEmptyString,
+  type ChangeRequestState,
   type SourceControlRepositoryVisibility,
   type VcsError,
 } from "@t3tools/contracts";
@@ -128,7 +131,7 @@ export class GitHubPullRequestListDecodeError extends Schema.TaggedErrorClass<Gi
   }
 
   override get message(): string {
-    return `GitHub CLI failed in listOpenPullRequests: ${this.detail}`;
+    return `GitHub CLI failed in listPullRequests: ${this.detail}`;
   }
 }
 
@@ -221,6 +224,7 @@ export interface GitHubPullRequestSummary {
   readonly baseRefName: string;
   readonly headRefName: string;
   readonly state?: "open" | "closed" | "merged";
+  readonly updatedAt?: Option.Option<DateTime.Utc>;
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
@@ -241,9 +245,10 @@ export class GitHubCli extends Context.Service<
       readonly timeoutMs?: number;
     }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitHubCliError>;
 
-    readonly listOpenPullRequests: (input: {
+    readonly listPullRequests: (input: {
       readonly cwd: string;
       readonly headSelector: string;
+      readonly state: ChangeRequestState | "all";
       readonly limit?: number;
     }) => Effect.Effect<ReadonlyArray<GitHubPullRequestSummary>, GitHubCliError>;
 
@@ -391,7 +396,7 @@ export const make = Effect.gen(function* () {
 
   return GitHubCli.of({
     execute,
-    listOpenPullRequests: (input) =>
+    listPullRequests: (input) =>
       resolvePullRequestRepositoryContext(input.cwd).pipe(
         Effect.flatMap((context) =>
           execute({
@@ -402,13 +407,13 @@ export const make = Effect.gen(function* () {
               "--head",
               qualifyPullRequestHead(context, input.headSelector),
               "--state",
-              "open",
+              input.state,
               "--limit",
-              String(input.limit ?? 1),
+              String(input.limit ?? (input.state === "open" ? 1 : 20)),
               "--repo",
               context.baseRepository,
               "--json",
-              "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+              "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
             ],
           }),
         ),
@@ -428,24 +433,27 @@ export const make = Effect.gen(function* () {
                     );
                   }
 
-                  return Effect.succeed(
-                    decoded.success.map(({ updatedAt: _updatedAt, ...summary }) => summary),
-                  );
+                  return Effect.succeed(decoded.success);
                 }),
               ),
         ),
       ),
     getPullRequest: (input) =>
-      execute({
-        cwd: input.cwd,
-        args: [
-          "pr",
-          "view",
-          input.reference,
-          "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
-        ],
-      }).pipe(
+      resolvePullRequestRepositoryContext(input.cwd).pipe(
+        Effect.flatMap((context) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "pr",
+              "view",
+              input.reference,
+              "--repo",
+              context.baseRepository,
+              "--json",
+              "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            ],
+          }),
+        ),
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
           Effect.sync(() => decodeGitHubPullRequestJson(raw)).pipe(
@@ -541,10 +549,22 @@ export const make = Effect.gen(function* () {
         }),
       ),
     checkoutPullRequest: (input) =>
-      execute({
-        cwd: input.cwd,
-        args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
-      }).pipe(Effect.asVoid),
+      resolvePullRequestRepositoryContext(input.cwd).pipe(
+        Effect.flatMap((context) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "pr",
+              "checkout",
+              input.reference,
+              ...(input.force ? ["--force"] : []),
+              "--repo",
+              context.baseRepository,
+            ],
+          }),
+        ),
+        Effect.asVoid,
+      ),
   });
 });
 
