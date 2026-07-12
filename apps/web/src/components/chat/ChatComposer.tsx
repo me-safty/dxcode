@@ -44,7 +44,6 @@ import {
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
-  composerDraftEntriesEnvironment,
   type ComposerImageAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
@@ -92,7 +91,6 @@ import {
   textAttachmentClaimChanges,
   textAttachmentDraftOwnerId,
   getTextAttachmentClaimReconciler as getRegisteredTextAttachmentClaimReconciler,
-  reconcileTextAttachmentClaimsEnvironment,
   releaseTextAttachmentClaimsInBackground,
   runTextAttachmentUpload,
 } from "../../textAttachmentClaims";
@@ -472,7 +470,6 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
-  connectionPhase: EnvironmentConnectionPresentation["phase"];
   isConnecting: boolean;
   isSendBusy: boolean;
   isPreparingWorktree: boolean;
@@ -582,7 +579,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     phase,
-    connectionPhase,
     isConnecting,
     isSendBusy,
     isPreparingWorktree,
@@ -979,16 +975,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (textAttachmentClaimsHeld) return;
     getTextAttachmentClaimReconciler().setDesiredPrompt(prompt);
   }, [getTextAttachmentClaimReconciler, prompt, textAttachmentClaimsHeld]);
-
-  useEffect(() => {
-    if (connectionPhase === "connected") {
-      reconcileTextAttachmentClaimsEnvironment(
-        environmentId,
-        composerDraftEntriesEnvironment(environmentId),
-        textAttachmentClaimOperations,
-      );
-    }
-  }, [connectionPhase, environmentId, textAttachmentClaimOperations]);
 
   // ------------------------------------------------------------------
   // Derived: composer send state
