@@ -14,6 +14,11 @@ describe("inferFileTagEntryKind", () => {
         "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/extensionless-test",
       ),
     ).toBe("file");
+    expect(
+      inferFileTagEntryKind(
+        "/srv/project/.t3/attachments/12345678-1234-1234-1234-123456789abc-extensionless-test",
+      ),
+    ).toBe("file");
   });
 
   it("preserves directory inference for ordinary extensionless paths", () => {

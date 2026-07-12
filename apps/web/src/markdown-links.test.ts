@@ -116,6 +116,15 @@ describe("resolveMarkdownFileLinkTarget", () => {
       basename: "extensionless-test",
       workspaceRelativePath: null,
     });
+    expect(
+      resolveMarkdownFileLinkMeta(
+        "/srv/project/.t3/attachments/12345678-1234-1234-1234-123456789abc-extensionless-test",
+        "/repo/project",
+      ),
+    ).toMatchObject({
+      basename: "12345678-1234-1234-1234-123456789abc-extensionless-test",
+      workspaceRelativePath: null,
+    });
   });
 
   it("normalizes slash-prefixed windows drive paths before resolving", () => {
