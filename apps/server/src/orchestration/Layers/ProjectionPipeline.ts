@@ -485,23 +485,25 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
     { concurrency: 1 },
   );
 
-  const retainedTextAttachmentPaths = collectThreadTextAttachmentRelativePaths(
-    attachmentsRootDir,
-    (yield* projectionThreadMessageRepository.listRetained()).filter(
-      (message) => !sideEffects.deletedThreadIds.has(message.threadId),
-    ),
-  );
-  yield* Effect.forEach(
-    [...sideEffects.textAttachmentRelativePathsToRemove].filter(
-      (relativePath) => !retainedTextAttachmentPaths.has(relativePath),
-    ),
-    (relativePath) =>
-      fileSystem.remove(path.join(attachmentsRootDir, path.dirname(relativePath)), {
-        recursive: true,
-        force: true,
-      }),
-    { concurrency: 1 },
-  );
+  if (sideEffects.textAttachmentRelativePathsToRemove.size > 0) {
+    const retainedTextAttachmentPaths = collectThreadTextAttachmentRelativePaths(
+      attachmentsRootDir,
+      (yield* projectionThreadMessageRepository.listRetained()).filter(
+        (message) => !sideEffects.deletedThreadIds.has(message.threadId),
+      ),
+    );
+    yield* Effect.forEach(
+      [...sideEffects.textAttachmentRelativePathsToRemove].filter(
+        (relativePath) => !retainedTextAttachmentPaths.has(relativePath),
+      ),
+      (relativePath) =>
+        fileSystem.remove(path.join(attachmentsRootDir, path.dirname(relativePath)), {
+          recursive: true,
+          force: true,
+        }),
+      { concurrency: 1 },
+    );
+  }
 });
 
 const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjectionPipeline")(
