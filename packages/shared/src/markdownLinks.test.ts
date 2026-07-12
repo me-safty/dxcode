@@ -35,4 +35,22 @@ describe("markdownLinkDestinations", () => {
     ).toEqual(["/real"]);
     expect(markdownLinkDestinations("unmatched ` [still-real](/real)")).toEqual(["/real"]);
   });
+
+  it("requires a valid closing fence and skips indented code blocks", () => {
+    expect(
+      markdownLinkDestinations(
+        [
+          "```",
+          "[inside](/inside)",
+          "```not-a-close",
+          "[still-inside](/still-inside)",
+          "```   ",
+          "[outside](/outside)",
+          "    [space-indented](/space-indented)",
+          "\t[tab-indented](/tab-indented)",
+          "[final](/final)",
+        ].join("\n"),
+      ),
+    ).toEqual(["/outside", "/final"]);
+  });
 });

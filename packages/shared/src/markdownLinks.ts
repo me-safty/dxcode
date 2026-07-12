@@ -26,7 +26,14 @@ function fenceEnd(markdown: string, start: number, delimiter: string, runLength:
       delimiterRunLength(markdown, cursor, delimiter) >= runLength
     ) {
       const lineEnd = markdown.indexOf("\n", cursor);
-      return lineEnd < 0 ? markdown.length : lineEnd + 1;
+      const closingRunLength = delimiterRunLength(markdown, cursor, delimiter);
+      const suffix = markdown.slice(
+        cursor + closingRunLength,
+        lineEnd < 0 ? markdown.length : lineEnd,
+      );
+      if (/^[ \t]*$/.test(suffix)) {
+        return lineEnd < 0 ? markdown.length : lineEnd + 1;
+      }
     }
     const nextLine = markdown.indexOf("\n", lineStart);
     if (nextLine < 0) return markdown.length;
@@ -57,6 +64,14 @@ export function markdownLinkDestinations(markdown: string): ReadonlyArray<string
   const destinations: Array<string> = [];
   let cursor = 0;
   while (cursor < markdown.length) {
+    if (
+      (cursor === 0 || markdown[cursor - 1] === "\n") &&
+      (markdown[cursor] === "\t" || markdown.startsWith("    ", cursor))
+    ) {
+      const lineEnd = markdown.indexOf("\n", cursor);
+      cursor = lineEnd < 0 ? markdown.length : lineEnd + 1;
+      continue;
+    }
     const character = markdown[cursor];
     if (character === "\\") {
       cursor += 2;
