@@ -53,6 +53,25 @@ describe("GitHubCli.layer", () => {
     assert.notProperty(commandFailure, "operation");
   });
 
+  it.effect("reports malformed repository context without a synthetic cause", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("invalid repository context\n")));
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const error = yield* gh
+        .listPullRequests({
+          cwd: "/repo",
+          headSelector: "feature/pr-list",
+          state: "open",
+        })
+        .pipe(Effect.flip);
+
+      assert.equal(error._tag, "GitHubRepositoryContextDecodeError");
+      assert.equal(error.detail, "GitHub CLI returned invalid pull request repository context.");
+      assert.notProperty(error, "cause");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("parses pull request view output", () =>
     Effect.gen(function* () {
       mockRun.mockReturnValueOnce(

@@ -131,6 +131,22 @@ export class GitHubCliCommandError extends Schema.TaggedErrorClass<GitHubCliComm
   }
 }
 
+export class GitHubRepositoryContextDecodeError extends Schema.TaggedErrorClass<GitHubRepositoryContextDecodeError>()(
+  "GitHubRepositoryContextDecodeError",
+  {
+    command: Schema.Literal("gh"),
+    cwd: Schema.String,
+  },
+) {
+  get detail(): string {
+    return "GitHub CLI returned invalid pull request repository context.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in resolvePullRequestRepositoryContext: ${this.detail}`;
+  }
+}
+
 const gitHubCliDecodeFields = {
   command: Schema.Literal("gh"),
   cwd: Schema.String,
@@ -194,6 +210,7 @@ export const GitHubCliError = Schema.Union([
   GitHubCliAuthenticationError,
   GitHubPullRequestNotFoundError,
   GitHubCliCommandError,
+  GitHubRepositoryContextDecodeError,
   GitHubPullRequestListDecodeError,
   GitHubChangeRequestListDecodeError,
   GitHubPullRequestDecodeError,
@@ -396,10 +413,9 @@ export const make = Effect.gen(function* () {
             return Effect.succeed({ baseRepository, headRepository });
           }
           return Effect.fail(
-            new GitHubCliCommandError({
+            new GitHubRepositoryContextDecodeError({
               command: "gh",
               cwd,
-              cause: new Error("GitHub CLI returned invalid repository context."),
             }),
           );
         }),
