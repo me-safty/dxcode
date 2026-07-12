@@ -91,4 +91,17 @@ describe("attachmentStore", () => {
     );
     expect(attachmentPath).not.toContain(`${NodePath.sep}..${NodePath.sep}`);
   });
+
+  it("bounds text attachment basenames and avoids Windows reserved names", () => {
+    const attachmentsDir = NodePath.join(NodeOS.tmpdir(), "t3code-attachments");
+    const reservedPath = createTextAttachmentPath({ attachmentsDir, fileName: "CON.ts" });
+    const longPath = createTextAttachmentPath({
+      attachmentsDir,
+      fileName: `${"a".repeat(300)}.tsx`,
+    });
+
+    expect(NodePath.basename(reservedPath)).toBe("_CON.ts");
+    expect(NodePath.basename(longPath)).toHaveLength(120);
+    expect(NodePath.basename(longPath)).toMatch(/\.tsx$/);
+  });
 });

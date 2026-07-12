@@ -13,6 +13,8 @@ import { inferImageExtension, SAFE_IMAGE_FILE_EXTENSIONS } from "./imageMime.ts"
 
 const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
 const TEXT_ATTACHMENT_DIRECTORY = "text";
+const TEXT_ATTACHMENT_FILE_NAME_MAX_CHARS = 120;
+const WINDOWS_RESERVED_FILE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS = 80;
 const ATTACHMENT_ID_THREAD_SEGMENT_PATTERN = "[a-z0-9_]+(?:-[a-z0-9_]+)*";
 const ATTACHMENT_ID_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -115,11 +117,19 @@ export function createTextAttachmentPath(input: {
   readonly attachmentsDir: string;
   readonly fileName: string;
 }): string {
-  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-");
-  const safeName =
+  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/\.+$/, "");
+  let safeName =
     sanitizedName.length > 0 && sanitizedName !== "." && sanitizedName !== ".."
       ? sanitizedName
       : "context.txt";
+  if (WINDOWS_RESERVED_FILE_NAME_PATTERN.test(safeName)) {
+    safeName = `_${safeName}`;
+  }
+  if (safeName.length > TEXT_ATTACHMENT_FILE_NAME_MAX_CHARS) {
+    const extensionIndex = safeName.lastIndexOf(".");
+    const extension = extensionIndex > 0 ? safeName.slice(extensionIndex).slice(0, 20) : "";
+    safeName = `${safeName.slice(0, TEXT_ATTACHMENT_FILE_NAME_MAX_CHARS - extension.length)}${extension}`;
+  }
   return NodePath.join(
     input.attachmentsDir,
     TEXT_ATTACHMENT_DIRECTORY,
