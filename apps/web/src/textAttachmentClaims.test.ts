@@ -352,4 +352,26 @@ describe("text attachment claims", () => {
 
     expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
   });
+
+  it("reclaims paths partially released before environment preparation fails", async () => {
+    const environmentId = EnvironmentId.make("partially-released-environment");
+    const claim = vi.fn(async () => true);
+    const operations = { claim, release: vi.fn(async () => true) };
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId: "draft:partial-release",
+      operations,
+    });
+    reconciler.setDesiredPaths([PATH]);
+    await reconciler.settled();
+    expect(claim).toHaveBeenCalledOnce();
+
+    await pauseTextAttachmentClaimEnvironment(environmentId);
+    // Preparation released this claim, then a later release failed.
+    resumeTextAttachmentClaimEnvironment(environmentId);
+    await reconciler.settled();
+
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
+  });
 });

@@ -71,6 +71,11 @@ export class TextAttachmentClaimReconciler {
     for (const path of paths) this.#confirmed.add(path);
   }
 
+  invalidateDesiredConfirmations(): void {
+    if (this.#disposed) return;
+    for (const path of this.#desired) this.#confirmed.delete(path);
+  }
+
   reconcileNow(): void {
     if (this.#disposed || this.#paused) return;
     this.#retryCount = 0;
@@ -248,7 +253,9 @@ export async function pauseTextAttachmentClaimEnvironment(
 export function resumeTextAttachmentClaimEnvironment(environmentId: EnvironmentId): void {
   const prefix = `${environmentId}:`;
   for (const [key, reconciler] of textAttachmentClaimReconcilerRegistry) {
-    if (key.startsWith(prefix)) reconciler.resume();
+    if (!key.startsWith(prefix)) continue;
+    reconciler.invalidateDesiredConfirmations();
+    reconciler.resume();
   }
 }
 
