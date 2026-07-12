@@ -165,11 +165,32 @@ export function useThreadActions() {
     async (target: ScopedThreadRef, opts: { deletedThreadKeys?: ReadonlySet<string> } = {}) => {
       const resolved = resolveThreadTarget(target);
       if (!resolved) {
-        // Thread not in main store (e.g. archived thread) — dispatch delete directly.
+        const draftOwnerId = textAttachmentDraftOwnerId(target);
+        const discardedPrompt =
+          useComposerDraftStore.getState().getComposerDraft(target)?.prompt ?? "";
+        await fenceTextAttachmentUploadOwner(target.environmentId, draftOwnerId);
         const result = await deleteThreadMutation({
           environmentId: target.environmentId,
           input: { threadId: target.threadId },
         });
+        if (result._tag === "Failure") {
+          resumeTextAttachmentUploadOwner(target.environmentId, draftOwnerId);
+          return result;
+        }
+        await detachTextAttachmentClaimOwner(target.environmentId, draftOwnerId);
+        await Promise.all(
+          textAttachmentClaims(target, discardedPrompt).map(({ path }) =>
+            retryTextAttachmentOperation(async () => {
+              const released = await releaseTextAttachment({
+                environmentId: target.environmentId,
+                input: { path, draftOwnerId },
+              });
+              return detachedTextAttachmentReleaseComplete(released);
+            }),
+          ),
+        );
+        clearComposerDraftForThread(target);
+        tombstoneTextAttachmentUploadOwner(target.environmentId, draftOwnerId);
         if (result._tag === "Success") {
           refreshArchivedThreadsForEnvironment(target.environmentId);
         }
