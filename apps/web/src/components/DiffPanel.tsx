@@ -272,7 +272,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const latestTurn = orderedTurnDiffSummaries[0];
   const diffPreviewCacheKey = JSON.stringify({
     latestTurnId: latestTurn?.turnId ?? null,
-    workingTree: gitStatusQuery.data?.workingTree ?? null,
+    localGeneration: gitStatusQuery.data?.localGeneration ?? null,
   });
   const selectedScopeLabel =
     selectedTurnId === null

@@ -361,10 +361,51 @@ describe("VcsStatusBroadcaster", () => {
         _tag: "snapshot",
         local: baseLocalStatus,
         remote: null,
+        localGeneration: 1,
       } satisfies VcsStatusStreamEvent);
       assert.deepStrictEqual(remoteUpdated, {
         _tag: "remoteUpdated",
         remote: baseRemoteStatus,
+      } satisfies VcsStatusStreamEvent);
+    }).pipe(Effect.provide(makeTestLayer(state)));
+  });
+
+  it.effect("publishes a new local generation when the status summary is unchanged", () => {
+    const state = {
+      currentLocalStatus: baseLocalStatus,
+      currentRemoteStatus: baseRemoteStatus,
+      localStatusCalls: 0,
+      remoteStatusCalls: 0,
+      localInvalidationCalls: 0,
+      remoteInvalidationCalls: 0,
+    };
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+      const snapshotDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
+      const localUpdatedDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
+      yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }), (event) => {
+        if (event._tag === "snapshot") {
+          return Deferred.succeed(snapshotDeferred, event).pipe(Effect.ignore);
+        }
+        if (event._tag === "localUpdated") {
+          return Deferred.succeed(localUpdatedDeferred, event).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }).pipe(Effect.forkScoped);
+
+      const snapshot = yield* Deferred.await(snapshotDeferred);
+      yield* broadcaster.refreshLocalStatus("/repo");
+      const localUpdated = yield* Deferred.await(localUpdatedDeferred);
+
+      if (snapshot._tag !== "snapshot") {
+        return yield* Effect.die(`Expected snapshot, received ${snapshot._tag}`);
+      }
+      assert.strictEqual(snapshot.localGeneration, 1);
+      assert.deepStrictEqual(localUpdated, {
+        _tag: "localUpdated",
+        local: baseLocalStatus,
+        localGeneration: 2,
       } satisfies VcsStatusStreamEvent);
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
@@ -408,6 +449,7 @@ describe("VcsStatusBroadcaster", () => {
         _tag: "snapshot",
         local: baseLocalStatus,
         remote: null,
+        localGeneration: 1,
       } satisfies VcsStatusStreamEvent);
       assert.deepStrictEqual(remoteUpdated, {
         _tag: "remoteUpdated",
