@@ -7,6 +7,8 @@ import {
   FolderPlusIcon,
   Globe2Icon,
   LoaderIcon,
+  PinIcon,
+  PinOffIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -30,10 +32,13 @@ import {
   DndContext,
   type DragCancelEvent,
   type CollisionDetection,
+  type DragOverEvent,
   PointerSensor,
   type DragStartEvent,
   closestCorners,
   pointerWithin,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -197,6 +202,8 @@ import {
   orderItemsByPreferredIds,
   prioritizeThreadsByPinnedKeys,
   shouldClearThreadSelectionOnMouseDown,
+  resolveThreadPinDropAction,
+  type ThreadPinDropAction,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
   ThreadStatusPill,
@@ -324,6 +331,9 @@ interface SidebarThreadRowProps {
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
   jumpLabel: string | null;
+  threadDropId: string;
+  isPinned: boolean;
+  togglePinned: (threadKey: string, pinned: boolean) => void;
   appSettingsConfirmThreadArchive: boolean;
   renamingThreadKey: string | null;
   renamingTitle: string;
@@ -361,6 +371,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     orderedProjectThreadKeys,
     isActive,
     jumpLabel,
+    threadDropId,
+    isPinned,
+    togglePinned,
     appSettingsConfirmThreadArchive,
     renamingThreadKey,
     renamingTitle,
@@ -384,6 +397,15 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const threadDrag = useDraggable({ id: threadKey });
+  const threadPinDrop = useDroppable({ id: threadDropId });
+  const setThreadDragDropRef = useCallback(
+    (node: HTMLLIElement | null) => {
+      threadDrag.setNodeRef(node);
+      threadPinDrop.setNodeRef(node);
+    },
+    [threadDrag, threadPinDrop],
+  );
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -668,10 +690,23 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     },
     [attemptArchiveThread, threadRef],
   );
+  const handleTogglePinnedClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePinned(threadKey, !isPinned);
+    },
+    [isPinned, threadKey, togglePinned],
+  );
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
   return (
     <SidebarMenuSubItem
+      ref={setThreadDragDropRef}
+      style={{
+        transform: CSS.Translate.toString(threadDrag.transform),
+        opacity: threadDrag.isDragging ? 0.55 : undefined,
+      }}
       className="w-full"
       data-thread-item
       onMouseLeave={handleMouseLeave}
@@ -690,6 +725,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
+        {...threadDrag.attributes}
+        {...threadDrag.listeners}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && (
@@ -784,6 +821,32 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               isRemoteThread ? "max-sm:min-w-24" : "max-sm:min-w-20"
             }`}
           >
+            {!isConfirmingArchive && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <div className="pointer-events-none absolute top-1/2 right-7 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <button
+                        type="button"
+                        data-thread-selection-safe
+                        data-testid={`thread-pin-${thread.id}`}
+                        aria-label={`${isPinned ? "Unpin" : "Pin"} ${thread.title}`}
+                        className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                        onPointerDown={stopPropagationOnPointerDown}
+                        onClick={handleTogglePinnedClick}
+                      >
+                        {isPinned ? (
+                          <PinOffIcon className="size-3.5" />
+                        ) : (
+                          <PinIcon className="size-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  }
+                />
+                <TooltipPopup side="top">{isPinned ? "Unpin" : "Pin"}</TooltipPopup>
+              </Tooltip>
+            )}
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -902,6 +965,7 @@ interface SidebarProjectThreadListProps {
   activeRouteThreadKey: string | null;
   threadJumpLabelByKey: ReadonlyMap<string, string>;
   pinnedThreadKeys: readonly string[];
+  toggleThreadPinned: (threadKey: string, pinned: boolean) => void;
   appSettingsConfirmThreadArchive: boolean;
   renamingThreadKey: string | null;
   renamingTitle: string;
@@ -937,6 +1001,25 @@ interface SidebarProjectThreadListProps {
   collapseThreadListForProject: (projectKey: string) => void;
 }
 
+function SidebarPinnedDivider({ id, flow }: { id: string; flow: ThreadPinDropAction | null }) {
+  const { setNodeRef } = useDroppable({ id });
+  const colorClass =
+    flow === "pin"
+      ? "text-emerald-500 before:bg-emerald-500/70 after:bg-emerald-500/70"
+      : flow === "unpin"
+        ? "text-amber-500 before:bg-amber-500/70 after:bg-amber-500/70"
+        : "text-muted-foreground/45 before:bg-border/80 after:bg-border/80";
+  return (
+    <SidebarMenuSubItem
+      ref={setNodeRef}
+      aria-hidden="true"
+      className={`flex h-3 w-full items-center gap-1.5 px-2 transition-colors before:h-px before:flex-1 after:h-px after:flex-1 ${colorClass}`}
+    >
+      <PinIcon className="size-2.5 shrink-0 transition-colors" />
+    </SidebarMenuSubItem>
+  );
+}
+
 const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   props: SidebarProjectThreadListProps,
 ) {
@@ -954,6 +1037,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     activeRouteThreadKey,
     threadJumpLabelByKey,
     pinnedThreadKeys,
+    toggleThreadPinned,
     appSettingsConfirmThreadArchive,
     renamingThreadKey,
     renamingTitle,
@@ -979,107 +1063,159 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   } = props;
   const showMoreButtonRender = useMemo(() => <button type="button" />, []);
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
+  const threadDragSensor = useSensor(PointerSensor, { activationConstraint: { distance: 6 } });
+  const threadDragSensors = useSensors(threadDragSensor);
+  const pinDropPrefix = `${projectKey}:pin-drop:`;
+  const unpinDropPrefix = `${projectKey}:unpin-drop:`;
+  const dividerDropId = `${projectKey}:pin-divider`;
+  const [dragFlow, setDragFlow] = useState<ThreadPinDropAction | null>(null);
+
+  const resolveDropAction = useCallback(
+    (activeThreadKey: string, overId: string | null) =>
+      resolveThreadPinDropAction({
+        activeThreadKey,
+        overId,
+        pinDropPrefix,
+        unpinDropPrefix,
+        dividerDropId,
+        pinnedThreadKeys,
+      }),
+    [dividerDropId, pinDropPrefix, pinnedThreadKeys, unpinDropPrefix],
+  );
+
+  const handleThreadDragOver = useCallback(
+    (event: DragOverEvent) => {
+      setDragFlow(
+        resolveDropAction(String(event.active.id), event.over ? String(event.over.id) : null),
+      );
+    },
+    [resolveDropAction],
+  );
+
+  const handleThreadDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const activeThreadKey = String(event.active.id);
+      const action = resolveDropAction(activeThreadKey, event.over ? String(event.over.id) : null);
+      setDragFlow(null);
+      if (action !== null) {
+        toggleThreadPinned(activeThreadKey, action === "pin");
+      }
+    },
+    [resolveDropAction, toggleThreadPinned],
+  );
 
   return (
-    <SidebarMenuSub
-      ref={attachThreadListAutoAnimateRef}
-      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5"
+    <DndContext
+      sensors={threadDragSensors}
+      collisionDetection={pointerWithin}
+      onDragOver={handleThreadDragOver}
+      onDragCancel={() => setDragFlow(null)}
+      onDragEnd={handleThreadDragEnd}
     >
-      {shouldShowThreadPanel && showEmptyThreadState ? (
-        <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
-          <div
-            data-thread-selection-safe
-            className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
-          >
-            <span>No threads yet</span>
-          </div>
-        </SidebarMenuSubItem>
-      ) : null}
-      {shouldShowThreadPanel &&
-        renderedThreads.map((thread, index) => {
-          const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-          const showPinnedSeparator =
-            index > 0 &&
-            pinnedThreadKeys.includes(
-              scopedThreadKey(
-                scopeThreadRef(
-                  renderedThreads[index - 1]!.environmentId,
-                  renderedThreads[index - 1]!.id,
+      <SidebarMenuSub
+        ref={attachThreadListAutoAnimateRef}
+        className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5"
+      >
+        {shouldShowThreadPanel && showEmptyThreadState ? (
+          <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
+            <div
+              data-thread-selection-safe
+              className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
+            >
+              <span>No threads yet</span>
+            </div>
+          </SidebarMenuSubItem>
+        ) : null}
+        {shouldShowThreadPanel &&
+          renderedThreads.map((thread, index) => {
+            const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+            const showPinnedSeparator =
+              index > 0 &&
+              pinnedThreadKeys.includes(
+                scopedThreadKey(
+                  scopeThreadRef(
+                    renderedThreads[index - 1]!.environmentId,
+                    renderedThreads[index - 1]!.id,
+                  ),
                 ),
-              ),
-            ) &&
-            !pinnedThreadKeys.includes(threadKey);
-          return (
-            <React.Fragment key={threadKey}>
-              {showPinnedSeparator && (
-                <SidebarMenuSubItem aria-hidden="true" className="h-1.5 w-full px-2">
-                  <div className="h-px w-full bg-linear-to-r from-transparent via-border/80 to-transparent" />
-                </SidebarMenuSubItem>
-              )}
-              <SidebarThreadRow
-                thread={thread}
-                projectCwd={projectCwd}
-                orderedProjectThreadKeys={orderedProjectThreadKeys}
-                isActive={activeRouteThreadKey === threadKey}
-                jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
-                appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
-                renamingThreadKey={renamingThreadKey}
-                renamingTitle={renamingTitle}
-                setRenamingTitle={setRenamingTitle}
-                startThreadRename={startThreadRename}
-                renamingInputRef={renamingInputRef}
-                renamingCommittedRef={renamingCommittedRef}
-                confirmingArchiveThreadKey={confirmingArchiveThreadKey}
-                setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
-                confirmArchiveButtonRefs={confirmArchiveButtonRefs}
-                handleThreadClick={handleThreadClick}
-                navigateToThread={navigateToThread}
-                handleMultiSelectContextMenu={handleMultiSelectContextMenu}
-                handleThreadContextMenu={handleThreadContextMenu}
-                clearSelection={clearSelection}
-                commitRename={commitRename}
-                cancelRename={cancelRename}
-                attemptArchiveThread={attemptArchiveThread}
-                openPrLink={openPrLink}
-              />
-            </React.Fragment>
-          );
-        })}
+              ) &&
+              !pinnedThreadKeys.includes(threadKey);
+            return (
+              <React.Fragment key={threadKey}>
+                {showPinnedSeparator && <SidebarPinnedDivider id={dividerDropId} flow={dragFlow} />}
+                <SidebarThreadRow
+                  thread={thread}
+                  projectCwd={projectCwd}
+                  orderedProjectThreadKeys={orderedProjectThreadKeys}
+                  isActive={activeRouteThreadKey === threadKey}
+                  jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
+                  threadDropId={
+                    pinnedThreadKeys.includes(threadKey) ||
+                    (index === 0 && pinnedThreadKeys.length === 0)
+                      ? `${pinDropPrefix}${threadKey}`
+                      : `${unpinDropPrefix}${threadKey}`
+                  }
+                  isPinned={pinnedThreadKeys.includes(threadKey)}
+                  togglePinned={toggleThreadPinned}
+                  appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+                  renamingThreadKey={renamingThreadKey}
+                  renamingTitle={renamingTitle}
+                  setRenamingTitle={setRenamingTitle}
+                  startThreadRename={startThreadRename}
+                  renamingInputRef={renamingInputRef}
+                  renamingCommittedRef={renamingCommittedRef}
+                  confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+                  setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+                  confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+                  handleThreadClick={handleThreadClick}
+                  navigateToThread={navigateToThread}
+                  handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+                  handleThreadContextMenu={handleThreadContextMenu}
+                  clearSelection={clearSelection}
+                  commitRename={commitRename}
+                  cancelRename={cancelRename}
+                  attemptArchiveThread={attemptArchiveThread}
+                  openPrLink={openPrLink}
+                />
+              </React.Fragment>
+            );
+          })}
 
-      {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
-        <SidebarMenuSubItem className="w-full">
-          <SidebarMenuSubButton
-            render={showMoreButtonRender}
-            data-thread-selection-safe
-            size="sm"
-            className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
-            onClick={() => {
-              expandThreadListForProject(projectKey);
-            }}
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-2">
-              {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
-              <span>Show more</span>
-            </span>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-      )}
-      {projectExpanded && hasOverflowingThreads && isThreadListExpanded && (
-        <SidebarMenuSubItem className="w-full">
-          <SidebarMenuSubButton
-            render={showLessButtonRender}
-            data-thread-selection-safe
-            size="sm"
-            className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
-            onClick={() => {
-              collapseThreadListForProject(projectKey);
-            }}
-          >
-            <span>Show less</span>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-      )}
-    </SidebarMenuSub>
+        {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
+          <SidebarMenuSubItem className="w-full">
+            <SidebarMenuSubButton
+              render={showMoreButtonRender}
+              data-thread-selection-safe
+              size="sm"
+              className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+              onClick={() => {
+                expandThreadListForProject(projectKey);
+              }}
+            >
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
+                <span>Show more</span>
+              </span>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        )}
+        {projectExpanded && hasOverflowingThreads && isThreadListExpanded && (
+          <SidebarMenuSubItem className="w-full">
+            <SidebarMenuSubButton
+              render={showLessButtonRender}
+              data-thread-selection-safe
+              size="sm"
+              className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+              onClick={() => {
+                collapseThreadListForProject(projectKey);
+              }}
+            >
+              <span>Show less</span>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        )}
+      </SidebarMenuSub>
+    </DndContext>
   );
 });
 
@@ -1219,6 +1355,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
   const pinnedThreadKeys = useUiStateStore(
     useShallow((state) => state.pinnedThreadKeysByProject[project.projectKey] ?? []),
+  );
+  const toggleThreadPinned = useCallback(
+    (threadKey: string, pinned: boolean) => setThreadPinned(project.projectKey, threadKey, pinned),
+    [project.projectKey, setThreadPinned],
   );
   const threadLastVisitedAts = useUiStateStore(
     useShallow((state) =>
@@ -2361,6 +2501,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         activeRouteThreadKey={activeRouteThreadKey}
         threadJumpLabelByKey={threadJumpLabelByKey}
         pinnedThreadKeys={pinnedThreadKeys}
+        toggleThreadPinned={toggleThreadPinned}
         appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
         renamingThreadKey={renamingThreadKey}
         renamingTitle={renamingTitle}

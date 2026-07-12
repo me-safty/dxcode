@@ -19,6 +19,7 @@ import {
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
+  resolveThreadPinDropAction,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
@@ -47,6 +48,57 @@ describe("prioritizeThreadsByPinnedKeys", () => {
       { id: "newest" },
       { id: "oldest" },
     ]);
+  });
+});
+
+describe("resolveThreadPinDropAction", () => {
+  it("pins an unpinned thread dropped on its project's pin target", () => {
+    expect(
+      resolveThreadPinDropAction({
+        activeThreadKey: "thread-1",
+        overId: "project-a:pin-drop:thread-2",
+        pinDropPrefix: "project-a:pin-drop:",
+        unpinDropPrefix: "project-a:unpin-drop:",
+        dividerDropId: "project-a:pin-divider",
+        pinnedThreadKeys: [],
+      }),
+    ).toBe("pin");
+  });
+
+  it("unpins a pinned thread dropped in the regular thread area", () => {
+    expect(
+      resolveThreadPinDropAction({
+        activeThreadKey: "thread-1",
+        overId: "project-a:unpin-drop:thread-2",
+        pinDropPrefix: "project-a:pin-drop:",
+        unpinDropPrefix: "project-a:unpin-drop:",
+        dividerDropId: "project-a:pin-divider",
+        pinnedThreadKeys: ["thread-1"],
+      }),
+    ).toBe("unpin");
+  });
+
+  it("uses the divider to toggle based on the dragged thread's current state", () => {
+    expect(
+      resolveThreadPinDropAction({
+        activeThreadKey: "thread-1",
+        overId: "project-a:pin-divider",
+        pinDropPrefix: "project-a:pin-drop:",
+        unpinDropPrefix: "project-a:unpin-drop:",
+        dividerDropId: "project-a:pin-divider",
+        pinnedThreadKeys: ["thread-1"],
+      }),
+    ).toBe("unpin");
+    expect(
+      resolveThreadPinDropAction({
+        activeThreadKey: "thread-1",
+        overId: "project-a:pin-drop:thread-2",
+        pinDropPrefix: "project-a:pin-drop:",
+        unpinDropPrefix: "project-a:unpin-drop:",
+        dividerDropId: "project-a:pin-divider",
+        pinnedThreadKeys: [],
+      }),
+    ).toBe("pin");
   });
 });
 
