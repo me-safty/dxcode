@@ -93,7 +93,7 @@ import {
   textAttachmentDraftOwnerId,
   getTextAttachmentClaimReconciler as getRegisteredTextAttachmentClaimReconciler,
   reconcileTextAttachmentClaimsEnvironment,
-  retryTextAttachmentOperation,
+  releaseTextAttachmentClaimsInBackground,
   runTextAttachmentUpload,
 } from "../../textAttachmentClaims";
 import { cn, randomUUID } from "~/lib/utils";
@@ -1880,13 +1880,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             }),
           path: (result) => (result._tag === "Success" ? result.value.path : null),
           release: (path) =>
-            retryTextAttachmentOperation(async () => {
-              const released = await releaseTextAttachment({
-                environmentId,
-                input: { path, draftOwnerId },
-              });
-              return released._tag === "Success";
-            }).then(() => undefined),
+            releaseTextAttachmentClaimsInBackground({
+              environmentId,
+              claims: [{ path, draftOwnerId }],
+              release: async ({ path: releasePath, draftOwnerId: ownerId }) => {
+                const released = await releaseTextAttachment({
+                  environmentId,
+                  input: { path: releasePath, draftOwnerId: ownerId },
+                });
+                return released._tag === "Success";
+              },
+            }),
         });
       })
       .catch(() => null);

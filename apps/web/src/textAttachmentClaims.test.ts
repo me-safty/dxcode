@@ -15,7 +15,9 @@ import {
   fenceTextAttachmentUploadOwner,
   getTextAttachmentClaimReconciler,
   pauseTextAttachmentClaimEnvironment,
+  pendingTextAttachmentClaimReleases,
   reconcileTextAttachmentClaimsEnvironment,
+  releaseTextAttachmentClaimsInBackground,
   resetTextAttachmentClaimRegistryForTest,
   resumeTextAttachmentClaimEnvironment,
   resumeTextAttachmentUploadEnvironment,
@@ -259,6 +261,95 @@ describe("text attachment claims", () => {
 
     expect(completed).toBe(true);
     expect(releaseRpc).toHaveBeenCalledOnce();
+  });
+
+  it("keeps destructive owner releases retrying after the foreground deadline", async () => {
+    vi.useFakeTimers();
+    const environmentId = EnvironmentId.make("destructive-release-outbox");
+    const claims = [
+      { path: `${PATH}.normal`, draftOwnerId: "thread:env:normal" },
+      { path: `${PATH}.archived`, draftOwnerId: "thread:env:archived" },
+      { path: `${PATH}.project`, draftOwnerId: "draft:project" },
+      { path: `${PATH}.fenced-upload`, draftOwnerId: "draft:fenced-upload" },
+    ];
+    const attempts = new Map<string, number>();
+    const release = vi.fn(async (claim: (typeof claims)[number]) => {
+      const next = (attempts.get(claim.path) ?? 0) + 1;
+      attempts.set(claim.path, next);
+      return next > 1;
+    });
+
+    const foreground = releaseTextAttachmentClaimsInBackground({
+      environmentId,
+      claims,
+      release,
+      foregroundWaitMs: 25,
+      retryDelayMs: 100,
+    });
+    await vi.advanceTimersByTimeAsync(25);
+    await foreground;
+
+    expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual(claims);
+    expect(release).toHaveBeenCalledTimes(4);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual([]);
+    expect(release).toHaveBeenCalledTimes(8);
+  });
+
+  it("times out a hung background release and retries it", async () => {
+    vi.useFakeTimers();
+    const environmentId = EnvironmentId.make("hung-release-outbox");
+    const releaseClaim = { path: PATH, draftOwnerId: "thread:env:hung" };
+    const release = vi
+      .fn<(claim: typeof releaseClaim) => Promise<boolean>>()
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValueOnce(true);
+
+    const foreground = releaseTextAttachmentClaimsInBackground({
+      environmentId,
+      claims: [releaseClaim],
+      release,
+      foregroundWaitMs: 10,
+      operationTimeoutMs: 50,
+      retryDelayMs: 100,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await foreground;
+    expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual([releaseClaim]);
+
+    await vi.advanceTimersByTimeAsync(140);
+
+    expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual([]);
+    expect(release).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases confirmed owner paths even when the cleared prompt has no links", async () => {
+    const environmentId = EnvironmentId.make("destroyed-owner-with-stale-confirmation");
+    const draftOwnerId = "thread:env:destroyed";
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId,
+      operations: {
+        claim: vi.fn(async () => true),
+        release: vi.fn(async () => false),
+      },
+    });
+    reconciler.confirmPaths([PATH]);
+    reconciler.setDesiredPaths([PATH]);
+    await reconciler.settled();
+    const release = vi.fn(async (_path: string, _draftOwnerId: string) => true);
+
+    await releaseTextAttachmentClaimsInBackground({
+      environmentId,
+      claims: [],
+      draftOwnerIds: [draftOwnerId],
+      release: ({ path, draftOwnerId: ownerId }) => release(path, ownerId),
+    });
+
+    expect(release).toHaveBeenCalledWith(PATH, draftOwnerId);
+    expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual([]);
   });
 
   it("cancels pending retry timers when disposed on unmount", async () => {

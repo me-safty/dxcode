@@ -60,6 +60,7 @@ import {
   clearTextAttachmentUploadEnvironment,
   fenceTextAttachmentUploadEnvironment,
   pauseTextAttachmentClaimEnvironment,
+  pendingTextAttachmentClaimReleases,
   resumeTextAttachmentClaimEnvironment,
   resumeTextAttachmentUploadEnvironment,
   textAttachmentClaims,
@@ -595,10 +596,27 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
       Effect.gen(function* () {
         yield* Effect.promise(() => fenceTextAttachmentUploadEnvironment(environmentId));
         yield* Effect.promise(() => pauseTextAttachmentClaimEnvironment(environmentId));
+        const claims = [
+          ...composerDraftEntriesEnvironment(environmentId).flatMap(({ target, prompt }) =>
+            textAttachmentClaims(target, prompt),
+          ),
+          ...pendingTextAttachmentClaimReleases(environmentId),
+        ].filter(
+          (claim, index, all) =>
+            all.findIndex(
+              (candidate) =>
+                candidate.path === claim.path && candidate.draftOwnerId === claim.draftOwnerId,
+            ) === index,
+        );
+        if (claims.length > 0 && !supervisor) {
+          resumeTextAttachmentClaimEnvironment(environmentId);
+          resumeTextAttachmentUploadEnvironment(environmentId);
+          return yield* new ConnectionPersistenceError({
+            operation: "clear-environment",
+            message: "Could not release text attachment draft claims without a connection.",
+          });
+        }
         if (supervisor) {
-          const claims = composerDraftEntriesEnvironment(environmentId).flatMap(
-            ({ target, prompt }) => textAttachmentClaims(target, prompt),
-          );
           const releaseResult = yield* Effect.exit(
             Effect.forEach(
               claims,

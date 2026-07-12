@@ -121,11 +121,10 @@ import { vcsEnvironment } from "../state/vcs";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
   tombstoneTextAttachmentUploadOwner,
-  detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
   fenceTextAttachmentUploadOwner,
+  releaseTextAttachmentClaimsInBackground,
   resumeTextAttachmentUploadOwner,
-  retryTextAttachmentOperation,
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
 } from "../textAttachmentClaims";
@@ -1480,22 +1479,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         }
         return result;
       }
-      await Promise.all(
-        discardedTargets.map((target) =>
-          detachTextAttachmentClaimOwner(member.environmentId, textAttachmentDraftOwnerId(target)),
-        ),
-      );
-      await Promise.all(
-        discardedClaims.map(({ path, draftOwnerId }) =>
-          retryTextAttachmentOperation(async () => {
-            const result = await releaseTextAttachment({
-              environmentId: member.environmentId,
-              input: { path, draftOwnerId },
-            });
-            return detachedTextAttachmentReleaseComplete(result);
-          }),
-        ),
-      );
+      await releaseTextAttachmentClaimsInBackground({
+        environmentId: member.environmentId,
+        claims: discardedClaims,
+        draftOwnerIds: discardedTargets.map(textAttachmentDraftOwnerId),
+        release: async ({ path, draftOwnerId }) => {
+          const result = await releaseTextAttachment({
+            environmentId: member.environmentId,
+            input: { path, draftOwnerId },
+          });
+          return detachedTextAttachmentReleaseComplete(result);
+        },
+      });
       for (const target of discardedTargets) {
         draftStore.clearDraftThread(target);
         tombstoneTextAttachmentUploadOwner(

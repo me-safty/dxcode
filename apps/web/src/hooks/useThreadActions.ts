@@ -29,11 +29,10 @@ import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   tombstoneTextAttachmentUploadOwner,
-  detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
   fenceTextAttachmentUploadOwner,
+  releaseTextAttachmentClaimsInBackground,
   resumeTextAttachmentUploadOwner,
-  retryTextAttachmentOperation,
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
 } from "../textAttachmentClaims";
@@ -177,18 +176,18 @@ export function useThreadActions() {
           resumeTextAttachmentUploadOwner(target.environmentId, draftOwnerId);
           return result;
         }
-        await detachTextAttachmentClaimOwner(target.environmentId, draftOwnerId);
-        await Promise.all(
-          textAttachmentClaims(target, discardedPrompt).map(({ path }) =>
-            retryTextAttachmentOperation(async () => {
-              const released = await releaseTextAttachment({
-                environmentId: target.environmentId,
-                input: { path, draftOwnerId },
-              });
-              return detachedTextAttachmentReleaseComplete(released);
-            }),
-          ),
-        );
+        await releaseTextAttachmentClaimsInBackground({
+          environmentId: target.environmentId,
+          claims: textAttachmentClaims(target, discardedPrompt),
+          draftOwnerIds: [draftOwnerId],
+          release: async ({ path, draftOwnerId: ownerId }) => {
+            const released = await releaseTextAttachment({
+              environmentId: target.environmentId,
+              input: { path, draftOwnerId: ownerId },
+            });
+            return detachedTextAttachmentReleaseComplete(released);
+          },
+        });
         clearComposerDraftForThread(target);
         tombstoneTextAttachmentUploadOwner(target.environmentId, draftOwnerId);
         if (result._tag === "Success") {
@@ -286,21 +285,18 @@ export function useThreadActions() {
         );
         return deleteResult;
       }
-      await detachTextAttachmentClaimOwner(
-        threadRef.environmentId,
-        textAttachmentDraftOwnerId(threadRef),
-      );
-      await Promise.all(
-        textAttachmentClaims(threadRef, discardedPrompt).map(({ path, draftOwnerId }) =>
-          retryTextAttachmentOperation(async () => {
-            const result = await releaseTextAttachment({
-              environmentId: threadRef.environmentId,
-              input: { path, draftOwnerId },
-            });
-            return detachedTextAttachmentReleaseComplete(result);
-          }),
-        ),
-      );
+      await releaseTextAttachmentClaimsInBackground({
+        environmentId: threadRef.environmentId,
+        claims: textAttachmentClaims(threadRef, discardedPrompt),
+        draftOwnerIds: [textAttachmentDraftOwnerId(threadRef)],
+        release: async ({ path, draftOwnerId }) => {
+          const result = await releaseTextAttachment({
+            environmentId: threadRef.environmentId,
+            input: { path, draftOwnerId },
+          });
+          return detachedTextAttachmentReleaseComplete(result);
+        },
+      });
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       clearComposerDraftForThread(threadRef);
       clearProjectDraftThreadById(

@@ -30,10 +30,11 @@ export function textAttachmentClaims(
 }
 
 export class TextAttachmentClaimReconciler {
-  readonly #claim: (path: string) => Promise<boolean>;
-  readonly #release: (path: string) => Promise<boolean>;
+  #claim: (path: string) => Promise<boolean>;
+  #release: (path: string) => Promise<boolean>;
   readonly #retryDelayMs: number;
   readonly #maxRetryDelayMs: number;
+  readonly #operationTimeoutMs: number;
   #desired = new Set<string>();
   #confirmed = new Set<string>();
   #queue: Promise<void> = Promise.resolve();
@@ -47,15 +48,25 @@ export class TextAttachmentClaimReconciler {
     release: (path: string) => Promise<boolean>;
     retryDelayMs?: number;
     maxRetryDelayMs?: number;
+    operationTimeoutMs?: number;
   }) {
     this.#claim = options.claim;
     this.#release = options.release;
     this.#retryDelayMs = options.retryDelayMs ?? 250;
     this.#maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
+    this.#operationTimeoutMs = options.operationTimeoutMs ?? 10_000;
   }
 
   setDesiredPrompt(prompt: string): void {
     this.setDesiredPaths(textAttachmentPaths(prompt));
+  }
+
+  setOperations(operations: {
+    claim: (path: string) => Promise<boolean>;
+    release: (path: string) => Promise<boolean>;
+  }): void {
+    this.#claim = operations.claim;
+    this.#release = operations.release;
   }
 
   setDesiredPaths(paths: Iterable<string>): void {
@@ -122,12 +133,12 @@ export class TextAttachmentClaimReconciler {
     let failed = false;
     for (const path of this.#desired) {
       if (this.#confirmed.has(path)) continue;
-      if (await this.#claim(path)) this.#confirmed.add(path);
+      if (await this.#runOperation(() => this.#claim(path))) this.#confirmed.add(path);
       else failed = true;
     }
     for (const path of this.#confirmed) {
       if (this.#desired.has(path)) continue;
-      if (await this.#release(path)) this.#confirmed.delete(path);
+      if (await this.#runOperation(() => this.#release(path))) this.#confirmed.delete(path);
       else failed = true;
     }
     if (!failed) {
@@ -150,6 +161,20 @@ export class TextAttachmentClaimReconciler {
     if (this.#retryTimer === null) return;
     clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
+  }
+
+  async #runOperation(operation: () => Promise<boolean>): Promise<boolean> {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    return Promise.race([
+      Promise.resolve()
+        .then(operation)
+        .catch(() => false),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), this.#operationTimeoutMs);
+      }),
+    ]).finally(() => {
+      if (timeout !== null) clearTimeout(timeout);
+    });
   }
 }
 
@@ -178,6 +203,11 @@ export function detachedTextAttachmentReleaseComplete(result: { readonly _tag: s
   return result._tag === "Success";
 }
 
+export interface TextAttachmentClaimRelease {
+  readonly path: string;
+  readonly draftOwnerId: string;
+}
+
 export interface TextAttachmentClaimOperations {
   claim: (path: string, draftOwnerId: string) => Promise<boolean>;
   release: (path: string, draftOwnerId: string) => Promise<boolean>;
@@ -196,16 +226,94 @@ export function getTextAttachmentClaimReconciler(input: {
   environmentId: EnvironmentId;
   draftOwnerId: string;
   operations: TextAttachmentClaimOperations;
+  retryDelayMs?: number;
+  maxRetryDelayMs?: number;
+  operationTimeoutMs?: number;
 }): TextAttachmentClaimReconciler {
   const key = textAttachmentClaimRegistryKey(input.environmentId, input.draftOwnerId);
   const existing = textAttachmentClaimReconcilerRegistry.get(key);
-  if (existing) return existing;
+  if (existing) {
+    existing.setOperations({
+      claim: (path) => input.operations.claim(path, input.draftOwnerId),
+      release: (path) => input.operations.release(path, input.draftOwnerId),
+    });
+    return existing;
+  }
   const reconciler = new TextAttachmentClaimReconciler({
     claim: (path) => input.operations.claim(path, input.draftOwnerId),
     release: (path) => input.operations.release(path, input.draftOwnerId),
+    ...(input.retryDelayMs === undefined ? {} : { retryDelayMs: input.retryDelayMs }),
+    ...(input.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: input.maxRetryDelayMs }),
+    ...(input.operationTimeoutMs === undefined
+      ? {}
+      : { operationTimeoutMs: input.operationTimeoutMs }),
   });
   textAttachmentClaimReconcilerRegistry.set(key, reconciler);
   return reconciler;
+}
+
+export async function releaseTextAttachmentClaimsInBackground(input: {
+  environmentId: EnvironmentId;
+  claims: ReadonlyArray<TextAttachmentClaimRelease>;
+  draftOwnerIds?: ReadonlyArray<string>;
+  release: (claim: TextAttachmentClaimRelease) => Promise<boolean>;
+  foregroundWaitMs?: number;
+  retryDelayMs?: number;
+  maxRetryDelayMs?: number;
+  operationTimeoutMs?: number;
+}): Promise<void> {
+  // Reuse the module-level reconciler registry as a release outbox. It outlives
+  // the composer or sidebar that initiated teardown and keeps retrying after
+  // their persisted draft state has been cleared.
+  const claimsByOwner = new Map<string, Set<string>>();
+  for (const draftOwnerId of input.draftOwnerIds ?? []) {
+    claimsByOwner.set(draftOwnerId, new Set());
+  }
+  for (const { path, draftOwnerId } of input.claims) {
+    const paths = claimsByOwner.get(draftOwnerId) ?? new Set<string>();
+    paths.add(path);
+    claimsByOwner.set(draftOwnerId, paths);
+  }
+  const reconciliations = [...claimsByOwner].map(([draftOwnerId, paths]) => {
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId: input.environmentId,
+      draftOwnerId,
+      operations: {
+        claim: async () => false,
+        release: (path, ownerId) => input.release({ path, draftOwnerId: ownerId }),
+      },
+      ...(input.retryDelayMs === undefined ? {} : { retryDelayMs: input.retryDelayMs }),
+      ...(input.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: input.maxRetryDelayMs }),
+      ...(input.operationTimeoutMs === undefined
+        ? {}
+        : { operationTimeoutMs: input.operationTimeoutMs }),
+    });
+    reconciler.confirmPaths(paths);
+    reconciler.setDesiredPaths([]);
+    return reconciler.settled();
+  });
+  if (reconciliations.length === 0) return;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  await Promise.race([
+    Promise.all(reconciliations),
+    new Promise<void>((resolve) => {
+      timeout = setTimeout(resolve, input.foregroundWaitMs ?? 1_000);
+    }),
+  ]).finally(() => {
+    if (timeout !== null) clearTimeout(timeout);
+  });
+}
+
+export function pendingTextAttachmentClaimReleases(
+  environmentId: EnvironmentId,
+): TextAttachmentClaimRelease[] {
+  const prefix = `${environmentId}:`;
+  return [...textAttachmentClaimReconcilerRegistry].flatMap(([key, reconciler]) => {
+    if (!key.startsWith(prefix)) return [];
+    const draftOwnerId = key.slice(prefix.length);
+    const { confirmed, desired } = reconciler.snapshot();
+    return [...confirmed].flatMap((path) => (desired.has(path) ? [] : [{ path, draftOwnerId }]));
+  });
 }
 
 export function reconcileTextAttachmentClaimsEnvironment(
