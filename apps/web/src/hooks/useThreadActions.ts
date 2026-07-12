@@ -30,6 +30,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import {
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
+  fenceTextAttachmentUploadOwner,
   retryTextAttachmentOperation,
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
@@ -227,6 +228,11 @@ export function useThreadActions() {
           input: { threadId: threadRef.threadId },
         });
       }
+
+      await fenceTextAttachmentUploadOwner(
+        threadRef.environmentId,
+        textAttachmentDraftOwnerId(threadRef),
+      );
 
       await closeTerminal({
         environmentId: threadRef.environmentId,

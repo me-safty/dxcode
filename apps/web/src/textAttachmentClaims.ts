@@ -262,4 +262,86 @@ export function resumeTextAttachmentClaimEnvironment(environmentId: EnvironmentI
 export function resetTextAttachmentClaimRegistryForTest(): void {
   for (const reconciler of textAttachmentClaimReconcilerRegistry.values()) reconciler.dispose();
   textAttachmentClaimReconcilerRegistry.clear();
+  textAttachmentUploadRegistry.clear();
+}
+
+interface TextAttachmentUploadOwnerState {
+  fenced: boolean;
+  pending: Set<Promise<void>>;
+}
+
+const textAttachmentUploadRegistry = new Map<string, TextAttachmentUploadOwnerState>();
+
+function textAttachmentUploadOwnerState(
+  environmentId: EnvironmentId,
+  draftOwnerId: string,
+): TextAttachmentUploadOwnerState {
+  const key = textAttachmentClaimRegistryKey(environmentId, draftOwnerId);
+  const existing = textAttachmentUploadRegistry.get(key);
+  if (existing) return existing;
+  const state = { fenced: false, pending: new Set<Promise<void>>() };
+  textAttachmentUploadRegistry.set(key, state);
+  return state;
+}
+
+export async function runTextAttachmentUpload<T>(input: {
+  environmentId: EnvironmentId;
+  draftOwnerId: string;
+  upload: () => Promise<T>;
+  path: (result: T) => string | null;
+  release: (path: string) => Promise<void>;
+}): Promise<T | null> {
+  const state = textAttachmentUploadOwnerState(input.environmentId, input.draftOwnerId);
+  if (state.fenced) return null;
+  let finish: () => void = () => undefined;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  state.pending.add(pending);
+  try {
+    const result = await input.upload();
+    if (!state.fenced) return result;
+    const path = input.path(result);
+    if (path) await input.release(path);
+    return null;
+  } finally {
+    state.pending.delete(pending);
+    finish();
+  }
+}
+
+export async function fenceTextAttachmentUploadOwner(
+  environmentId: EnvironmentId,
+  draftOwnerId: string,
+): Promise<void> {
+  const state = textAttachmentUploadOwnerState(environmentId, draftOwnerId);
+  state.fenced = true;
+  await Promise.all(state.pending);
+}
+
+export async function fenceTextAttachmentUploadEnvironment(
+  environmentId: EnvironmentId,
+): Promise<void> {
+  const prefix = `${environmentId}:`;
+  const waits: Promise<void>[] = [];
+  for (const [key, state] of textAttachmentUploadRegistry) {
+    if (!key.startsWith(prefix)) continue;
+    state.fenced = true;
+    waits.push(...state.pending);
+  }
+  await Promise.all(waits);
+}
+
+export function resumeTextAttachmentUploadEnvironment(environmentId: EnvironmentId): void {
+  const prefix = `${environmentId}:`;
+  for (const [key, state] of textAttachmentUploadRegistry) {
+    if (key.startsWith(prefix)) state.fenced = false;
+  }
+}
+
+export function clearTextAttachmentUploadEnvironment(environmentId: EnvironmentId): void {
+  const prefix = `${environmentId}:`;
+  for (const key of textAttachmentUploadRegistry.keys()) {
+    if (key.startsWith(prefix)) textAttachmentUploadRegistry.delete(key);
+  }
 }

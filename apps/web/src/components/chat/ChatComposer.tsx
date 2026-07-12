@@ -93,6 +93,8 @@ import {
   textAttachmentDraftOwnerId,
   getTextAttachmentClaimReconciler as getRegisteredTextAttachmentClaimReconciler,
   reconcileTextAttachmentClaimsEnvironment,
+  retryTextAttachmentOperation,
+  runTextAttachmentUpload,
 } from "../../textAttachmentClaims";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
@@ -1867,13 +1869,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const bytes = new Uint8Array(buffer);
         if (bytes.includes(0)) return null;
         const contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        return writeTextAttachment({
+        const draftOwnerId = textAttachmentDraftOwnerId(composerDraftTarget);
+        return runTextAttachmentUpload({
           environmentId,
-          input: {
-            fileName: file.name || "context.txt",
-            contents,
-            draftOwnerId: textAttachmentDraftOwnerId(composerDraftTarget),
-          },
+          draftOwnerId,
+          upload: () =>
+            writeTextAttachment({
+              environmentId,
+              input: { fileName: file.name || "context.txt", contents, draftOwnerId },
+            }),
+          path: (result) => (result._tag === "Success" ? result.value.path : null),
+          release: (path) =>
+            retryTextAttachmentOperation(async () => {
+              const released = await releaseTextAttachment({
+                environmentId,
+                input: { path, draftOwnerId },
+              });
+              return released._tag === "Success";
+            }).then(() => undefined),
         });
       })
       .catch(() => null);

@@ -10,11 +10,15 @@ import {
   TextAttachmentClaimReconciler,
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
+  fenceTextAttachmentUploadEnvironment,
+  fenceTextAttachmentUploadOwner,
   getTextAttachmentClaimReconciler,
   pauseTextAttachmentClaimEnvironment,
   reconcileTextAttachmentClaimsEnvironment,
   resetTextAttachmentClaimRegistryForTest,
   resumeTextAttachmentClaimEnvironment,
+  resumeTextAttachmentUploadEnvironment,
+  runTextAttachmentUpload,
   retryTextAttachmentOperation,
 } from "./textAttachmentClaims";
 
@@ -373,5 +377,75 @@ describe("text attachment claims", () => {
 
     expect(claim).toHaveBeenCalledTimes(2);
     expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
+  });
+
+  it("fences an in-flight thread upload and releases its late claim", async () => {
+    const environmentId = EnvironmentId.make("thread-upload-environment");
+    let finishUpload: (result: { path: string }) => void = () => undefined;
+    const release = vi.fn(async () => undefined);
+    const upload = runTextAttachmentUpload({
+      environmentId,
+      draftOwnerId: "thread:env:thread-a",
+      upload: () =>
+        new Promise<{ path: string }>((resolve) => {
+          finishUpload = resolve;
+        }),
+      path: (result) => result.path,
+      release,
+    });
+
+    const fence = fenceTextAttachmentUploadOwner(environmentId, "thread:env:thread-a");
+    finishUpload({ path: PATH });
+    await fence;
+
+    await expect(upload).resolves.toBeNull();
+    expect(release).toHaveBeenCalledWith(PATH);
+  });
+
+  it("rejects new project-owner uploads after destructive fencing", async () => {
+    const environmentId = EnvironmentId.make("project-upload-environment");
+    await fenceTextAttachmentUploadOwner(environmentId, "draft:project-draft");
+    const upload = vi.fn(async () => ({ path: PATH }));
+
+    await expect(
+      runTextAttachmentUpload({
+        environmentId,
+        draftOwnerId: "draft:project-draft",
+        upload,
+        path: (result) => result.path,
+        release: vi.fn(async () => undefined),
+      }),
+    ).resolves.toBeNull();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("fences all environment uploads and resumes them after cleanup abort", async () => {
+    const environmentId = EnvironmentId.make("environment-upload-fence");
+    let finishUpload: (result: { path: string }) => void = () => undefined;
+    const first = runTextAttachmentUpload({
+      environmentId,
+      draftOwnerId: "draft:environment-draft",
+      upload: () =>
+        new Promise<{ path: string }>((resolve) => {
+          finishUpload = resolve;
+        }),
+      path: (result) => result.path,
+      release: vi.fn(async () => undefined),
+    });
+    const fence = fenceTextAttachmentUploadEnvironment(environmentId);
+    finishUpload({ path: PATH });
+    await fence;
+    await expect(first).resolves.toBeNull();
+
+    resumeTextAttachmentUploadEnvironment(environmentId);
+    await expect(
+      runTextAttachmentUpload({
+        environmentId,
+        draftOwnerId: "draft:environment-draft",
+        upload: async () => ({ path: PATH }),
+        path: (result) => result.path,
+        release: vi.fn(async () => undefined),
+      }),
+    ).resolves.toEqual({ path: PATH });
   });
 });

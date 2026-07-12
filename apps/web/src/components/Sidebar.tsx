@@ -122,6 +122,7 @@ import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../sta
 import {
   detachTextAttachmentClaimOwner,
   detachedTextAttachmentReleaseComplete,
+  fenceTextAttachmentUploadOwner,
   retryTextAttachmentOperation,
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
@@ -1458,6 +1459,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const discardedTargets = composerDraftTargetsProject(memberProjectRef, projectThreadRefs);
       const discardedClaims = discardedTargets.flatMap((target) =>
         textAttachmentClaims(target, draftStore.getComposerDraft(target)?.prompt ?? ""),
+      );
+      await Promise.all(
+        discardedTargets.map((target) =>
+          fenceTextAttachmentUploadOwner(member.environmentId, textAttachmentDraftOwnerId(target)),
+        ),
       );
       const result = await deleteProject({
         environmentId: member.environmentId,
