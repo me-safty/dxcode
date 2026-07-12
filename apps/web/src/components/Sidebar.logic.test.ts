@@ -11,6 +11,7 @@ import {
   isContextMenuPointerDown,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  prioritizeThreadsByPinnedKeys,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
@@ -36,6 +37,18 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("prioritizeThreadsByPinnedKeys", () => {
+  it("moves only pinned threads to the front while preserving the current sort order", () => {
+    const threads = [{ id: "newest" }, { id: "pinned" }, { id: "oldest" }];
+
+    expect(prioritizeThreadsByPinnedKeys(threads, ["pinned"], (thread) => thread.id)).toEqual([
+      { id: "pinned" },
+      { id: "newest" },
+      { id: "oldest" },
+    ]);
+  });
+});
 
 describe("resolveSidebarStageBadgeLabel", () => {
   it("returns Nightly for nightly primary server versions", () => {
