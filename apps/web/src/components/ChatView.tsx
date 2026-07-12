@@ -5350,16 +5350,8 @@ function ChatViewContent(props: ChatViewProps) {
             <div
               ref={setComposerOverlayElement}
               data-chat-composer-overlay="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pt-2 sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]"
             >
-              <div
-                aria-hidden="true"
-                className="chat-composer-horizontal-inset pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 sm:top-2"
-              >
-                <div className="chat-content-lane relative h-full overflow-clip rounded-t-[20px]">
-                  <div className="chat-composer-shared-blur absolute -inset-8" />
-                </div>
-              </div>
               <div className="chat-composer-horizontal-inset">
                 <div className="pointer-events-auto relative z-10 isolate">
                   {isServerThread && activeThread ? (
@@ -5445,7 +5437,6 @@ function ChatViewContent(props: ChatViewProps) {
                   </div>
                 </div>
               </div>
-              <div className="chat-composer-horizontal-inset chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
             </div>
 
             {pullRequestDialogState ? (
