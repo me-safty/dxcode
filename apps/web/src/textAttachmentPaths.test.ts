@@ -25,6 +25,18 @@ describe("textAttachmentPaths", () => {
 
     expect(textAttachmentPaths(`before[notes.txt](${path}),after`)).toEqual([path]);
   });
+
+  it("ignores generated paths outside valid Markdown links and inside code", () => {
+    const path = "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/notes.txt";
+
+    expect(
+      textAttachmentPaths(
+        [`missing](${path})`, `\`[inline](${path})\``, "```", `[fenced](${path})`, "```"].join(
+          "\n",
+        ),
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe("removedTextAttachmentPaths", () => {

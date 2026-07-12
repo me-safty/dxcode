@@ -155,6 +155,24 @@ describe("attachmentStore", () => {
     ).toBeNull();
   });
 
+  it("ignores generated paths that are not Markdown links or are inside code", () => {
+    const attachmentsDir = NodePath.join(NodeOS.tmpdir(), "t3code-attachments");
+    const attachmentPath = createTextAttachmentPath({ attachmentsDir, fileName: "notes.txt" });
+
+    expect(
+      collectTextAttachmentRelativePaths({
+        attachmentsDir,
+        text: [
+          `missing](${attachmentPath})`,
+          `\`[inline](${attachmentPath})\``,
+          "```md",
+          `[fenced](${attachmentPath})`,
+          "```",
+        ].join("\n"),
+      }),
+    ).toEqual(new Set());
+  });
+
   it("persists draft claims across reconciliation and restart-style reloads", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "t3code-text-claims-"),

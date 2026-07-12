@@ -1,37 +1,97 @@
+function delimiterRunLength(markdown: string, start: number, delimiter: string): number {
+  let end = start;
+  while (markdown[end] === delimiter) end += 1;
+  return end - start;
+}
+
+function isFenceStart(markdown: string, index: number): boolean {
+  const lineStart = markdown.lastIndexOf("\n", index - 1) + 1;
+  const prefix = markdown.slice(lineStart, index);
+  return prefix.length <= 3 && /^ *$/.test(prefix);
+}
+
+function fenceEnd(markdown: string, start: number, delimiter: string, runLength: number): number {
+  let lineStart = markdown.indexOf("\n", start) + 1;
+  if (lineStart === 0) return markdown.length;
+  while (lineStart < markdown.length) {
+    let cursor = lineStart;
+    let spaces = 0;
+    while (markdown[cursor] === " " && spaces < 4) {
+      cursor += 1;
+      spaces += 1;
+    }
+    if (
+      spaces <= 3 &&
+      markdown[cursor] === delimiter &&
+      delimiterRunLength(markdown, cursor, delimiter) >= runLength
+    ) {
+      const lineEnd = markdown.indexOf("\n", cursor);
+      return lineEnd < 0 ? markdown.length : lineEnd + 1;
+    }
+    const nextLine = markdown.indexOf("\n", lineStart);
+    if (nextLine < 0) return markdown.length;
+    lineStart = nextLine + 1;
+  }
+  return markdown.length;
+}
+
+function balancedEnd(markdown: string, start: number, opening: string, closing: string): number {
+  let depth = 1;
+  for (let cursor = start; cursor < markdown.length; cursor += 1) {
+    const character = markdown[cursor];
+    if (character === "\\") {
+      cursor += 1;
+      continue;
+    }
+    if (character === opening) {
+      depth += 1;
+    } else if (character === closing) {
+      depth -= 1;
+      if (depth === 0) return cursor;
+    }
+  }
+  return -1;
+}
+
 export function markdownLinkDestinations(markdown: string): ReadonlyArray<string> {
   const destinations: Array<string> = [];
-  let searchFrom = 0;
-  while (searchFrom < markdown.length) {
-    const destinationStart = markdown.indexOf("](", searchFrom);
-    if (destinationStart < 0) break;
-    let depth = 1;
-    let escaped = false;
-    let cursor = destinationStart + 2;
-    const contentStart = cursor;
-    for (; cursor < markdown.length; cursor += 1) {
-      const character = markdown[cursor];
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (character === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (character === "(") {
-        depth += 1;
-        continue;
-      }
-      if (character !== ")") continue;
-      depth -= 1;
-      if (depth === 0) break;
+  let cursor = 0;
+  while (cursor < markdown.length) {
+    const character = markdown[cursor];
+    if (character === "\\") {
+      cursor += 2;
+      continue;
     }
-    if (depth === 0 && cursor > contentStart) {
-      destinations.push(markdown.slice(contentStart, cursor));
-      searchFrom = cursor + 1;
-    } else {
-      searchFrom = destinationStart + 2;
+    if (character === "`" || character === "~") {
+      const runLength = delimiterRunLength(markdown, cursor, character);
+      if (runLength >= 3 && isFenceStart(markdown, cursor)) {
+        cursor = fenceEnd(markdown, cursor, character, runLength);
+        continue;
+      }
+      if (character === "`") {
+        const delimiter = "`".repeat(runLength);
+        const end = markdown.indexOf(delimiter, cursor + runLength);
+        cursor = end < 0 ? cursor + runLength : end + runLength;
+        continue;
+      }
     }
+    if (character !== "[") {
+      cursor += 1;
+      continue;
+    }
+    const labelEnd = balancedEnd(markdown, cursor + 1, "[", "]");
+    if (labelEnd < 0 || markdown[labelEnd + 1] !== "(") {
+      cursor += 1;
+      continue;
+    }
+    const destinationStart = labelEnd + 2;
+    const destinationEnd = balancedEnd(markdown, destinationStart, "(", ")");
+    if (destinationEnd < 0 || destinationEnd === destinationStart) {
+      cursor = destinationStart;
+      continue;
+    }
+    destinations.push(markdown.slice(destinationStart, destinationEnd));
+    cursor = destinationEnd + 1;
   }
   return destinations;
 }
