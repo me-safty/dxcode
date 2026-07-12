@@ -961,7 +961,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           environmentId,
           input: { path, draftOwnerId },
         });
-        return result._tag === "Success" && result.value.released;
+        return result._tag === "Success";
       },
     }),
     [claimTextAttachment, environmentId, releaseTextAttachment],

@@ -518,6 +518,24 @@ describe("composerDraftStore terminal contexts", () => {
         },
         draftThreadsByThreadId: "not-an-object",
         projectDraftThreadIdByProjectKey: "not-an-object",
+        pendingTextAttachmentReleases: [
+          {
+            environmentId: TEST_ENVIRONMENT_ID,
+            path: "/tmp/attachment.txt",
+            draftOwnerId: "thread:env:valid",
+          },
+          {
+            environmentId: TEST_ENVIRONMENT_ID,
+            path: "/tmp/attachment.txt",
+            draftOwnerId: "thread:env:valid",
+          },
+          { environmentId: 42, path: null, draftOwnerId: [] },
+          {
+            environmentId: TEST_ENVIRONMENT_ID,
+            path: "x".repeat(9_000),
+            draftOwnerId: "thread:env:oversized",
+          },
+        ],
       },
       useComposerDraftStore.getInitialState(),
     );
@@ -525,6 +543,13 @@ describe("composerDraftStore terminal contexts", () => {
     expect(mergedState.draftsByThreadKey[threadKeyFor(threadId)]).toBeUndefined();
     expect(mergedState.draftThreadsByThreadKey).toEqual({});
     expect(mergedState.logicalProjectDraftThreadKeyByLogicalProjectKey).toEqual({});
+    expect(mergedState.pendingTextAttachmentReleases).toEqual([
+      {
+        environmentId: TEST_ENVIRONMENT_ID,
+        path: "/tmp/attachment.txt",
+        draftOwnerId: "thread:env:valid",
+      },
+    ]);
   });
 });
 

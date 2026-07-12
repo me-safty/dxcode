@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { DraftId } from "./composerDraftStore";
+import { DraftId, useComposerDraftStore } from "./composerDraftStore";
 import {
   textAttachmentClaimChanges,
   textAttachmentClaims,
@@ -30,6 +30,7 @@ const PATH = "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc
 
 afterEach(() => {
   resetTextAttachmentClaimRegistryForTest();
+  useComposerDraftStore.setState({ pendingTextAttachmentReleases: [] });
   vi.useRealTimers();
 });
 
@@ -350,6 +351,50 @@ describe("text attachment claims", () => {
 
     expect(release).toHaveBeenCalledWith(PATH, draftOwnerId);
     expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual([]);
+  });
+
+  it("reconstructs the release outbox after a module restart and retries on reconnect", async () => {
+    vi.useFakeTimers();
+    const environmentId = EnvironmentId.make("restarted-release-outbox");
+    const claim = { path: PATH, draftOwnerId: "thread:env:restarted" };
+    const firstRelease = vi.fn(async () => false);
+    const foreground = releaseTextAttachmentClaimsInBackground({
+      environmentId,
+      claims: [claim],
+      release: firstRelease,
+      foregroundWaitMs: 10,
+      retryDelayMs: 10_000,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await foreground;
+
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown;
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const options = persistApi.getOptions();
+    const persistedState = options.partialize(useComposerDraftStore.getState());
+    resetTextAttachmentClaimRegistryForTest();
+    useComposerDraftStore.setState({ pendingTextAttachmentReleases: [] });
+    const hydrated = options.merge(persistedState, useComposerDraftStore.getInitialState());
+    useComposerDraftStore.setState({
+      pendingTextAttachmentReleases: hydrated.pendingTextAttachmentReleases,
+    });
+    const reconnectRelease = vi.fn(async (_path: string, _draftOwnerId: string) => true);
+    const operations = {
+      claim: vi.fn(async () => true),
+      release: (path: string, draftOwnerId: string) => reconnectRelease(path, draftOwnerId),
+    };
+
+    reconcileTextAttachmentClaimsEnvironment(environmentId, [], operations);
+    await vi.waitFor(() => expect(pendingTextAttachmentClaimReleases(environmentId)).toEqual([]));
+
+    expect(reconnectRelease).toHaveBeenCalledWith(PATH, claim.draftOwnerId);
   });
 
   it("cancels pending retry timers when disposed on unmount", async () => {

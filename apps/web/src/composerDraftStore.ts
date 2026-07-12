@@ -57,7 +57,7 @@ const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "t3code:composer-drafts:v1";
-const COMPOSER_DRAFT_STORAGE_VERSION = 8;
+const COMPOSER_DRAFT_STORAGE_VERSION = 9;
 const DraftThreadEnvModeSchema = Schema.Literals(["local", "worktree"]);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
@@ -227,6 +227,22 @@ const PersistedDraftThreadState = Schema.Struct({
 });
 type PersistedDraftThreadState = typeof PersistedDraftThreadState.Type;
 
+export interface PendingTextAttachmentRelease {
+  readonly environmentId: EnvironmentId;
+  readonly path: string;
+  readonly draftOwnerId: string;
+}
+
+const PersistedTextAttachmentRelease = Schema.Struct({
+  environmentId: Schema.String,
+  path: Schema.String,
+  draftOwnerId: Schema.String,
+});
+const MAX_PENDING_TEXT_ATTACHMENT_RELEASES = 10_000;
+const MAX_PENDING_TEXT_ATTACHMENT_ENVIRONMENT_LENGTH = 1_024;
+const MAX_PENDING_TEXT_ATTACHMENT_PATH_LENGTH = 8_192;
+const MAX_PENDING_TEXT_ATTACHMENT_OWNER_LENGTH = 1_024;
+
 const PersistedComposerDraftStoreState = Schema.Struct({
   draftsByThreadKey: Schema.Record(Schema.String, PersistedComposerThreadDraftState),
   draftThreadsByThreadKey: Schema.Record(Schema.String, PersistedDraftThreadState),
@@ -235,6 +251,7 @@ const PersistedComposerDraftStoreState = Schema.Struct({
     Schema.Record(ProviderInstanceId, ModelSelection),
   ),
   stickyActiveProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
+  pendingTextAttachmentReleases: Schema.optionalKey(Schema.Array(PersistedTextAttachmentRelease)),
 });
 type PersistedComposerDraftStoreState = typeof PersistedComposerDraftStoreState.Type;
 
@@ -330,6 +347,7 @@ interface ComposerDraftStoreState {
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   stickyActiveProvider: ProviderInstanceId | null;
+  pendingTextAttachmentReleases: PendingTextAttachmentRelease[];
   /** Returns the editable composer content for a draft session or server thread. */
   getComposerDraft: (target: ComposerThreadTarget) => ComposerThreadDraftState | null;
   /** Looks up the active draft session for a logical project identity. */
@@ -549,6 +567,7 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
   logicalProjectDraftThreadKeyByLogicalProjectKey: {},
   stickyModelSelectionByProvider: {},
   stickyActiveProvider: null,
+  pendingTextAttachmentReleases: [],
 });
 
 const EMPTY_IMAGES: ComposerImageAttachment[] = [];
@@ -1812,7 +1831,39 @@ function migratePersistedComposerDraftStoreState(
     logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
     stickyActiveProvider,
+    pendingTextAttachmentReleases: normalizePendingTextAttachmentReleases(
+      candidate.pendingTextAttachmentReleases,
+    ),
   };
+}
+
+function normalizePendingTextAttachmentReleases(value: unknown): PendingTextAttachmentRelease[] {
+  if (!Array.isArray(value)) return [];
+  const releases: PendingTextAttachmentRelease[] = [];
+  const seen = new Set<string>();
+  for (const candidate of value) {
+    if (releases.length >= MAX_PENDING_TEXT_ATTACHMENT_RELEASES) break;
+    if (!candidate || typeof candidate !== "object") continue;
+    const { environmentId, path, draftOwnerId } = candidate as Record<string, unknown>;
+    if (
+      typeof environmentId !== "string" ||
+      environmentId.length === 0 ||
+      environmentId.length > MAX_PENDING_TEXT_ATTACHMENT_ENVIRONMENT_LENGTH ||
+      typeof path !== "string" ||
+      path.length === 0 ||
+      path.length > MAX_PENDING_TEXT_ATTACHMENT_PATH_LENGTH ||
+      typeof draftOwnerId !== "string" ||
+      draftOwnerId.length === 0 ||
+      draftOwnerId.length > MAX_PENDING_TEXT_ATTACHMENT_OWNER_LENGTH
+    ) {
+      continue;
+    }
+    const key = `${environmentId}\u0000${draftOwnerId}\u0000${path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    releases.push({ environmentId: environmentId as EnvironmentId, path, draftOwnerId });
+  }
+  return releases;
 }
 
 function partializeComposerDraftStoreState(
@@ -1907,6 +1958,7 @@ function partializeComposerDraftStoreState(
       state.stickyModelSelectionByProvider,
     ),
     stickyActiveProvider: state.stickyActiveProvider,
+    pendingTextAttachmentReleases: state.pendingTextAttachmentReleases,
   };
 }
 
@@ -1977,6 +2029,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
     stickyActiveProvider,
+    pendingTextAttachmentReleases: normalizePendingTextAttachmentReleases(
+      normalizedPersistedState.pendingTextAttachmentReleases,
+    ),
   };
 }
 
@@ -2177,6 +2232,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         logicalProjectDraftThreadKeyByLogicalProjectKey: {},
         stickyModelSelectionByProvider: {},
         stickyActiveProvider: null,
+        pendingTextAttachmentReleases: [],
         getComposerDraft: (target) => getComposerDraftState(get(), target),
         getDraftThreadByLogicalProjectKey: (logicalProjectKey) => {
           return get().getDraftSessionByLogicalProjectKey(logicalProjectKey);
@@ -3366,6 +3422,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             normalizedPersisted.logicalProjectDraftThreadKeyByLogicalProjectKey,
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
           stickyActiveProvider: normalizedPersisted.stickyActiveProvider ?? null,
+          pendingTextAttachmentReleases: normalizePendingTextAttachmentReleases(
+            normalizedPersisted.pendingTextAttachmentReleases,
+          ),
         };
       },
     },
@@ -3458,6 +3517,48 @@ export function composerDraftTargetsProject(
   });
 }
 
+function pendingTextAttachmentReleaseKey(release: PendingTextAttachmentRelease): string {
+  return `${release.environmentId}\u0000${release.draftOwnerId}\u0000${release.path}`;
+}
+
+export function pendingTextAttachmentReleasesEnvironment(
+  environmentId: EnvironmentId,
+): PendingTextAttachmentRelease[] {
+  return useComposerDraftStore
+    .getState()
+    .pendingTextAttachmentReleases.filter((release) => release.environmentId === environmentId);
+}
+
+export function persistPendingTextAttachmentReleases(
+  releases: ReadonlyArray<PendingTextAttachmentRelease>,
+): void {
+  if (releases.length === 0) return;
+  useComposerDraftStore.setState((state) => {
+    const next = [...state.pendingTextAttachmentReleases];
+    const seen = new Set(next.map(pendingTextAttachmentReleaseKey));
+    for (const release of releases) {
+      const normalized = normalizePendingTextAttachmentReleases([release])[0];
+      if (!normalized) continue;
+      const key = pendingTextAttachmentReleaseKey(normalized);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      next.push(normalized);
+    }
+    return { pendingTextAttachmentReleases: next };
+  });
+  composerDebouncedStorage.flush();
+}
+
+export function completePendingTextAttachmentRelease(release: PendingTextAttachmentRelease): void {
+  const completedKey = pendingTextAttachmentReleaseKey(release);
+  useComposerDraftStore.setState((state) => ({
+    pendingTextAttachmentReleases: state.pendingTextAttachmentReleases.filter(
+      (candidate) => pendingTextAttachmentReleaseKey(candidate) !== completedKey,
+    ),
+  }));
+  composerDebouncedStorage.flush();
+}
+
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
   useComposerDraftStore.setState((state) => {
     const removedThreadKeys = composerDraftKeysEnvironment(state, environmentId);
@@ -3489,6 +3590,9 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
       draftsByThreadKey: nextDrafts,
       draftThreadsByThreadKey: nextDraftThreads,
       logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
+      pendingTextAttachmentReleases: state.pendingTextAttachmentReleases.filter(
+        (release) => release.environmentId !== environmentId,
+      ),
     };
   });
   composerDebouncedStorage.flush();

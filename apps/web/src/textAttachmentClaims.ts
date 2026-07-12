@@ -1,6 +1,12 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 
-import type { ComposerThreadTarget, DraftId } from "./composerDraftStore";
+import {
+  completePendingTextAttachmentRelease,
+  pendingTextAttachmentReleasesEnvironment,
+  persistPendingTextAttachmentReleases,
+  type ComposerThreadTarget,
+  type DraftId,
+} from "./composerDraftStore";
 import { textAttachmentPaths } from "./textAttachmentPaths";
 
 export function textAttachmentDraftOwnerId(target: ScopedThreadRef | DraftId): string {
@@ -262,9 +268,6 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
   maxRetryDelayMs?: number;
   operationTimeoutMs?: number;
 }): Promise<void> {
-  // Reuse the module-level reconciler registry as a release outbox. It outlives
-  // the composer or sidebar that initiated teardown and keeps retrying after
-  // their persisted draft state has been cleared.
   const claimsByOwner = new Map<string, Set<string>>();
   for (const draftOwnerId of input.draftOwnerIds ?? []) {
     claimsByOwner.set(draftOwnerId, new Set());
@@ -274,13 +277,18 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
     paths.add(path);
     claimsByOwner.set(draftOwnerId, paths);
   }
-  const reconciliations = [...claimsByOwner].map(([draftOwnerId, paths]) => {
+  const owners = [...claimsByOwner].map(([draftOwnerId, paths]) => {
     const reconciler = getTextAttachmentClaimReconciler({
       environmentId: input.environmentId,
       draftOwnerId,
       operations: {
         claim: async () => false,
-        release: (path, ownerId) => input.release({ path, draftOwnerId: ownerId }),
+        release: async (path, ownerId) => {
+          const release = { environmentId: input.environmentId, path, draftOwnerId: ownerId };
+          const released = await input.release(release);
+          if (released) completePendingTextAttachmentRelease(release);
+          return released;
+        },
       },
       ...(input.retryDelayMs === undefined ? {} : { retryDelayMs: input.retryDelayMs }),
       ...(input.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: input.maxRetryDelayMs }),
@@ -288,6 +296,19 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
         ? {}
         : { operationTimeoutMs: input.operationTimeoutMs }),
     });
+    for (const path of reconciler.snapshot().confirmed) paths.add(path);
+    return { draftOwnerId, paths, reconciler };
+  });
+  persistPendingTextAttachmentReleases(
+    owners.flatMap(({ draftOwnerId, paths }) =>
+      [...paths].map((path) => ({
+        environmentId: input.environmentId,
+        path,
+        draftOwnerId,
+      })),
+    ),
+  );
+  const reconciliations = owners.map(({ paths, reconciler }) => {
     reconciler.confirmPaths(paths);
     reconciler.setDesiredPaths([]);
     return reconciler.settled();
@@ -307,13 +328,39 @@ export async function releaseTextAttachmentClaimsInBackground(input: {
 export function pendingTextAttachmentClaimReleases(
   environmentId: EnvironmentId,
 ): TextAttachmentClaimRelease[] {
-  const prefix = `${environmentId}:`;
-  return [...textAttachmentClaimReconcilerRegistry].flatMap(([key, reconciler]) => {
-    if (!key.startsWith(prefix)) return [];
-    const draftOwnerId = key.slice(prefix.length);
-    const { confirmed, desired } = reconciler.snapshot();
-    return [...confirmed].flatMap((path) => (desired.has(path) ? [] : [{ path, draftOwnerId }]));
-  });
+  return pendingTextAttachmentReleasesEnvironment(environmentId).map(({ path, draftOwnerId }) => ({
+    path,
+    draftOwnerId,
+  }));
+}
+
+function restorePendingTextAttachmentClaimReleases(
+  environmentId: EnvironmentId,
+  operations: TextAttachmentClaimOperations,
+): void {
+  const claimsByOwner = new Map<string, Set<string>>();
+  for (const { path, draftOwnerId } of pendingTextAttachmentReleasesEnvironment(environmentId)) {
+    const paths = claimsByOwner.get(draftOwnerId) ?? new Set<string>();
+    paths.add(path);
+    claimsByOwner.set(draftOwnerId, paths);
+  }
+  for (const [draftOwnerId, paths] of claimsByOwner) {
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId,
+      operations: {
+        claim: operations.claim,
+        release: async (path, ownerId) => {
+          const release = { environmentId, path, draftOwnerId: ownerId };
+          const released = await operations.release(path, ownerId);
+          if (released) completePendingTextAttachmentRelease(release);
+          return released;
+        },
+      },
+    });
+    reconciler.confirmPaths(paths);
+    reconciler.setDesiredPaths([]);
+  }
 }
 
 export function reconcileTextAttachmentClaimsEnvironment(
@@ -331,6 +378,7 @@ export function reconcileTextAttachmentClaimsEnvironment(
     reconciler.setDesiredPrompt(prompt);
     reconciler.reconcileNow();
   }
+  restorePendingTextAttachmentClaimReleases(environmentId, operations);
 }
 
 export async function detachTextAttachmentClaimOwner(
