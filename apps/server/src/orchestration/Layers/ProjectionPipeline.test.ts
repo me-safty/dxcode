@@ -943,6 +943,18 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
         const attachmentId = "thread-delete-files-00000000-0000-4000-8000-000000000001";
         const otherThreadAttachmentId =
           "thread-delete-files-extra-00000000-0000-4000-8000-000000000002";
+        const textAttachmentPath = path.join(
+          attachmentsDir,
+          "text",
+          "00000000-0000-4000-8000-000000000003",
+          "notes.txt",
+        );
+        const unrelatedTextAttachmentPath = path.join(
+          attachmentsDir,
+          "text",
+          "00000000-0000-4000-8000-000000000004",
+          "other.txt",
+        );
 
         const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
           eventStore
@@ -1010,7 +1022,7 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
             threadId,
             messageId: MessageId.make("message-delete-files"),
             role: "user",
-            text: "Delete",
+            text: `Delete [notes.txt](${encodeURI(textAttachmentPath)})`,
             attachments: [
               {
                 type: "image",
@@ -1035,8 +1047,16 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
         yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
         yield* fileSystem.writeFileString(threadAttachmentPath, "delete");
         yield* fileSystem.writeFileString(otherThreadAttachmentPath, "other-thread");
+        yield* fileSystem.makeDirectory(path.dirname(textAttachmentPath), { recursive: true });
+        yield* fileSystem.makeDirectory(path.dirname(unrelatedTextAttachmentPath), {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(textAttachmentPath, "delete text");
+        yield* fileSystem.writeFileString(unrelatedTextAttachmentPath, "keep text");
         assert.isTrue(yield* exists(threadAttachmentPath));
         assert.isTrue(yield* exists(otherThreadAttachmentPath));
+        assert.isTrue(yield* exists(textAttachmentPath));
+        assert.isTrue(yield* exists(unrelatedTextAttachmentPath));
 
         yield* appendAndProject({
           type: "thread.deleted",
@@ -1056,6 +1076,8 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
 
         assert.isFalse(yield* exists(threadAttachmentPath));
         assert.isTrue(yield* exists(otherThreadAttachmentPath));
+        assert.isFalse(yield* exists(textAttachmentPath));
+        assert.isTrue(yield* exists(unrelatedTextAttachmentPath));
       }),
     );
   },

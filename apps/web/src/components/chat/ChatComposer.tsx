@@ -127,6 +127,7 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { assetEnvironment } from "~/state/assets";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { resolvePathLinkTarget } from "~/terminal-links";
+import { removedTextAttachmentPaths } from "~/textAttachmentPaths";
 
 const TEXT_ATTACHMENT_MAX_BYTES = 1024 * 1024;
 
@@ -629,6 +630,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const writeTextAttachment = useAtomCommand(assetEnvironment.writeTextAttachment, {
     reportFailure: false,
   });
+  const deleteTextAttachment = useAtomCommand(assetEnvironment.deleteTextAttachment, {
+    reportFailure: false,
+  });
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
   const composerTerminalContexts = composerDraft.terminalContexts;
@@ -1113,6 +1117,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         scheduleComposerFocus();
         return;
       }
+      for (const path of removedTextAttachmentPaths(promptRef.current, nextPrompt)) {
+        void deleteTextAttachment({ environmentId, input: { path } });
+      }
       promptRef.current = nextPrompt;
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
       const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
@@ -1120,7 +1127,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setComposerTrigger(detectComposerTrigger(nextPrompt, nextPrompt.length));
       scheduleComposerFocus();
     },
-    [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
+    [
+      composerDraftTarget,
+      deleteTextAttachment,
+      environmentId,
+      promptRef,
+      scheduleComposerFocus,
+      setComposerDraftPrompt,
+    ],
   );
 
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
@@ -1466,6 +1480,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         );
         return;
       }
+      for (const path of removedTextAttachmentPaths(promptRef.current, nextPrompt)) {
+        void deleteTextAttachment({ environmentId, input: { path } });
+      }
       promptRef.current = nextPrompt;
       setPrompt(nextPrompt);
       if (!terminalContextIdListsEqual(composerTerminalContexts, terminalContextIds)) {
@@ -1481,6 +1498,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [
       activePendingProgress?.activeQuestion,
+      deleteTextAttachment,
+      environmentId,
       pendingUserInputs.length,
       onChangeActivePendingUserInputCustomAnswer,
       promptRef,

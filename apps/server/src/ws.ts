@@ -53,6 +53,7 @@ import {
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   AssetTextAttachmentWriteError,
+  AssetTextAttachmentDeleteError,
   EnvironmentAuthorizationError,
   ThreadId,
   type TerminalAttachStreamEvent,
@@ -87,7 +88,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
-import { createTextAttachmentPath } from "./attachmentStore.ts";
+import { createTextAttachmentPath, textAttachmentDirectory } from "./attachmentStore.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -313,6 +314,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.filesystemBrowse, AuthOrchestrationReadScope],
   [WS_METHODS.assetsCreateUrl, AuthOrchestrationReadScope],
   [WS_METHODS.assetsWriteTextAttachment, AuthOrchestrationOperateScope],
+  [WS_METHODS.assetsDeleteTextAttachment, AuthOrchestrationOperateScope],
   [WS_METHODS.subscribeVcsStatus, AuthOrchestrationReadScope],
   [WS_METHODS.vcsRefreshStatus, AuthOrchestrationReadScope],
   [WS_METHODS.vcsPull, AuthOrchestrationOperateScope],
@@ -1547,6 +1549,26 @@ const makeWsRpcLayer = (
                   ),
                 );
               return { path: attachmentPath };
+            }),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.assetsDeleteTextAttachment]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.assetsDeleteTextAttachment,
+            Effect.gen(function* () {
+              const directory = textAttachmentDirectory({
+                attachmentsDir: config.attachmentsDir,
+                path: input.path,
+              });
+              if (!directory) return { removed: false };
+              yield* fileSystem
+                .remove(directory, { recursive: true, force: true })
+                .pipe(
+                  Effect.mapError(
+                    (cause) => new AssetTextAttachmentDeleteError({ path: input.path, cause }),
+                  ),
+                );
+              return { removed: true };
             }),
             { "rpc.aggregate": "workspace" },
           ),

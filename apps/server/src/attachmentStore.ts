@@ -137,3 +137,51 @@ export function createTextAttachmentPath(input: {
     safeName,
   );
 }
+
+export function textAttachmentRelativePath(input: {
+  readonly attachmentsDir: string;
+  readonly path: string;
+}): string | null {
+  const relativePath = NodePath.relative(
+    NodePath.resolve(input.attachmentsDir),
+    NodePath.resolve(input.path),
+  ).replaceAll("\\", "/");
+  return /^text\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[^/]+$/i.test(
+    relativePath,
+  )
+    ? relativePath
+    : null;
+}
+
+export function textAttachmentDirectory(input: {
+  readonly attachmentsDir: string;
+  readonly path: string;
+}): string | null {
+  const relativePath = textAttachmentRelativePath(input);
+  return relativePath ? NodePath.join(input.attachmentsDir, NodePath.dirname(relativePath)) : null;
+}
+
+const MARKDOWN_LINK_DESTINATION_PATTERN = /\]\(([^)\s]+)\)/g;
+
+export function collectTextAttachmentRelativePaths(input: {
+  readonly attachmentsDir: string;
+  readonly text: string;
+}): Set<string> {
+  const paths = new Set<string>();
+  for (const match of input.text.matchAll(MARKDOWN_LINK_DESTINATION_PATTERN)) {
+    const encodedPath = match[1];
+    if (!encodedPath) continue;
+    let path = encodedPath;
+    try {
+      path = decodeURIComponent(encodedPath);
+    } catch {
+      continue;
+    }
+    const relativePath = textAttachmentRelativePath({
+      attachmentsDir: input.attachmentsDir,
+      path,
+    });
+    if (relativePath) paths.add(relativePath);
+  }
+  return paths;
+}

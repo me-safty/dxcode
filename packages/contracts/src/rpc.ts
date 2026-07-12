@@ -17,6 +17,9 @@ import {
   AssetAccessError,
   AssetCreateUrlInput,
   AssetCreateUrlResult,
+  AssetDeleteTextAttachmentInput,
+  AssetDeleteTextAttachmentResult,
+  AssetTextAttachmentDeleteError,
   AssetTextAttachmentWriteError,
   AssetWriteTextAttachmentInput,
   AssetWriteTextAttachmentResult,
@@ -168,6 +171,7 @@ export const WS_METHODS = {
   filesystemBrowse: "filesystem.browse",
   assetsCreateUrl: "assets.createUrl",
   assetsWriteTextAttachment: "assets.writeTextAttachment",
+  assetsDeleteTextAttachment: "assets.deleteTextAttachment",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -407,6 +411,12 @@ export const WsAssetsWriteTextAttachmentRpc = Rpc.make(WS_METHODS.assetsWriteTex
   payload: AssetWriteTextAttachmentInput,
   success: AssetWriteTextAttachmentResult,
   error: Schema.Union([AssetTextAttachmentWriteError, EnvironmentAuthorizationError]),
+});
+
+export const WsAssetsDeleteTextAttachmentRpc = Rpc.make(WS_METHODS.assetsDeleteTextAttachment, {
+  payload: AssetDeleteTextAttachmentInput,
+  success: AssetDeleteTextAttachmentResult,
+  error: Schema.Union([AssetTextAttachmentDeleteError, EnvironmentAuthorizationError]),
 });
 
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
@@ -721,6 +731,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsWriteTextAttachmentRpc,
+  WsAssetsDeleteTextAttachmentRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,

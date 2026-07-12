@@ -41,6 +41,16 @@ export const AssetWriteTextAttachmentResult = Schema.Struct({
 });
 export type AssetWriteTextAttachmentResult = typeof AssetWriteTextAttachmentResult.Type;
 
+export const AssetDeleteTextAttachmentInput = Schema.Struct({
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+});
+export type AssetDeleteTextAttachmentInput = typeof AssetDeleteTextAttachmentInput.Type;
+
+export const AssetDeleteTextAttachmentResult = Schema.Struct({
+  removed: Schema.Boolean,
+});
+export type AssetDeleteTextAttachmentResult = typeof AssetDeleteTextAttachmentResult.Type;
+
 export class AssetTextAttachmentWriteError extends Schema.TaggedErrorClass<AssetTextAttachmentWriteError>()(
   "AssetTextAttachmentWriteError",
   {
@@ -50,6 +60,18 @@ export class AssetTextAttachmentWriteError extends Schema.TaggedErrorClass<Asset
 ) {
   override get message(): string {
     return `Failed to store text attachment '${this.fileName}'.`;
+  }
+}
+
+export class AssetTextAttachmentDeleteError extends Schema.TaggedErrorClass<AssetTextAttachmentDeleteError>()(
+  "AssetTextAttachmentDeleteError",
+  {
+    path: TrimmedNonEmptyString,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Failed to delete text attachment.";
   }
 }
 

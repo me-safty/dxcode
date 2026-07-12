@@ -6,10 +6,12 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  collectTextAttachmentRelativePaths,
   createAttachmentId,
   createTextAttachmentPath,
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
+  textAttachmentDirectory,
 } from "./attachmentStore.ts";
 
 describe("attachmentStore", () => {
@@ -103,5 +105,24 @@ describe("attachmentStore", () => {
     expect(NodePath.basename(reservedPath)).toBe("_CON.ts");
     expect(NodePath.basename(longPath)).toHaveLength(120);
     expect(NodePath.basename(longPath)).toMatch(/\.tsx$/);
+  });
+
+  it("validates and collects server-owned text attachment paths", () => {
+    const attachmentsDir = NodePath.join(NodeOS.tmpdir(), "t3code-attachments");
+    const attachmentPath = createTextAttachmentPath({ attachmentsDir, fileName: "notes.txt" });
+    const encodedPath = encodeURI(attachmentPath).replaceAll("\\", "%5C");
+
+    expect(textAttachmentDirectory({ attachmentsDir, path: attachmentPath })).toBe(
+      NodePath.dirname(attachmentPath),
+    );
+    expect(
+      collectTextAttachmentRelativePaths({
+        attachmentsDir,
+        text: `[notes.txt](${encodedPath})`,
+      }),
+    ).toEqual(new Set([NodePath.relative(attachmentsDir, attachmentPath).replaceAll("\\", "/")]));
+    expect(
+      textAttachmentDirectory({ attachmentsDir, path: NodePath.join(attachmentsDir, "../nope") }),
+    ).toBeNull();
   });
 });

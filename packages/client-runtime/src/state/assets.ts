@@ -76,6 +76,10 @@ export function createAssetEnvironmentAtoms<R, E>(
       label: "environment-data:assets:write-text-attachment",
       tag: WS_METHODS.assetsWriteTextAttachment,
     }),
+    deleteTextAttachment: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:assets:delete-text-attachment",
+      tag: WS_METHODS.assetsDeleteTextAttachment,
+    }),
     createUrls: (target: {
       readonly environmentId: EnvironmentId;
       readonly resources: ReadonlyArray<AssetResource>;

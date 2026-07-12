@@ -23,6 +23,8 @@ import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem
 import type {
   AssetCreateUrlInput,
   AssetCreateUrlResult,
+  AssetDeleteTextAttachmentInput,
+  AssetDeleteTextAttachmentResult,
   AssetWriteTextAttachmentInput,
   AssetWriteTextAttachmentResult,
 } from "./assets.ts";
@@ -1173,6 +1175,9 @@ export interface EnvironmentApi {
     writeTextAttachment: (
       input: AssetWriteTextAttachmentInput,
     ) => Promise<AssetWriteTextAttachmentResult>;
+    deleteTextAttachment: (
+      input: AssetDeleteTextAttachmentInput,
+    ) => Promise<AssetDeleteTextAttachmentResult>;
   };
   sourceControl: {
     lookupRepository: (
