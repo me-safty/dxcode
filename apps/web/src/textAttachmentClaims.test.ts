@@ -8,6 +8,7 @@ import {
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
   TextAttachmentClaimReconciler,
+  detachTextAttachmentClaimOwner,
   getTextAttachmentClaimReconciler,
   reconcileTextAttachmentClaimsEnvironment,
   resetTextAttachmentClaimRegistryForTest,
@@ -176,6 +177,52 @@ describe("text attachment claims", () => {
 
     await expect(result).resolves.toBe(true);
     expect(operation).toHaveBeenCalledTimes(5);
+  });
+
+  it("waits for an in-flight claim before detaching a destructively cleared owner", async () => {
+    const environmentId = EnvironmentId.make("destructive-environment");
+    const draftOwnerId = "draft:destructive";
+    let finishClaim: (claimed: boolean) => void = () => undefined;
+    const claim = vi.fn<(path: string) => Promise<boolean>>(
+      (_path) =>
+        new Promise<boolean>((resolve) => {
+          finishClaim = resolve;
+        }),
+    );
+    const operations = {
+      claim: (path: string) => claim(path),
+      release: vi.fn(async () => true),
+    };
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId,
+      operations,
+    });
+    reconciler.setDesiredPaths([PATH]);
+    await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce());
+
+    let detached = false;
+    const detach = detachTextAttachmentClaimOwner(environmentId, draftOwnerId).then(() => {
+      detached = true;
+    });
+    await Promise.resolve();
+    expect(detached).toBe(false);
+
+    finishClaim(true);
+    await detach;
+    expect(detached).toBe(true);
+    expect(reconciler.snapshot().confirmed).toEqual(new Set([PATH]));
+  });
+
+  it("retries a released false result before destructive clear completes", async () => {
+    vi.useFakeTimers();
+    const release = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    const result = retryTextAttachmentOperation(release, { retryDelayMs: 100 });
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(result).resolves.toBe(true);
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it("cancels pending retry timers when disposed on unmount", async () => {
