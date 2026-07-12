@@ -16,6 +16,7 @@ const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
 const TEXT_ATTACHMENT_DIRECTORY = "text";
 export const TEXT_ATTACHMENT_METADATA_FILE = ".t3-attachment.json";
 export const TEXT_ATTACHMENT_PENDING_DIRECTORY = ".pending";
+const INTERNAL_TEXT_ATTACHMENT_FILE_NAME_PATTERN = /^\.t3-attachment\.json(?:\.|$)/i;
 export const TEXT_ATTACHMENT_DELETE_GRACE_MS = 60_000;
 const TEXT_ATTACHMENT_FILE_NAME_MAX_CHARS = 120;
 const WINDOWS_RESERVED_FILE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
@@ -128,6 +129,9 @@ export function createTextAttachmentPath(input: {
       : "context.txt";
   if (WINDOWS_RESERVED_FILE_NAME_PATTERN.test(safeName)) {
     safeName = `_${safeName}`;
+  }
+  if (INTERNAL_TEXT_ATTACHMENT_FILE_NAME_PATTERN.test(safeName)) {
+    safeName = `_${safeName.slice(1)}`;
   }
   if (safeName.length > TEXT_ATTACHMENT_FILE_NAME_MAX_CHARS) {
     const extensionIndex = safeName.lastIndexOf(".");

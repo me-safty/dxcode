@@ -136,6 +136,44 @@ describe("attachmentStore", () => {
     expect(NodePath.basename(longPath)).toMatch(/\.tsx$/);
   });
 
+  it("reserves internal text attachment metadata basenames", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-text-internal-name-"),
+    );
+    try {
+      const generatedPath = createTextAttachmentPath({
+        attachmentsDir,
+        fileName: TEXT_ATTACHMENT_METADATA_FILE,
+      });
+      expect(NodePath.basename(generatedPath)).toBe("_t3-attachment.json");
+
+      const attachmentPath = writeClaimedTextAttachment({
+        attachmentsDir,
+        fileName: TEXT_ATTACHMENT_METADATA_FILE,
+        contents: "user attachment contents",
+        draftOwnerId: "internal-name-owner",
+      });
+      const metadataPath = NodePath.join(
+        NodePath.dirname(attachmentPath),
+        TEXT_ATTACHMENT_METADATA_FILE,
+      );
+      expect(NodePath.basename(attachmentPath)).toBe("_t3-attachment.json");
+      expect(attachmentPath).not.toBe(metadataPath);
+      expect(NodeFS.readFileSync(attachmentPath, "utf8")).toBe("user attachment contents");
+      expect(NodeFS.existsSync(metadataPath)).toBe(true);
+      expect(
+        releaseTextAttachment({
+          attachmentsDir,
+          path: attachmentPath,
+          draftOwnerId: "internal-name-owner",
+          nowMs: 0,
+        }),
+      ).toBe(true);
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
   it("validates and collects server-owned text attachment paths", () => {
     const attachmentsDir = NodePath.join(NodeOS.tmpdir(), "t3code-(attachments)");
     const attachmentPath = createTextAttachmentPath({ attachmentsDir, fileName: "notes.txt" });
