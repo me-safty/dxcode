@@ -134,6 +134,11 @@ function composerAttachmentTargetKey(target: ScopedThreadRef | DraftId): string 
     ? `draft:${target}`
     : `thread:${target.environmentId}:${target.threadId}`;
 }
+
+function textAttachmentStorageCwd(projectCwd: string): string {
+  const separator = projectCwd.includes("\\") ? "\\" : "/";
+  return `${projectCwd.replace(/[\\/]+$/, "")}${separator}..${separator}.t3${separator}attachments`;
+}
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
@@ -1792,7 +1797,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return `'${file.name}' exceeds the 1 MB text attachment limit.`;
     }
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-") || "context.md";
-    const relativePath = `.t3/attachments/${randomUUID()}/${safeName}`;
+    const attachmentCwd = textAttachmentStorageCwd(gitCwd);
+    const relativePath = `${randomUUID()}/${safeName}`;
     const result = await file
       .arrayBuffer()
       .then((buffer) => {
@@ -1801,7 +1807,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
         return writeProjectFile({
           environmentId,
-          input: { cwd: gitCwd, relativePath, contents },
+          input: { cwd: attachmentCwd, relativePath, contents },
         });
       })
       .catch(() => null);
@@ -1813,7 +1819,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setComposerDraftPrompt(
       composerDraftTarget,
       `${currentPrompt}${separator}${serializeComposerFileLink(
-        resolvePathLinkTarget(relativePath, gitCwd),
+        resolvePathLinkTarget(relativePath, attachmentCwd),
       )} `,
     );
     return null;
