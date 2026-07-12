@@ -108,7 +108,11 @@ import {
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { readLocalApi } from "../localApi";
-import { useComposerDraftStore } from "../composerDraftStore";
+import {
+  composerDraftPromptsEnvironmentExcept,
+  composerDraftTargetsProject,
+  useComposerDraftStore,
+} from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
@@ -119,7 +123,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { textAttachmentPaths } from "../textAttachmentPaths";
+import { unreferencedTextAttachmentPaths } from "../textAttachmentPaths";
 import {
   buildThreadRouteParams,
   resolveThreadRouteRef,
@@ -1443,10 +1447,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     async (member: SidebarProjectGroupMember, options: { force?: boolean } = {}) => {
       const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
       const draftStore = useComposerDraftStore.getState();
-      const projectDraftThread = draftStore.getDraftThreadByProjectRef(memberProjectRef);
-      const discardedPrompt = projectDraftThread
-        ? (draftStore.getComposerDraft(projectDraftThread.draftId)?.prompt ?? "")
-        : "";
+      const projectThreadRefs = projectThreads
+        .filter(
+          (thread) =>
+            thread.environmentId === member.environmentId && thread.projectId === member.id,
+        )
+        .map((thread) => scopeThreadRef(thread.environmentId, thread.id));
+      const discardedTargets = composerDraftTargetsProject(memberProjectRef, projectThreadRefs);
+      const discardedPrompts = discardedTargets.map(
+        (target) => draftStore.getComposerDraft(target)?.prompt ?? "",
+      );
+      const retainedPrompts = composerDraftPromptsEnvironmentExcept(
+        member.environmentId,
+        discardedTargets,
+      );
       const result = await deleteProject({
         environmentId: member.environmentId,
         input: {
@@ -1457,21 +1471,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (result._tag === "Failure") {
         return result;
       }
-      if (projectDraftThread) {
-        await Promise.all(
-          textAttachmentPaths(discardedPrompt).map((path) =>
-            deleteTextAttachment({
-              environmentId: member.environmentId,
-              input: { path },
-            }),
-          ),
-        );
-        draftStore.clearDraftThread(projectDraftThread.draftId);
+      await Promise.all(
+        unreferencedTextAttachmentPaths(discardedPrompts, retainedPrompts).map((path) =>
+          deleteTextAttachment({
+            environmentId: member.environmentId,
+            input: { path },
+          }),
+        ),
+      );
+      for (const target of discardedTargets) {
+        draftStore.clearDraftThread(target);
       }
       draftStore.clearProjectDraftThreadId(memberProjectRef);
       return result;
     },
-    [deleteProject, deleteTextAttachment],
+    [deleteProject, deleteTextAttachment, projectThreads],
   );
 
   const handleRemoveProject = useCallback(

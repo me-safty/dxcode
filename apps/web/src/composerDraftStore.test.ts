@@ -61,6 +61,8 @@ import {
   COMPOSER_DRAFT_STORAGE_KEY,
   clearComposerDraftsEnvironment,
   composerDraftPromptsEnvironment,
+  composerDraftPromptsEnvironmentExcept,
+  composerDraftTargetsProject,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThread,
   markPromotedDraftThreadByRef,
@@ -732,6 +734,33 @@ describe("composerDraftStore project draft thread mapping", () => {
     } finally {
       URL.revokeObjectURL = originalRevokeObjectUrl;
     }
+  });
+
+  it("collects every draft target removed with a forced project deletion", () => {
+    const store = useComposerDraftStore.getState();
+    const projectThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+    const retainedThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, otherThreadId);
+    const projectDraftThreadId = ThreadId.make("project-draft-thread");
+
+    store.setPrompt(projectThreadRef, "project server-thread draft");
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId: projectDraftThreadId });
+    store.setPrompt(draftId, "project new-thread draft");
+    store.setPrompt(retainedThreadRef, "other project draft");
+
+    const discardedTargets = composerDraftTargetsProject(projectRef, [projectThreadRef]);
+    expect(discardedTargets).toEqual([projectThreadRef, draftId]);
+    expect(discardedTargets.map((target) => store.getComposerDraft(target)?.prompt)).toEqual([
+      "project server-thread draft",
+      "project new-thread draft",
+    ]);
+    expect(composerDraftPromptsEnvironmentExcept(TEST_ENVIRONMENT_ID, discardedTargets)).toEqual([
+      "other project draft",
+    ]);
+
+    for (const target of discardedTargets) store.clearDraftThread(target);
+    expect(store.getComposerDraft(projectThreadRef)).toBeNull();
+    expect(store.getComposerDraft(draftId)).toBeNull();
+    expect(store.getComposerDraft(retainedThreadRef)?.prompt).toBe("other project draft");
   });
 
   it("stores and reads project draft thread ids via actions", () => {

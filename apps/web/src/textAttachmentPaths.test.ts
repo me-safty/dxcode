@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { removedOwnedTextAttachmentPaths, textAttachmentPaths } from "./textAttachmentPaths";
+import {
+  removedOwnedTextAttachmentPaths,
+  textAttachmentPaths,
+  unreferencedTextAttachmentPaths,
+} from "./textAttachmentPaths";
 
 describe("textAttachmentPaths", () => {
   it("collects unique generated attachment links from a discarded draft", () => {
@@ -33,5 +37,21 @@ describe("removedOwnedTextAttachmentPaths", () => {
     expect(
       removedOwnedTextAttachmentPaths(`[notes.txt](${path})`, `[notes](${path})`, new Set([path])),
     ).toEqual([]);
+  });
+});
+
+describe("unreferencedTextAttachmentPaths", () => {
+  it("protects an attachment referenced by another unsent draft", () => {
+    const sharedPath =
+      "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/shared.txt";
+    const uniquePath =
+      "/var/t3-data/attachments/text/87654321-4321-4321-4321-cba987654321/unique.txt";
+
+    expect(
+      unreferencedTextAttachmentPaths(
+        [`[shared.txt](${sharedPath}) [unique.txt](${uniquePath}) `],
+        [`Still using [shared.txt](${sharedPath}) `],
+      ),
+    ).toEqual([uniquePath]);
   });
 });

@@ -315,7 +315,7 @@ interface ProjectDraftSession extends DraftSessionState {
  * Raw `ThreadId` is intentionally excluded so callers cannot drop environment
  * identity for real threads.
  */
-type ComposerThreadTarget = ScopedThreadRef | DraftId;
+export type ComposerThreadTarget = ScopedThreadRef | DraftId;
 
 /**
  * Persisted store for composer content plus draft-session metadata.
@@ -3401,6 +3401,46 @@ export function composerDraftPromptsEnvironment(environmentId: EnvironmentId): s
   return [...keys].flatMap((key) => {
     const draft = state.draftsByThreadKey[key];
     return draft ? [draft.prompt] : [];
+  });
+}
+
+export function composerDraftPromptsEnvironmentExcept(
+  environmentId: EnvironmentId,
+  excludedTargets: ReadonlyArray<ComposerThreadTarget>,
+): string[] {
+  const state = useComposerDraftStore.getState();
+  const excludedKeys = new Set(
+    excludedTargets.flatMap((target) => {
+      const key = resolveComposerDraftKey(state, target);
+      return key ? [key] : [];
+    }),
+  );
+  return [...composerDraftKeysEnvironment(state, environmentId)].flatMap((key) => {
+    const draft = state.draftsByThreadKey[key];
+    return draft && !excludedKeys.has(key) ? [draft.prompt] : [];
+  });
+}
+
+export function composerDraftTargetsProject(
+  projectRef: ScopedProjectRef,
+  threadRefs: ReadonlyArray<ScopedThreadRef>,
+): ComposerThreadTarget[] {
+  const state = useComposerDraftStore.getState();
+  const targets: ComposerThreadTarget[] = [...threadRefs];
+  for (const [draftId, draftThread] of Object.entries(state.draftThreadsByThreadKey)) {
+    if (
+      draftThread.environmentId === projectRef.environmentId &&
+      draftThread.projectId === projectRef.projectId
+    ) {
+      targets.push(DraftId.make(draftId));
+    }
+  }
+  const seenKeys = new Set<string>();
+  return targets.filter((target) => {
+    const key = resolveComposerDraftKey(state, target);
+    if (!key || seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
   });
 }
 

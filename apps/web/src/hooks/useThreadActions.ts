@@ -12,7 +12,10 @@ import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef } from "react";
 
 import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
-import { useComposerDraftStore } from "../composerDraftStore";
+import {
+  composerDraftPromptsEnvironmentExcept,
+  useComposerDraftStore,
+} from "../composerDraftStore";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
 import { assetEnvironment } from "../state/assets";
@@ -27,7 +30,7 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
-import { textAttachmentPaths } from "../textAttachmentPaths";
+import { unreferencedTextAttachmentPaths } from "../textAttachmentPaths";
 
 export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
@@ -240,6 +243,9 @@ export function useThreadActions() {
       });
       const discardedPrompt =
         useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt ?? "";
+      const retainedPrompts = composerDraftPromptsEnvironmentExcept(threadRef.environmentId, [
+        threadRef,
+      ]);
       const deleteResult = await deleteThreadMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId },
@@ -248,7 +254,7 @@ export function useThreadActions() {
         return deleteResult;
       }
       await Promise.all(
-        textAttachmentPaths(discardedPrompt).map((path) =>
+        unreferencedTextAttachmentPaths([discardedPrompt], retainedPrompts).map((path) =>
           deleteTextAttachment({
             environmentId: threadRef.environmentId,
             input: { path },

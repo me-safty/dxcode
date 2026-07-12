@@ -35,4 +35,16 @@ export function removedOwnedTextAttachmentPaths(
   );
 }
 
+export function unreferencedTextAttachmentPaths(
+  discardedPrompts: ReadonlyArray<string>,
+  retainedPrompts: ReadonlyArray<string>,
+): string[] {
+  const retainedPaths = new Set(retainedPrompts.flatMap(textAttachmentPaths));
+  return [
+    ...new Set(
+      discardedPrompts.flatMap(textAttachmentPaths).filter((path) => !retainedPaths.has(path)),
+    ),
+  ];
+}
+
 import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
