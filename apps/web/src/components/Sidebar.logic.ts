@@ -26,6 +26,19 @@ type SidebarProject = {
 
 export type ThreadTraversalDirection = "previous" | "next";
 
+export function prioritizeThreadsByPinnedKeys<T>(
+  threads: readonly T[],
+  pinnedKeys: readonly string[],
+  getKey: (thread: T) => string,
+): T[] {
+  if (pinnedKeys.length === 0) return [...threads];
+  const pinned = new Set(pinnedKeys);
+  return [
+    ...threads.filter((thread) => pinned.has(getKey(thread))),
+    ...threads.filter((thread) => !pinned.has(getKey(thread))),
+  ];
+}
+
 export interface ThreadStatusPill {
   label:
     | "Working"
