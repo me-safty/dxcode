@@ -1,5 +1,9 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, RpcCompressionCodec } from "@t3tools/contracts";
 import type { RelayManagedEndpoint } from "@t3tools/contracts/relay";
+import type {
+  ExecutionEnvironmentDescriptor,
+  ExecutionEnvironmentRpcTransport,
+} from "@t3tools/contracts";
 import {
   exchangeRemoteDpopAccessToken,
   type RemoteEnvironmentAuthError,
@@ -10,6 +14,11 @@ import { environmentMismatchError, mapRemoteEnvironmentError } from "../connecti
 import { ConnectionBlockedError, type ConnectionAttemptError } from "../connection/model.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
+import {
+  applyRpcTransport,
+  selectRpcTransport,
+  selectThreadSyncVersion,
+} from "../environment/transport.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import * as TokenStore from "./tokenStore.ts";
@@ -35,12 +44,17 @@ export interface AuthorizedRemoteEnvironment {
   readonly label: string;
   readonly httpBaseUrl: string;
   readonly socketUrl: string;
+  readonly rpcTransport?: ExecutionEnvironmentRpcTransport;
+  readonly threadSyncVersion?: 1 | 2;
   readonly httpAuthorization: PreparedHttpAuthorization;
 }
 
 export class RemoteEnvironmentAuthorization extends Context.Service<
   RemoteEnvironmentAuthorization,
   {
+    readonly getDescriptor?: (
+      httpBaseUrl: string,
+    ) => Effect.Effect<ExecutionEnvironmentDescriptor, ConnectionAttemptError>;
     readonly authorizeBearer: (input: {
       readonly expectedEnvironmentId: EnvironmentId;
       readonly httpBaseUrl: string;
@@ -125,11 +139,15 @@ export const make = Effect.gen(function* () {
         Effect.mapError(mapRemoteEnvironmentError),
         Effect.provideService(HttpClient.HttpClient, httpClient),
       );
+      const hasCompressionCodec = (yield* RpcCompressionCodec) !== null;
+      const rpcTransport = selectRpcTransport(descriptor, { hasCompressionCodec });
       return {
         environmentId: descriptor.environmentId,
         label: descriptor.label,
         httpBaseUrl: input.httpBaseUrl,
-        socketUrl,
+        socketUrl: applyRpcTransport(socketUrl, rpcTransport),
+        rpcTransport,
+        threadSyncVersion: selectThreadSyncVersion(descriptor),
         httpAuthorization: {
           _tag: "Bearer" as const,
           token: input.bearerToken,
@@ -198,12 +216,38 @@ export const make = Effect.gen(function* () {
         });
         const cachedSocket = yield* createDpopSocketUrl(cached.value).pipe(Effect.result);
         if (Result.isSuccess(cachedSocket)) {
+          // Best-effort transport negotiation: the whole point of this branch is
+          // reusing the persisted token WITHOUT any network round trip, so a
+          // failed or unreachable descriptor fetch must not break it — fall back
+          // to the legacy JSON transport and let a later full authorization
+          // upgrade the transport.
+          const descriptor = yield* fetchDescriptor(cached.value.endpoint.httpBaseUrl).pipe(
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+            Effect.option,
+          );
+          if (
+            Option.isSome(descriptor) &&
+            descriptor.value.environmentId !== input.expectedEnvironmentId
+          ) {
+            return yield* environmentMismatchError({
+              expected: input.expectedEnvironmentId,
+              actual: descriptor.value.environmentId,
+            });
+          }
+          const hasCompressionCodec = (yield* RpcCompressionCodec) !== null;
+          const rpcTransport = Option.isSome(descriptor)
+            ? selectRpcTransport(descriptor.value, { hasCompressionCodec })
+            : ({ kind: "json", path: "/ws" } as const);
           yield* resetCachedEndpointFailures(input.expectedEnvironmentId);
           return {
             environmentId: cached.value.environmentId,
             label: cached.value.label,
             httpBaseUrl: cached.value.endpoint.httpBaseUrl,
-            socketUrl: cachedSocket.success,
+            socketUrl: applyRpcTransport(cachedSocket.success, rpcTransport),
+            rpcTransport,
+            threadSyncVersion: Option.isSome(descriptor)
+              ? selectThreadSyncVersion(descriptor.value)
+              : (1 as const),
             httpAuthorization: {
               _tag: "Dpop" as const,
               accessToken: cached.value.accessToken,
@@ -276,6 +320,8 @@ export const make = Effect.gen(function* () {
         dpopThumbprint: thumbprint,
       });
       const socketUrl = yield* createDpopSocketUrl(token).pipe(Effect.mapError(mapDpopSocketError));
+      const hasCompressionCodec = (yield* RpcCompressionCodec) !== null;
+      const rpcTransport = selectRpcTransport(descriptor, { hasCompressionCodec });
       yield* tokenStore
         .put(token)
         .pipe(Effect.withSpan("environment.authorization.accessToken.persist"));
@@ -283,7 +329,9 @@ export const make = Effect.gen(function* () {
         environmentId: descriptor.environmentId,
         label: descriptor.label,
         httpBaseUrl: bootstrap.endpoint.httpBaseUrl,
-        socketUrl,
+        socketUrl: applyRpcTransport(socketUrl, rpcTransport),
+        rpcTransport,
+        threadSyncVersion: selectThreadSyncVersion(descriptor),
         httpAuthorization: {
           _tag: "Dpop" as const,
           accessToken: token.accessToken,
@@ -293,6 +341,8 @@ export const make = Effect.gen(function* () {
   );
 
   return RemoteEnvironmentAuthorization.of({
+    getDescriptor: (httpBaseUrl) =>
+      fetchDescriptor(httpBaseUrl).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
     authorizeBearer,
     authorizeDpop: (input) =>
       authorizeDpop(input).pipe(Effect.withSpan("environment.authorization")),

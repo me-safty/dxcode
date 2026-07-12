@@ -699,6 +699,9 @@ function ThreadRouteContent(
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}
           threadSyncStatus={selectedThreadDetailState.status}
+          onLoadOlder={selectedThreadDetailState.loadOlder ?? (() => Promise.resolve())}
+          hasOlder={selectedThreadDetailState.hasOlder ?? false}
+          loadingOlder={selectedThreadDetailState.loadingOlder ?? false}
           activeThreadBusy={composer.activeThreadBusy}
           environmentId={selectedThread.environmentId}
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}

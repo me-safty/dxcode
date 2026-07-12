@@ -72,6 +72,9 @@ export interface ThreadDetailScreenProps {
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
+  readonly onLoadOlder: () => Promise<void>;
+  readonly hasOlder: boolean;
+  readonly loadingOlder: boolean;
   readonly onOpenConnectionEditor: () => void;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftImages: () => Promise<void>;
@@ -414,6 +417,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             layoutVariant={layoutVariant}
             usesAutomaticContentInsets={props.usesAutomaticContentInsets}
             onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
+            onLoadOlder={props.onLoadOlder}
+            hasOlder={props.hasOlder}
+            loadingOlder={props.loadingOlder}
             skills={selectedProviderSkills}
           />
         </View>

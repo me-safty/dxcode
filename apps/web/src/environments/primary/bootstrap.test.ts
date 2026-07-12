@@ -26,6 +26,8 @@ const BASE_ENVIRONMENT = {
   capabilities: {
     repositoryIdentity: true,
   },
+  rpcTransports: [{ kind: "json", path: "/ws" }],
+  threadSyncVersions: [1],
 } satisfies ExecutionEnvironmentDescriptor;
 
 let disposeHttpTest: (() => Promise<void>) | undefined;

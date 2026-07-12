@@ -1,11 +1,58 @@
 import * as Haptics from "expo-haptics";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { LayoutAnimation, Pressable, ScrollView, useColorScheme, View } from "react-native";
+import { useEffect, useState } from "react";
+import type { ActivityPayloadAssetReference, EnvironmentId } from "@t3tools/contracts";
+import {
+  LayoutAnimation,
+  Linking,
+  Pressable,
+  ScrollView,
+  useColorScheme,
+  View,
+} from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import type { ThreadFeedActivity } from "../../lib/threadActivity";
 import Animated, { FadeIn } from "react-native-reanimated";
+import { useAssetUrl } from "../../state/assets";
+
+function ActivityPayloadAssetLink(props: {
+  readonly environmentId: EnvironmentId;
+  readonly asset: ActivityPayloadAssetReference;
+}) {
+  const [requested, setRequested] = useState(false);
+  const uri = useAssetUrl(props.environmentId, requested ? props.asset.resource : null);
+  useEffect(() => {
+    if (uri === null) return;
+    void Linking.openURL(uri)
+      .catch(() => {})
+      .finally(() => setRequested(false));
+  }, [uri]);
+  // A lookup that never resolves (offline, signing failure) must not leave the
+  // link stuck on "Loading media…" — reset so the user can retry.
+  useEffect(() => {
+    if (!requested || uri !== null) return;
+    const timeout = setTimeout(() => setRequested(false), 10_000);
+    return () => clearTimeout(timeout);
+  }, [requested, uri]);
+
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel="Open activity media"
+      onPress={(event) => {
+        event.stopPropagation();
+        setRequested(true);
+      }}
+      className="rounded-md px-1.5 py-1"
+    >
+      <Text className="font-t3-medium text-3xs text-blue-600 dark:text-blue-400">
+        {requested ? "Loading media…" : "Open media"}
+      </Text>
+    </Pressable>
+  );
+}
 
 const WORK_LOG_LAYOUT_ANIMATION = {
   duration: 180,
@@ -78,6 +125,7 @@ function isFreshRow(createdAt: string): boolean {
 }
 
 export function ThreadWorkLog(props: {
+  readonly environmentId: EnvironmentId;
   readonly activities: ReadonlyArray<ThreadFeedActivity>;
   readonly copiedRowId: string | null;
   readonly expandedRows: Readonly<Record<string, boolean>>;
@@ -89,7 +137,10 @@ export function ThreadWorkLog(props: {
   const pressedBackground = colorScheme === "dark" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.035)";
   const rows = props.activities
     .filter((activity) => !(activity.toolLike && activity.status === "neutral"))
-    .map((activity) => ({ ...activity, detail: compactActivityDetail(activity.detail) }));
+    .map((activity) => ({
+      ...activity,
+      detail: compactActivityDetail(activity.detail),
+    }));
 
   if (rows.length === 0) {
     return null;
@@ -165,6 +216,12 @@ export function ThreadWorkLog(props: {
                   </Text>
 
                   <View className="shrink-0 flex-row items-center gap-px">
+                    {row.payloadAsset ? (
+                      <ActivityPayloadAssetLink
+                        environmentId={props.environmentId}
+                        asset={row.payloadAsset}
+                      />
+                    ) : null}
                     {props.copiedRowId === row.id ? (
                       <Text className="pr-1 font-t3-medium text-3xs text-emerald-600 dark:text-emerald-400">
                         Copied

@@ -137,6 +137,9 @@ export interface ThreadFeedProps {
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
+  readonly onLoadOlder: () => Promise<void>;
+  readonly hasOlder: boolean;
+  readonly loadingOlder: boolean;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
 }
 
@@ -146,10 +149,41 @@ function MessageAttachmentImage(props: {
   readonly className: string;
   readonly onPressImage: (uri: string, headers?: Record<string, string>) => void;
 }) {
-  const uri = useAssetUrl(props.environmentId, {
-    _tag: "attachment",
-    attachmentId: props.attachmentId,
-  });
+  const [requested, setRequested] = useState(false);
+  const uri = useAssetUrl(
+    props.environmentId,
+    requested
+      ? {
+          _tag: "attachment",
+          attachmentId: props.attachmentId,
+        }
+      : null,
+  );
+
+  // A resolution that never arrives (offline, URL-signing failure) must not
+  // strand the row on a spinner: fall back to the tappable placeholder so the
+  // user can retry.
+  useEffect(() => {
+    if (!requested || uri !== null) return;
+    const timeout = setTimeout(() => setRequested(false), 10_000);
+    return () => clearTimeout(timeout);
+  }, [requested, uri]);
+
+  if (!requested) {
+    return (
+      <TouchableOpacity
+        accessibilityRole="imagebutton"
+        accessibilityLabel="Load attached media"
+        activeOpacity={0.7}
+        onPress={() => setRequested(true)}
+      >
+        <View className={`${props.className} items-center justify-center gap-1.5`}>
+          <SymbolView name="photo" size={20} tintColor="#8a8a8a" type="monochrome" />
+          <Text className="font-t3-medium text-xs text-foreground-muted">Tap to load media</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
   if (uri === null) {
     return (
@@ -878,6 +912,7 @@ function renderFeedEntry(
 
   return (
     <ThreadWorkLog
+      environmentId={props.environmentId}
       activities={entry.activities}
       copiedRowId={props.copiedRowId}
       expandedRows={props.expandedWorkRows}
@@ -1071,7 +1106,10 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
           showsHorizontalScrollIndicator={false}
           bounces={false}
           className="border-t"
-          style={{ backgroundColor: props.colors.codeBackground, borderColor: props.colors.border }}
+          style={{
+            backgroundColor: props.colors.codeBackground,
+            borderColor: props.colors.border,
+          }}
           contentContainerStyle={{ padding: 10 }}
         >
           <NativeText
@@ -1273,15 +1311,39 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     },
     [props.onHeaderMaterialVisibilityChange],
   );
+  const lastScrollOffsetRef = useRef<number | null>(null);
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       // anchorTopInset, not topContentInset: under automatic insets the list
       // rests at contentOffset.y = -headerHeight (the inset lives only in
       // UIKit's adjustedContentInset, so topContentInset is 0 here). Add the
       // header height back or the material toggles a full header too late.
-      reportHeaderMaterialVisibility(event.nativeEvent.contentOffset.y + anchorTopInset > 6);
+      const offset = event.nativeEvent.contentOffset.y;
+      reportHeaderMaterialVisibility(offset + anchorTopInset > 6);
+      // Thread-sync v2 pagination: nearing the top of the loaded window pulls
+      // the next page of older history (single-flight; loadingOlder gates it).
+      // Gated on UPWARD movement so a list shorter than the viewport — which
+      // rests inside the threshold — does not page eagerly on open or on
+      // unrelated scroll events.
+      const previousOffset = lastScrollOffsetRef.current;
+      lastScrollOffsetRef.current = offset;
+      const scrolledUpward = previousOffset !== null && offset < previousOffset;
+      if (
+        scrolledUpward &&
+        props.hasOlder &&
+        !props.loadingOlder &&
+        offset + anchorTopInset < 180
+      ) {
+        void props.onLoadOlder();
+      }
     },
-    [reportHeaderMaterialVisibility, anchorTopInset],
+    [
+      props.hasOlder,
+      props.loadingOlder,
+      props.onLoadOlder,
+      reportHeaderMaterialVisibility,
+      anchorTopInset,
+    ],
   );
   const handleViewportLayout = useCallback((event: LayoutChangeEvent) => {
     const nextWidth = Math.round(event.nativeEvent.layout.width);
@@ -1577,7 +1639,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                   // own layout math) collapses the scroll view's adjustedContentInset
                   // top to 0, leaving the iOS 26/27 scroll-edge effect no region to
                   // render into — which is why the header blur was missing on threads.
-                  scrollIndicatorInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+                  scrollIndicatorInsets: {
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                  },
                 }
               : { scrollIndicatorInsets: { top: topContentInset, bottom: 0 } })}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
@@ -1648,7 +1715,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             onScroll={handleScroll}
             scrollEventThrottle={16}
             ListHeaderComponent={
-              usesNativeAutomaticInsets ? null : <View style={{ height: topContentInset }} />
+              <View>
+                {usesNativeAutomaticInsets ? null : <View style={{ height: topContentInset }} />}
+                {props.loadingOlder ? (
+                  <View className="items-center py-3">
+                    <ActivityIndicator size="small" />
+                  </View>
+                ) : null}
+              </View>
             }
             contentContainerStyle={{
               paddingTop: 12,

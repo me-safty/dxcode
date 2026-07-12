@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type ExecutionEnvironmentRpcTransport } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const ConnectionTargetBase = {
@@ -118,6 +118,8 @@ export interface PreparedConnection {
   readonly label: string;
   readonly httpBaseUrl: string;
   readonly socketUrl: string;
+  readonly rpcTransport?: ExecutionEnvironmentRpcTransport;
+  readonly threadSyncVersion?: 1 | 2;
   readonly httpAuthorization: PreparedHttpAuthorization | null;
   readonly target: ConnectionTarget;
 }

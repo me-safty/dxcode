@@ -26,10 +26,12 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  getThreadHistoryPage: "orchestration.getThreadHistoryPage",
   replayEvents: "orchestration.replayEvents",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeThreadV2: "orchestration.subscribeThreadV2",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -366,6 +368,86 @@ export const OrchestrationThread = Schema.Struct({
   session: Schema.NullOr(OrchestrationSession),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
+
+export const ThreadWindowMessage = Schema.Struct({
+  ...OrchestrationMessage.fields,
+  textTruncated: Schema.optional(Schema.Boolean),
+  originalTextBytes: Schema.optional(NonNegativeInt),
+});
+export type ThreadWindowMessage = typeof ThreadWindowMessage.Type;
+
+export const ThreadMessageHistoryCursor = Schema.Struct({
+  createdAt: IsoDateTime,
+  messageId: MessageId,
+});
+export type ThreadMessageHistoryCursor = typeof ThreadMessageHistoryCursor.Type;
+
+export const ThreadActivityHistoryCursor = Schema.Struct({
+  createdAt: IsoDateTime,
+  activityId: EventId,
+});
+export type ThreadActivityHistoryCursor = typeof ThreadActivityHistoryCursor.Type;
+
+export const ThreadHistoryCursor = Schema.Struct({
+  message: Schema.NullOr(ThreadMessageHistoryCursor),
+  activity: Schema.NullOr(ThreadActivityHistoryCursor),
+});
+export type ThreadHistoryCursor = typeof ThreadHistoryCursor.Type;
+
+export const ThreadHeadCounts = Schema.Struct({
+  messages: NonNegativeInt,
+  activities: NonNegativeInt,
+});
+export type ThreadHeadCounts = typeof ThreadHeadCounts.Type;
+
+/** Metadata and actionable state that must arrive before any history body. */
+export const ThreadHead = Schema.Struct({
+  id: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+  session: Schema.NullOr(OrchestrationSession),
+  activeProposedPlan: Schema.NullOr(OrchestrationProposedPlan),
+  pendingRequests: Schema.Array(OrchestrationThreadActivity),
+  counts: ThreadHeadCounts,
+});
+export type ThreadHead = typeof ThreadHead.Type;
+
+/**
+ * Client/cache representation of a bounded v2 history window. It is deliberately
+ * distinct from `OrchestrationThread`; the legacy reducer must never receive it.
+ */
+export const WindowedOrchestrationThread = Schema.Struct({
+  syncVersion: Schema.Literal(2),
+  historyEpoch: NonNegativeInt,
+  lastAppliedSequence: NonNegativeInt,
+  head: ThreadHead,
+  messages: Schema.Array(ThreadWindowMessage),
+  activities: Schema.Array(OrchestrationThreadActivity),
+  before: ThreadHistoryCursor,
+  hasOlderMessages: Schema.Boolean,
+  hasOlderActivities: Schema.Boolean,
+});
+export type WindowedOrchestrationThread = typeof WindowedOrchestrationThread.Type;
+
+export const ActivityPayloadAssetReference = Schema.TaggedStruct("activity-payload-asset", {
+  resource: Schema.TaggedStruct("attachment", {
+    attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  }),
+  mediaType: TrimmedNonEmptyString,
+  byteLength: NonNegativeInt,
+  sha256: TrimmedNonEmptyString,
+});
+export type ActivityPayloadAssetReference = typeof ActivityPayloadAssetReference.Type;
 
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
@@ -1139,12 +1221,97 @@ export const OrchestrationThreadStreamItem = Schema.Union([
     kind: Schema.Literal("snapshot"),
     snapshot: OrchestrationThreadDetailSnapshot,
   }),
+  // Incremental sync (Fix 2): tells the client to KEEP its cached thread and
+  // apply the `event` items that follow (sequence in `(fromSequence, toSequence]`)
+  // rather than replacing it with a full snapshot. `fromSequence` echoes the
+  // client's requested `sinceSequence`; `toSequence` is the server's watermark.
+  Schema.Struct({
+    kind: Schema.Literal("catchup"),
+    fromSequence: NonNegativeInt,
+    toSequence: NonNegativeInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("event"),
     event: OrchestrationEvent,
   }),
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
+
+export const OrchestrationSubscribeThreadV2Input = Schema.Struct({
+  threadId: ThreadId,
+  sinceSequence: Schema.optional(NonNegativeInt),
+  historyEpoch: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationSubscribeThreadV2Input = typeof OrchestrationSubscribeThreadV2Input.Type;
+
+export const OrchestrationThreadV2StreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot-start"),
+    snapshotId: TrimmedNonEmptyString,
+    historyEpoch: NonNegativeInt,
+    watermark: NonNegativeInt,
+    chunkCount: NonNegativeInt,
+    inlineBytes: NonNegativeInt,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("snapshot-chunk"),
+    snapshotId: TrimmedNonEmptyString,
+    index: NonNegativeInt,
+    head: Schema.optional(ThreadHead),
+    messages: Schema.Array(ThreadWindowMessage),
+    activities: Schema.Array(OrchestrationThreadActivity),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("snapshot-complete"),
+    snapshotId: TrimmedNonEmptyString,
+    historyEpoch: NonNegativeInt,
+    lastAppliedSequence: NonNegativeInt,
+    before: ThreadHistoryCursor,
+    hasOlderMessages: Schema.Boolean,
+    hasOlderActivities: Schema.Boolean,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("catchup"),
+    historyEpoch: NonNegativeInt,
+    fromSequence: NonNegativeInt,
+    toSequence: NonNegativeInt,
+    eventCount: NonNegativeInt,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("event"),
+    event: OrchestrationEvent,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("keepalive"),
+    sequence: NonNegativeInt,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("resync-required"),
+    reason: Schema.Literals(["live-buffer-overflow", "history-invalidated"]),
+  }),
+]);
+export type OrchestrationThreadV2StreamItem = typeof OrchestrationThreadV2StreamItem.Type;
+
+export const OrchestrationGetThreadHistoryPageInput = Schema.Struct({
+  threadId: ThreadId,
+  historyEpoch: NonNegativeInt,
+  before: ThreadHistoryCursor,
+  messageLimit: NonNegativeInt,
+  activityLimit: NonNegativeInt,
+});
+export type OrchestrationGetThreadHistoryPageInput =
+  typeof OrchestrationGetThreadHistoryPageInput.Type;
+
+export const OrchestrationGetThreadHistoryPageResult = Schema.Struct({
+  historyEpoch: NonNegativeInt,
+  messages: Schema.Array(ThreadWindowMessage),
+  activities: Schema.Array(OrchestrationThreadActivity),
+  before: ThreadHistoryCursor,
+  hasOlderMessages: Schema.Boolean,
+  hasOlderActivities: Schema.Boolean,
+});
+export type OrchestrationGetThreadHistoryPageResult =
+  typeof OrchestrationGetThreadHistoryPageResult.Type;
 
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
@@ -1253,6 +1420,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
   },
+  getThreadHistoryPage: {
+    input: OrchestrationGetThreadHistoryPageInput,
+    output: OrchestrationGetThreadHistoryPageResult,
+  },
   replayEvents: {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
@@ -1264,6 +1435,10 @@ export const OrchestrationRpcSchemas = {
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,
     output: OrchestrationThreadStreamItem,
+  },
+  subscribeThreadV2: {
+    input: OrchestrationSubscribeThreadV2Input,
+    output: OrchestrationThreadV2StreamItem,
   },
   subscribeShell: {
     input: OrchestrationSubscribeShellInput,

@@ -106,6 +106,51 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
+  it("builds v2 chronology from the loaded window only", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-window"),
+      projectId: ProjectId.make("project-1"),
+      title: "Windowed thread",
+      messages: [
+        {
+          id: MessageId.make("message-tail"),
+          role: "user",
+          text: "Latest loaded message",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:10.000Z",
+          updatedAt: "2026-04-01T00:00:10.000Z",
+        },
+      ],
+      activities: [
+        makeActivity({
+          id: EventId.make("pending-before-window"),
+          kind: "approval.requested",
+          summary: "Historic pending metadata",
+          createdAt: "2026-04-01T00:00:01.000Z",
+        }),
+        makeActivity({
+          id: EventId.make("activity-in-window"),
+          kind: "runtime.warning",
+          summary: "Loaded activity",
+          createdAt: "2026-04-01T00:00:11.000Z",
+        }),
+      ],
+    });
+
+    const feed = buildThreadFeed({ ...thread, syncVersion: 2 });
+
+    // v2 paginates messages and activities INDEPENDENTLY: an activity older
+    // than the oldest loaded message is still part of the loaded window and
+    // must render, or paged-in activity-only history would be hidden forever.
+    // Only an explicit `loadedMessages` override implies a message cutoff.
+    expect(feed.map((entry) => entry.id)).toEqual([
+      "pending-before-window",
+      "message-tail",
+      "activity-in-window",
+    ]);
+  });
+
   it("collapses matching tool lifecycle rows like desktop", () => {
     const thread = makeThread({
       id: ThreadId.make("thread-2"),

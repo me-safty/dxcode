@@ -25,12 +25,24 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
+export const ExecutionEnvironmentRpcTransport = Schema.Struct({
+  kind: Schema.Literals(["json", "gzip-json"]),
+  path: TrimmedNonEmptyString,
+});
+export type ExecutionEnvironmentRpcTransport = typeof ExecutionEnvironmentRpcTransport.Type;
+
 export const ExecutionEnvironmentDescriptor = Schema.Struct({
   environmentId: EnvironmentId,
   label: TrimmedNonEmptyString,
   platform: ExecutionEnvironmentPlatform,
   serverVersion: TrimmedNonEmptyString,
   capabilities: ExecutionEnvironmentCapabilities,
+  rpcTransports: Schema.optional(Schema.Array(ExecutionEnvironmentRpcTransport)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([{ kind: "json" as const, path: "/ws" }])),
+  ),
+  threadSyncVersions: Schema.optional(Schema.Array(Schema.Literals([1, 2]))).pipe(
+    Schema.withDecodingDefault(Effect.succeed([1 as const])),
+  ),
 });
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;
 

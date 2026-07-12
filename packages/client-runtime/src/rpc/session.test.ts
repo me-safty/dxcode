@@ -110,6 +110,8 @@ const SERVER_CONFIG: ServerConfigType = {
     capabilities: {
       repositoryIdentity: true,
     },
+    rpcTransports: [{ kind: "json", path: "/ws" }],
+    threadSyncVersions: [1],
   },
   auth: {
     policy: "loopback-browser",
