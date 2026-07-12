@@ -735,6 +735,12 @@ it.layer(
       const removeAttachmentId = "thread-revert-files-00000000-0000-4000-8000-000000000002";
       const otherThreadAttachmentId =
         "thread-revert-files-extra-00000000-0000-4000-8000-000000000003";
+      const removeTextAttachmentPath = path.join(
+        attachmentsDir,
+        "text",
+        "00000000-0000-4000-8000-000000000008",
+        "remove.txt",
+      );
 
       const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
         eventStore
@@ -877,7 +883,7 @@ it.layer(
           threadId,
           messageId: MessageId.make("message-remove"),
           role: "assistant",
-          text: "Remove",
+          text: `[remove.txt](${encodeURI(removeTextAttachmentPath)})`,
           attachments: [
             {
               type: "image",
@@ -923,6 +929,21 @@ it.layer(
 
       assert.isTrue(yield* exists(keepPath));
       assert.isFalse(yield* exists(removePath));
+      assert.isTrue(yield* exists(otherThreadPath));
+
+      // Simulate a crash after the projection transaction commits but before
+      // its filesystem cleanup completes.
+      yield* fileSystem.writeFileString(removePath, "remove after restart");
+      yield* fileSystem.makeDirectory(path.dirname(removeTextAttachmentPath), {
+        recursive: true,
+      });
+      yield* fileSystem.writeFileString(removeTextAttachmentPath, "remove after restart");
+
+      yield* projectionPipeline.bootstrap;
+
+      assert.isTrue(yield* exists(keepPath));
+      assert.isFalse(yield* exists(removePath));
+      assert.isFalse(yield* exists(removeTextAttachmentPath));
       assert.isTrue(yield* exists(otherThreadPath));
     }),
   );
@@ -1078,6 +1099,17 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
         assert.isTrue(yield* exists(otherThreadAttachmentPath));
         assert.isFalse(yield* exists(textAttachmentPath));
         assert.isTrue(yield* exists(unrelatedTextAttachmentPath));
+
+        yield* fileSystem.writeFileString(threadAttachmentPath, "delete after restart");
+        yield* fileSystem.makeDirectory(path.dirname(textAttachmentPath), { recursive: true });
+        yield* fileSystem.writeFileString(textAttachmentPath, "delete after restart");
+
+        yield* projectionPipeline.bootstrap;
+
+        assert.isFalse(yield* exists(threadAttachmentPath));
+        assert.isTrue(yield* exists(otherThreadAttachmentPath));
+        assert.isFalse(yield* exists(textAttachmentPath));
+        assert.isTrue(yield* exists(unrelatedTextAttachmentPath));
       }),
     );
   },
@@ -1102,6 +1134,18 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
           "text",
           "00000000-0000-4000-8000-000000000005",
           "shared.txt",
+        );
+        const deletedTextAttachmentPath = path.join(
+          attachmentsDir,
+          "text",
+          "00000000-0000-4000-8000-000000000006",
+          "deleted.txt",
+        );
+        const deletedImageAttachmentId =
+          "thread-attachment-replay-deleted-00000000-0000-4000-8000-000000000007";
+        const deletedImageAttachmentPath = path.join(
+          attachmentsDir,
+          `${deletedImageAttachmentId}.png`,
         );
         const attachmentLink = `[shared.txt](${encodeURI(textAttachmentPath)})`;
         const append = (event: Parameters<typeof eventStore.append>[0]) =>
@@ -1168,7 +1212,23 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
               threadId,
               messageId: MessageId.make(`message-attachment-replay-${index}`),
               role: "user",
-              text: attachmentLink,
+              text:
+                index === 0
+                  ? `${attachmentLink} [deleted.txt](${encodeURI(deletedTextAttachmentPath)})`
+                  : attachmentLink,
+              ...(index === 0
+                ? {
+                    attachments: [
+                      {
+                        type: "image" as const,
+                        id: deletedImageAttachmentId,
+                        name: "deleted.png",
+                        mimeType: "image/png",
+                        sizeBytes: 5,
+                      },
+                    ],
+                  }
+                : {}),
               turnId: null,
               streaming: false,
               createdAt: now,
@@ -1194,11 +1254,18 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
         });
 
         yield* fileSystem.makeDirectory(path.dirname(textAttachmentPath), { recursive: true });
+        yield* fileSystem.makeDirectory(path.dirname(deletedTextAttachmentPath), {
+          recursive: true,
+        });
         yield* fileSystem.writeFileString(textAttachmentPath, "shared attachment");
+        yield* fileSystem.writeFileString(deletedTextAttachmentPath, "deleted attachment");
+        yield* fileSystem.writeFileString(deletedImageAttachmentPath, "deleted image");
 
         yield* projectionPipeline.bootstrap;
 
         assert.isTrue(yield* exists(textAttachmentPath));
+        assert.isFalse(yield* exists(deletedTextAttachmentPath));
+        assert.isFalse(yield* exists(deletedImageAttachmentPath));
       }),
     );
   },

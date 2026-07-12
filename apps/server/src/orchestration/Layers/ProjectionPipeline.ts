@@ -108,6 +108,14 @@ interface AttachmentSideEffects {
   readonly textAttachmentRelativePathsToRemove: Set<string>;
 }
 
+function makeAttachmentSideEffects(): AttachmentSideEffects {
+  return {
+    deletedThreadIds: new Set<string>(),
+    prunedThreadRelativePaths: new Map<string, Set<string>>(),
+    textAttachmentRelativePathsToRemove: new Set<string>(),
+  };
+}
+
 const materializeAttachmentsForProjection = Effect.fn("materializeAttachmentsForProjection")(
   (input: { readonly attachments: ReadonlyArray<ChatAttachment> }) =>
     Effect.succeed(input.attachments.length === 0 ? [] : input.attachments),
@@ -1568,11 +1576,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       event: OrchestrationEvent,
       applyAttachmentSideEffects: boolean,
     ) {
-      const attachmentSideEffects: AttachmentSideEffects = {
-        deletedThreadIds: new Set<string>(),
-        prunedThreadRelativePaths: new Map<string, Set<string>>(),
-        textAttachmentRelativePathsToRemove: new Set<string>(),
-      };
+      const attachmentSideEffects = makeAttachmentSideEffects();
 
       yield* sql.withTransaction(
         projector.apply(event, attachmentSideEffects).pipe(
@@ -1619,6 +1623,63 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           ),
         );
 
+    const collectBootstrapAttachmentSideEffects = Effect.fn(
+      "collectBootstrapAttachmentSideEffects",
+    )(function* () {
+      const attachmentSideEffects = makeAttachmentSideEffects();
+      const messageTextsByThread = new Map<string, Map<string, string>>();
+
+      yield* Stream.runForEach(eventStore.readFromSequence(0), (event) =>
+        Effect.sync(() => {
+          if (event.type === "thread.message-sent") {
+            const messageTexts =
+              messageTextsByThread.get(event.payload.threadId) ?? new Map<string, string>();
+            const previousText = messageTexts.get(event.payload.messageId);
+            const nextText =
+              previousText === undefined
+                ? event.payload.text
+                : event.payload.streaming
+                  ? `${previousText}${event.payload.text}`
+                  : event.payload.text.length === 0
+                    ? previousText
+                    : event.payload.text;
+            messageTexts.set(event.payload.messageId, nextText);
+            messageTextsByThread.set(event.payload.threadId, messageTexts);
+            return;
+          }
+
+          if (event.type !== "thread.deleted" && event.type !== "thread.reverted") {
+            return;
+          }
+          if (event.type === "thread.deleted") {
+            attachmentSideEffects.deletedThreadIds.add(event.payload.threadId);
+          } else {
+            attachmentSideEffects.prunedThreadRelativePaths.set(event.payload.threadId, new Set());
+          }
+          for (const text of messageTextsByThread.get(event.payload.threadId)?.values() ?? []) {
+            for (const relativePath of collectTextAttachmentRelativePaths({
+              attachmentsDir: serverConfig.attachmentsDir,
+              text,
+            })) {
+              attachmentSideEffects.textAttachmentRelativePathsToRemove.add(relativePath);
+            }
+          }
+        }),
+      );
+
+      for (const threadId of attachmentSideEffects.prunedThreadRelativePaths.keys()) {
+        const messages = yield* projectionThreadMessageRepository.listByThreadId({
+          threadId: ThreadId.make(threadId),
+        });
+        attachmentSideEffects.prunedThreadRelativePaths.set(
+          threadId,
+          collectThreadAttachmentRelativePaths(threadId, messages),
+        );
+      }
+
+      return attachmentSideEffects;
+    });
+
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
       Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event, true), {
         concurrency: 1,
@@ -1633,11 +1694,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         ),
       );
 
-    const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.forEach(
-      projectors,
-      bootstrapProjector,
-      { concurrency: 1 },
-    ).pipe(
+    const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.gen(function* () {
+      yield* Effect.forEach(projectors, bootstrapProjector, { concurrency: 1 });
+      const attachmentSideEffects = yield* collectBootstrapAttachmentSideEffects();
+      yield* runAttachmentSideEffects(
+        attachmentSideEffects,
+        projectionThreadMessageRepository,
+      ).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to reconcile projected attachment side-effects", { cause }),
+        ),
+      );
+    }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ServerConfig, serverConfig),
