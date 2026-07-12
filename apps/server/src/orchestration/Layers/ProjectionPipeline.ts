@@ -48,6 +48,7 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
 import { SAFE_IMAGE_FILE_EXTENSIONS } from "../../imageMime.ts";
+import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import { withTextAttachmentMutationLock } from "../../textAttachmentMutationLock.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -672,7 +673,7 @@ const removeDueTextAttachments = Effect.fn("removeDueTextAttachments")(function*
               ...metadataResult.success,
               deleteAfter: null,
             });
-            yield* fileSystem.writeFileString(metadataPath, encoded);
+            yield* writeFileStringAtomically({ filePath: metadataPath, contents: encoded });
           }
           yield* fileSystem.remove(candidate.markerPath, { force: true });
           return;

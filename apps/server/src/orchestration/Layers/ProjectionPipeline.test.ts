@@ -203,6 +203,14 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-text-expiry-swe
           Effect.succeed(new Set(relativePath ? [relativePath] : [])),
         );
 
+        const directoryEntries = yield* fileSystem.readDirectory(path.dirname(attachmentPath), {
+          recursive: false,
+        });
+        assert.deepEqual(
+          [...directoryEntries].sort(),
+          [TEXT_ATTACHMENT_METADATA_FILE, "retained.txt"].sort(),
+        );
+
         assert.isFalse(
           releaseTextAttachment({
             attachmentsDir,
