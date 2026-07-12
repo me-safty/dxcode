@@ -7,6 +7,7 @@ const LEGACY_FLAT_TEXT_ATTACHMENT_PATH_PATTERN = new RegExp(
   `(?:^|[\\\\/])\\.t3[\\\\/]attachments[\\\\/]${UUID_PATH_SEGMENT}-[^\\\\/]+$`,
   "i",
 );
+const MARKDOWN_LINK_DESTINATION_PATTERN = /(?:^|\s)\[(?:\\.|[^\]\\])*\]\(([^)\s]+)\)(?=\s|$)/g;
 
 export function isTextAttachmentPath(path: string): boolean {
   return (
@@ -15,13 +16,19 @@ export function isTextAttachmentPath(path: string): boolean {
 }
 
 export function textAttachmentPaths(prompt: string): string[] {
-  return [
-    ...new Set(
-      collectComposerInlineTokens(prompt).flatMap((token) =>
-        token.type === "mention" && isTextAttachmentPath(token.value) ? [token.value] : [],
-      ),
-    ),
-  ];
+  const paths = new Set<string>();
+  for (const match of prompt.matchAll(MARKDOWN_LINK_DESTINATION_PATTERN)) {
+    const encodedPath = match[1];
+    if (!encodedPath) continue;
+    let path = encodedPath;
+    try {
+      path = decodeURIComponent(encodedPath);
+    } catch {
+      // Preserve malformed source rather than dropping a generated path.
+    }
+    if (isTextAttachmentPath(path)) paths.add(path);
+  }
+  return [...paths];
 }
 
 export function removedOwnedTextAttachmentPaths(
@@ -46,5 +53,3 @@ export function unreferencedTextAttachmentPaths(
     ),
   ];
 }
-
-import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";

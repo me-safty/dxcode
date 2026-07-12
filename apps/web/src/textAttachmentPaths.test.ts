@@ -13,6 +13,12 @@ describe("textAttachmentPaths", () => {
     expect(textAttachmentPaths(`[notes.txt](${path}) keep [notes.txt](${path})`)).toEqual([path]);
     expect(textAttachmentPaths("ordinary prompt")).toEqual([]);
   });
+
+  it("collects a generated attachment whose Markdown link ends at EOF", () => {
+    const path = "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/notes.txt";
+
+    expect(textAttachmentPaths(`[notes.txt](${path})`)).toEqual([path]);
+  });
 });
 
 describe("removedOwnedTextAttachmentPaths", () => {
@@ -36,6 +42,26 @@ describe("removedOwnedTextAttachmentPaths", () => {
 
     expect(
       removedOwnedTextAttachmentPaths(`[notes.txt](${path})`, `[notes](${path})`, new Set([path])),
+    ).toEqual([]);
+  });
+
+  it("detects removal when the previous attachment link ended at EOF", () => {
+    const path = "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/notes.txt";
+
+    expect(removedOwnedTextAttachmentPaths(`[notes.txt](${path})`, "", new Set([path]))).toEqual([
+      path,
+    ]);
+  });
+
+  it("preserves an owned attachment whose next link ends at EOF", () => {
+    const path = "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/notes.txt";
+
+    expect(
+      removedOwnedTextAttachmentPaths(
+        `[notes.txt](${path}) `,
+        `[notes.txt](${path})`,
+        new Set([path]),
+      ),
     ).toEqual([]);
   });
 });
