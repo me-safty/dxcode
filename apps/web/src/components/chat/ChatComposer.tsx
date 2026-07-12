@@ -44,6 +44,7 @@ import {
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
+  composerDraftPromptsEnvironment,
   type ComposerImageAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
@@ -88,6 +89,10 @@ import { ContextWindowMeter } from "./ContextWindowMeter";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
 import { removedOwnedTextAttachmentPaths, textAttachmentPaths } from "../../textAttachmentPaths";
+import {
+  DeferredTextAttachmentCleanup,
+  isTextAttachmentReferenced,
+} from "../../deferredTextAttachmentCleanup";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
@@ -927,11 +932,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const attachmentQueueRef = useRef<Promise<void>>(Promise.resolve());
   const composerAttachmentKeyRef = useRef(composerAttachmentKey);
   composerAttachmentKeyRef.current = composerAttachmentKey;
-  const ownedTextAttachmentPathsRef = useRef(new Set(textAttachmentPaths(prompt)));
+  const ownedTextAttachmentPathsRef = useRef(new Set<string>());
+  const textAttachmentCleanupRef = useRef(new DeferredTextAttachmentCleanup());
   const ownedTextAttachmentTargetKeyRef = useRef(composerAttachmentKey);
   if (ownedTextAttachmentTargetKeyRef.current !== composerAttachmentKey) {
     ownedTextAttachmentTargetKeyRef.current = composerAttachmentKey;
-    ownedTextAttachmentPathsRef.current = new Set(textAttachmentPaths(prompt));
+    ownedTextAttachmentPathsRef.current = new Set();
   }
 
   // ------------------------------------------------------------------
@@ -1184,14 +1190,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const setPrompt = useCallback(
     (nextPrompt: string) => {
       const previousPrompt = getComposerDraft(composerDraftTarget)?.prompt ?? "";
-      const removedPaths = removedOwnedTextAttachmentPaths(
-        previousPrompt,
-        nextPrompt,
-        ownedTextAttachmentPathsRef.current,
-      );
+      for (const path of textAttachmentPaths(nextPrompt)) {
+        textAttachmentCleanupRef.current.cancel(path);
+      }
+      const ownedPaths = ownedTextAttachmentPathsRef.current;
+      const removedPaths = removedOwnedTextAttachmentPaths(previousPrompt, nextPrompt, ownedPaths);
       for (const path of removedPaths) {
-        ownedTextAttachmentPathsRef.current.delete(path);
-        void deleteTextAttachment({ environmentId, input: { path } });
+        textAttachmentCleanupRef.current.schedule(path, {
+          isReferenced: () =>
+            isTextAttachmentReferenced(path, composerDraftPromptsEnvironment(environmentId)),
+          deletePath: async () => {
+            const result = await deleteTextAttachment({ environmentId, input: { path } });
+            if (result._tag === "Success") ownedPaths.delete(path);
+          },
+        });
       }
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
     },
