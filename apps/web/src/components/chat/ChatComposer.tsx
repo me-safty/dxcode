@@ -1788,12 +1788,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (result === null) return `'${file.name}' is not a supported text file.`;
     if (result._tag === "Failure") return `Could not attach '${file.name}'.`;
 
-    const currentPrompt = promptRef.current;
+    const currentPrompt = getComposerDraft(composerDraftTarget)?.prompt ?? "";
     const separator = currentPrompt.length > 0 && !/\s$/.test(currentPrompt) ? " " : "";
-    applyPromptReplacement(
-      currentPrompt.length,
-      currentPrompt.length,
-      `${separator}${serializeComposerFileLink(resolvePathLinkTarget(relativePath, gitCwd))} `,
+    setComposerDraftPrompt(
+      composerDraftTarget,
+      `${currentPrompt}${separator}${serializeComposerFileLink(
+        resolvePathLinkTarget(relativePath, gitCwd),
+      )} `,
     );
     return null;
   };
