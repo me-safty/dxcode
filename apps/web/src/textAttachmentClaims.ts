@@ -1,4 +1,4 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 
 import type { ComposerThreadTarget, DraftId } from "./composerDraftStore";
 import { textAttachmentPaths } from "./textAttachmentPaths";
@@ -146,4 +146,77 @@ export async function retryTextAttachmentOperation(
     await new Promise<void>((resolve) => setTimeout(resolve, delay));
   }
   return false;
+}
+
+export interface TextAttachmentClaimOperations {
+  claim: (path: string, draftOwnerId: string) => Promise<boolean>;
+  release: (path: string, draftOwnerId: string) => Promise<boolean>;
+}
+
+const textAttachmentClaimReconcilerRegistry = new Map<string, TextAttachmentClaimReconciler>();
+
+function textAttachmentClaimRegistryKey(
+  environmentId: EnvironmentId,
+  draftOwnerId: string,
+): string {
+  return `${environmentId}:${draftOwnerId}`;
+}
+
+export function getTextAttachmentClaimReconciler(input: {
+  environmentId: EnvironmentId;
+  draftOwnerId: string;
+  operations: TextAttachmentClaimOperations;
+}): TextAttachmentClaimReconciler {
+  const key = textAttachmentClaimRegistryKey(input.environmentId, input.draftOwnerId);
+  const existing = textAttachmentClaimReconcilerRegistry.get(key);
+  if (existing) return existing;
+  const reconciler = new TextAttachmentClaimReconciler({
+    claim: (path) => input.operations.claim(path, input.draftOwnerId),
+    release: (path) => input.operations.release(path, input.draftOwnerId),
+  });
+  textAttachmentClaimReconcilerRegistry.set(key, reconciler);
+  return reconciler;
+}
+
+export function reconcileTextAttachmentClaimsEnvironment(
+  environmentId: EnvironmentId,
+  entries: ReadonlyArray<{ target: ComposerThreadTarget; prompt: string }>,
+  operations: TextAttachmentClaimOperations,
+): void {
+  for (const { target, prompt } of entries) {
+    const draftOwnerId = textAttachmentDraftOwnerId(target);
+    const reconciler = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId,
+      operations,
+    });
+    reconciler.setDesiredPrompt(prompt);
+    reconciler.reconcileNow();
+  }
+}
+
+export async function detachTextAttachmentClaimOwner(
+  environmentId: EnvironmentId,
+  draftOwnerId: string,
+): Promise<void> {
+  const key = textAttachmentClaimRegistryKey(environmentId, draftOwnerId);
+  const reconciler = textAttachmentClaimReconcilerRegistry.get(key);
+  if (!reconciler) return;
+  textAttachmentClaimReconcilerRegistry.delete(key);
+  reconciler.dispose();
+  await reconciler.settled();
+}
+
+export function disposeTextAttachmentClaimEnvironment(environmentId: EnvironmentId): void {
+  const prefix = `${environmentId}:`;
+  for (const [key, reconciler] of textAttachmentClaimReconcilerRegistry) {
+    if (!key.startsWith(prefix)) continue;
+    reconciler.dispose();
+    textAttachmentClaimReconcilerRegistry.delete(key);
+  }
+}
+
+export function resetTextAttachmentClaimRegistryForTest(): void {
+  for (const reconciler of textAttachmentClaimReconcilerRegistry.values()) reconciler.dispose();
+  textAttachmentClaimReconcilerRegistry.clear();
 }

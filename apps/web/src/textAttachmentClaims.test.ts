@@ -8,12 +8,16 @@ import {
   textAttachmentClaims,
   textAttachmentDraftOwnerId,
   TextAttachmentClaimReconciler,
+  getTextAttachmentClaimReconciler,
+  reconcileTextAttachmentClaimsEnvironment,
+  resetTextAttachmentClaimRegistryForTest,
   retryTextAttachmentOperation,
 } from "./textAttachmentClaims";
 
 const PATH = "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/shared.txt";
 
 afterEach(() => {
+  resetTextAttachmentClaimRegistryForTest();
   vi.useRealTimers();
 });
 
@@ -189,5 +193,42 @@ describe("text attachment claims", () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(claim).toHaveBeenCalledOnce();
+  });
+
+  it("retries a background draft claim after navigation and reconnect", async () => {
+    vi.useFakeTimers();
+    const environmentId = EnvironmentId.make("offline-environment");
+    const draft = DraftId.make("background-draft");
+    const draftOwnerId = textAttachmentDraftOwnerId(draft);
+    let online = false;
+    const operations = {
+      claim: vi.fn(async () => online),
+      release: vi.fn(async () => online),
+    };
+
+    reconcileTextAttachmentClaimsEnvironment(
+      environmentId,
+      [{ target: draft, prompt: `[shared.txt](${PATH})` }],
+      operations,
+    );
+    const background = getTextAttachmentClaimReconciler({
+      environmentId,
+      draftOwnerId,
+      operations,
+    });
+    await background.settled();
+    expect(background.snapshot().confirmed).toEqual(new Set());
+
+    // Navigating away does not dispose the owner. A later reconnect reconciles
+    // every persisted draft, including this now-background draft.
+    online = true;
+    reconcileTextAttachmentClaimsEnvironment(
+      environmentId,
+      [{ target: draft, prompt: `[shared.txt](${PATH})` }],
+      operations,
+    );
+    await background.settled();
+
+    expect(background.snapshot().confirmed).toEqual(new Set([PATH]));
   });
 });
