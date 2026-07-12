@@ -76,6 +76,7 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
+import { currentComposerImageCount } from "./composerAttachmentBatch";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
   getComposerPromptInjectionState,
@@ -1835,7 +1836,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return;
     }
     const nextImages: ComposerImageAttachment[] = [];
-    let nextImageCount = composerImagesRef.current.length;
+    let nextImageCount = currentComposerImageCount(
+      getComposerDraft(composerDraftTarget),
+      composerImagesRef.current,
+    );
     const errors: string[] = [];
     let attachedCount = 0;
     for (const file of files) {
