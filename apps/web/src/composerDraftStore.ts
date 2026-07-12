@@ -3404,6 +3404,20 @@ export function composerDraftPromptsEnvironment(environmentId: EnvironmentId): s
   });
 }
 
+export function composerDraftEntriesEnvironment(
+  environmentId: EnvironmentId,
+): Array<{ target: ComposerThreadTarget; prompt: string }> {
+  const state = useComposerDraftStore.getState();
+  return [...composerDraftKeysEnvironment(state, environmentId)].flatMap((key) => {
+    const draft = state.draftsByThreadKey[key];
+    if (!draft) return [];
+    const target = state.draftThreadsByThreadKey[key]
+      ? DraftId.make(key)
+      : parseScopedThreadKey(key);
+    return target ? [{ target, prompt: draft.prompt }] : [];
+  });
+}
+
 export function composerDraftPromptsEnvironmentExcept(
   environmentId: EnvironmentId,
   excludedTargets: ReadonlyArray<ComposerThreadTarget>,

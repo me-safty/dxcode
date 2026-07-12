@@ -3923,6 +3923,7 @@ function ChatViewContent(props: ChatViewProps) {
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
       });
+      composerRef.current?.releaseTextAttachmentClaims();
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -3942,6 +3943,7 @@ function ChatViewContent(props: ChatViewProps) {
         : null;
     if (standaloneSlashCommand) {
       handleInteractionModeChange(standaloneSlashCommand);
+      composerRef.current?.releaseTextAttachmentClaims();
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -4067,6 +4069,7 @@ function ChatViewContent(props: ChatViewProps) {
         }),
       );
     }
+    composerRef.current?.releaseTextAttachmentClaims();
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();

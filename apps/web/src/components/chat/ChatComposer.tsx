@@ -44,7 +44,6 @@ import {
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
-  composerDraftPromptsEnvironment,
   type ComposerImageAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
@@ -88,11 +87,7 @@ import {
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
-import { removedTextAttachmentPaths, textAttachmentPaths } from "../../textAttachmentPaths";
-import {
-  DeferredTextAttachmentCleanup,
-  isTextAttachmentReferenced,
-} from "../../deferredTextAttachmentCleanup";
+import { textAttachmentClaimChanges, textAttachmentDraftOwnerId } from "../../textAttachmentClaims";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
@@ -426,6 +421,8 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /** Release draft claims before the parent destructively clears composer content. */
+  releaseTextAttachmentClaims: () => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
@@ -635,7 +632,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const writeTextAttachment = useAtomCommand(assetEnvironment.writeTextAttachment, {
     reportFailure: false,
   });
-  const deleteTextAttachment = useAtomCommand(assetEnvironment.deleteTextAttachment, {
+  const claimTextAttachment = useAtomCommand(assetEnvironment.claimTextAttachment, {
+    reportFailure: false,
+  });
+  const releaseTextAttachment = useAtomCommand(assetEnvironment.releaseTextAttachment, {
     reportFailure: false,
   });
   const prompt = composerDraft.prompt;
@@ -932,7 +932,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const attachmentQueueRef = useRef<Promise<void>>(Promise.resolve());
   const composerAttachmentKeyRef = useRef(composerAttachmentKey);
   composerAttachmentKeyRef.current = composerAttachmentKey;
-  const textAttachmentCleanupRef = useRef(new DeferredTextAttachmentCleanup());
+  const textAttachmentClaimQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const textAttachmentClaimStateRef = useRef<{
+    draftOwnerId: string;
+    paths: Set<string>;
+  } | null>(null);
+
+  useEffect(() => {
+    const draftOwnerId = textAttachmentDraftOwnerId(composerDraftTarget);
+    const previous = textAttachmentClaimStateRef.current;
+    const previousPaths =
+      previous?.draftOwnerId === draftOwnerId ? previous.paths : new Set<string>();
+    const changes = textAttachmentClaimChanges(previousPaths, prompt);
+    textAttachmentClaimStateRef.current = { draftOwnerId, paths: changes.nextPaths };
+    textAttachmentClaimQueueRef.current = textAttachmentClaimQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        for (const path of changes.claim) {
+          await claimTextAttachment({ environmentId, input: { path, draftOwnerId } });
+        }
+        for (const path of changes.release) {
+          await releaseTextAttachment({ environmentId, input: { path, draftOwnerId } });
+        }
+      });
+  }, [claimTextAttachment, composerDraftTarget, environmentId, prompt, releaseTextAttachment]);
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -1183,30 +1206,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   const setPrompt = useCallback(
     (nextPrompt: string) => {
-      const previousPrompt = getComposerDraft(composerDraftTarget)?.prompt ?? "";
-      for (const path of textAttachmentPaths(nextPrompt)) {
-        textAttachmentCleanupRef.current.cancel(path);
-      }
-      const removedPaths = removedTextAttachmentPaths(previousPrompt, nextPrompt);
-      for (const path of removedPaths) {
-        textAttachmentCleanupRef.current.schedule(path, {
-          isReferenced: () =>
-            isTextAttachmentReferenced(path, composerDraftPromptsEnvironment(environmentId)),
-          deletePath: async () => {
-            const result = await deleteTextAttachment({ environmentId, input: { path } });
-            return result._tag === "Success";
-          },
-        });
-      }
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
     },
-    [
-      composerDraftTarget,
-      deleteTextAttachment,
-      environmentId,
-      getComposerDraft,
-      setComposerDraftPrompt,
-    ],
+    [composerDraftTarget, setComposerDraftPrompt],
   );
 
   const addComposerImage = useCallback(
@@ -1836,7 +1838,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
         return writeTextAttachment({
           environmentId,
-          input: { fileName: file.name || "context.txt", contents },
+          input: {
+            fileName: file.name || "context.txt",
+            contents,
+            draftOwnerId: textAttachmentDraftOwnerId(composerDraftTarget),
+          },
         });
       })
       .catch(() => null);
@@ -2126,6 +2132,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
       },
+      releaseTextAttachmentClaims: () => {
+        const draftOwnerId = textAttachmentDraftOwnerId(composerDraftTarget);
+        const paths = new Set([
+          ...textAttachmentClaimChanges(new Set(), promptRef.current).nextPaths,
+          ...(textAttachmentClaimStateRef.current?.draftOwnerId === draftOwnerId
+            ? textAttachmentClaimStateRef.current.paths
+            : []),
+        ]);
+        textAttachmentClaimStateRef.current = { draftOwnerId, paths: new Set() };
+        textAttachmentClaimQueueRef.current = textAttachmentClaimQueueRef.current
+          .catch(() => undefined)
+          .then(async () => {
+            for (const path of paths) {
+              await releaseTextAttachment({ environmentId, input: { path, draftOwnerId } });
+            }
+          });
+      },
       getSendContext: () => ({
         prompt: promptRef.current,
         images: composerImagesRef.current,
@@ -2147,6 +2170,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerCursor,
       composerTerminalContexts,
       insertComposerDraftTerminalContext,
+      environmentId,
+      releaseTextAttachment,
       promptRef,
       composerImagesRef,
       composerTerminalContextsRef,

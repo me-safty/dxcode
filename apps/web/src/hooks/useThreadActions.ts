@@ -12,10 +12,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef } from "react";
 
 import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
-import {
-  composerDraftPromptsEnvironmentExcept,
-  useComposerDraftStore,
-} from "../composerDraftStore";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
 import { assetEnvironment } from "../state/assets";
@@ -30,7 +27,7 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
-import { unreferencedTextAttachmentPaths } from "../textAttachmentPaths";
+import { textAttachmentClaims } from "../textAttachmentClaims";
 
 export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
@@ -55,7 +52,7 @@ export function useThreadActions() {
   const deleteThreadMutation = useAtomCommand(threadEnvironment.delete, {
     reportFailure: false,
   });
-  const deleteTextAttachment = useAtomCommand(assetEnvironment.deleteTextAttachment, {
+  const releaseTextAttachment = useAtomCommand(assetEnvironment.releaseTextAttachment, {
     reportFailure: false,
   });
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession);
@@ -243,9 +240,6 @@ export function useThreadActions() {
       });
       const discardedPrompt =
         useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt ?? "";
-      const retainedPrompts = composerDraftPromptsEnvironmentExcept(threadRef.environmentId, [
-        threadRef,
-      ]);
       const deleteResult = await deleteThreadMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId },
@@ -254,10 +248,10 @@ export function useThreadActions() {
         return deleteResult;
       }
       await Promise.all(
-        unreferencedTextAttachmentPaths([discardedPrompt], retainedPrompts).map((path) =>
-          deleteTextAttachment({
+        textAttachmentClaims(threadRef, discardedPrompt).map(({ path, draftOwnerId }) =>
+          releaseTextAttachment({
             environmentId: threadRef.environmentId,
-            input: { path },
+            input: { path, draftOwnerId },
           }),
         ),
       );
@@ -355,7 +349,7 @@ export function useThreadActions() {
       clearProjectDraftThreadById,
       clearTerminalUiState,
       closeTerminal,
-      deleteTextAttachment,
+      releaseTextAttachment,
       deleteThreadMutation,
       getCurrentRouteThreadRef,
       refreshVcsStatus,

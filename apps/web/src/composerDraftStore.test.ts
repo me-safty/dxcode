@@ -60,6 +60,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
   clearComposerDraftsEnvironment,
+  composerDraftEntriesEnvironment,
   composerDraftPromptsEnvironment,
   composerDraftPromptsEnvironmentExcept,
   composerDraftTargetsProject,
@@ -79,6 +80,7 @@ import {
   type TerminalContextDraft,
 } from "./lib/terminalContext";
 import { createDebouncedStorage } from "./lib/storage";
+import { textAttachmentClaims } from "./textAttachmentClaims";
 
 function makeImage(input: {
   id: string;
@@ -734,6 +736,29 @@ describe("composerDraftStore project draft thread mapping", () => {
     } finally {
       URL.revokeObjectURL = originalRevokeObjectUrl;
     }
+  });
+
+  it("lists stable targets and prompts before a bulk environment clear", () => {
+    const store = useComposerDraftStore.getState();
+    const serverThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, otherThreadId);
+    const draftPath =
+      "/var/t3-data/attachments/text/12345678-1234-1234-1234-123456789abc/draft.txt";
+    const threadPath =
+      "/var/t3-data/attachments/text/87654321-4321-4321-4321-cba987654321/thread.txt";
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId: ThreadId.make("draft-thread"),
+    });
+    store.setPrompt(draftId, `[draft.txt](${draftPath})`);
+    store.setPrompt(serverThreadRef, `[thread.txt](${threadPath})`);
+
+    const entries = composerDraftEntriesEnvironment(TEST_ENVIRONMENT_ID);
+    expect(entries.flatMap(({ target, prompt }) => textAttachmentClaims(target, prompt))).toEqual([
+      { path: draftPath, draftOwnerId: `draft:${draftId}` },
+      {
+        path: threadPath,
+        draftOwnerId: `thread:${TEST_ENVIRONMENT_ID}:${otherThreadId}`,
+      },
+    ]);
   });
 
   it("collects every draft target removed with a forced project deletion", () => {

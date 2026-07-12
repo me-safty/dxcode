@@ -52,9 +52,9 @@ import {
 } from "../environments/primary/target";
 import {
   clearComposerDraftsEnvironment,
-  composerDraftPromptsEnvironment,
+  composerDraftEntriesEnvironment,
 } from "../composerDraftStore";
-import { textAttachmentPaths } from "../textAttachmentPaths";
+import { textAttachmentClaims } from "../textAttachmentClaims";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
@@ -585,13 +585,13 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
     clear: (environmentId, supervisor) =>
       Effect.gen(function* () {
         if (supervisor) {
-          const paths = [
-            ...new Set(composerDraftPromptsEnvironment(environmentId).flatMap(textAttachmentPaths)),
-          ];
+          const claims = composerDraftEntriesEnvironment(environmentId).flatMap(
+            ({ target, prompt }) => textAttachmentClaims(target, prompt),
+          );
           yield* Effect.forEach(
-            paths,
-            (path) =>
-              request(WS_METHODS.assetsDeleteTextAttachment, { path }).pipe(
+            claims,
+            ({ path, draftOwnerId }) =>
+              request(WS_METHODS.assetsReleaseTextAttachment, { path, draftOwnerId }).pipe(
                 Effect.provideService(EnvironmentSupervisor, supervisor),
                 Effect.ignoreCause({ log: true }),
               ),
