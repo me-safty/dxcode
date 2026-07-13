@@ -16,21 +16,58 @@ export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 export const TIMELINE_CONTENT_MAX_WIDTH = 768;
 export const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 
-export function shouldPauseTimelineAutoFollow({
+export interface TimelineAutoFollowScrollState {
+  readonly timelineKey: string;
+  readonly anchorScrollOffset: number | null;
+  readonly isAtEnd: boolean | undefined;
+}
+
+export function updateTimelineAutoFollowScrollState({
+  state,
+  timelineKey,
   isAtEnd,
-  previousScrollOffset,
   scrollOffset,
 }: {
+  readonly state: TimelineAutoFollowScrollState;
+  readonly timelineKey: string;
   readonly isAtEnd: boolean | undefined;
-  readonly previousScrollOffset: number | null;
   readonly scrollOffset: number | null;
 }) {
-  return (
+  if (state.timelineKey !== timelineKey) {
+    return {
+      state: {
+        timelineKey,
+        anchorScrollOffset: isAtEnd === true ? scrollOffset : null,
+        isAtEnd,
+      },
+      shouldPause: false,
+    } as const;
+  }
+
+  const shouldPause =
     isAtEnd === false &&
     scrollOffset !== null &&
-    previousScrollOffset !== null &&
-    scrollOffset < previousScrollOffset - 1
-  );
+    state.anchorScrollOffset !== null &&
+    scrollOffset < state.anchorScrollOffset - 1;
+
+  let anchorScrollOffset = shouldPause ? null : state.anchorScrollOffset;
+  if (
+    !shouldPause &&
+    isAtEnd === true &&
+    scrollOffset !== null &&
+    (state.isAtEnd !== true || anchorScrollOffset === null || scrollOffset > anchorScrollOffset)
+  ) {
+    anchorScrollOffset = scrollOffset;
+  }
+
+  return {
+    state: {
+      timelineKey,
+      anchorScrollOffset,
+      isAtEnd,
+    },
+    shouldPause,
+  } as const;
 }
 
 export interface TimelineEndState {

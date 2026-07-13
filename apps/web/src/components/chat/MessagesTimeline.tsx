@@ -70,12 +70,13 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
-  shouldPauseTimelineAutoFollow,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapHeightStyle,
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapTopPercent,
+  type TimelineAutoFollowScrollState,
+  updateTimelineAutoFollowScrollState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -325,7 +326,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     null,
   );
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
-  const previousScrollOffsetRef = useRef<number | null>(null);
+  const autoFollowScrollStateRef = useRef<TimelineAutoFollowScrollState>({
+    timelineKey: routeThreadKey,
+    anchorScrollOffset: null,
+    isAtEnd: undefined,
+  });
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -355,16 +360,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const state = listRef.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state);
     const scrollTop = state?.scroll ?? null;
-    if (
-      shouldPauseTimelineAutoFollow({
-        isAtEnd,
-        previousScrollOffset: previousScrollOffsetRef.current,
-        scrollOffset: scrollTop,
-      })
-    ) {
+    const autoFollowUpdate = updateTimelineAutoFollowScrollState({
+      state: autoFollowScrollStateRef.current,
+      timelineKey: routeThreadKey,
+      isAtEnd,
+      scrollOffset: scrollTop,
+    });
+    autoFollowScrollStateRef.current = autoFollowUpdate.state;
+    if (autoFollowUpdate.shouldPause) {
       onManualNavigation();
     }
-    previousScrollOffsetRef.current = scrollTop;
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
     }
@@ -390,7 +395,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange, onManualNavigation]);
+  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange, onManualNavigation, routeThreadKey]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);

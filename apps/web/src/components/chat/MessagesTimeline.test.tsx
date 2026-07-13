@@ -227,7 +227,6 @@ describe("MessagesTimeline", () => {
       resolveTimelineMinimapHeightStyle,
       resolveTimelineMinimapIndexFromPointer,
       resolveTimelineMinimapTopPercent,
-      shouldPauseTimelineAutoFollow,
     } = await import("./MessagesTimeline.logic");
 
     expect(resolveTimelineIsAtEnd({ isNearEnd: true, isAtEnd: false })).toBe(true);
@@ -241,21 +240,6 @@ describe("MessagesTimeline", () => {
     expect(resolveTimelineIsAtEnd({ isNearEnd: false, isAtEnd: true })).toBe(false);
     expect(resolveTimelineIsAtEnd({ isAtEnd: true })).toBe(true);
     expect(resolveTimelineIsAtEnd(undefined)).toBeUndefined();
-    expect(
-      shouldPauseTimelineAutoFollow({
-        isAtEnd: false,
-        previousScrollOffset: 400,
-        scrollOffset: 250,
-      }),
-    ).toBe(true);
-    expect(
-      shouldPauseTimelineAutoFollow({
-        isAtEnd: true,
-        previousScrollOffset: 400,
-        scrollOffset: 399.5,
-      }),
-    ).toBe(false);
-
     expect(resolveTimelineMinimapHeightStyle(5)).toBe("min(32px, calc(100vh - 18rem))");
     expect(resolveTimelineMinimapTopPercent(2, 5)).toBe(50);
     expect(
@@ -277,6 +261,62 @@ describe("MessagesTimeline", () => {
     expect(resolveTimelineMinimapHasPersistentGutter(832)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(863)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(864)).toBe(true);
+  });
+
+  it("accumulates slow upward scrolling and resets tracking between timelines", async () => {
+    const { updateTimelineAutoFollowScrollState } = await import("./MessagesTimeline.logic");
+    let result = updateTimelineAutoFollowScrollState({
+      state: {
+        timelineKey: "thread-a",
+        anchorScrollOffset: null,
+        isAtEnd: undefined,
+      },
+      timelineKey: "thread-a",
+      isAtEnd: true,
+      scrollOffset: 400,
+    });
+
+    result = updateTimelineAutoFollowScrollState({
+      state: result.state,
+      timelineKey: "thread-a",
+      isAtEnd: true,
+      scrollOffset: 399.6,
+    });
+    expect(result.shouldPause).toBe(false);
+    expect(result.state.anchorScrollOffset).toBe(400);
+
+    result = updateTimelineAutoFollowScrollState({
+      state: result.state,
+      timelineKey: "thread-a",
+      isAtEnd: false,
+      scrollOffset: 399.2,
+    });
+    expect(result.shouldPause).toBe(false);
+
+    result = updateTimelineAutoFollowScrollState({
+      state: result.state,
+      timelineKey: "thread-a",
+      isAtEnd: false,
+      scrollOffset: 398.8,
+    });
+    expect(result.shouldPause).toBe(true);
+
+    result = updateTimelineAutoFollowScrollState({
+      state: {
+        timelineKey: "thread-a",
+        anchorScrollOffset: 1_000,
+        isAtEnd: true,
+      },
+      timelineKey: "thread-b",
+      isAtEnd: false,
+      scrollOffset: 100,
+    });
+    expect(result.shouldPause).toBe(false);
+    expect(result.state).toEqual({
+      timelineKey: "thread-b",
+      anchorScrollOffset: null,
+      isAtEnd: false,
+    });
   });
 
   it("anchors a sent attachment message using its measured height", async () => {
