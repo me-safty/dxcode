@@ -10,12 +10,8 @@ import {
 } from "@t3tools/client-runtime/state/provider-workspace-skills";
 import { useEffect, useMemo, useRef } from "react";
 
-import { serverEnvironment } from "../state/server";
-import { useEnvironmentQuery } from "../state/query";
-
-export function invalidateProviderWorkspaceSkills(): void {
-  // Workspace skill requests are now owned by the environment query cache.
-}
+import { useEnvironmentQuery } from "./query";
+import { serverEnvironment } from "./server";
 
 export function useProviderWorkspaceSkills(
   target: ProviderWorkspaceSkillsTarget,

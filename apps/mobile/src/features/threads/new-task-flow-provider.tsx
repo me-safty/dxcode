@@ -53,8 +53,13 @@ import {
   setPendingConnectionError,
   useSavedRemoteConnections,
 } from "../../state/use-remote-environment-registry";
+import { useProviderWorkspaceSkills } from "../../state/providerWorkspaceSkillsState";
 import { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { type VcsRef } from "@t3tools/client-runtime/state/vcs";
+import {
+  promptHasNewTaskProviderSkillReference,
+  resolveNewTaskProviderSkillsCwd,
+} from "./new-task-provider-skills";
 
 type WorkspaceMode = "local" | "worktree";
 
@@ -381,13 +386,31 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         option.selection.instanceId === selectedModel.instanceId &&
         option.selection.model === selectedModel.model,
     ) ?? null;
-  const selectedProviderSkills = useMemo(
+  const selectedProviderFallbackSkills = useMemo(
     () =>
       selectedEnvironmentServerConfig?.providers.find(
         (provider) => provider.instanceId === selectedModel?.instanceId,
       )?.skills ?? [],
     [selectedEnvironmentServerConfig, selectedModel?.instanceId],
   );
+  const promptNeedsWorkspaceSkills = useMemo(
+    () => promptHasNewTaskProviderSkillReference(prompt),
+    [prompt],
+  );
+  const selectedProviderSkills = useProviderWorkspaceSkills({
+    environmentId: selectedProject?.environmentId ?? null,
+    instanceId: selectedModel?.instanceId ?? null,
+    // A new-worktree draft has no target directory yet. Do not inspect the
+    // selected base branch's checkout because its uncommitted skills may not
+    // exist in the worktree that task creation will materialize.
+    cwd: resolveNewTaskProviderSkillsCwd({
+      workspaceMode,
+      selectedWorktreePath,
+      projectWorkspaceRoot: selectedProject?.workspaceRoot ?? null,
+    }),
+    enabled: promptNeedsWorkspaceSkills,
+    fallbackSkills: selectedProviderFallbackSkills,
+  }).skills;
   const setSelectedModelKey = useCallback(
     (key: string | null) => {
       if (!key || !selectedProjectDraftKey) {

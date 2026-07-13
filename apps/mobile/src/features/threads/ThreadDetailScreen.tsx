@@ -12,6 +12,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
+  ServerProviderSkill,
   ThreadId,
 } from "@t3tools/contracts";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
@@ -43,6 +44,7 @@ import {
 } from "./ThreadComposer";
 import { ThreadFeed } from "./ThreadFeed";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
+import { useProviderWorkspaceSkills } from "../../state/providerWorkspaceSkillsState";
 
 export interface ThreadDetailScreenProps {
   readonly selectedThread: OrchestrationThreadShell;
@@ -270,12 +272,19 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const contentMaxWidth = isSplitLayout ? CHAT_CONTENT_MAX_WIDTH : undefined;
   const selectedInstanceId = props.selectedThread.modelSelection.instanceId;
   useStreamingHaptics(props.selectedThread.id, props.selectedThreadFeed);
-  const selectedProviderSkills = useMemo(
+  const selectedProviderFallbackSkills = useMemo<ReadonlyArray<ServerProviderSkill>>(
     () =>
       props.serverConfig?.providers.find((provider) => provider.instanceId === selectedInstanceId)
         ?.skills ?? [],
     [props.serverConfig, selectedInstanceId],
   );
+  const selectedProviderWorkspaceSkills = useProviderWorkspaceSkills({
+    environmentId: props.environmentId,
+    instanceId: selectedInstanceId,
+    cwd: props.threadCwd ?? props.projectWorkspaceRoot,
+    enabled: true,
+    fallbackSkills: selectedProviderFallbackSkills,
+  });
 
   useLayoutEffect(() => {
     selectedThreadKeyRef.current = selectedThreadKey;
@@ -414,7 +423,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             layoutVariant={layoutVariant}
             usesAutomaticContentInsets={props.usesAutomaticContentInsets}
             onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
-            skills={selectedProviderSkills}
+            skills={selectedProviderWorkspaceSkills.skills}
           />
         </View>
       ) : (
@@ -480,6 +489,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               threadSyncPhase={threadSyncPhase}
               selectedThread={props.selectedThread}
               serverConfig={props.serverConfig}
+              workspaceSkills={selectedProviderWorkspaceSkills.skills}
+              workspaceSkillsIsPending={selectedProviderWorkspaceSkills.isPending}
+              workspaceSkillsError={selectedProviderWorkspaceSkills.error}
               queueCount={props.selectedThreadQueueCount}
               activeThreadBusy={props.activeThreadBusy}
               environmentId={props.environmentId}

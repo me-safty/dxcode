@@ -1,14 +1,13 @@
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import { ServerProviderSkillsListError } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
-import { describe, expect, it } from "vite-plus/test";
-
 import {
   formatProviderWorkspaceSkillsError,
   resolveNextProviderWorkspaceSkillsSnapshot,
   resolvePendingProviderWorkspaceSkills,
   resolveProviderWorkspaceSkills,
-} from "./providerWorkspaceSkillsState";
+} from "@t3tools/client-runtime/state/provider-workspace-skills";
+import * as Cause from "effect/Cause";
+import { describe, expect, it } from "vite-plus/test";
 
 function skill(name: string): ServerProviderSkill {
   return {
