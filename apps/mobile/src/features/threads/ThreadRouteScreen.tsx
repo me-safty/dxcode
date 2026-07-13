@@ -827,6 +827,56 @@ function ThreadRouteContent(
     [navigation],
   );
 
+  // Keep hooks above early returns so hook order stays stable if route params
+  // or selectedThread go null on a re-render of this mounted instance.
+  const selectedThreadTitle = selectedThread?.title ?? "";
+  const threadScreenOptions = useMemo(
+    () => ({
+      // Android draws its own in-flow header (AndroidScreenHeader below);
+      // the native stack header stays iOS-only.
+      headerShown: Platform.OS !== "android",
+      headerTitle: selectedThreadTitle,
+      headerTitleStyle: usesNativeHeaderGlass
+        ? ({
+            fontSize: 17,
+            fontWeight: "800" as const,
+          } as const)
+        : undefined,
+      title: selectedThreadTitle,
+      headerBackVisible: !layout.usesSplitView,
+      // Compact uses the NATIVE back button when a previous route exists;
+      // deep links / cold starts get an explicit Home button instead.
+      // Split view always uses its custom left items.
+      unstable_headerLeftItems:
+        Platform.OS === "ios"
+          ? layout.usesSplitView
+            ? () => splitLeftHeaderItems
+            : canGoBack
+              ? undefined
+              : () => compactHomeHeaderItems
+          : undefined,
+      // Search lives in the persistent sidebar, so the split header keeps
+      // the git controls on the RIGHT (no center items — center space is
+      // reserved for future breadcrumbs/status).
+      unstable_headerRightItems:
+        Platform.OS === "ios"
+          ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
+          : undefined,
+      unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
+    }),
+    [
+      canGoBack,
+      compactHomeHeaderItems,
+      compactRightHeaderItems,
+      headerSubtitle,
+      layout.usesSplitView,
+      selectedThreadTitle,
+      splitLeftHeaderItems,
+      threadCenterHeaderItems,
+      usesNativeHeaderGlass,
+    ],
+  );
+
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
   }
@@ -893,53 +943,6 @@ function ThreadRouteContent(
         />
       </View>
     </>
-  );
-
-  const threadScreenOptions = useMemo(
-    () => ({
-      // Android draws its own in-flow header (AndroidScreenHeader below);
-      // the native stack header stays iOS-only.
-      headerShown: Platform.OS !== "android",
-      headerTitle: selectedThread.title,
-      headerTitleStyle: usesNativeHeaderGlass
-        ? ({
-            fontSize: 17,
-            fontWeight: "800" as const,
-          } as const)
-        : undefined,
-      title: selectedThread.title,
-      headerBackVisible: !layout.usesSplitView,
-      // Compact uses the NATIVE back button when a previous route exists;
-      // deep links / cold starts get an explicit Home button instead.
-      // Split view always uses its custom left items.
-      unstable_headerLeftItems:
-        Platform.OS === "ios"
-          ? layout.usesSplitView
-            ? () => splitLeftHeaderItems
-            : canGoBack
-              ? undefined
-              : () => compactHomeHeaderItems
-          : undefined,
-      // Search lives in the persistent sidebar, so the split header keeps
-      // the git controls on the RIGHT (no center items — center space is
-      // reserved for future breadcrumbs/status).
-      unstable_headerRightItems:
-        Platform.OS === "ios"
-          ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
-          : undefined,
-      unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
-    }),
-    [
-      canGoBack,
-      compactHomeHeaderItems,
-      compactRightHeaderItems,
-      headerSubtitle,
-      layout.usesSplitView,
-      selectedThread.title,
-      splitLeftHeaderItems,
-      threadCenterHeaderItems,
-      usesNativeHeaderGlass,
-    ],
   );
 
   return (
