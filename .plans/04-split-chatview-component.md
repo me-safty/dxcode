@@ -1,47 +1,47 @@
-# Plan: Split ChatView into Smaller UI/Logic Units
+# Decompose `ChatView` Along Current Runtime Boundaries
 
-## Summary
+Status: **Active**
+Last reviewed: 2026-07-13
 
-Refactor `ChatView.tsx` into composable pieces with isolated responsibilities.
+## Goal
 
-## Motivation
+Reduce `apps/web/src/components/ChatView.tsx` from a multi-thousand-line coordinator into a route-level container whose dependencies and failure behavior are easy to test. Preserve current UX, stream ordering, draft persistence, terminal recovery, and mobile/desktop parity.
 
-- `apps/renderer/src/components/ChatView.tsx` is large and handles:
-  - Session orchestration
-  - Send/interrupt actions
-  - Timeline rendering
-  - Header/status UI
-  - Composer UI
-- Hard to test and maintain as one component.
+## Current state
 
-## Scope
+The first decomposition already happened. Presentation and pure logic now exist in:
 
-- Renderer component boundaries and hooks.
-- Keep visual behavior unchanged.
+- `apps/web/src/components/chat/ChatComposer.tsx`
+- `apps/web/src/components/chat/ChatHeader.tsx`
+- `apps/web/src/components/chat/MessagesTimeline.tsx`
+- `apps/web/src/components/ChatView.logic.ts`
+- focused `components/chat/*` panels, pickers, and tests
 
-## Proposed Changes
+`ChatView.tsx` still owns too much coordination, especially persistent terminal drawer/panel behavior, orchestration-derived command state, composer submission, environment availability, and cross-panel effects.
 
-1. Create hook: `apps/renderer/src/hooks/useChatSession.ts`
-   - `ensureSession`
-   - `sendTurn`
-   - `interruptTurn`
-2. Split presentational components:
-   - `components/chat/ThreadHeader.tsx`
-   - `components/chat/MessageTimeline.tsx`
-   - `components/chat/ComposerBar.tsx`
-3. Keep `ChatView.tsx` as container wiring store + hook + child components.
-4. Add focused tests for hook behavior (error handling, session reuse).
+## Implementation phases
 
-## Risks
+1. **Characterize behavior first**
+   - Add or strengthen tests around terminal attach/restart, draft-to-thread handoff, send/interrupt/retry, reconnect recovery, plan follow-up, and focus/scroll behavior.
+   - Prefer semantic assertions over DOM geometry.
+2. **Extract terminal presentation ownership**
+   - Move `PersistentThreadTerminalDrawer` and `PersistentThreadTerminalPanel` into `components/chat/terminal/`.
+   - Keep terminal session state in `packages/client-runtime`/`apps/web/src/state`; extracted components should receive narrow IDs and callbacks.
+3. **Extract composer orchestration**
+   - Introduce a focused hook/module for send, interrupt, retry, provider selection, and draft-thread promotion.
+   - Keep durable mutations routed through existing client-runtime commands and RPC atoms.
+4. **Extract environment and availability derivation**
+   - Move environment-offline, auth, provider, and branch/worktree readiness derivation into pure selectors with table-driven tests.
+5. **Shrink the container**
+   - Leave route/thread selection, high-level layout, and explicit composition in `ChatView.tsx`.
+   - Remove compatibility props and duplicate local state only after all callers have moved.
 
-- Refactor can break subtle UI interactions (auto-scroll, menu close, keyboard send).
+Each phase must be independently reviewable and green. Avoid a file-move-only mega-PR or a new facade that recreates `ChatView` elsewhere.
 
-## Validation
+## Acceptance criteria
 
-- `bun run test`
-- Manual smoke: send, stream, interrupt, model switch.
-
-## Done Criteria
-
-- `ChatView.tsx` significantly reduced and easier to scan.
-- Session logic isolated from rendering.
+- `ChatView.tsx` is materially smaller and reads as composition rather than implementation.
+- Terminal, composer, and environment logic have narrow public interfaces and direct regression tests.
+- No new global store is introduced for component-local state.
+- Reconnects, partial streams, session restarts, and failed terminal operations remain predictable.
+- The repository baseline passes after every phase.

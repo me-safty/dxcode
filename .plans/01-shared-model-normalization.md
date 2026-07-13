@@ -1,49 +1,31 @@
-# Plan: Centralize Model Normalization in Contracts
+# Model Normalization Boundaries
 
-## Summary
+Status: **Completed**
+Last reviewed: 2026-07-13
 
-Move model alias/default normalization into `packages/contracts` so desktop and renderer use one shared source of truth.
+## Original intent
 
-## Motivation
+Eliminate divergent model aliases and defaults across the desktop process and renderer.
 
-- Removes duplicated logic between:
-  - `apps/desktop/src/codexAppServerManager.ts`
-  - `apps/renderer/src/model-logic.ts`
-- Prevents behavior drift when model aliases/defaults are updated.
+## Current state
 
-## Scope
+The original desktop/renderer split no longer exists. Model responsibilities are intentionally divided by package role:
 
-- Add shared model utilities to contracts.
-- Update desktop and renderer to consume shared utilities.
-- Keep renderer-specific display options in renderer.
+- `packages/contracts/src/model.ts` owns schema-only model identifiers and wire shapes.
+- `packages/shared/src/model.ts` owns reusable normalization and compatibility behavior.
+- `packages/client-runtime/src/state/models.ts` owns cross-client reactive model state.
+- `apps/server/src/codexModelOptions.ts` owns Codex-specific option discovery.
+- `apps/web/src/modelSelection.ts` and `apps/web/src/providerModels.ts` own web presentation and selection behavior.
 
-## Proposed Changes
+This is preferable to putting runtime maps in `packages/contracts`, which is now required to remain schema-only.
 
-1. Add `packages/contracts/src/model.ts` with:
-   - Canonical model list
-   - Alias map
-   - `normalizeModelSlug`
-   - `resolveModelSlug`
-   - `DEFAULT_MODEL`
-2. Export model utilities from `packages/contracts/src/index.ts`.
-3. Update `apps/desktop/src/codexAppServerManager.ts` to replace local alias map/helper.
-4. Update `apps/renderer/src/model-logic.ts` to wrap or re-export shared functions.
-5. Update tests:
-   - Move/duplicate normalization tests to contracts.
-   - Keep renderer tests focused on renderer-only behavior.
+## Maintenance rules
 
-## Risks
-
-- Desktop/renderer may currently rely on slightly different fallback behavior.
-- Import graph must avoid bundling issues for Electron main/preload.
+- Keep provider-neutral identifiers and codecs in contracts.
+- Put reusable executable normalization in `packages/shared`.
+- Keep provider-specific discovery and fallback behavior in the provider/server boundary.
+- Add regression tests next to every normalization layer when aliases or canonical IDs change.
 
 ## Validation
 
-- `bun run test`
-- `bun run typecheck`
-- Manual check that model selection and session start still send expected model slug.
-
-## Done Criteria
-
-- No duplicated alias/default map in desktop and renderer.
-- Shared model utilities are contract-tested.
+Run focused model tests with `vp test`, then the repository baseline in `.plans/README.md`.

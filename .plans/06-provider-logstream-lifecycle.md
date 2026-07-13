@@ -1,38 +1,23 @@
-# Plan: Add Provider Log Stream Lifecycle Management
+# Provider Event Logging Lifecycle
 
-## Summary
+Status: **Completed and superseded by scoped server services**
+Last reviewed: 2026-07-13
 
-Ensure `ProviderManager` logging stream is initialized, rotated/structured, and closed safely.
+## Original intent
 
-## Motivation
+Give a desktop `ProviderManager` explicit log-stream ownership and shutdown behavior.
 
-- `apps/desktop/src/providerManager.ts` opens a write stream in constructor.
-- Stream lifecycle is not explicit on shutdown.
+## Current state
 
-## Scope
+Provider runtime ownership moved to `apps/server`. Logging is separated into `ProviderEventLoggers.ts`, `EventNdjsonLogger.ts`, and provider-specific adapters under `apps/server/src/provider/Layers`. Provider sessions and loggers are acquired through the server layer graph and released by Effect scopes rather than an Electron `dispose()` call.
 
-- Desktop provider logging behavior.
-- App shutdown integration.
+## Maintenance rules
 
-## Proposed Changes
-
-1. Add explicit `dispose()` on `ProviderManager`:
-   - Remove event listeners
-   - End/close log stream
-2. Call `providerManager.dispose()` from app shutdown path in `apps/desktop/src/main.ts`.
-3. Optional: change log format to JSON lines with stable fields.
-4. Optional: per-session log files under `.logs/providers/`.
-
-## Risks
-
-- Improper close sequencing may lose final log lines.
+- Open files and subscriptions with scoped acquisition/release.
+- Preserve ordering and flush behavior on normal shutdown, interruption, and failed startup.
+- Keep provider-native payload logging adapter-local and redact credentials before serialization.
+- Test finalization and logger failure isolation; logging failure must not kill provider event ingestion.
 
 ## Validation
 
-- Manual run/quit cycle to ensure no open handle warnings.
-- Confirm logs flush on quit and file descriptors are not leaked.
-
-## Done Criteria
-
-- ProviderManager owns complete log stream lifecycle.
-- Shutdown path explicitly disposes provider resources.
+Run provider logger and lifecycle tests with `vp test`, then the repository baseline.

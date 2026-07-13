@@ -1,42 +1,30 @@
-# Plan: Unify Process and PTY Session Abstractions in ProcessManager
+# Process and Terminal Runtime Boundaries
 
-## Summary
+Status: **Superseded by server-owned runtime services**
+Last reviewed: 2026-07-13
 
-Refactor `ProcessManager` to use a single runtime-session interface for child-process and PTY modes.
+## Original intent
 
-## Motivation
+Hide child-process and PTY branching behind one desktop `ProcessManager` session interface.
 
-- `apps/desktop/src/processManager.ts` maintains parallel maps and branch-heavy logic.
-- New execution backends/providers will multiply complexity.
+## Current state
 
-## Scope
+Execution no longer belongs to one desktop manager:
 
-- Desktop process execution internals.
-- Preserve public `ProcessManager` API.
+- `apps/server/src/processRunner.ts` covers bounded external commands.
+- `apps/server/src/terminal` owns long-lived terminal sessions and PTY lifecycle.
+- Provider subprocesses are owned by provider adapters and protocol runtimes.
+- Desktop-only launch and shell concerns stay in `apps/desktop`.
 
-## Proposed Changes
+These boundaries intentionally distinguish bounded commands, interactive terminals, provider protocols, and desktop launchers. A universal runtime-session interface would erase important cancellation, output, persistence, and platform differences.
 
-1. Introduce internal interface (e.g. `RuntimeSession`):
-   - `write(data)`
-   - `kill()`
-   - lifecycle/output event hooks
-2. Implement:
-   - `ChildProcessSession`
-   - `PtySession`
-3. Replace dual maps with one `Map<string, RuntimeSession>`.
-4. Keep output/exit event contract unchanged.
-5. Add tests for both implementations.
+## Maintenance rules
 
-## Risks
-
-- PTY behavior differs by platform; abstraction must not hide required differences.
+- Share low-level safe process helpers only when cancellation and output-limit semantics match.
+- Keep PTY history/reconnect contracts in the terminal domain.
+- Use Effect scopes and typed spawn/exit/timeout errors.
+- Test Windows and WSL paths when changing native or shell behavior.
 
 ## Validation
 
-- Existing `processManager.test.ts` passes.
-- Add PTY-path tests where feasible.
-
-## Done Criteria
-
-- Manager no longer branches per backend in `write/kill/killAll`.
-- Session backends are independently testable.
+Run the affected process/terminal tests with `vp test`, then the repository baseline. Native mobile code is not involved in this plan.

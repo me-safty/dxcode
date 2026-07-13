@@ -1,39 +1,25 @@
-# Plan: Add Pre-Commit Formatting/Lint Hooks
+# Pre-Commit Formatting and Linting
 
-## Summary
+Status: **Completed**
+Last reviewed: 2026-07-13
 
-Introduce pre-commit automation so formatting and basic lint checks happen before commits.
+## Current state
 
-## Motivation
+Vite+ installs the repository hooks during `prepare`. `.vite-hooks/pre-commit` runs:
 
-- Current lint failures include formatting-only issues.
-- Shift-left feedback reduces noisy CI failures and cleanup churn.
+```bash
+vp staged
+```
 
-## Scope
+Formatting and lint configuration therefore remains centralized in Vite+ instead of Husky, lint-staged, Lefthook, Biome, or custom per-package hooks.
 
-- Root tooling config and package scripts.
-- No runtime code changes.
+## Maintenance rules
 
-## Proposed Changes
-
-1. Add hook tooling (e.g. Husky + lint-staged or Lefthook).
-2. Configure staged-file tasks:
-   - `biome format --write`
-   - `biome check`
-3. Add setup docs in README.
-4. Keep checks fast to avoid developer friction.
-
-## Risks
-
-- Slow hooks can frustrate contributors and be bypassed.
-- Need to ensure compatibility with Bun workspace setup.
+- Keep the hook fast and limited to staged files.
+- Keep full-repository correctness in CI (`vp check` and typecheck), not in pre-commit.
+- Do not add a second hook manager.
+- When changing formatting or lint rules, verify both `vp staged` behavior and a full `vp check`.
 
 ## Validation
 
-- Create sample staged changes and verify hook behavior.
-- Confirm formatting fixes are applied automatically.
-
-## Done Criteria
-
-- Pre-commit hook installed and documented.
-- Formatting-only lint failures drop significantly.
+Stage representative supported file types, run `vp staged`, and finish with the repository baseline.

@@ -1,48 +1,30 @@
-# Plan: Decompose CodexAppServerManager
+# Codex Runtime Decomposition
 
-## Summary
+Status: **Completed and superseded by the provider architecture**
+Last reviewed: 2026-07-13
 
-Split `CodexAppServerManager` into smaller modules with clear responsibilities.
+## Original intent
 
-## Motivation
+Split a desktop-owned `CodexAppServerManager` that mixed process lifecycle, JSON-RPC, sessions, and events.
 
-- `apps/desktop/src/codexAppServerManager.ts` is large and mixes:
-  - Process lifecycle
-  - JSON-RPC parsing/routing
-  - Session state transitions
-  - Event emission
-- This increases regression risk and slows changes.
+## Current state
 
-## Scope
+Codex is no longer owned by the Electron main process:
 
-- Desktop provider internals only.
-- Keep external behavior/API stable.
+- `packages/effect-codex-app-server` owns the typed Codex app-server protocol client.
+- `apps/server/src/provider/Layers/CodexAdapter.ts` translates Codex behavior into provider-neutral runtime events.
+- `apps/server/src/provider/Layers/CodexSessionRuntime.ts` owns live Codex session runtime state.
+- `apps/server/src/provider/Layers/ProviderService.ts` is the provider-neutral facade.
+- `apps/server/src/orchestration` persists and projects user-visible state.
 
-## Proposed Changes
+Effect scopes, typed errors, and adapter-local tests now provide the lifecycle boundaries the old class split was trying to create.
 
-1. Extract modules:
-   - `codex/processLifecycle.ts`
-   - `codex/jsonrpcRouter.ts`
-   - `codex/sessionState.ts`
-   - `codex/parsing.ts`
-2. Keep `CodexAppServerManager` as thin orchestrator/facade.
-3. Move pure helpers (`classifyCodexStderrLine`, route parsing) into unit-testable files.
-4. Add targeted unit tests for:
-   - Message classification
-   - Request/notification/response routing
-   - Session state transitions
+## Maintenance rules
 
-## Risks
-
-- Reordering event handling can change behavior.
-- Must preserve pending request timeout/cancellation semantics.
+- Keep raw Codex JSON-RPC types and ordering inside the protocol package or Codex adapter.
+- Do not add Codex branches to provider-neutral orchestration.
+- Use scoped resources and finalizers for subprocesses, subscriptions, and pending requests.
 
 ## Validation
 
-- Existing tests pass.
-- Add module-level tests for parsing and transition logic.
-
-## Done Criteria
-
-- Main manager file materially smaller and orchestration-focused.
-- Core protocol/state logic covered by focused tests.
+Run the protocol-package and Codex adapter tests with `vp test`, then the repository baseline.

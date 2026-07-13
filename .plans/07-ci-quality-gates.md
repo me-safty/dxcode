@@ -1,41 +1,28 @@
-# Plan: Add CI Workflow for Core Quality Gates
+# CI Quality Gates
 
-## Summary
+Status: **Completed**
+Last reviewed: 2026-07-13
 
-Add GitHub Actions workflow to run lint/typecheck/test (and optionally smoke-test) on pushes and PRs.
+## Current state
 
-## Motivation
+`.github/workflows/ci.yml` uses `voidzero-dev/setup-vp` and separates the main gates into:
 
-- Repository currently has no CI workflow files.
-- Quality checks are only local/manual.
+- `vp check`
+- workspace typechecking
+- desktop build/preload verification
+- `vp run test`
+- macOS mobile-native static analysis via `vp run lint:mobile`
+- release-only smoke coverage
 
-## Scope
+Release workflows repeat the appropriate Vite+ checks before publishing artifacts. CI uses the Node engine declared in `package.json` and the repository lockfile; Bun/Turbo setup is no longer part of the toolchain.
 
-- `.github/workflows/ci.yml`
-- Bun + Turbo setup in CI.
+## Maintenance rules
 
-## Proposed Changes
-
-1. Add `ci.yml` with jobs:
-   - Setup Bun and Node environment
-   - Install deps
-   - `bun run lint`
-   - `bun run typecheck`
-   - `bun run test`
-2. Add separate optional job for `bun run smoke-test` (desktop/Electron).
-3. Configure caching for Bun/Turbo as appropriate.
-
-## Risks
-
-- Smoke test may be flaky in headless CI environments.
-- CI runtime can grow if caching is misconfigured.
+- Keep local completion commands aligned with CI and `AGENTS.md`.
+- Add a focused gate only when it protects a distinct platform or artifact boundary.
+- Prefer deterministic tests and explicit readiness signals over retries or timing sleeps.
+- Update workflow caches through `setup-vp`; do not introduce a second package-manager cache path.
 
 ## Validation
 
-- Verify workflow runs on a branch PR.
-- Ensure failures surface clearly by job name.
-
-## Done Criteria
-
-- CI blocks regressions in lint/typecheck/test.
-- Workflow docs added to README.
+Workflow changes must be exercised on a PR. Locally, run the repository baseline and any changed workflow-equivalent script.

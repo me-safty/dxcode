@@ -1,44 +1,30 @@
-# Plan: Strengthen Typed IPC Boundaries in Main Process
+# Typed Desktop IPC Boundaries
 
-## Summary
+Status: **Completed**
+Last reviewed: 2026-07-13
 
-Replace loose payload casting in IPC handlers with strict schema parsing and typed helper wrappers.
+## Original intent
 
-## Motivation
+Replace unchecked Electron IPC payload casts with validated, typed handlers.
 
-- `apps/desktop/src/main.ts` currently uses casts like `payload as Parameters<...>`.
-- Casts can hide contract breakages until runtime.
+## Current state
 
-## Scope
+Desktop IPC is organized under `apps/desktop/src/ipc`:
 
-- Desktop main process IPC registration.
-- Optional shared helper for handler registration.
+- `DesktopIpc.ts` owns registration and request execution.
+- `DesktopIpcHandlers.ts` composes handler layers.
+- `channels.ts` defines channel metadata.
+- `methods/` contains narrow domain handlers and colocated tests.
 
-## Proposed Changes
+Payloads are Effect Schema values decoded at the boundary. Shared transport shapes live in `packages/contracts`; runtime behavior stays in the desktop app or a runtime package.
 
-1. Add IPC helper utility (e.g. `apps/desktop/src/ipcHelpers.ts`) to:
-   - Parse payload(s) with Zod schemas
-   - Standardize typed handler signatures
-2. Refactor provider IPC handlers in `apps/desktop/src/main.ts` to use:
-   - `providerSessionStartInputSchema.parse`
-   - `providerSendTurnInputSchema.parse`
-   - `providerInterruptTurnInputSchema.parse`
-   - `providerStopSessionInputSchema.parse`
-3. Apply same pattern to agent/terminal handlers where possible.
-4. Add tests for handler parsing failure paths (invalid payloads).
+## Maintenance rules
 
-## Risks
-
-- Refactor can subtly change IPC error shape/messages.
-- Helper abstraction should stay simple and not obscure control flow.
+- Treat renderer input as `unknown` until the channel schema decodes it.
+- Return typed errors; do not restore `as Parameters<...>` casts.
+- Keep method modules domain-sized and test invalid payloads as well as success paths.
+- Prefer the same schema for preload, main-process, and test fixtures.
 
 ## Validation
 
-- `bun run test`
-- `bun run typecheck`
-- Manual invalid payload check from renderer/devtools to confirm fast failure.
-
-## Done Criteria
-
-- No provider handler uses `payload as Parameters<...>`.
-- All IPC entrypoints parse unknown payloads at boundary.
+Run affected `apps/desktop/src/ipc/**/*.test.ts` tests with `vp test`, then the repository baseline.
