@@ -20,6 +20,7 @@ import {
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
   shouldBlockThreadDragActivation,
+  shouldShowPinnedThreadDivider,
   resolveThreadPinCrossingAction,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
@@ -97,6 +98,29 @@ describe("resolveThreadPinCrossingAction", () => {
         dividerCenterY: 100,
       }),
     ).toBeNull();
+  });
+});
+
+describe("shouldShowPinnedThreadDivider", () => {
+  it("shows between mixed groups and during edge-case drags", () => {
+    expect(
+      shouldShowPinnedThreadDivider({ isDragging: false, pinnedCount: 1, regularCount: 1 }),
+    ).toBe(true);
+    expect(
+      shouldShowPinnedThreadDivider({ isDragging: true, pinnedCount: 0, regularCount: 2 }),
+    ).toBe(true);
+    expect(
+      shouldShowPinnedThreadDivider({ isDragging: true, pinnedCount: 2, regularCount: 0 }),
+    ).toBe(true);
+  });
+
+  it("stays hidden outside a drag when only one group exists", () => {
+    expect(
+      shouldShowPinnedThreadDivider({ isDragging: false, pinnedCount: 0, regularCount: 2 }),
+    ).toBe(false);
+    expect(
+      shouldShowPinnedThreadDivider({ isDragging: false, pinnedCount: 2, regularCount: 0 }),
+    ).toBe(false);
   });
 });
 

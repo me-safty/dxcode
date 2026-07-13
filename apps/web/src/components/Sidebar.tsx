@@ -202,6 +202,7 @@ import {
   prioritizeThreadsByPinnedKeys,
   shouldClearThreadSelectionOnMouseDown,
   shouldBlockThreadDragActivation,
+  shouldShowPinnedThreadDivider,
   resolveThreadPinCrossingAction,
   type ThreadPinDropAction,
   sortProjectsForSidebar,
@@ -1224,10 +1225,11 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </SidebarThreadSection>
         )}
         {shouldShowThreadPanel &&
-          renderedPinnedThreads.length > 0 &&
-          renderedRegularThreads.length > 0 && (
-            <SidebarPinnedDivider nodeRef={setDividerElement} flow={dragFlow} />
-          )}
+          shouldShowPinnedThreadDivider({
+            isDragging: isThreadDragActive,
+            pinnedCount: renderedPinnedThreads.length,
+            regularCount: renderedRegularThreads.length,
+          }) && <SidebarPinnedDivider nodeRef={setDividerElement} flow={dragFlow} />}
         {shouldShowThreadPanel && renderedRegularThreads.length > 0 && (
           <SidebarThreadSection attachAutoAnimateRef={attachThreadListAutoAnimateRef}>
             {renderedRegularThreads.map(renderThreadRow)}

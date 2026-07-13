@@ -52,6 +52,17 @@ export function resolveThreadPinCrossingAction(input: {
   return input.draggedCenterY < input.dividerCenterY ? "pin" : null;
 }
 
+export function shouldShowPinnedThreadDivider(input: {
+  isDragging: boolean;
+  pinnedCount: number;
+  regularCount: number;
+}): boolean {
+  return (
+    (input.pinnedCount > 0 && input.regularCount > 0) ||
+    (input.isDragging && input.pinnedCount + input.regularCount > 0)
+  );
+}
+
 export interface ThreadStatusPill {
   label:
     | "Working"
