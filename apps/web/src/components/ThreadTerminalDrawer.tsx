@@ -65,7 +65,7 @@ import { previewEnvironment } from "../state/preview";
 import { terminalEnvironment } from "../state/terminal";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { useAtomCommand } from "../state/use-atom-command";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, useClientSettingsHydrated } from "../hooks/useSettings";
 import {
   applyTerminalAppearance,
   resolveTerminalFontFamily,
@@ -318,6 +318,7 @@ export function TerminalViewport({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalAppearanceUpdateRef = useRef<TerminalAppearanceUpdateState>({ generation: 0 });
   const { terminalFontFamily, terminalFontSize } = useClientSettings();
+  const clientSettingsHydrated = useClientSettingsHydrated();
   const resolvedTerminalFontFamily = resolveTerminalFontFamily(terminalFontFamily);
   const environmentId = threadRef.environmentId;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
@@ -389,7 +390,7 @@ export function TerminalViewport({
 
   useEffect(() => {
     const mount = containerRef.current;
-    if (!mount) return;
+    if (!mount || !clientSettingsHydrated) return;
 
     const localApi = readLocalApi();
 
@@ -713,7 +714,15 @@ export function TerminalViewport({
     // autoFocus is intentionally omitted;
     // it is only read at mount time and must not trigger terminal teardown/recreation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, environmentId, runtimeEnvKey, terminalId, threadId, worktreePath]);
+  }, [
+    clientSettingsHydrated,
+    cwd,
+    environmentId,
+    runtimeEnvKey,
+    terminalId,
+    threadId,
+    worktreePath,
+  ]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -735,7 +744,17 @@ export function TerminalViewport({
       requestFrame: (callback) => window.requestAnimationFrame(callback),
       cancelFrame: (frame) => window.cancelAnimationFrame(frame),
     });
-  }, [resolvedTerminalFontFamily, terminalFontSize]);
+  }, [
+    clientSettingsHydrated,
+    cwd,
+    environmentId,
+    resolvedTerminalFontFamily,
+    runtimeEnvKey,
+    terminalFontSize,
+    terminalId,
+    threadId,
+    worktreePath,
+  ]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

@@ -92,8 +92,6 @@ interface ApplyTerminalAppearanceOptions {
 
 export function applyTerminalAppearance(options: ApplyTerminalAppearanceOptions): () => void {
   const updateId = ++options.state.generation;
-  const wasAtBottom =
-    options.terminal.buffer.active.viewportY >= options.terminal.buffer.active.baseY;
   let frame: number | null = null;
 
   options.terminal.options.fontFamily = options.fontFamily;
@@ -106,6 +104,8 @@ export function applyTerminalAppearance(options: ApplyTerminalAppearanceOptions)
     frame = options.requestFrame(() => {
       frame = null;
       if (!isCurrent()) return;
+      const wasAtBottom =
+        options.terminal.buffer.active.viewportY >= options.terminal.buffer.active.baseY;
       options.fit();
       if (wasAtBottom) {
         options.terminal.scrollToBottom();

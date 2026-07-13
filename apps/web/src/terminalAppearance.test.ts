@@ -134,6 +134,35 @@ describe("applyTerminalAppearance", () => {
     expect(resize).toHaveBeenCalledWith(120, 32);
   });
 
+  it("samples the scroll position immediately before refitting", async () => {
+    const state: TerminalAppearanceUpdateState = { generation: 0 };
+    const terminal = makeTerminal(true);
+    const fontsReady = deferred();
+    const frames = makeFrameHarness();
+    const fit = vi.fn();
+
+    applyTerminalAppearance({
+      state,
+      terminal,
+      fontFamily: "updated",
+      fontSize: 14,
+      fontsReady: fontsReady.promise,
+      fit,
+      resize: vi.fn(),
+      requestFrame: frames.requestFrame,
+      cancelFrame: frames.cancelFrame,
+    });
+
+    terminal.buffer.active.viewportY = 10;
+    fontsReady.resolve();
+    await fontsReady.promise;
+    await Promise.resolve();
+    frames.runAll();
+
+    expect(fit).toHaveBeenCalledOnce();
+    expect(terminal.scrollToBottom).not.toHaveBeenCalled();
+  });
+
   it("allows only the latest async update to run", async () => {
     const state: TerminalAppearanceUpdateState = { generation: 0 };
     const terminal = makeTerminal(false);
