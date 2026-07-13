@@ -98,6 +98,5 @@ export function getDefaultServerModel(
   const models = getProviderModels(providers, provider);
   const firstRealModel = models.find((model) => !model.isCustom)?.slug;
   if (firstRealModel) return firstRealModel;
-  if (provider === PI_DRIVER_KIND) return "";
   return models[0]?.slug ?? getFallbackServerModel(provider);
 }
