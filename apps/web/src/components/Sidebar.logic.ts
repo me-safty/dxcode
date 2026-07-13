@@ -194,6 +194,13 @@ export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null
   return !target.closest(THREAD_SELECTION_SAFE_SELECTOR);
 }
 
+const THREAD_DRAG_BLOCKED_SELECTOR =
+  "input, textarea, select, button, a, [contenteditable='true'], [data-thread-selection-safe]";
+
+export function shouldBlockThreadDragActivation(target: HTMLElement | null): boolean {
+  return target !== null && target.closest(THREAD_DRAG_BLOCKED_SELECTOR) !== null;
+}
+
 // A double-click dispatches two `click` events before `dblclick`: the first has
 // `detail === 1`, the second `detail === 2`. The second click must not run the
 // row's single-click navigation, otherwise double-click-to-rename would also

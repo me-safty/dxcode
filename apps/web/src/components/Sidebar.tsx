@@ -201,6 +201,7 @@ import {
   orderItemsByPreferredIds,
   prioritizeThreadsByPinnedKeys,
   shouldClearThreadSelectionOnMouseDown,
+  shouldBlockThreadDragActivation,
   resolveThreadPinCrossingAction,
   type ThreadPinDropAction,
   sortProjectsForSidebar,
@@ -687,6 +688,15 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     },
     [isPinned, threadKey, togglePinned],
   );
+  const handleThreadDragPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (shouldBlockThreadDragActivation(event.target as HTMLElement)) {
+        return;
+      }
+      threadDrag.listeners?.onPointerDown?.(event);
+    },
+    [threadDrag.listeners],
+  );
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
   return (
@@ -714,8 +724,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
+        onPointerDown={handleThreadDragPointerDown}
         {...threadDrag.attributes}
-        {...threadDrag.listeners}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && (

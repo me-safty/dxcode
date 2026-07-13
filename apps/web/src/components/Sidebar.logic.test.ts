@@ -19,6 +19,7 @@ import {
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
+  shouldBlockThreadDragActivation,
   resolveThreadPinCrossingAction,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
@@ -38,6 +39,18 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("shouldBlockThreadDragActivation", () => {
+  it("blocks drag activation from interactive descendants", () => {
+    const input = { closest: vi.fn(() => ({})) } as unknown as HTMLElement;
+    const button = { closest: vi.fn(() => ({})) } as unknown as HTMLElement;
+    const row = { closest: vi.fn(() => null) } as unknown as HTMLElement;
+
+    expect(shouldBlockThreadDragActivation(input)).toBe(true);
+    expect(shouldBlockThreadDragActivation(button)).toBe(true);
+    expect(shouldBlockThreadDragActivation(row)).toBe(false);
+  });
+});
 
 describe("prioritizeThreadsByPinnedKeys", () => {
   it("moves only pinned threads to the front while preserving the current sort order", () => {
