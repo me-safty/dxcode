@@ -922,6 +922,8 @@ describe("getVisibleThreadsForProject", () => {
       getThreadId: (thread) => thread.scopedKey,
     });
 
+    expect(result.hasHiddenThreads).toBe(false);
+    expect(result.hiddenThreads).toEqual([]);
     expect(result.visibleThreads).toEqual(threads);
   });
 });
