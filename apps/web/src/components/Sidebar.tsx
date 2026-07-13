@@ -332,6 +332,7 @@ interface SidebarThreadRowProps {
   isActive: boolean;
   jumpLabel: string | null;
   isPinned: boolean;
+  isThreadDragActive: boolean;
   togglePinned: (threadKey: string, pinned: boolean) => void;
   appSettingsConfirmThreadArchive: boolean;
   renamingThreadKey: string | null;
@@ -371,6 +372,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     isActive,
     jumpLabel,
     isPinned,
+    isThreadDragActive,
     togglePinned,
     appSettingsConfirmThreadArchive,
     renamingThreadKey,
@@ -472,6 +474,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   );
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
+  const [rowActionsFocusedOrHovered, setRowActionsFocusedOrHovered] = useState(false);
+  const showRowActions = !isThreadDragActive && (isMobile || rowActionsFocusedOrHovered);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -484,15 +488,23 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
-    : !isThreadRunning
-      ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
-      : "pointer-events-none";
+    : `pointer-events-none transition-opacity duration-150 ${showRowActions ? "opacity-0" : ""}`;
+  const rowActionVisibilityClass = showRowActions
+    ? "pointer-events-auto opacity-100"
+    : "pointer-events-none opacity-0";
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
   }, [setConfirmingArchiveThreadKey, threadKey]);
   const handleMouseLeave = useCallback(() => {
+    setRowActionsFocusedOrHovered(false);
     clearConfirmingArchive();
   }, [clearConfirmingArchive]);
+  const handleMouseEnter = useCallback(() => {
+    setRowActionsFocusedOrHovered(true);
+  }, []);
+  const handleFocusCapture = useCallback(() => {
+    setRowActionsFocusedOrHovered(true);
+  }, []);
   const handleBlurCapture = useCallback(
     (event: React.FocusEvent<HTMLLIElement>) => {
       const currentTarget = event.currentTarget;
@@ -500,6 +512,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         if (currentTarget.contains(document.activeElement)) {
           return;
         }
+        setRowActionsFocusedOrHovered(false);
         clearConfirmingArchive();
       });
     },
@@ -708,7 +721,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       }}
       className="w-full"
       data-thread-item
+      onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onFocusCapture={handleFocusCapture}
       onBlurCapture={handleBlurCapture}
     >
       <SidebarMenuSubButton
@@ -822,7 +837,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <div className="pointer-events-none absolute top-1/2 right-7 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                    <div
+                      className={`${rowActionVisibilityClass} absolute top-1/2 right-7 -translate-y-1/2 transition-opacity duration-150`}
+                    >
                       <button
                         type="button"
                         data-thread-selection-safe
@@ -859,7 +876,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               </button>
             ) : !isThreadRunning ? (
               appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <div
+                  className={`${rowActionVisibilityClass} absolute top-1/2 right-0.5 -translate-y-1/2 transition-opacity duration-150`}
+                >
                   <button
                     type="button"
                     data-thread-selection-safe
@@ -876,7 +895,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <div
+                        className={`${rowActionVisibilityClass} absolute top-1/2 right-0.5 -translate-y-1/2 transition-opacity duration-150`}
+                      >
                         <button
                           type="button"
                           data-thread-selection-safe
@@ -1084,6 +1105,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const threadDragSensor = useSensor(PointerSensor, { activationConstraint: { distance: 6 } });
   const threadDragSensors = useSensors(threadDragSensor);
   const [dragFlow, setDragFlow] = useState<ThreadPinDropAction | null>(null);
+  const [isThreadDragActive, setIsThreadDragActive] = useState(false);
   const dragFlowRef = useRef<ThreadPinDropAction | null>(null);
   const dividerElementRef = useRef<HTMLLIElement | null>(null);
   const setDividerElement = useCallback((node: HTMLLIElement | null) => {
@@ -1118,6 +1140,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     (event: DragEndEvent) => {
       const activeThreadKey = String(event.active.id);
       const action = dragFlowRef.current;
+      setIsThreadDragActive(false);
       updateDragFlow(null);
       if (action !== null) {
         toggleThreadPinned(activeThreadKey, action === "pin");
@@ -1143,6 +1166,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         isActive={activeRouteThreadKey === threadKey}
         jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
         isPinned={pinnedThreadKeys.includes(threadKey)}
+        isThreadDragActive={isThreadDragActive}
         togglePinned={toggleThreadPinned}
         appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
         renamingThreadKey={renamingThreadKey}
@@ -1170,8 +1194,12 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   return (
     <DndContext
       sensors={threadDragSensors}
+      onDragStart={() => setIsThreadDragActive(true)}
       onDragMove={handleThreadDragMove}
-      onDragCancel={() => updateDragFlow(null)}
+      onDragCancel={() => {
+        setIsThreadDragActive(false);
+        updateDragFlow(null);
+      }}
       onDragEnd={handleThreadDragEnd}
     >
       <SidebarMenuSub
