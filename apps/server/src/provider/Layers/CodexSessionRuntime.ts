@@ -693,6 +693,28 @@ function parseThreadSnapshot(
   };
 }
 
+type CodexTurnOrderingCandidate = Pick<
+  EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number],
+  "startedAt"
+>;
+
+export function shouldPreferActiveCodexTurnCandidate(
+  candidate: CodexTurnOrderingCandidate,
+  selected: CodexTurnOrderingCandidate | undefined,
+): boolean {
+  if (selected === undefined) {
+    return true;
+  }
+
+  // When either timestamp is absent, provider response order is authoritative.
+  // The caller scans in response order, so the later candidate replaces the selection.
+  if (candidate.startedAt == null || selected.startedAt == null) {
+    return true;
+  }
+
+  return candidate.startedAt >= selected.startedAt;
+}
+
 export function findActiveCodexTurnId(
   response: EffectCodexSchema.V2ThreadReadResponse,
 ): TurnId | undefined {
@@ -701,18 +723,7 @@ export function findActiveCodexTurnId(
     if (turn.status !== "inProgress") {
       continue;
     }
-    if (
-      activeTurn === undefined ||
-      turn.startedAt === undefined ||
-      turn.startedAt === null ||
-      activeTurn.startedAt === undefined ||
-      activeTurn.startedAt === null ||
-      (turn.startedAt !== undefined &&
-        turn.startedAt !== null &&
-        activeTurn.startedAt !== undefined &&
-        activeTurn.startedAt !== null &&
-        turn.startedAt >= activeTurn.startedAt)
-    ) {
+    if (shouldPreferActiveCodexTurnCandidate(turn, activeTurn)) {
       activeTurn = turn;
     }
   }
