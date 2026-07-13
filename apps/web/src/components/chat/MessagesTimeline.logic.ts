@@ -16,13 +16,31 @@ export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 export const TIMELINE_CONTENT_MAX_WIDTH = 768;
 export const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 
+export function shouldPauseTimelineAutoFollow({
+  isAtEnd,
+  previousScrollOffset,
+  scrollOffset,
+}: {
+  readonly isAtEnd: boolean | undefined;
+  readonly previousScrollOffset: number | null;
+  readonly scrollOffset: number | null;
+}) {
+  return (
+    isAtEnd === false &&
+    scrollOffset !== null &&
+    previousScrollOffset !== null &&
+    scrollOffset < previousScrollOffset - 1
+  );
+}
+
 export interface TimelineEndState {
   readonly isAtEnd?: boolean;
   readonly isNearEnd?: boolean;
+  readonly isWithinMaintainScrollAtEndThreshold?: boolean;
 }
 
 export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boolean | undefined {
-  return state?.isNearEnd ?? state?.isAtEnd;
+  return state?.isWithinMaintainScrollAtEndThreshold ?? state?.isNearEnd ?? state?.isAtEnd;
 }
 
 export function resolveTimelineMinimapHeightStyle(itemCount: number): string {

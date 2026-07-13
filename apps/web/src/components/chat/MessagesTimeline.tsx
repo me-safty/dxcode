@@ -70,6 +70,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  shouldPauseTimelineAutoFollow,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapHeightStyle,
@@ -177,6 +178,7 @@ interface MessagesTimelineProps {
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
   contentInsetEndAdjustment: number;
+  autoFollowEnabled: boolean;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onManualNavigation: () => void;
 }
@@ -210,6 +212,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onAnchorReady,
   onAnchorSizeChanged,
   contentInsetEndAdjustment,
+  autoFollowEnabled,
   onIsAtEndChange,
   onManualNavigation,
 }: MessagesTimelineProps) {
@@ -322,6 +325,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     null,
   );
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
+  const previousScrollOffsetRef = useRef<number | null>(null);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -350,6 +354,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state);
+    const scrollTop = state?.scroll ?? null;
+    if (
+      shouldPauseTimelineAutoFollow({
+        isAtEnd,
+        previousScrollOffset: previousScrollOffsetRef.current,
+        scrollOffset: scrollTop,
+      })
+    ) {
+      onManualNavigation();
+    }
+    previousScrollOffsetRef.current = scrollTop;
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
     }
@@ -357,8 +372,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return;
     }
 
-    const scrollTop = state.scroll ?? 0;
-    const scrollBottom = scrollTop + (state.scrollLength ?? 0);
+    const resolvedScrollTop = scrollTop ?? 0;
+    const scrollBottom = resolvedScrollTop + (state.scrollLength ?? 0);
 
     for (const item of minimapItems) {
       const strip = minimapStripMap.get(item.id);
@@ -371,11 +386,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       const inView =
         rowTop !== null &&
         rowTop < scrollBottom &&
-        rowTop + Math.max(1, rowHeight ?? 1) > scrollTop;
+        rowTop + Math.max(1, rowHeight ?? 1) > resolvedScrollTop;
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange, onManualNavigation]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -482,7 +497,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={contentInsetEndAdjustment}
             maintainScrollAtEnd={
-              anchoredEndSpace
+              anchoredEndSpace || !autoFollowEnabled
                 ? false
                 : {
                     animated: false,

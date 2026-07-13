@@ -190,6 +190,7 @@ function buildProps() {
     onAnchorReady: () => {},
     onAnchorSizeChanged: () => {},
     contentInsetEndAdjustment: 0,
+    autoFollowEnabled: true,
     onIsAtEndChange: () => {},
     onManualNavigation: () => {},
   };
@@ -226,12 +227,34 @@ describe("MessagesTimeline", () => {
       resolveTimelineMinimapHeightStyle,
       resolveTimelineMinimapIndexFromPointer,
       resolveTimelineMinimapTopPercent,
+      shouldPauseTimelineAutoFollow,
     } = await import("./MessagesTimeline.logic");
 
     expect(resolveTimelineIsAtEnd({ isNearEnd: true, isAtEnd: false })).toBe(true);
+    expect(
+      resolveTimelineIsAtEnd({
+        isWithinMaintainScrollAtEndThreshold: false,
+        isNearEnd: true,
+        isAtEnd: true,
+      }),
+    ).toBe(false);
     expect(resolveTimelineIsAtEnd({ isNearEnd: false, isAtEnd: true })).toBe(false);
     expect(resolveTimelineIsAtEnd({ isAtEnd: true })).toBe(true);
     expect(resolveTimelineIsAtEnd(undefined)).toBeUndefined();
+    expect(
+      shouldPauseTimelineAutoFollow({
+        isAtEnd: false,
+        previousScrollOffset: 400,
+        scrollOffset: 250,
+      }),
+    ).toBe(true);
+    expect(
+      shouldPauseTimelineAutoFollow({
+        isAtEnd: true,
+        previousScrollOffset: 400,
+        scrollOffset: 399.5,
+      }),
+    ).toBe(false);
 
     expect(resolveTimelineMinimapHeightStyle(5)).toBe("min(32px, calc(100vh - 18rem))");
     expect(resolveTimelineMinimapTopPercent(2, 5)).toBe(50);
@@ -336,6 +359,19 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Show full message");
     expect(markup).toContain('data-user-message-collapsible="false"');
+  });
+
+  it("disables LegendList auto-follow while the reader is away from the live edge", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        autoFollowEnabled={false}
+        timelineEntries={[buildUserTimelineEntry("Earlier message.")]}
+      />,
+    );
+
+    expect(markup).not.toContain('data-maintain-scroll-at-end="enabled"');
   });
 
   it("renders inline terminal labels with the composer chip UI", async () => {
