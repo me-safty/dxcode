@@ -63,15 +63,22 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       ),
     ),
   );
+  // Do not paint disk into the visible snapshot up front. A stale warm cache can
+  // list more active threads than the server (dropped archive deltas); showing it
+  // before the HTTP/socket heal balloons Home, then the heal shrinks the list.
+  // Disk is kept for offline / heal-failure fallback only.
   const state = yield* SubscriptionRef.make<EnvironmentShellState>({
-    snapshot: cachedSnapshot,
-    status: shellStatusForSnapshot(cachedSnapshot),
+    snapshot: Option.none(),
+    status: "synchronizing",
     error: Option.none(),
   });
   // When HTTP heal fails we subscribe without afterSequence so the server
   // embeds a full snapshot. That first snapshot must apply even if its sequence
   // is behind the warm disk cache (authoritative server membership).
   const acceptNextSocketSnapshotAuthoritatively = yield* Ref.make(false);
+  // True after an authoritative server snapshot (HTTP or socket heal) or any
+  // live delta. While true, non-authoritative disk must not replace the list.
+  const hasServerBackedSnapshot = yield* Ref.make(false);
   const persistence = yield* Queue.sliding<OrchestrationShellSnapshot>(1);
 
   const persist = Effect.fn("EnvironmentShellState.persist")(function* (
@@ -126,9 +133,17 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
   const applyItem = Effect.fn("EnvironmentShellState.applyItem")(function* (
     item: OrchestrationShellStreamItem,
-    options?: { readonly authoritative?: boolean },
+    options?: { readonly authoritative?: boolean; readonly fromDisk?: boolean },
   ) {
     const current = yield* SubscriptionRef.get(state);
+    // Hold the last server-backed (or live) list while reconciling. Disk must
+    // not overwrite it or Home balloons with stale active membership.
+    if (options?.fromDisk === true) {
+      const serverBacked = yield* Ref.get(hasServerBackedSnapshot);
+      if (serverBacked || Option.isSome(current.snapshot)) {
+        return;
+      }
+    }
     const nextSnapshot =
       item.kind === "snapshot"
         ? Option.match(current.snapshot, {
@@ -152,6 +167,12 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       return;
     }
 
+    // Disk fallback is provisional only. Authoritative heals and live deltas
+    // mark the list as server-backed so later disk paints cannot overwrite it.
+    if (options?.fromDisk !== true) {
+      yield* Ref.set(hasServerBackedSnapshot, true);
+    }
+
     yield* SubscriptionRef.set(state, {
       snapshot: Option.some(nextSnapshot),
       status: "live",
@@ -160,23 +181,29 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     yield* Queue.offer(persistence, nextSnapshot);
   });
 
+  const applyDiskFallback = Effect.gen(function* () {
+    if (Option.isNone(cachedSnapshot)) {
+      return;
+    }
+    yield* applyItem({ kind: "snapshot", snapshot: cachedSnapshot.value }, { fromDisk: true });
+  });
+
   yield* Effect.forkScoped(
     Effect.gen(function* () {
-      // Paint immediately from disk cache when available, then always heal from
-      // the HTTP shell snapshot before (and on every) live session.
-      //
       // Why HTTP heal is required even with a warm cache:
       // If an archive delta is dropped, later unrelated shell events still
       // advance snapshotSequence. Resuming only via afterSequence then skips
       // the archive forever and keeps the thread on the home list.
-      if (Option.isSome(cachedSnapshot)) {
-        yield* applyItem({ kind: "snapshot", snapshot: cachedSnapshot.value });
-      }
-
+      //
+      // Do not paint disk before that heal when online: stale active membership
+      // would flash a larger Home list, then shrink when the heal arrives.
+      // Disk is applied only if the server heal fails and we have nothing to show.
       yield* SubscriptionRef.changes(supervisor.session).pipe(
         Stream.switchMap(
           Option.match({
-            onNone: () => Stream.empty,
+            onNone: () =>
+              // Offline / no session: surface disk if we never got a server list.
+              Stream.fromEffect(applyDiskFallback).pipe(Stream.drain),
             onSome: () =>
               Stream.unwrap(
                 Effect.gen(function* () {
@@ -185,6 +212,9 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
                   // past the archive, so delta-only resume keeps the thread on
                   // the home list forever. Require a server heal first:
                   // HTTP full snapshot, or a socket-embedded full snapshot.
+                  //
+                  // While reconciling, keep the previous server-backed snapshot
+                  // visible (setSynchronizing only flips status).
                   let healedFromServer = false;
                   const prepared = yield* SubscriptionRef.get(supervisor.prepared);
                   if (Option.isSome(prepared)) {
@@ -202,14 +232,18 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
                     }
                   }
 
+                  if (!healedFromServer) {
+                    // Prefer holding an existing list over painting disk. Disk
+                    // only fills an empty Home when the socket must carry the heal.
+                    yield* applyDiskFallback;
+                    yield* Ref.set(acceptNextSocketSnapshotAuthoritatively, true);
+                  }
+
                   const live = yield* SubscriptionRef.get(state);
                   const subscribeInput =
                     healedFromServer && Option.isSome(live.snapshot)
                       ? { afterSequence: live.snapshot.value.snapshotSequence }
                       : {};
-                  if (!healedFromServer) {
-                    yield* Ref.set(acceptNextSocketSnapshotAuthoritatively, true);
-                  }
                   return subscribe(ORCHESTRATION_WS_METHODS.subscribeShell, subscribeInput, {
                     onExpectedFailure: (cause) => setStreamError(Cause.squash(cause)),
                   });

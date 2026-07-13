@@ -5,6 +5,7 @@ import {
   type OrchestrationShellStreamItem,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -311,6 +312,92 @@ describe("environment shell synchronization", () => {
 
       expect(yield* SubscriptionRef.get(loaderCalls)).toBe(1);
       expect(yield* SubscriptionRef.get(capturedAfterSequence)).toBe(4);
+      const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
+      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
+    }),
+  );
+
+  it.effect("does not paint stale disk membership before the HTTP heal arrives", () =>
+    Effect.gen(function* () {
+      const staleActive = {
+        id: "thread-1" as never,
+        projectId: "project-1" as never,
+        title: "Stale active",
+        createdAt: "2026-06-01T00:00:00.000Z",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+      } as never;
+      const cachedSnapshot: OrchestrationShellSnapshot = {
+        snapshotSequence: 5,
+        projects: [],
+        threads: [staleActive],
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      };
+      const httpSnapshot: OrchestrationShellSnapshot = {
+        snapshotSequence: 6,
+        projects: [],
+        threads: [
+          {
+            ...(staleActive as object),
+            archivedAt: "2026-06-02T00:00:00.000Z",
+          } as never,
+        ],
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      };
+      const httpReady = yield* Deferred.make<void>();
+      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const client = {
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
+      } as unknown as WsRpcProtocolClient;
+      const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
+      const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
+        Option.some(session(client)),
+      );
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: supervisorState,
+        session: activeSession,
+        prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.some(cachedSnapshot)),
+        saveShell: () => Effect.void,
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () => Effect.succeed(Option.none()),
+        saveServerConfig: () => Effect.void,
+        loadVcsRefs: () => Effect.succeed(Option.none()),
+        saveVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      });
+      const snapshotLoader = ShellSnapshotLoader.of({
+        load: () => Deferred.await(httpReady).pipe(Effect.as(Option.some(httpSnapshot))),
+      });
+      const shellState = yield* makeEnvironmentShellState().pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        Effect.provideService(ShellSnapshotLoader, snapshotLoader),
+      );
+
+      // While HTTP heal is in flight, Home must not show the inflated disk list.
+      for (let index = 0; index < 20; index += 1) {
+        yield* Effect.yieldNow;
+      }
+      expect(Option.isNone((yield* SubscriptionRef.get(shellState)).snapshot)).toBe(true);
+
+      yield* Deferred.succeed(httpReady, undefined);
+      yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.filter(
+          (state) =>
+            Option.isSome(state.snapshot) && state.snapshot.value.threads[0]?.archivedAt !== null,
+        ),
+        Stream.runHead,
+      );
       const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
       expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
     }),
