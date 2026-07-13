@@ -39,14 +39,19 @@ export function timelineNavigationInputMovesTowardHistory(input: TimelineNavigat
   }
 }
 
-export function timelineUserScrollRequestsPause({
-  inputScrollOffset,
-  scrollOffset,
-}: {
-  readonly inputScrollOffset: number | null;
-  readonly scrollOffset: number | null;
-}) {
-  return inputScrollOffset !== null && scrollOffset !== null && scrollOffset < inputScrollOffset;
+export interface TimelineScrollableNodeState {
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+  readonly scrollTop: number;
+}
+
+export function resolveTimelineScrollableNodeIsAtEnd(
+  scrollNode: TimelineScrollableNodeState | null | undefined,
+): boolean | undefined {
+  if (!scrollNode) {
+    return undefined;
+  }
+  return scrollNode.scrollHeight - scrollNode.scrollTop - scrollNode.clientHeight <= 0;
 }
 
 export interface TimelineEndState {

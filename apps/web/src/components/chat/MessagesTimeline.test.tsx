@@ -264,7 +264,7 @@ describe("MessagesTimeline", () => {
   });
 
   it("recognizes directional user input without inferring intent from layout offsets", async () => {
-    const { timelineNavigationInputMovesTowardHistory, timelineUserScrollRequestsPause } =
+    const { resolveTimelineScrollableNodeIsAtEnd, timelineNavigationInputMovesTowardHistory } =
       await import("./MessagesTimeline.logic");
 
     expect(timelineNavigationInputMovesTowardHistory({ type: "wheel", deltaY: -0.1 })).toBe(true);
@@ -279,12 +279,20 @@ describe("MessagesTimeline", () => {
         shiftKey: false,
       }),
     ).toBe(true);
-    expect(timelineUserScrollRequestsPause({ inputScrollOffset: 400, scrollOffset: 399.9 })).toBe(
-      true,
-    );
-    expect(timelineUserScrollRequestsPause({ inputScrollOffset: 400, scrollOffset: 400 })).toBe(
-      false,
-    );
+    expect(
+      resolveTimelineScrollableNodeIsAtEnd({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 399.9,
+      }),
+    ).toBe(false);
+    expect(
+      resolveTimelineScrollableNodeIsAtEnd({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 400,
+      }),
+    ).toBe(true);
   });
 
   it("anchors a sent attachment message using its measured height", async () => {
