@@ -3170,6 +3170,12 @@ function ChatViewContent(props: ChatViewProps) {
   } | null>(null);
   const anchorScrollRestoreFrameRef = useRef<number | null>(null);
   const cancelTimelineLiveFollowForUserNavigation = useCallback(() => {
+    if (
+      liveFollowUserScrollGenerationRef.current === null &&
+      timelineScrollModeRef.current === "free-scrolling"
+    ) {
+      return;
+    }
     anchorUserScrollGenerationRef.current += 1;
     setTimelineAutoFollowEnabled(false);
     timelineScrollModeRef.current = "free-scrolling";

@@ -19,7 +19,10 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
+  type TouchEvent,
+  type WheelEvent,
 } from "react";
 import { flushSync } from "react-dom";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -75,8 +78,8 @@ import {
   resolveTimelineMinimapHeightStyle,
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapTopPercent,
-  type TimelineAutoFollowScrollState,
-  updateTimelineAutoFollowScrollState,
+  timelineNavigationInputMovesTowardHistory,
+  timelineUserScrollRequestsPause,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -326,11 +329,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     null,
   );
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
-  const autoFollowScrollStateRef = useRef<TimelineAutoFollowScrollState>({
-    timelineKey: routeThreadKey,
-    anchorScrollOffset: null,
-    isAtEnd: undefined,
-  });
+  const timelineTouchYRef = useRef<number | null>(null);
+  const pendingTimelineNavigationRef = useRef<{
+    readonly timelineKey: string;
+    readonly scrollOffset: number;
+    readonly expiresAt: number;
+  } | null>(null);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -360,15 +364,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const state = listRef.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state);
     const scrollTop = state?.scroll ?? null;
-    const autoFollowUpdate = updateTimelineAutoFollowScrollState({
-      state: autoFollowScrollStateRef.current,
-      timelineKey: routeThreadKey,
-      isAtEnd,
-      scrollOffset: scrollTop,
-    });
-    autoFollowScrollStateRef.current = autoFollowUpdate.state;
-    if (autoFollowUpdate.shouldPause) {
-      onManualNavigation();
+    const pendingNavigation = pendingTimelineNavigationRef.current;
+    if (
+      pendingNavigation &&
+      (pendingNavigation.timelineKey !== routeThreadKey || pendingNavigation.expiresAt < Date.now())
+    ) {
+      pendingTimelineNavigationRef.current = null;
+    } else if (
+      pendingNavigation &&
+      scrollTop !== null &&
+      scrollTop !== pendingNavigation.scrollOffset
+    ) {
+      pendingTimelineNavigationRef.current = null;
+      if (
+        timelineUserScrollRequestsPause({
+          inputScrollOffset: pendingNavigation.scrollOffset,
+          scrollOffset: scrollTop,
+        })
+      ) {
+        onManualNavigation();
+      }
     }
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
@@ -396,6 +411,83 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       strip.dataset.inView = inView ? "true" : "false";
     }
   }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange, onManualNavigation, routeThreadKey]);
+
+  const armTimelineNavigation = useCallback(() => {
+    const scrollOffset = listRef.current?.getState?.().scroll;
+    if (typeof scrollOffset !== "number") {
+      return;
+    }
+    pendingTimelineNavigationRef.current = {
+      timelineKey: routeThreadKey,
+      scrollOffset,
+      expiresAt: Date.now() + 500,
+    };
+  }, [listRef, routeThreadKey]);
+
+  const handleTimelineWheelCapture = useCallback(
+    (event: WheelEvent<HTMLDivElement>) => {
+      if (timelineNavigationInputMovesTowardHistory({ type: "wheel", deltaY: event.deltaY })) {
+        armTimelineNavigation();
+      }
+    },
+    [armTimelineNavigation],
+  );
+  const handleTimelineTouchStartCapture = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    timelineTouchYRef.current = event.touches[0]?.clientY ?? null;
+  }, []);
+  const handleTimelineTouchMoveCapture = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      const currentY = event.touches[0]?.clientY ?? null;
+      if (
+        timelineNavigationInputMovesTowardHistory({
+          type: "touch",
+          previousY: timelineTouchYRef.current,
+          currentY,
+        })
+      ) {
+        armTimelineNavigation();
+      }
+      timelineTouchYRef.current = currentY;
+    },
+    [armTimelineNavigation],
+  );
+  const resetTimelineTouchTracking = useCallback(() => {
+    timelineTouchYRef.current = null;
+  }, []);
+  const handleTimelineKeyDownCapture = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) {
+        return;
+      }
+      if (
+        timelineNavigationInputMovesTowardHistory({
+          type: "keyboard",
+          key: event.key,
+          shiftKey: event.shiftKey,
+        })
+      ) {
+        armTimelineNavigation();
+      }
+    },
+    [armTimelineNavigation],
+  );
+  const handleTimelinePointerDownCapture = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      const scrollNode = listRef.current?.getScrollableNode();
+      if (!scrollNode || event.target !== scrollNode) {
+        return;
+      }
+      const scrollbarWidth = scrollNode.offsetWidth - scrollNode.clientWidth;
+      if (
+        scrollbarWidth > 0 &&
+        event.clientX >= scrollNode.getBoundingClientRect().right - scrollbarWidth
+      ) {
+        armTimelineNavigation();
+      }
+    },
+    [armTimelineNavigation, listRef],
+  );
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -490,7 +582,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
+        <div
+          ref={setTimelineViewportElement}
+          className="relative h-full min-h-0"
+          onKeyDownCapture={handleTimelineKeyDownCapture}
+          onPointerDownCapture={handleTimelinePointerDownCapture}
+          onTouchCancelCapture={resetTimelineTouchTracking}
+          onTouchEndCapture={resetTimelineTouchTracking}
+          onTouchMoveCapture={handleTimelineTouchMoveCapture}
+          onTouchStartCapture={handleTimelineTouchStartCapture}
+          onWheelCapture={handleTimelineWheelCapture}
+        >
           <LegendList<MessagesTimelineRow>
             ref={listRef}
             data={rows}

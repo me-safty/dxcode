@@ -16,58 +16,37 @@ export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 export const TIMELINE_CONTENT_MAX_WIDTH = 768;
 export const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 
-export interface TimelineAutoFollowScrollState {
-  readonly timelineKey: string;
-  readonly anchorScrollOffset: number | null;
-  readonly isAtEnd: boolean | undefined;
+export type TimelineNavigationInput =
+  | { readonly type: "wheel"; readonly deltaY: number }
+  | { readonly type: "touch"; readonly previousY: number | null; readonly currentY: number | null }
+  | { readonly type: "keyboard"; readonly key: string; readonly shiftKey: boolean };
+
+export function timelineNavigationInputMovesTowardHistory(input: TimelineNavigationInput) {
+  switch (input.type) {
+    case "wheel":
+      return input.deltaY < 0;
+    case "touch":
+      return (
+        input.previousY !== null && input.currentY !== null && input.currentY > input.previousY
+      );
+    case "keyboard":
+      return (
+        input.key === "ArrowUp" ||
+        input.key === "PageUp" ||
+        input.key === "Home" ||
+        (input.key === " " && input.shiftKey)
+      );
+  }
 }
 
-export function updateTimelineAutoFollowScrollState({
-  state,
-  timelineKey,
-  isAtEnd,
+export function timelineUserScrollRequestsPause({
+  inputScrollOffset,
   scrollOffset,
 }: {
-  readonly state: TimelineAutoFollowScrollState;
-  readonly timelineKey: string;
-  readonly isAtEnd: boolean | undefined;
+  readonly inputScrollOffset: number | null;
   readonly scrollOffset: number | null;
 }) {
-  if (state.timelineKey !== timelineKey) {
-    return {
-      state: {
-        timelineKey,
-        anchorScrollOffset: isAtEnd === true ? scrollOffset : null,
-        isAtEnd,
-      },
-      shouldPause: false,
-    } as const;
-  }
-
-  const shouldPause =
-    isAtEnd === false &&
-    scrollOffset !== null &&
-    state.anchorScrollOffset !== null &&
-    scrollOffset < state.anchorScrollOffset - 1;
-
-  let anchorScrollOffset = shouldPause ? null : state.anchorScrollOffset;
-  if (
-    !shouldPause &&
-    isAtEnd === true &&
-    scrollOffset !== null &&
-    (state.isAtEnd !== true || anchorScrollOffset === null || scrollOffset > anchorScrollOffset)
-  ) {
-    anchorScrollOffset = scrollOffset;
-  }
-
-  return {
-    state: {
-      timelineKey,
-      anchorScrollOffset,
-      isAtEnd,
-    },
-    shouldPause,
-  } as const;
+  return inputScrollOffset !== null && scrollOffset !== null && scrollOffset < inputScrollOffset;
 }
 
 export interface TimelineEndState {
