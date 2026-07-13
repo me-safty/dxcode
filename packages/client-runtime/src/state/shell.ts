@@ -121,11 +121,21 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
   const applyItem = Effect.fn("EnvironmentShellState.applyItem")(function* (
     item: OrchestrationShellStreamItem,
+    options?: { readonly authoritative?: boolean },
   ) {
     const current = yield* SubscriptionRef.get(state);
     const nextSnapshot =
       item.kind === "snapshot"
-        ? item.snapshot
+        ? Option.match(current.snapshot, {
+            // Reject older full snapshots from the live stream so a slow
+            // enrichment refresh cannot reintroduce archived threads. HTTP
+            // reconnect heals use authoritative:true and always apply.
+            onSome: (snapshot) =>
+              !options?.authoritative && item.snapshot.snapshotSequence < snapshot.snapshotSequence
+                ? null
+                : item.snapshot,
+            onNone: () => item.snapshot,
+          })
         : Option.match(current.snapshot, {
             onNone: () => null,
             onSome: (snapshot) =>
@@ -147,41 +157,56 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
   yield* Effect.forkScoped(
     Effect.gen(function* () {
-      // Establish the base shell snapshot to resume from, minimizing bytes over
-      // the wire:
-      // - Warm cache: reuse the cached snapshot (zero network) and resume via
-      //   `afterSequence` so we only receive shell events since the cached
-      //   sequence.
-      // - Cold cache: load the full shell snapshot over HTTP (gzip-compressible,
-      //   and off the socket), then resume via `afterSequence`.
-      // If no base can be established we fall back to the socket-embedded
-      // snapshot so the shell still synchronizes. Overlapping/replayed events are
-      // deduped by sequence in applyItem.
-      const base = Option.isSome(cachedSnapshot)
-        ? cachedSnapshot
-        : yield* Effect.gen(function* () {
-            const prepared = yield* SubscriptionRef.changes(supervisor.prepared).pipe(
-              Stream.filter(Option.isSome),
-              Stream.map((current) => current.value),
-              Stream.runHead,
-            );
-            return Option.isSome(prepared)
-              ? yield* snapshotLoader.load(prepared.value)
-              : Option.none<OrchestrationShellSnapshot>();
-          });
-
-      if (Option.isSome(base)) {
-        yield* applyItem({ kind: "snapshot", snapshot: base.value });
+      // Paint immediately from disk cache when available, then always heal from
+      // the HTTP shell snapshot before (and on every) live session.
+      //
+      // Why HTTP heal is required even with a warm cache:
+      // If an archive delta is dropped, later unrelated shell events still
+      // advance snapshotSequence. Resuming only via afterSequence then skips
+      // the archive forever and keeps the thread on the home list.
+      if (Option.isSome(cachedSnapshot)) {
+        yield* applyItem({ kind: "snapshot", snapshot: cachedSnapshot.value });
       }
 
-      const subscribeInput = Option.match(base, {
-        onNone: () => ({}),
-        onSome: (snapshot) => ({ afterSequence: snapshot.snapshotSequence }),
-      });
+      yield* SubscriptionRef.changes(supervisor.session).pipe(
+        Stream.switchMap(
+          Option.match({
+            onNone: () => Stream.empty,
+            onSome: () =>
+              Stream.unwrap(
+                Effect.gen(function* () {
+                  // Never resume afterSequence from disk cache alone. A dropped
+                  // archive delta plus later events advances snapshotSequence
+                  // past the archive, so delta-only resume keeps the thread on
+                  // the home list forever. Require a server heal first:
+                  // HTTP full snapshot, or a socket-embedded full snapshot.
+                  let healedFromServer = false;
+                  const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+                  if (Option.isSome(prepared)) {
+                    const httpSnapshot = yield* snapshotLoader.load(prepared.value);
+                    if (Option.isSome(httpSnapshot)) {
+                      yield* applyItem(
+                        { kind: "snapshot", snapshot: httpSnapshot.value },
+                        { authoritative: true },
+                      );
+                      healedFromServer = true;
+                    }
+                  }
 
-      yield* subscribe(ORCHESTRATION_WS_METHODS.subscribeShell, subscribeInput, {
-        onExpectedFailure: (cause) => setStreamError(Cause.squash(cause)),
-      }).pipe(Stream.runForEach(applyItem));
+                  const live = yield* SubscriptionRef.get(state);
+                  const subscribeInput =
+                    healedFromServer && Option.isSome(live.snapshot)
+                      ? { afterSequence: live.snapshot.value.snapshotSequence }
+                      : {};
+                  return subscribe(ORCHESTRATION_WS_METHODS.subscribeShell, subscribeInput, {
+                    onExpectedFailure: (cause) => setStreamError(Cause.squash(cause)),
+                  });
+                }),
+              ),
+          }),
+        ),
+        Stream.runForEach((item) => applyItem(item)),
+      );
     }),
   );
   yield* SubscriptionRef.changes(supervisor.state).pipe(
