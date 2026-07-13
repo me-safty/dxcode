@@ -9,6 +9,7 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
@@ -67,6 +68,10 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     status: shellStatusForSnapshot(cachedSnapshot),
     error: Option.none(),
   });
+  // When HTTP heal fails we subscribe without afterSequence so the server
+  // embeds a full snapshot. That first snapshot must apply even if its sequence
+  // is behind the warm disk cache (authoritative server membership).
+  const acceptNextSocketSnapshotAuthoritatively = yield* Ref.make(false);
   const persistence = yield* Queue.sliding<OrchestrationShellSnapshot>(1);
 
   const persist = Effect.fn("EnvironmentShellState.persist")(function* (
@@ -198,6 +203,9 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
                     healedFromServer && Option.isSome(live.snapshot)
                       ? { afterSequence: live.snapshot.value.snapshotSequence }
                       : {};
+                  if (!healedFromServer) {
+                    yield* Ref.set(acceptNextSocketSnapshotAuthoritatively, true);
+                  }
                   return subscribe(ORCHESTRATION_WS_METHODS.subscribeShell, subscribeInput, {
                     onExpectedFailure: (cause) => setStreamError(Cause.squash(cause)),
                   });
@@ -205,7 +213,18 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
               ),
           }),
         ),
-        Stream.runForEach((item) => applyItem(item)),
+        Stream.runForEach((item) =>
+          Effect.gen(function* () {
+            if (item.kind === "snapshot") {
+              const acceptAuthoritative = yield* Ref.get(acceptNextSocketSnapshotAuthoritatively);
+              if (acceptAuthoritative) {
+                yield* Ref.set(acceptNextSocketSnapshotAuthoritatively, false);
+                return yield* applyItem(item, { authoritative: true });
+              }
+            }
+            return yield* applyItem(item);
+          }),
+        ),
       );
     }),
   );

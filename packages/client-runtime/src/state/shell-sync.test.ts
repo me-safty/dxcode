@@ -317,10 +317,19 @@ describe("environment shell synchronization", () => {
 
   it.effect("forces a full socket snapshot when HTTP heal fails with a warm cache", () =>
     Effect.gen(function* () {
+      const staleThread = {
+        id: "thread-stale" as never,
+        projectId: "project-1" as never,
+        title: "Ghost active",
+        createdAt: "2026-06-01T00:00:00.000Z",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+      } as never;
       const cachedSnapshot: OrchestrationShellSnapshot = {
         snapshotSequence: 50,
         projects: [],
-        threads: [],
+        threads: [staleThread],
         updatedAt: "2026-06-06T00:00:00.000Z",
       };
       const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
@@ -364,7 +373,7 @@ describe("environment shell synchronization", () => {
       const snapshotLoader = ShellSnapshotLoader.of({
         load: () => Effect.succeed(Option.none()),
       });
-      yield* makeEnvironmentShellState().pipe(
+      const shellState = yield* makeEnvironmentShellState().pipe(
         Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
         Effect.provideService(Persistence.EnvironmentCacheStore, cache),
         Effect.provideService(ShellSnapshotLoader, snapshotLoader),
@@ -377,6 +386,33 @@ describe("environment shell synchronization", () => {
 
       // Cache alone must not drive afterSequence; socket should send a full snapshot.
       expect(yield* SubscriptionRef.get(capturedAfterSequence)).toBeUndefined();
+
+      // Server membership is correct but sequence is behind the warm cache.
+      // The socket heal must still apply (authoritative) or ghost threads remain.
+      yield* Queue.offer(events, {
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: 40,
+          projects: [],
+          threads: [
+            {
+              ...(staleThread as object),
+              archivedAt: "2026-06-02T00:00:00.000Z",
+            } as never,
+          ],
+          updatedAt: "2026-06-06T00:00:00.000Z",
+        },
+      });
+      yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.filter(
+          (state) =>
+            Option.isSome(state.snapshot) && state.snapshot.value.threads[0]?.archivedAt !== null,
+        ),
+        Stream.runHead,
+      );
+      const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
+      expect(snapshot.snapshotSequence).toBe(40);
+      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
     }),
   );
 
