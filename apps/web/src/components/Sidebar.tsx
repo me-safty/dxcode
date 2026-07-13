@@ -1030,9 +1030,11 @@ interface SidebarProjectThreadListProps {
 function SidebarPinnedDivider({
   nodeRef,
   flow,
+  overlaysThreadList = false,
 }: {
   nodeRef: (node: HTMLLIElement | null) => void;
   flow: ThreadPinDropAction | null;
+  overlaysThreadList?: boolean;
 }) {
   const colorClass =
     flow === "pin"
@@ -1044,7 +1046,7 @@ function SidebarPinnedDivider({
     <SidebarMenuSubItem
       ref={nodeRef}
       aria-hidden="true"
-      className={`flex h-3 w-full items-center gap-1.5 px-2 transition-colors before:h-px before:flex-1 after:h-px after:flex-1 ${colorClass}`}
+      className={`flex h-3 w-full items-center gap-1.5 px-2 transition-colors before:h-px before:flex-1 after:h-px after:flex-1 ${overlaysThreadList ? "absolute inset-x-0 z-10" : ""} ${colorClass}`}
     >
       <PinIcon className="size-2.5 shrink-0 transition-colors" />
     </SidebarMenuSubItem>
@@ -1163,6 +1165,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     (thread) =>
       !pinnedThreadKeys.includes(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
   );
+  const pinnedDividerOverlaysThreadList =
+    renderedPinnedThreads.length === 0 || renderedRegularThreads.length === 0;
   const renderThreadRow = (thread: SidebarThreadSummary) => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
     return (
@@ -1212,7 +1216,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     >
       <SidebarMenuSub
         ref={attachThreadListAutoAnimateRef}
-        className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5"
+        className="relative mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5"
       >
         {shouldShowThreadPanel && showEmptyThreadState ? (
           <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
@@ -1234,7 +1238,13 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             isDragging: isThreadDragActive,
             pinnedCount: renderedPinnedThreads.length,
             regularCount: renderedRegularThreads.length,
-          }) && <SidebarPinnedDivider nodeRef={setDividerElement} flow={dragFlow} />}
+          }) && (
+            <SidebarPinnedDivider
+              nodeRef={setDividerElement}
+              flow={dragFlow}
+              overlaysThreadList={pinnedDividerOverlaysThreadList}
+            />
+          )}
         {shouldShowThreadPanel && renderedRegularThreads.length > 0 && (
           <SidebarThreadSection attachAutoAnimateRef={attachThreadListAutoAnimateRef}>
             {renderedRegularThreads.map(renderThreadRow)}
