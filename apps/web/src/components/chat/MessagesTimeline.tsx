@@ -1167,9 +1167,7 @@ function WorkGroupToggleTimelineRow({
       aria-expanded={row.expanded}
       onClick={(event) => {
         const anchorElement =
-          event.currentTarget.closest<HTMLElement>("[data-timeline-row-id]") ??
-          event.currentTarget;
-
+          event.currentTarget.closest<HTMLElement>("[data-timeline-row-id]") ?? event.currentTarget;
         ctx.onToggleWorkGroup(row.groupId, anchorElement);
       }}
     >
@@ -1181,7 +1179,6 @@ function WorkGroupToggleTimelineRow({
           )}
         />
       </span>
-
       {row.expanded ? (
         <span className="font-medium text-foreground/82">
           Show fewer {row.onlyToolEntries ? "tool calls" : "log entries"}
