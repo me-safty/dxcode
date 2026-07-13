@@ -36,7 +36,7 @@ export function resolveBrowserNavigationTarget(
   if (target.kind === "url") {
     return {
       requestedUrl: target.url,
-      resolvedUrl: target.url,
+      resolvedUrl: normalizePreviewUrl(target.url),
       resolutionKind: "direct",
       environmentId,
     };
