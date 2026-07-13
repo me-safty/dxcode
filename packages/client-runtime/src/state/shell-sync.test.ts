@@ -17,6 +17,7 @@ import {
   AVAILABLE_CONNECTION_STATE,
   PrimaryConnectionTarget,
   type PreparedConnection,
+  type SupervisorConnectionState,
 } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as Persistence from "../platform/persistence.ts";
@@ -350,9 +351,20 @@ describe("environment shell synchronization", () => {
       const client = {
         [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
       } as unknown as WsRpcProtocolClient;
-      const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
+      // Normal online connect starts with session:None while the lease opens.
+      // Disk must not paint during that window either.
+      const supervisorState = yield* SubscriptionRef.make<SupervisorConnectionState>({
+        desired: true,
+        network: "online",
+        phase: "connecting",
+        stage: "opening",
+        attempt: 1,
+        generation: 0,
+        lastFailure: null,
+        retryAt: null,
+      });
       const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
-        Option.some(session(client)),
+        Option.none(),
       );
       const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
         target: TARGET,
@@ -384,10 +396,16 @@ describe("environment shell synchronization", () => {
         Effect.provideService(ShellSnapshotLoader, snapshotLoader),
       );
 
-      // While HTTP heal is in flight, Home must not show the inflated disk list.
       for (let index = 0; index < 20; index += 1) {
         yield* Effect.yieldNow;
       }
+      expect(Option.isNone((yield* SubscriptionRef.get(shellState)).snapshot)).toBe(true);
+
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      for (let index = 0; index < 20; index += 1) {
+        yield* Effect.yieldNow;
+      }
+      // Still no disk paint while HTTP heal is in flight.
       expect(Option.isNone((yield* SubscriptionRef.get(shellState)).snapshot)).toBe(true);
 
       yield* Deferred.succeed(httpReady, undefined);

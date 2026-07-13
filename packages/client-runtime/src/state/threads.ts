@@ -74,6 +74,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   // When the server advertises threadResumeCompletionMarker and we request it on
   // resume, keep status synchronizing until the stream marker arrives (including
   // through catch-up events). Legacy servers never set this path.
+  // markerMode stays true for the life of this thread state once we opt in;
+  // awaitingCompletion is re-armed on each reconnect generation.
+  const markerMode = yield* Ref.make(false);
   const awaitingCompletion = yield* Ref.make(false);
 
   const persist = Effect.fn("EnvironmentThreadState.persist")(function* (
@@ -98,11 +101,18 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     Effect.forkScoped,
   );
 
-  const setSynchronizing = SubscriptionRef.update(state, (current) => ({
-    ...current,
-    status: "synchronizing" as const,
-    error: Option.none(),
-  }));
+  const setSynchronizing = Effect.gen(function* () {
+    // Ordinary reconnect clears awaitingCompletion on disconnect; re-arm here so
+    // setReady / catch-up setThread keep synchronizing until the new marker.
+    if (yield* Ref.get(markerMode)) {
+      yield* Ref.set(awaitingCompletion, true);
+    }
+    yield* SubscriptionRef.update(state, (current) => ({
+      ...current,
+      status: "synchronizing" as const,
+      error: Option.none(),
+    }));
+  });
   const setReady = Effect.gen(function* () {
     const waiting = yield* Ref.get(awaitingCompletion);
     yield* SubscriptionRef.update(state, (current) => {
@@ -133,8 +143,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const setStreamError = (cause: Cause.Cause<unknown>) =>
     Effect.gen(function* () {
       // Resubscribe will re-enter marker wait when this stream is in marker mode.
-      const waiting = yield* Ref.get(awaitingCompletion);
-      if (waiting) {
+      if (yield* Ref.get(markerMode)) {
         yield* Ref.set(awaitingCompletion, true);
       }
       yield* SubscriptionRef.update(state, (current) => ({
@@ -270,6 +279,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         : false;
       const requestCompletionMarker = serverSupportsCompletionMarker && Option.isSome(base);
       if (requestCompletionMarker) {
+        yield* Ref.set(markerMode, true);
         yield* Ref.set(awaitingCompletion, true);
       }
 
@@ -290,13 +300,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       });
 
       yield* subscribe(ORCHESTRATION_WS_METHODS.subscribeThread, subscribeInput, {
-        onExpectedFailure: (cause) =>
-          Effect.gen(function* () {
-            if (requestCompletionMarker) {
-              yield* Ref.set(awaitingCompletion, true);
-            }
-            yield* setStreamError(cause);
-          }),
+        onExpectedFailure: (cause) => setStreamError(cause),
         retryExpectedFailureAfter: "250 millis",
       }).pipe(Stream.runForEach(applyItem));
     }),

@@ -578,13 +578,44 @@ describe("EnvironmentThreads", () => {
         }
         expect(yield* Ref.get(harness.lastRequestCompletionMarker)).toBe(true);
 
+        yield* Queue.offer(harness.inputs, synchronized());
+        yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+
+        // Ordinary transport reconnect: disconnect clears awaitingCompletion; the
+        // synchronizing phase must re-arm marker wait before setReady runs.
+        yield* SubscriptionRef.set(harness.supervisorState, {
+          desired: true,
+          network: "online",
+          phase: "backoff",
+          stage: null,
+          attempt: 2,
+          generation: 1,
+          lastFailure: null,
+          retryAt: null,
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "cached");
+        yield* SubscriptionRef.set(harness.supervisorSession, Option.none());
+
+        yield* SubscriptionRef.set(harness.supervisorState, {
+          desired: true,
+          network: "online",
+          phase: "connecting",
+          stage: "synchronizing",
+          attempt: 2,
+          generation: 2,
+          lastFailure: null,
+          retryAt: null,
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "synchronizing");
+        yield* harness.replaceSession;
+
         yield* SubscriptionRef.set(harness.supervisorState, {
           desired: true,
           network: "online",
           phase: "connected",
           stage: null,
-          attempt: 1,
-          generation: 1,
+          attempt: 2,
+          generation: 2,
           lastFailure: null,
           retryAt: null,
         });
@@ -593,12 +624,23 @@ describe("EnvironmentThreads", () => {
         }
         expect((yield* Ref.get(harness.latest)).status).toBe("synchronizing");
 
+        yield* Queue.offer(
+          harness.inputs,
+          titleUpdated("Post-reconnect catch-up", CACHED_SNAPSHOT_SEQUENCE + 1),
+        );
+        yield* awaitThreadState(
+          harness.observed,
+          (value) =>
+            value.status === "synchronizing" &&
+            Option.isSome(value.data) &&
+            value.data.value.title === "Post-reconnect catch-up",
+        );
+
         yield* Queue.offer(harness.inputs, synchronized());
         yield* awaitThreadState(harness.observed, (value) => value.status === "live");
-
-        const latest = yield* Ref.get(harness.latest);
-        expect(latest.status).toBe("live");
-        expect(Option.getOrThrow(latest.data)).toEqual(BASE_THREAD);
+        expect(Option.getOrThrow((yield* Ref.get(harness.latest)).data).title).toBe(
+          "Post-reconnect catch-up",
+        );
       }),
   );
 

@@ -102,35 +102,6 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     Effect.forkScoped,
   );
 
-  const setDisconnected = SubscriptionRef.update(state, (current) => ({
-    ...current,
-    status: shellStatusForSnapshot(current.snapshot),
-  }));
-  const setSynchronizing = SubscriptionRef.update(state, (current) => ({
-    ...current,
-    status: "synchronizing" as const,
-    error: Option.none(),
-  }));
-  const setReady = SubscriptionRef.update(state, (current) => ({
-    ...current,
-    status: Option.isSome(current.snapshot) ? ("live" as const) : ("synchronizing" as const),
-    error: Option.none(),
-  }));
-  const setStreamError = (error: unknown) =>
-    Effect.logWarning("Could not synchronize the environment shell.").pipe(
-      Effect.annotateLogs({
-        environmentId,
-        ...safeErrorLogAttributes(error),
-      }),
-      Effect.andThen(
-        SubscriptionRef.update(state, (current) => ({
-          ...current,
-          status: shellStatusForSnapshot(current.snapshot),
-          error: Option.some(SHELL_SYNCHRONIZATION_ERROR_MESSAGE),
-        })),
-      ),
-    );
-
   const applyItem = Effect.fn("EnvironmentShellState.applyItem")(function* (
     item: OrchestrationShellStreamItem,
     options?: { readonly authoritative?: boolean; readonly fromDisk?: boolean },
@@ -188,6 +159,40 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     yield* applyItem({ kind: "snapshot", snapshot: cachedSnapshot.value }, { fromDisk: true });
   });
 
+  const setDisconnected = Effect.gen(function* () {
+    yield* SubscriptionRef.update(state, (current) => ({
+      ...current,
+      status: shellStatusForSnapshot(current.snapshot),
+    }));
+    // Truly offline/unavailable only: session is often None while connecting,
+    // so disk must not run off session absence alone.
+    yield* applyDiskFallback;
+  });
+  const setSynchronizing = SubscriptionRef.update(state, (current) => ({
+    ...current,
+    status: "synchronizing" as const,
+    error: Option.none(),
+  }));
+  const setReady = SubscriptionRef.update(state, (current) => ({
+    ...current,
+    status: Option.isSome(current.snapshot) ? ("live" as const) : ("synchronizing" as const),
+    error: Option.none(),
+  }));
+  const setStreamError = (error: unknown) =>
+    Effect.logWarning("Could not synchronize the environment shell.").pipe(
+      Effect.annotateLogs({
+        environmentId,
+        ...safeErrorLogAttributes(error),
+      }),
+      Effect.andThen(
+        SubscriptionRef.update(state, (current) => ({
+          ...current,
+          status: shellStatusForSnapshot(current.snapshot),
+          error: Option.some(SHELL_SYNCHRONIZATION_ERROR_MESSAGE),
+        })),
+      ),
+    );
+
   yield* Effect.forkScoped(
     Effect.gen(function* () {
       // Why HTTP heal is required even with a warm cache:
@@ -195,15 +200,14 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       // advance snapshotSequence. Resuming only via afterSequence then skips
       // the archive forever and keeps the thread on the home list.
       //
-      // Do not paint disk before that heal when online: stale active membership
-      // would flash a larger Home list, then shrink when the heal arrives.
-      // Disk is applied only if the server heal fails and we have nothing to show.
+      // Do not paint disk when session is still None during online connect
+      // setup (lease not ready yet). Disk is only applied from setDisconnected
+      // or when a live session fails HTTP heal and needs a provisional list
+      // before the socket snapshot.
       yield* SubscriptionRef.changes(supervisor.session).pipe(
         Stream.switchMap(
           Option.match({
-            onNone: () =>
-              // Offline / no session: surface disk if we never got a server list.
-              Stream.fromEffect(applyDiskFallback).pipe(Stream.drain),
+            onNone: () => Stream.empty,
             onSome: () =>
               Stream.unwrap(
                 Effect.gen(function* () {
