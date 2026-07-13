@@ -154,30 +154,6 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
-const TIMELINE_KEYBOARD_INPUT_SELECTOR = [
-  "input",
-  "select",
-  "textarea",
-  '[contenteditable]:not([contenteditable="false"])',
-  '[role="combobox"]',
-  '[role="listbox"]',
-  '[role="option"]',
-  '[role="slider"]',
-  '[role="spinbutton"]',
-  '[role="textbox"]',
-].join(",");
-const TIMELINE_KEYBOARD_ACTIVATION_SELECTOR = [
-  "button",
-  "a[href]",
-  "summary",
-  '[role="button"]',
-  '[role="checkbox"]',
-  '[role="link"]',
-  '[role="menuitem"]',
-  '[role="radio"]',
-  '[role="switch"]',
-  '[role="tab"]',
-].join(",");
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -365,6 +341,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     readonly timelineKey: string;
     scrollTop: number;
   } | null>(null);
+  const keyboardNavigationFrameRef = useRef<number | null>(null);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -504,23 +481,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, []);
   const handleTimelineKeyDownCapture = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
-      const target = event.target instanceof HTMLElement ? event.target : null;
       if (
-        target?.closest(TIMELINE_KEYBOARD_INPUT_SELECTOR) ||
-        (event.key === " " && target?.closest(TIMELINE_KEYBOARD_ACTIVATION_SELECTOR))
-      ) {
-        return;
-      }
-      if (
-        timelineNavigationInputMovesTowardHistory({
+        !timelineNavigationInputMovesTowardHistory({
           type: "keyboard",
           key: event.key,
           shiftKey: event.shiftKey,
-        }) &&
-        timelineScrollableNodeCanNavigateTowardHistory(listRef.current?.getScrollableNode())
+        })
       ) {
-        markTimelineManualNavigation();
+        return;
       }
+      const scrollNode = listRef.current?.getScrollableNode();
+      if (!scrollNode || !timelineScrollableNodeCanNavigateTowardHistory(scrollNode)) {
+        return;
+      }
+      if (keyboardNavigationFrameRef.current !== null) {
+        cancelAnimationFrame(keyboardNavigationFrameRef.current);
+      }
+      const scrollTop = scrollNode.scrollTop;
+      keyboardNavigationFrameRef.current = requestAnimationFrame(() => {
+        keyboardNavigationFrameRef.current = null;
+        if (scrollNode.scrollTop < scrollTop) {
+          markTimelineManualNavigation();
+        }
+      });
     },
     [listRef, markTimelineManualNavigation],
   );
@@ -550,6 +533,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       manualNavigationRef.current = null;
     }
     pointerNavigationRef.current = null;
+    if (keyboardNavigationFrameRef.current !== null) {
+      cancelAnimationFrame(keyboardNavigationFrameRef.current);
+      keyboardNavigationFrameRef.current = null;
+    }
+    return () => {
+      if (keyboardNavigationFrameRef.current !== null) {
+        cancelAnimationFrame(keyboardNavigationFrameRef.current);
+        keyboardNavigationFrameRef.current = null;
+      }
+    };
   }, [autoFollowEnabled, routeThreadKey]);
 
   useEffect(() => {
