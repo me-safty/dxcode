@@ -22,7 +22,7 @@ import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { EnvironmentCacheStore } from "../platform/persistence.ts";
 import { subscribe } from "../rpc/client.ts";
 import { ShellSnapshotLoader } from "./shellSnapshotHttp.ts";
-import { applyShellStreamEvent } from "./shellReducer.ts";
+import { applyShellStreamEvent, normalizeShellThreadMembership } from "./shellReducer.ts";
 import type { EnvironmentCatalogState } from "./connections.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 
@@ -125,8 +125,8 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
             onSome: (snapshot) =>
               !options?.authoritative && item.snapshot.snapshotSequence < snapshot.snapshotSequence
                 ? null
-                : item.snapshot,
-            onNone: () => item.snapshot,
+                : normalizeShellThreadMembership(item.snapshot),
+            onNone: () => normalizeShellThreadMembership(item.snapshot),
           })
         : Option.match(current.snapshot, {
             onNone: () => null,
