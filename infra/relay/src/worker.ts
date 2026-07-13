@@ -51,6 +51,8 @@ import * as ApnsClient from "./agentActivity/ApnsClient.ts";
 import * as ApnsProviderTokens from "./agentActivity/ApnsProviderTokens.ts";
 import * as ApnsDeliveryQueue from "./agentActivity/ApnsDeliveryQueue.ts";
 import * as ApnsDeliveries from "./agentActivity/ApnsDeliveries.ts";
+import * as ExpoPushClient from "./agentActivity/ExpoPushClient.ts";
+import * as ExpoPushDeliveries from "./agentActivity/ExpoPushDeliveries.ts";
 import * as EnvironmentConnector from "./environments/EnvironmentConnector.ts";
 import * as EnvironmentLinker from "./environments/EnvironmentLinker.ts";
 import * as EnvironmentPublishSignatures from "./environments/EnvironmentPublishSignatures.ts";
@@ -197,8 +199,13 @@ export default class Api extends Cloudflare.Worker<Api>()(
         ),
       ),
       Layer.provideMerge(DpopProofs.layer),
-      Layer.provideMerge(ApnsDeliveries.layer),
-      Layer.provideMerge(ApnsClient.layer.pipe(Layer.provideMerge(ApnsProviderTokens.layer))),
+      Layer.provideMerge(Layer.mergeAll(ApnsDeliveries.layer, ExpoPushDeliveries.layer)),
+      Layer.provideMerge(
+        Layer.mergeAll(
+          ApnsClient.layer.pipe(Layer.provideMerge(ApnsProviderTokens.layer)),
+          ExpoPushClient.layer,
+        ),
+      ),
       Layer.provideMerge(
         ApnsDeliveryQueue.layerCloudflareQueues(apnsDeliveryQueueSender, alchemyRuntimeContext),
       ),
@@ -253,6 +260,11 @@ export default class Api extends Cloudflare.Worker<Api>()(
                 updatedBefore: DateTime.formatIso(DateTime.subtract(now, { minutes: 30 })),
               }),
             ),
+          ),
+        ),
+        Effect.andThen(
+          ExpoPushDeliveries.ExpoPushDeliveries.pipe(
+            Effect.flatMap((deliveries) => deliveries.reconcileReceipts),
           ),
         ),
         Effect.withSpan("relay.cron.prune_expired_state"),

@@ -3,7 +3,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, isNotNull, isNull, lte } from "drizzle-orm";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 
@@ -13,7 +13,13 @@ import { relayDeliveryAttempts } from "../persistence/schema.ts";
 export class DeliveryAttemptRecordPersistenceError extends Schema.TaggedErrorClass<DeliveryAttemptRecordPersistenceError>()(
   "DeliveryAttemptRecordPersistenceError",
   {
-    operation: Schema.Literals(["record", "claim-source-job", "complete-source-job"]),
+    operation: Schema.Literals([
+      "record",
+      "claim-source-job",
+      "complete-source-job",
+      "list-expo-receipts",
+      "complete-expo-receipt",
+    ]),
     sourceJobId: Schema.NullOr(Schema.String),
     userId: Schema.NullOr(Schema.String),
     environmentId: Schema.NullOr(Schema.String),
@@ -36,6 +42,10 @@ export interface DeliveryAttemptInput {
   readonly kind: string;
   readonly sourceJobId?: string | null;
   readonly token: string | null;
+  readonly deliveryProvider?: "apns" | "expo";
+  readonly providerStatus?: string;
+  readonly providerReason?: string;
+  readonly providerId?: string | null;
   readonly apnsStatus?: number;
   readonly apnsReason?: string;
   readonly apnsId?: string | null;
@@ -52,6 +62,13 @@ export interface DeliveryAttemptCompletionInput {
 
 export type DeliverySourceJobClaimResult = "claimed" | "completed" | "in_flight";
 
+export interface PendingExpoReceipt {
+  readonly providerId: string;
+  readonly userId: string | null;
+  readonly deviceId: string | null;
+  readonly tokenSuffix: string | null;
+}
+
 export class DeliveryAttempts extends Context.Service<
   DeliveryAttempts,
   {
@@ -64,6 +81,16 @@ export class DeliveryAttempts extends Context.Service<
     readonly completeSourceJob: (
       input: DeliveryAttemptCompletionInput,
     ) => Effect.Effect<void, DeliveryAttemptRecordPersistenceError>;
+    readonly listPendingExpoReceipts: (input: {
+      readonly createdAfter: string;
+      readonly createdBefore: string;
+      readonly limit: number;
+    }) => Effect.Effect<ReadonlyArray<PendingExpoReceipt>, DeliveryAttemptRecordPersistenceError>;
+    readonly completeExpoReceipt: (input: {
+      readonly providerId: string;
+      readonly status: string;
+      readonly reason: string | null;
+    }) => Effect.Effect<void, DeliveryAttemptRecordPersistenceError>;
   }
 >()("t3code-relay/agentActivity/DeliveryAttempts") {}
 
@@ -84,6 +111,10 @@ function insertValues(
     kind: input.kind,
     sourceJobId: input.sourceJobId ?? null,
     tokenSuffix: input.token?.slice(-8) ?? null,
+    deliveryProvider: input.deliveryProvider ?? "apns",
+    providerStatus: input.providerStatus ?? null,
+    providerReason: input.providerReason ?? null,
+    providerId: input.providerId ?? null,
     apnsStatus: input.apnsStatus ?? null,
     apnsReason: input.apnsReason ?? null,
     apnsId: input.apnsId ?? null,
@@ -108,6 +139,80 @@ export const make = Effect.gen(function* () {
   };
 
   return DeliveryAttempts.of({
+    listPendingExpoReceipts: Effect.fn("relay.delivery_attempts.list_pending_expo_receipts")(
+      function* (input) {
+        return yield* db
+          .select({
+            providerId: relayDeliveryAttempts.providerId,
+            userId: relayDeliveryAttempts.userId,
+            deviceId: relayDeliveryAttempts.deviceId,
+            tokenSuffix: relayDeliveryAttempts.tokenSuffix,
+          })
+          .from(relayDeliveryAttempts)
+          .where(
+            and(
+              eq(relayDeliveryAttempts.deliveryProvider, "expo"),
+              eq(relayDeliveryAttempts.providerStatus, "ok"),
+              isNotNull(relayDeliveryAttempts.providerId),
+              gte(relayDeliveryAttempts.createdAt, input.createdAfter),
+              lte(relayDeliveryAttempts.createdAt, input.createdBefore),
+            ),
+          )
+          .orderBy(asc(relayDeliveryAttempts.createdAt))
+          .limit(input.limit)
+          .pipe(
+            Effect.map((rows) =>
+              rows.flatMap((row) =>
+                row.providerId === null ? [] : [{ ...row, providerId: row.providerId }],
+              ),
+            ),
+            Effect.mapError(
+              (cause) =>
+                new DeliveryAttemptRecordPersistenceError({
+                  operation: "list-expo-receipts",
+                  sourceJobId: null,
+                  userId: null,
+                  environmentId: null,
+                  threadId: null,
+                  deviceId: null,
+                  kind: "push_notification",
+                  cause,
+                }),
+            ),
+          );
+      },
+    ),
+    completeExpoReceipt: Effect.fn("relay.delivery_attempts.complete_expo_receipt")(
+      function* (input) {
+        yield* db
+          .update(relayDeliveryAttempts)
+          .set({
+            providerStatus: `receipt:${input.status}`,
+            providerReason: input.reason,
+          })
+          .where(
+            and(
+              eq(relayDeliveryAttempts.deliveryProvider, "expo"),
+              eq(relayDeliveryAttempts.providerId, input.providerId),
+            ),
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new DeliveryAttemptRecordPersistenceError({
+                  operation: "complete-expo-receipt",
+                  sourceJobId: null,
+                  userId: null,
+                  environmentId: null,
+                  threadId: null,
+                  deviceId: null,
+                  kind: "push_notification",
+                  cause,
+                }),
+            ),
+          );
+      },
+    ),
     record: Effect.fn("relay.delivery_attempts.record")(function* (input) {
       yield* Effect.annotateCurrentSpan({
         "relay.delivery.kind": input.kind,

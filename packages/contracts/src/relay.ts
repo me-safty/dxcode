@@ -11,7 +11,7 @@ import * as OpenApi from "effect/unstable/httpapi/OpenApi";
 import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 
-export const RelayAgentAwarenessPlatform = Schema.Literal("ios");
+export const RelayAgentAwarenessPlatform = Schema.Literals(["ios", "android"]);
 export type RelayAgentAwarenessPlatform = typeof RelayAgentAwarenessPlatform.Type;
 
 export const RelayAgentAwarenessPhase = Schema.Literals([
@@ -42,7 +42,8 @@ export const RelayDeviceRegistrationRequest = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   platform: RelayAgentAwarenessPlatform,
-  iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
+  iosMajorVersion: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(18))),
+  androidApiLevel: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(21))),
   appVersion: Schema.optional(TrimmedNonEmptyString),
   // APNs routing for this install: the topic must match the app's bundle id
   // (dev/preview/prod variants differ) and development-signed builds receive
@@ -51,6 +52,7 @@ export const RelayDeviceRegistrationRequest = Schema.Struct({
   bundleId: Schema.optional(TrimmedNonEmptyString),
   apsEnvironment: Schema.optional(RelayApnsEnvironment),
   pushToken: Schema.optional(TrimmedNonEmptyString),
+  expoPushToken: Schema.optional(TrimmedNonEmptyString),
   pushToStartToken: Schema.optional(TrimmedNonEmptyString),
   preferences: RelayAgentAwarenessPreferences,
 });
@@ -60,7 +62,10 @@ export const RelayClientDeviceRecord = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   platform: RelayAgentAwarenessPlatform,
-  iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
+  iosMajorVersion: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(18))),
+  androidApiLevel: Schema.optional(
+    Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(21))),
+  ),
   appVersion: Schema.NullOr(TrimmedNonEmptyString),
   notifications: Schema.Struct({
     enabled: Schema.Boolean,
@@ -811,6 +816,10 @@ export const RelayDeliveryResult = Schema.Struct({
   apnsStatus: Schema.NullOr(Schema.Number),
   apnsReason: Schema.NullOr(Schema.String),
   apnsId: Schema.NullOr(Schema.String),
+  provider: Schema.optional(Schema.Literals(["apns", "expo"])),
+  providerStatus: Schema.optional(Schema.NullOr(Schema.String)),
+  providerReason: Schema.optional(Schema.NullOr(Schema.String)),
+  providerId: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type RelayDeliveryResult = typeof RelayDeliveryResult.Type;
 

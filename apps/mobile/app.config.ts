@@ -195,6 +195,13 @@ const config: ExpoConfig = {
     ],
     "expo-secure-store",
     "expo-sqlite",
+    [
+      "expo-notifications",
+      {
+        color: "#2563EB",
+        defaultChannel: "t3-connect-activity",
+      },
+    ],
     // appleSignIn must be gated here: withoutIosPersonalTeamCapabilities.cjs runs before
     // plugins earlier in this array, so it cannot strip the entitlement Clerk would add.
     ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],

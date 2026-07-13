@@ -6,7 +6,6 @@ import type {
 } from "@t3tools/contracts/relay";
 import {
   RelayAgentActivityAggregateState as RelayAgentActivityAggregateStateSchema,
-  RelayAgentAwarenessPreferences as RelayAgentAwarenessPreferencesSchema,
   RelayDeliveryKind as RelayDeliveryKindSchema,
 } from "@t3tools/contracts/relay";
 import * as Context from "effect/Context";
@@ -41,6 +40,10 @@ import * as LiveActivities from "./LiveActivities.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
 import { withSpanAttributes } from "../observability.ts";
+import {
+  alertAllowedForPhase,
+  parseAgentAwarenessPreferences,
+} from "./agentAwarenessPreferences.ts";
 
 const MIN_LIVE_ACTIVITY_UPDATE_INTERVAL_MS = 15_000;
 // How long a just-armed card may sit with an empty aggregate before an end is
@@ -124,9 +127,6 @@ export const isApnsDeliveryTransportError = Schema.is(ApnsDeliveryTransportError
 const decodeRelayAgentActivityAggregateStateJson = Schema.decodeUnknownOption(
   Schema.fromJsonString(RelayAgentActivityAggregateStateSchema),
 );
-const decodeRelayAgentAwarenessPreferencesJson = Schema.decodeUnknownOption(
-  Schema.fromJsonString(RelayAgentAwarenessPreferencesSchema),
-);
 const decodeSignedApnsDeliveryJob = Schema.decodeUnknownEffect(SignedApnsDeliveryJob);
 
 function parseAggregate(value: string | null): RelayAgentActivityAggregateState | null {
@@ -134,10 +134,6 @@ function parseAggregate(value: string | null): RelayAgentActivityAggregateState 
     return null;
   }
   return Option.getOrNull(decodeRelayAgentActivityAggregateStateJson(value));
-}
-
-function parsePreferences(value: string): RelayAgentAwarenessPreferences | null {
-  return Option.getOrNull(decodeRelayAgentAwarenessPreferencesJson(value));
 }
 
 function aggregateNeedsAttention(aggregate: RelayAgentActivityAggregateState): boolean {
@@ -148,30 +144,6 @@ function aggregateNeedsAttention(aggregate: RelayAgentActivityAggregateState): b
 
 function isAttentionPhase(phase: string): boolean {
   return phase === "waiting_for_approval" || phase === "waiting_for_input";
-}
-
-// Honors the same per-event notification switches the push channel uses; a
-// missing/corrupt preferences blob only disables nothing (matching how the
-// liveActivitiesEnabled check treats it), since every registration writes one.
-function alertAllowedForPhase(
-  preferences: RelayAgentAwarenessPreferences | null,
-  phase: string,
-): boolean {
-  if (preferences === null) {
-    return true;
-  }
-  switch (phase) {
-    case "waiting_for_approval":
-      return preferences.notifyOnApproval;
-    case "waiting_for_input":
-      return preferences.notifyOnInput;
-    case "completed":
-      return preferences.notifyOnCompletion;
-    case "failed":
-      return preferences.notifyOnFailure;
-    default:
-      return false;
-  }
 }
 
 // Alert copy for an update whose aggregate contains threads that were NOT in an
@@ -338,7 +310,7 @@ function notificationForAggregate(input: {
   if (!input.target.push_token || input.aggregate === null) {
     return null;
   }
-  const preferences = parsePreferences(input.target.preferences_json);
+  const preferences = parseAgentAwarenessPreferences(input.target.preferences_json);
   if (!preferences?.notificationsEnabled) {
     return null;
   }
@@ -380,7 +352,7 @@ function chooseLiveActivityDelivery(input: {
   readonly aggregate: RelayAgentActivityAggregateState | null;
   readonly nowMs: number;
 }): ChosenLiveActivityDelivery | "suppressed" | null {
-  const preferences = parsePreferences(input.target.preferences_json);
+  const preferences = parseAgentAwarenessPreferences(input.target.preferences_json);
   if (preferences?.liveActivitiesEnabled === false) {
     return input.target.activity_push_token
       ? {
@@ -1128,7 +1100,7 @@ export const make = Effect.gen(function* () {
             ? null
             : alertForTerminalAggregate({
                 aggregate: delivery.aggregate,
-                preferences: parsePreferences(input.target.preferences_json),
+                preferences: parseAgentAwarenessPreferences(input.target.preferences_json),
               })
           : delivery.alert;
       const result = yield* deliveryQueue.enqueueLiveActivity({

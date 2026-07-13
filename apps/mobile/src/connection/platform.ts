@@ -125,14 +125,12 @@ const capabilitiesLayer = Layer.effectContext(
         RelayDeviceIdentity,
         RelayDeviceIdentity.of({
           deviceId: storage.loadOrCreateAgentAwarenessDeviceId.pipe(
-            Effect.mapError(
-              (cause) =>
-                new ConnectionTransientError({
-                  reason: "remote-unavailable",
-                  detail: `Could not load the mobile device identity: ${String(cause)}`,
-                }),
-            ),
             Effect.map(Option.some),
+            Effect.catch((cause) =>
+              Effect.logWarning(
+                "Could not load the mobile device identity; connecting without agent awareness.",
+              ).pipe(Effect.annotateLogs({ cause }), Effect.as(Option.none<string>())),
+            ),
           ),
         }),
       ),

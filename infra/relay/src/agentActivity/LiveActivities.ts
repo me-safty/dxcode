@@ -66,12 +66,14 @@ export class LiveActivityDeliveryMarkPersistenceError extends Schema.TaggedError
 export interface DeviceRow {
   readonly user_id: string;
   readonly device_id: string;
-  readonly platform: "ios";
-  readonly ios_major_version: number;
+  readonly platform: "ios" | "android";
+  readonly ios_major_version: number | null;
+  readonly android_api_level?: number | null;
   readonly app_version: string | null;
   readonly bundle_id: string | null;
   readonly aps_environment: "sandbox" | "production" | null;
   readonly push_token: string | null;
+  readonly expo_push_token?: string | null;
   readonly push_to_start_token: string | null;
   readonly preferences_json: string;
 }
@@ -197,10 +199,12 @@ export const make = Effect.gen(function* () {
           user_id: relayMobileDevices.userId,
           platform: relayMobileDevices.platform,
           ios_major_version: relayMobileDevices.iosMajorVersion,
+          android_api_level: relayMobileDevices.androidApiLevel,
           app_version: relayMobileDevices.appVersion,
           bundle_id: relayMobileDevices.bundleId,
           aps_environment: relayMobileDevices.apsEnvironment,
           push_token: relayMobileDevices.pushToken,
+          expo_push_token: relayMobileDevices.expoPushToken,
           push_to_start_token: relayMobileDevices.pushToStartToken,
           preferences_json: relayMobileDevices.preferencesJson,
           activity_push_token: relayLiveActivities.activityPushToken,

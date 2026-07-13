@@ -193,6 +193,8 @@ function makeLayer(input: {
             }),
         }),
         Layer.succeed(DeliveryAttempts.DeliveryAttempts, {
+          listPendingExpoReceipts: () => Effect.succeed([]),
+          completeExpoReceipt: () => Effect.void,
           record: (attempt) =>
             Effect.sync(() => {
               input.attempts.push(attempt);

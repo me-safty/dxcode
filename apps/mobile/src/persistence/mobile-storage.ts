@@ -5,12 +5,14 @@ import * as Effect from "effect/Effect";
 import { pipe } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import {
   isRelayManagedConnection,
   type SavedRemoteConnection,
   toStableSavedRemoteConnection,
 } from "../lib/connection";
+import { randomHex, uuidv4 } from "../lib/uuid";
 import * as MobileSecureStorage from "./mobile-secure-storage";
 
 const CONNECTIONS_KEY = "t3code.connections";
@@ -119,6 +121,8 @@ export class MobileStorage extends Context.Service<
 
 export const make = Effect.fn("MobileStorage.make")(function* () {
   const secureStorage = yield* MobileSecureStorage.MobileSecureStorage;
+  const deviceIdentityLock = yield* Semaphore.make(1);
+  let cachedAgentAwarenessDeviceId: string | null = null;
 
   const parseJson = <A>(key: string, raw: string): A | null => {
     if (!raw.trim()) return null;
@@ -188,16 +192,36 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
     yield* writeJson(CONNECTIONS_KEY, { connections: next });
   });
 
-  const loadOrCreateAgentAwarenessDeviceId = Effect.gen(function* () {
-    const existing = yield* secureStorage.getItem(AGENT_AWARENESS_DEVICE_ID_KEY);
-    if (existing?.trim()) return existing;
-    const deviceId = yield* Effect.tryPromise({
-      try: () => import("../lib/uuid").then(({ uuidv4 }) => uuidv4()),
-      catch: (cause) => new MobileDeviceIdGenerationError({ cause }),
-    });
-    yield* secureStorage.setItem(AGENT_AWARENESS_DEVICE_ID_KEY, deviceId);
-    return deviceId;
-  });
+  const loadOrCreateAgentAwarenessDeviceId = deviceIdentityLock.withPermits(1)(
+    Effect.gen(function* () {
+      if (cachedAgentAwarenessDeviceId !== null) return cachedAgentAwarenessDeviceId;
+
+      const existing = yield* secureStorage.getItem(AGENT_AWARENESS_DEVICE_ID_KEY);
+      if (existing?.trim()) {
+        cachedAgentAwarenessDeviceId = existing;
+        return existing;
+      }
+
+      const deviceId = yield* Effect.try({
+        try: () => {
+          try {
+            return uuidv4();
+          } catch {
+            // Some Android runtimes do not expose randomUUID even though the
+            // native crypto module itself is available. Keep the persisted id
+            // cryptographically random by falling back to the same module's
+            // random-byte primitive.
+            const hex = randomHex(16);
+            return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+          }
+        },
+        catch: (cause) => new MobileDeviceIdGenerationError({ cause }),
+      });
+      yield* secureStorage.setItem(AGENT_AWARENESS_DEVICE_ID_KEY, deviceId);
+      cachedAgentAwarenessDeviceId = deviceId;
+      return deviceId;
+    }),
+  );
 
   const loadAgentAwarenessDeviceId = secureStorage
     .getItem(AGENT_AWARENESS_DEVICE_ID_KEY)

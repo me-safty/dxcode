@@ -262,6 +262,29 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     });
   });
 
+  it("builds an Android registration with an Expo push token", () => {
+    expect(
+      makeRelayDeviceRegistrationRequest({
+        platform: "android",
+        deviceId: "device-1",
+        label: "Pixel",
+        androidApiLevel: 36,
+        appVersion: "1.0.0",
+        expoPushToken: "ExponentPushToken[test]",
+        notificationsEnabled: true,
+        preferences: { liveActivitiesEnabled: true },
+      }),
+    ).toMatchObject({
+      platform: "android",
+      androidApiLevel: 36,
+      expoPushToken: "ExponentPushToken[test]",
+      preferences: {
+        liveActivitiesEnabled: true,
+        notificationsEnabled: true,
+      },
+    });
+  });
+
   it("registers the app's APNs routing so the relay targets the right bundle", () => {
     expect(
       makeRelayDeviceRegistrationRequest({

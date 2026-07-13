@@ -11,13 +11,16 @@ export function resolveApsEnvironment(appVariant: unknown): "sandbox" | "product
 }
 
 export function makeRelayDeviceRegistrationRequest(input: {
+  readonly platform?: "ios" | "android";
   readonly deviceId: string;
   readonly label: string;
-  readonly iosMajorVersion: number;
+  readonly iosMajorVersion?: number;
+  readonly androidApiLevel?: number;
   readonly appVersion?: string;
   readonly bundleId?: string;
   readonly apsEnvironment?: "sandbox" | "production";
   readonly pushToken?: string;
+  readonly expoPushToken?: string;
   readonly pushToStartToken?: string;
   readonly notificationsEnabled: boolean;
   readonly preferences: Preferences;
@@ -27,12 +30,14 @@ export function makeRelayDeviceRegistrationRequest(input: {
   return {
     deviceId: input.deviceId,
     label: input.label,
-    platform: "ios",
-    iosMajorVersion: input.iosMajorVersion,
+    platform: input.platform ?? "ios",
+    ...(input.iosMajorVersion === undefined ? {} : { iosMajorVersion: input.iosMajorVersion }),
+    ...(input.androidApiLevel === undefined ? {} : { androidApiLevel: input.androidApiLevel }),
     appVersion: input.appVersion,
     ...(input.bundleId ? { bundleId: input.bundleId } : {}),
     ...(input.apsEnvironment ? { apsEnvironment: input.apsEnvironment } : {}),
     ...(input.pushToken ? { pushToken: input.pushToken } : {}),
+    ...(input.expoPushToken ? { expoPushToken: input.expoPushToken } : {}),
     ...(input.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
     preferences: {
       liveActivitiesEnabled,

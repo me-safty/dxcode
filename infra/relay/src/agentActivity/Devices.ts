@@ -18,7 +18,13 @@ export class DeviceRegistrationPersistenceError extends Schema.TaggedErrorClass<
   {
     userId: Schema.String,
     deviceId: Schema.String,
-    stage: Schema.Literals(["claim-push-token", "claim-push-to-start-token", "upsert-device"]),
+    stage: Schema.Literals([
+      "claim-push-token",
+      "claim-expo-push-token",
+      "invalidate-expo-push-token",
+      "claim-push-to-start-token",
+      "upsert-device",
+    ]),
     cause: Schema.Defect(),
   },
 ) {
@@ -67,6 +73,16 @@ export class Devices extends Context.Service<
     readonly listForUser: (input: {
       readonly userId: string;
     }) => Effect.Effect<ReadonlyArray<RelayClientDeviceRecord>, DeviceListPersistenceError>;
+    readonly invalidateExpoPushToken: (input: {
+      readonly userId: string;
+      readonly deviceId: string;
+      readonly expoPushToken: string;
+    }) => Effect.Effect<void, DeviceRegistrationPersistenceError>;
+    readonly invalidateExpoPushTokenSuffix: (input: {
+      readonly userId: string;
+      readonly deviceId: string;
+      readonly tokenSuffix: string;
+    }) => Effect.Effect<void, DeviceRegistrationPersistenceError>;
   }
 >()("t3code-relay/agentActivity/Devices") {}
 
@@ -74,6 +90,56 @@ export const make = Effect.gen(function* () {
   const db = yield* RelayDb.RelayDb;
 
   return Devices.of({
+    invalidateExpoPushTokenSuffix: Effect.fn("relay.devices.invalidateExpoPushTokenSuffix")(
+      function* (input) {
+        const updatedAt = DateTime.formatIso(yield* DateTime.now);
+        yield* db
+          .update(relayMobileDevices)
+          .set({ expoPushToken: null, updatedAt })
+          .where(
+            and(
+              eq(relayMobileDevices.userId, input.userId),
+              eq(relayMobileDevices.deviceId, input.deviceId),
+              sql`right(${relayMobileDevices.expoPushToken}, ${input.tokenSuffix.length}) = ${input.tokenSuffix}`,
+            ),
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new DeviceRegistrationPersistenceError({
+                  userId: input.userId,
+                  deviceId: input.deviceId,
+                  stage: "invalidate-expo-push-token",
+                  cause,
+                }),
+            ),
+          );
+      },
+    ),
+    invalidateExpoPushToken: Effect.fn("relay.devices.invalidateExpoPushToken")(function* (input) {
+      const updatedAt = DateTime.formatIso(yield* DateTime.now);
+      yield* db
+        .update(relayMobileDevices)
+        .set({ expoPushToken: null, updatedAt })
+        .where(
+          and(
+            eq(relayMobileDevices.userId, input.userId),
+            eq(relayMobileDevices.deviceId, input.deviceId),
+            eq(relayMobileDevices.expoPushToken, input.expoPushToken),
+          ),
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new DeviceRegistrationPersistenceError({
+                userId: input.userId,
+                deviceId: input.deviceId,
+                stage: "invalidate-expo-push-token",
+                cause,
+              }),
+          ),
+        );
+    }),
     register: Effect.fn("relay.devices.register")(function* (input) {
       yield* Effect.annotateCurrentSpan({
         "relay.mobile.device_id": input.registration.deviceId,
@@ -98,6 +164,23 @@ export const make = Effect.gen(function* () {
                   userId: input.userId,
                   deviceId: registration.deviceId,
                   stage: "claim-push-token",
+                  cause,
+                }),
+            ),
+          );
+      }
+      if (registration.expoPushToken) {
+        yield* db
+          .update(relayMobileDevices)
+          .set({ expoPushToken: null, updatedAt })
+          .where(eq(relayMobileDevices.expoPushToken, registration.expoPushToken))
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new DeviceRegistrationPersistenceError({
+                  userId: input.userId,
+                  deviceId: registration.deviceId,
+                  stage: "claim-expo-push-token",
                   cause,
                 }),
             ),
@@ -128,11 +211,13 @@ export const make = Effect.gen(function* () {
           deviceId: registration.deviceId,
           label: registration.label,
           platform: registration.platform,
-          iosMajorVersion: registration.iosMajorVersion,
+          iosMajorVersion: registration.iosMajorVersion ?? null,
+          androidApiLevel: registration.androidApiLevel ?? null,
           appVersion: registration.appVersion ?? null,
           bundleId: registration.bundleId ?? null,
           apsEnvironment: registration.apsEnvironment ?? null,
           pushToken: registration.pushToken ?? null,
+          expoPushToken: registration.expoPushToken ?? null,
           pushToStartToken: registration.pushToStartToken ?? null,
           preferencesJson: registration.preferences,
           createdAt: updatedAt,
@@ -143,7 +228,8 @@ export const make = Effect.gen(function* () {
           set: {
             platform: registration.platform,
             label: registration.label,
-            iosMajorVersion: registration.iosMajorVersion,
+            iosMajorVersion: registration.iosMajorVersion ?? null,
+            androidApiLevel: registration.androidApiLevel ?? null,
             appVersion: registration.appVersion ?? null,
             // Preserve routing from newer app builds when an older build
             // re-registers without these fields.
@@ -153,6 +239,10 @@ export const make = Effect.gen(function* () {
                 ${relayMobileDevices.apsEnvironment}
               )`,
             pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
+            expoPushToken: sql`coalesce(
+                excluded.expo_push_token,
+                ${relayMobileDevices.expoPushToken}
+              )`,
             pushToStartToken: sql`coalesce(
                 excluded.push_to_start_token,
                 ${relayMobileDevices.pushToStartToken}
@@ -225,6 +315,7 @@ export const make = Effect.gen(function* () {
           label: relayMobileDevices.label,
           platform: relayMobileDevices.platform,
           iosMajorVersion: relayMobileDevices.iosMajorVersion,
+          androidApiLevel: relayMobileDevices.androidApiLevel,
           appVersion: relayMobileDevices.appVersion,
           preferences: relayMobileDevices.preferencesJson,
           updatedAt: relayMobileDevices.updatedAt,
@@ -241,6 +332,9 @@ export const make = Effect.gen(function* () {
         label: row.label,
         platform: row.platform,
         iosMajorVersion: row.iosMajorVersion,
+        ...(row.androidApiLevel === null || row.androidApiLevel === undefined
+          ? {}
+          : { androidApiLevel: row.androidApiLevel }),
         appVersion: row.appVersion,
         notifications: {
           enabled: row.preferences.notificationsEnabled,
