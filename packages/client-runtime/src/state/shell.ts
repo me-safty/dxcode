@@ -195,6 +195,10 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
                         { authoritative: true },
                       );
                       healedFromServer = true;
+                      // Clear any leftover flag from a prior session that
+                      // failed HTTP heal and disconnected before its socket
+                      // snapshot arrived.
+                      yield* Ref.set(acceptNextSocketSnapshotAuthoritatively, false);
                     }
                   }
 

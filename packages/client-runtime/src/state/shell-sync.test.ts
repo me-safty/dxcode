@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
@@ -412,6 +413,132 @@ describe("environment shell synchronization", () => {
       );
       const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
       expect(snapshot.snapshotSequence).toBe(40);
+      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
+    }),
+  );
+
+  it.effect("clears socket-authoritative flag after a successful HTTP heal on reconnect", () =>
+    Effect.gen(function* () {
+      const staleThread = {
+        id: "thread-stale" as never,
+        projectId: "project-1" as never,
+        title: "Ghost active",
+        createdAt: "2026-06-01T00:00:00.000Z",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+      } as never;
+      const cachedSnapshot: OrchestrationShellSnapshot = {
+        snapshotSequence: 50,
+        projects: [],
+        threads: [staleThread],
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      };
+      const httpHealed: OrchestrationShellSnapshot = {
+        snapshotSequence: 60,
+        projects: [],
+        threads: [
+          {
+            ...(staleThread as object),
+            archivedAt: "2026-06-02T00:00:00.000Z",
+          } as never,
+        ],
+        updatedAt: "2026-06-06T00:00:00.000Z",
+      };
+      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const subscribeCount = yield* Ref.make(0);
+      const capturedAfterSequence = yield* SubscriptionRef.make<number | undefined | "missing">(
+        "missing",
+      );
+      const client = {
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input: { readonly afterSequence?: number }) =>
+          Stream.unwrap(
+            Ref.update(subscribeCount, (count) => count + 1).pipe(
+              Effect.andThen(
+                SubscriptionRef.set(
+                  capturedAfterSequence,
+                  input.afterSequence === undefined ? undefined : input.afterSequence,
+                ),
+              ),
+              Effect.as(Stream.fromQueue(events)),
+            ),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
+      const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
+        Option.some(session(client)),
+      );
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: supervisorState,
+        session: activeSession,
+        prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.some(cachedSnapshot)),
+        saveShell: () => Effect.void,
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () => Effect.succeed(Option.none()),
+        saveServerConfig: () => Effect.void,
+        loadVcsRefs: () => Effect.succeed(Option.none()),
+        saveVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      });
+      // First session: HTTP fails (sets socket-authoritative). Second: HTTP heals.
+      const loaderCalls = yield* Ref.make(0);
+      const snapshotLoader = ShellSnapshotLoader.of({
+        load: () =>
+          Ref.update(loaderCalls, (count) => count + 1).pipe(
+            Effect.flatMap(() => Ref.get(loaderCalls)),
+            Effect.map((count) => (count === 1 ? Option.none() : Option.some(httpHealed))),
+          ),
+      });
+      const shellState = yield* makeEnvironmentShellState().pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        Effect.provideService(ShellSnapshotLoader, snapshotLoader),
+      );
+
+      // First subscribe: HTTP failed, no afterSequence, flag armed.
+      yield* SubscriptionRef.changes(capturedAfterSequence).pipe(
+        Stream.filter((value) => value !== "missing"),
+        Stream.runHead,
+      );
+      expect(yield* SubscriptionRef.get(capturedAfterSequence)).toBeUndefined();
+      expect(yield* Ref.get(subscribeCount)).toBe(1);
+
+      // Disconnect without delivering a socket snapshot, then reconnect.
+      yield* SubscriptionRef.set(activeSession, Option.none());
+      yield* SubscriptionRef.set(capturedAfterSequence, "missing");
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+
+      yield* SubscriptionRef.changes(capturedAfterSequence).pipe(
+        Stream.filter((value) => value !== "missing"),
+        Stream.runHead,
+      );
+      expect(yield* SubscriptionRef.get(capturedAfterSequence)).toBe(60);
+      expect(yield* Ref.get(loaderCalls)).toBe(2);
+
+      // Stale enrichment-style snapshot must not override the HTTP heal.
+      yield* Queue.offer(events, {
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: 40,
+          projects: [],
+          threads: [staleThread],
+          updatedAt: "2026-06-06T00:00:00.000Z",
+        },
+      });
+      for (let index = 0; index < 10; index += 1) {
+        yield* Effect.yieldNow;
+      }
+      const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
+      expect(snapshot.snapshotSequence).toBe(60);
       expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
     }),
   );
