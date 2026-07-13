@@ -125,6 +125,15 @@ export function combinedAuthOutput(input: SourceControlAuthProbeInput): string {
   return parts.join("\n");
 }
 
+// Cobra-based CLIs (gh, glab, …) print these when handed a flag/subcommand they
+// don't support — the signal that a probe failed because the CLI is too old for
+// the primary args, rather than because the user is signed out.
+const UNSUPPORTED_INVOCATION_PATTERN = /unknown (?:flag|shorthand flag|command)/iu;
+
+export function looksLikeUnsupportedInvocation(input: SourceControlAuthProbeInput): boolean {
+  return input.exitCode !== 0 && UNSUPPORTED_INVOCATION_PATTERN.test(combinedAuthOutput(input));
+}
+
 function sanitizedAuthLines(text: string): ReadonlyArray<string> {
   const lines: string[] = [];
   for (const entry of text.split(/\r?\n/)) {
@@ -258,16 +267,18 @@ export function probeSourceControlProvider(input: {
         Effect.flatMap((result) => {
           const auth = spec.parseAuth(result);
           const fallbackArgs = spec.authFallbackArgs;
+          // Only retry with the fallback args when the CLI actually rejected the
+          // primary invocation (an older CLI that predates those flags). A genuine
+          // "not signed in" result already carries specific detail, so it must not
+          // trigger the fallback or have its detail replaced by a generic hint.
           if (
             fallbackArgs === undefined ||
-            result.exitCode === 0 ||
-            auth.status === "authenticated"
+            auth.status === "authenticated" ||
+            !looksLikeUnsupportedInvocation(result)
           ) {
             return Effect.succeed({ ...item, auth } satisfies SourceControlProviderDiscoveryItem);
           }
 
-          // The probe command failed outright. Retry with the fallback args so an
-          // older CLI that predates the primary flags is not reported as signed out.
           return runAuth(fallbackArgs).pipe(
             Effect.map((fallbackResult) => {
               const fallbackAuth = spec.parseAuth(fallbackResult);
