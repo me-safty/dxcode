@@ -203,6 +203,22 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
   };
 }
 
+export function classifyTerminalExitTransition(options: {
+  previousVersion: number;
+  previousStatus: string;
+  currentStatus: string;
+  hasHandledExit: boolean;
+}): "none" | "initial" | "live" {
+  if (
+    (options.currentStatus !== "closed" && options.currentStatus !== "exited") ||
+    options.currentStatus === options.previousStatus ||
+    options.hasHandledExit
+  ) {
+    return "none";
+  }
+  return options.previousVersion === 0 ? "initial" : "live";
+}
+
 function getTerminalSelectionRect(mountElement: HTMLElement): DOMRect | null {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
@@ -770,6 +786,7 @@ export function TerminalViewport({
     }
 
     const previous = previousSessionRef.current;
+    const isInitialSessionSync = previous.version === 0;
     if (current.version === previous.version) {
       return;
     }
@@ -788,26 +805,30 @@ export function TerminalViewport({
       writeSystemMessage(terminal, current.error);
     }
 
+    const exitTransition = classifyTerminalExitTransition({
+      previousVersion: previous.version,
+      previousStatus: previous.status,
+      currentStatus: current.status,
+      hasHandledExit: hasHandledExitRef.current,
+    });
     if (current.status === "running") {
       hasHandledExitRef.current = false;
-    } else if (
-      (current.status === "closed" || current.status === "exited") &&
-      current.status !== previous.status &&
-      !hasHandledExitRef.current
-    ) {
+    } else if (exitTransition !== "none") {
       hasHandledExitRef.current = true;
       writeSystemMessage(
         terminal,
         current.status === "closed" ? "Terminal closed" : "Process exited",
       );
-      window.setTimeout(() => {
-        if (hasHandledExitRef.current) {
-          handleSessionExited();
-        }
-      }, 0);
+      if (exitTransition === "live") {
+        window.setTimeout(() => {
+          if (hasHandledExitRef.current) {
+            handleSessionExited();
+          }
+        }, 0);
+      }
     }
 
-    if (previous.version === 0 && autoFocus) {
+    if (isInitialSessionSync && autoFocus) {
       window.requestAnimationFrame(() => {
         terminal.focus();
       });

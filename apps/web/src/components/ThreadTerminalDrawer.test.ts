@@ -1,10 +1,51 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  classifyTerminalExitTransition,
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalSelectionMouseUp,
   terminalSelectionActionDelayForClickCount,
 } from "./ThreadTerminalDrawer";
+
+describe("classifyTerminalExitTransition", () => {
+  it("keeps an initially exited session visible after its buffer is replayed", () => {
+    expect(
+      classifyTerminalExitTransition({
+        previousVersion: 0,
+        previousStatus: "closed",
+        currentStatus: "exited",
+        hasHandledExit: false,
+      }),
+    ).toBe("initial");
+  });
+
+  it("distinguishes a live exit from unchanged or already-handled state", () => {
+    expect(
+      classifyTerminalExitTransition({
+        previousVersion: 3,
+        previousStatus: "running",
+        currentStatus: "exited",
+        hasHandledExit: false,
+      }),
+    ).toBe("live");
+    expect(
+      classifyTerminalExitTransition({
+        previousVersion: 4,
+        previousStatus: "exited",
+        currentStatus: "exited",
+        hasHandledExit: false,
+      }),
+    ).toBe("none");
+    expect(
+      classifyTerminalExitTransition({
+        previousVersion: 4,
+        previousStatus: "running",
+        currentStatus: "exited",
+        hasHandledExit: true,
+      }),
+    ).toBe("none");
+  });
+});
 
 describe("resolveTerminalSelectionActionPosition", () => {
   it("prefers the selection rect over the last pointer position", () => {
