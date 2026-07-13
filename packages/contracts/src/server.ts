@@ -417,6 +417,12 @@ export const ServerConfig = Schema.Struct({
   availableEditors: Schema.Array(EditorId),
   observability: ServerObservability,
   settings: ServerSettings,
+  /**
+   * When true, `orchestration.subscribeThread` resume (`afterSequence`) can emit
+   * a `{ kind: "synchronized" }` completion marker if the client requests it.
+   * Absent or false means legacy servers: clients must not wait for the marker.
+   */
+  threadResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
 });
 export type ServerConfig = typeof ServerConfig.Type;
 

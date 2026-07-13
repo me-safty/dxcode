@@ -5623,12 +5623,42 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           client[ORCHESTRATION_WS_METHODS.subscribeThread]({
             threadId: defaultThreadId,
             afterSequence: 0,
+            requestCompletionMarker: true,
           }).pipe(Stream.runHead),
         ),
       );
 
       assert.deepEqual(Option.getOrThrow(firstItem), { kind: "synchronized" });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("omits the thread completion marker when the client does not request it", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      // Empty catch-up without a requested marker never emits a stream head.
+      // Live clock so the race timeout advances while the WS live buffer stays open.
+      const outcome = yield* Effect.race(
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId: defaultThreadId,
+              afterSequence: 0,
+            }).pipe(Stream.runHead, Effect.as("item" as const)),
+          ),
+        ),
+        Effect.sleep("200 millis").pipe(Effect.as("timeout" as const)),
+      );
+
+      assert.equal(outcome, "timeout");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("enriches replayed project events with repository identity metadata", () =>

@@ -474,6 +474,14 @@ export const OrchestrationSubscribeThreadInput = Schema.Struct({
    * sequence on the client).
    */
   afterSequence: Schema.optionalKey(NonNegativeInt),
+  /**
+   * When true and `afterSequence` is set, the server emits `{ kind: "synchronized" }`
+   * after catch-up replay (including when replay is empty) so the client can leave
+   * the syncing state without a full snapshot retransmit. Only send when
+   * `ServerConfig.threadResumeCompletionMarker` is true; older servers ignore
+   * unknown keys and never emit the marker.
+   */
+  requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
 

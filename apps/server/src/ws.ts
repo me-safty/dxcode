@@ -935,6 +935,7 @@ const makeWsRpcLayer = (
             otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
           },
           settings,
+          threadResumeCompletionMarker: true,
         };
       });
 
@@ -1104,14 +1105,7 @@ const makeWsRpcLayer = (
                             }),
                         ),
                       );
-                    // A warm client already has the full snapshot and might have no
-                    // replay events to apply. Emit a lightweight marker once its live
-                    // subscription is attached so it can leave the syncing state
-                    // without retransmitting the full thread body.
-                    return Stream.concat(
-                      Stream.make({ kind: "synchronized" as const }),
-                      Stream.concat(catchUpStream, Stream.fromQueue(liveBuffer)),
-                    );
+                    return Stream.concat(catchUpStream, Stream.fromQueue(liveBuffer));
                   }),
                 );
               }
@@ -1211,7 +1205,17 @@ const makeWsRpcLayer = (
                             }),
                         ),
                       );
-                    return Stream.concat(catchUpStream, Stream.fromQueue(liveBuffer));
+                    // Opt-in completion marker after catch-up so warm clients can leave
+                    // syncing without a full body retransmit, including when replay is empty.
+                    // Emit only when requested so older clients never see an unknown kind.
+                    const afterCatchUp =
+                      input.requestCompletionMarker === true
+                        ? Stream.concat(
+                            Stream.make({ kind: "synchronized" as const }),
+                            Stream.fromQueue(liveBuffer),
+                          )
+                        : Stream.fromQueue(liveBuffer);
+                    return Stream.concat(catchUpStream, afterCatchUp);
                   }),
                 );
               }
