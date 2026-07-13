@@ -154,6 +154,27 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const TIMELINE_KEYBOARD_INTERACTIVE_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "select",
+  "summary",
+  "textarea",
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="combobox"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="radio"]',
+  '[role="slider"]',
+  '[role="spinbutton"]',
+  '[role="switch"]',
+  '[role="tab"]',
+  '[role="textbox"]',
+].join(",");
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -481,7 +502,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const handleTimelineKeyDownCapture = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target?.closest("input, textarea, [contenteditable='true']")) {
+      if (target?.closest(TIMELINE_KEYBOARD_INTERACTIVE_SELECTOR)) {
         return;
       }
       if (
