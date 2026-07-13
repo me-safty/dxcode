@@ -11,7 +11,24 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
-import { ASSET_ROUTE_PREFIX, issueAssetUrl, resolveAsset } from "./AssetAccess.ts";
+import {
+  ASSET_ROUTE_PREFIX,
+  FALLBACK_PROJECT_FAVICON_SVG,
+  issueAssetUrl,
+  resolveAsset,
+} from "./AssetAccess.ts";
+
+type FallbackTag =
+  | "project-favicon"
+  | "project-favicon-react"
+  | "project-favicon-nextjs"
+  | "project-favicon-vue"
+  | "project-favicon-svelte"
+  | "project-favicon-angular"
+  | "project-favicon-android"
+  | "project-favicon-youtube"
+  | "project-favicon-tiktok"
+  | "project-favicon-instagram";
 
 const configLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-asset-access-test-",
@@ -235,7 +252,108 @@ describe("AssetAccess", () => {
           fallbackSuffix.slice(0, fallbackSeparatorIndex),
           fallbackSuffix.slice(fallbackSeparatorIndex + 1),
         ),
-      ).toEqual({ kind: "project-favicon-fallback" });
+      ).toEqual({ kind: "project-favicon-fallback", svg: FALLBACK_PROJECT_FAVICON_SVG });
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("serves stack-specific fallback icons for projects without a favicon", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+
+      const resolveFallbackTag = Effect.fnUntraced(function* (root: string) {
+        const result = yield* issueAssetUrl({
+          resource: { _tag: "project-favicon", cwd: root },
+        });
+        const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+        const separatorIndex = suffix.indexOf("/");
+        const resolved = yield* resolveAsset(
+          suffix.slice(0, separatorIndex),
+          suffix.slice(separatorIndex + 1),
+        );
+        expect(resolved?.kind).toBe("project-favicon-fallback");
+        if (resolved?.kind !== "project-favicon-fallback") return "project-favicon" as FallbackTag;
+        const match = /data-fallback="([^"]+)"/.exec(resolved.svg);
+        return (match?.[1] ?? "project-favicon") as FallbackTag;
+      });
+
+      const makePkgRoot = (prefix: string, deps: Record<string, string>) =>
+        Effect.gen(function* () {
+          const root = yield* fileSystem.makeTempDirectoryScoped({ prefix });
+          const entries = Object.entries(deps)
+            .map(([k, v]) => `"${k}":"${v}"`)
+            .join(",");
+          yield* fileSystem.writeFileString(
+            path.join(root, "package.json"),
+            `{"dependencies":{${entries}}}`,
+          );
+          return root;
+        });
+
+      // Next.js takes priority over plain React
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-next-", { next: "^15.0.0", react: "^19.0.0" }),
+        ),
+      ).toBe("project-favicon-nextjs");
+
+      // Plain React
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-react-", { react: "^19.0.0" }),
+        ),
+      ).toBe("project-favicon-react");
+
+      // Angular
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-ng-", { "@angular/core": "^18.0.0" }),
+        ),
+      ).toBe("project-favicon-angular");
+
+      // Svelte
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-svelte-", { svelte: "^5.0.0" }),
+        ),
+      ).toBe("project-favicon-svelte");
+
+      // Vue
+      expect(
+        yield* resolveFallbackTag(yield* makePkgRoot("t3-asset-favicon-vue-", { vue: "^3.0.0" })),
+      ).toBe("project-favicon-vue");
+
+      // Android (Gradle marker file)
+      const androidRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-android-",
+      });
+      yield* fileSystem.writeFileString(path.join(androidRoot, "build.gradle"), "");
+      expect(yield* resolveFallbackTag(androidRoot)).toBe("project-favicon-android");
+
+      // YouTube (project name matching)
+      const ytRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-youtube-companion-",
+      });
+      expect(yield* resolveFallbackTag(ytRoot)).toBe("project-favicon-youtube");
+
+      // TikTok (project name matching)
+      const tiktokRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-tiktok-bot-",
+      });
+      expect(yield* resolveFallbackTag(tiktokRoot)).toBe("project-favicon-tiktok");
+
+      // Instagram (project name matching)
+      const igRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-insta-poster-",
+      });
+      expect(yield* resolveFallbackTag(igRoot)).toBe("project-favicon-instagram");
+
+      // Generic fallback for unrecognized stacks
+      expect(
+        yield* resolveFallbackTag(
+          yield* makePkgRoot("t3-asset-favicon-plain-", { express: "^5.0.0" }),
+        ),
+      ).toBe("project-favicon");
     }).pipe(Effect.provide(testLayer)),
   );
 
