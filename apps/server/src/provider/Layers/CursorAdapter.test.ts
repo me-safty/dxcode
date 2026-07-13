@@ -100,6 +100,20 @@ async function readJsonLines(filePath: string) {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+// Wall-clock delay for real process I/O under TestClock (Effect.sleep is virtual).
+// @effect-diagnostics globalTimers:off
+const wallClockDelay = (ms: number) =>
+  Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+class WaitForJsonLogTimeout extends Schema.TaggedErrorClass<WaitForJsonLogTimeout>()(
+  "WaitForJsonLogTimeout",
+  { filePath: Schema.String },
+) {
+  override get message(): string {
+    return `Timed out waiting for matching JSON log entry at ${this.filePath}`;
+  }
+}
+
 async function waitForFileContent(filePath: string, attempts = 40) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -108,7 +122,7 @@ async function waitForFileContent(filePath: string, attempts = 40) {
         return raw;
       }
     } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await Effect.runPromise(wallClockDelay(25));
   }
   throw new Error(`Timed out waiting for file content at ${filePath}`);
 }
@@ -124,16 +138,13 @@ function waitForJsonLogMatch(
       if (requests.some(predicate)) {
         return requests;
       }
-      // Wall-clock wait (not Effect.sleep): these tests run under TestClock, and
-      // ACP mock agent log writes are real process I/O. yieldNow alone can
-      // exhaust attempts under CI load before the file is updated.
-      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 25)));
+      // Real process I/O under TestClock: yieldNow alone can exhaust attempts
+      // under CI load before the ACP mock agent log is updated.
+      yield* wallClockDelay(25);
     }
     const requests = yield* Effect.promise(() => readJsonLines(filePath));
     if (!requests.some(predicate)) {
-      return yield* Effect.fail(
-        new Error(`Timed out waiting for matching JSON log entry at ${filePath}`),
-      );
+      return yield* new WaitForJsonLogTimeout({ filePath });
     }
     return requests;
   });
