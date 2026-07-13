@@ -21,6 +21,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   shouldBlockThreadDragActivation,
   shouldShowPinnedThreadDivider,
+  shouldHideThreadMeta,
   resolveThreadPinCrossingAction,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
@@ -50,6 +51,35 @@ describe("shouldBlockThreadDragActivation", () => {
     expect(shouldBlockThreadDragActivation(input)).toBe(true);
     expect(shouldBlockThreadDragActivation(button)).toBe(true);
     expect(shouldBlockThreadDragActivation(row)).toBe(false);
+  });
+});
+
+describe("shouldHideThreadMeta", () => {
+  it("keeps mobile metadata visible beside always-visible actions", () => {
+    expect(
+      shouldHideThreadMeta({
+        isConfirmingArchive: false,
+        isMobile: true,
+        showRowActions: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides metadata for desktop actions and archive confirmation", () => {
+    expect(
+      shouldHideThreadMeta({
+        isConfirmingArchive: false,
+        isMobile: false,
+        showRowActions: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldHideThreadMeta({
+        isConfirmingArchive: true,
+        isMobile: true,
+        showRowActions: true,
+      }),
+    ).toBe(true);
   });
 });
 
@@ -876,6 +906,23 @@ describe("getVisibleThreadsForProject", () => {
       threads.map((thread) => thread.id),
     );
     expect(result.hiddenThreads).toEqual([]);
+  });
+
+  it("supports scoped identities for grouped projects", () => {
+    const threads = [
+      { id: ThreadId.make("shared"), scopedKey: "env-a:shared" },
+      { id: ThreadId.make("shared"), scopedKey: "env-b:shared" },
+    ];
+
+    const result = getVisibleThreadsForProject({
+      threads,
+      activeThreadId: "env-b:shared",
+      isThreadListExpanded: false,
+      previewLimit: 1,
+      getThreadId: (thread) => thread.scopedKey,
+    });
+
+    expect(result.visibleThreads).toEqual(threads);
   });
 });
 

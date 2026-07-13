@@ -189,6 +189,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
 import {
   getSidebarThreadIdsToPrewarm,
+  getVisibleThreadsForProject,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   isTrailingDoubleClick,
@@ -203,6 +204,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   shouldBlockThreadDragActivation,
   shouldShowPinnedThreadDivider,
+  shouldHideThreadMeta,
   resolveThreadPinCrossingAction,
   type ThreadPinDropAction,
   sortProjectsForSidebar,
@@ -487,9 +489,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
-  const threadMetaClassName = isConfirmingArchive
+  const hideThreadMeta = shouldHideThreadMeta({
+    isConfirmingArchive,
+    isMobile,
+    showRowActions,
+  });
+  const threadMetaClassName = hideThreadMeta
     ? "pointer-events-none opacity-0"
-    : `pointer-events-none transition-opacity duration-150 ${showRowActions ? "opacity-0" : ""}`;
+    : "pointer-events-none transition-opacity duration-150 max-sm:pr-12";
   const rowActionVisibilityClass = showRowActions
     ? "pointer-events-auto opacity-100"
     : "pointer-events-none opacity-0";
@@ -1540,11 +1547,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       });
     };
-    const hasOverflowingThreads = visibleProjectThreads.length > sidebarThreadPreviewCount;
-    const previewThreads =
-      isThreadListExpanded || !hasOverflowingThreads
-        ? visibleProjectThreads
-        : visibleProjectThreads.slice(0, sidebarThreadPreviewCount);
+    const threadPreview = getVisibleThreadsForProject({
+      threads: visibleProjectThreads,
+      activeThreadId: activeRouteThreadKey ?? undefined,
+      isThreadListExpanded,
+      previewLimit: sidebarThreadPreviewCount,
+      getThreadId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    });
+    const hasOverflowingThreads = threadPreview.hasHiddenThreads;
+    const previewThreads = threadPreview.visibleThreads;
     const visibleThreadKeys = new Set(
       [...previewThreads, ...(pinnedCollapsedThread ? [pinnedCollapsedThread] : [])].map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
@@ -1555,10 +1566,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       : visibleProjectThreads.filter((thread) =>
           visibleThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
         );
-    const hiddenThreads = visibleProjectThreads.filter(
-      (thread) =>
-        !visibleThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
-    );
+    const hiddenThreads = pinnedCollapsedThread
+      ? visibleProjectThreads.filter(
+          (thread) =>
+            !visibleThreadKeys.has(
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+            ),
+        )
+      : threadPreview.hiddenThreads;
     return {
       hasOverflowingThreads,
       hiddenThreadStatus: resolveProjectStatusIndicator(
@@ -3661,11 +3676,14 @@ export default function Sidebar() {
           return [];
         }
         const isThreadListExpanded = expandedThreadListsByProject.has(project.projectKey);
-        const hasOverflowingThreads = projectThreads.length > sidebarThreadPreviewCount;
-        const previewThreads =
-          isThreadListExpanded || !hasOverflowingThreads
-            ? projectThreads
-            : projectThreads.slice(0, sidebarThreadPreviewCount);
+        const threadPreview = getVisibleThreadsForProject({
+          threads: projectThreads,
+          activeThreadId: activeThreadKey,
+          isThreadListExpanded,
+          previewLimit: sidebarThreadPreviewCount,
+          getThreadId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        });
+        const previewThreads = threadPreview.visibleThreads;
         const renderedThreads = pinnedCollapsedThread ? [pinnedCollapsedThread] : previewThreads;
         return renderedThreads.map((thread) =>
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
