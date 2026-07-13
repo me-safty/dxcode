@@ -45,6 +45,14 @@ export interface TimelineScrollableNodeState {
   readonly scrollTop: number;
 }
 
+export function timelineScrollableNodeCanNavigateTowardHistory(
+  scrollNode: TimelineScrollableNodeState | null | undefined,
+): boolean {
+  return Boolean(
+    scrollNode && scrollNode.scrollHeight > scrollNode.clientHeight && scrollNode.scrollTop > 0,
+  );
+}
+
 export function resolveTimelineScrollableNodeIsAtEnd(
   scrollNode: TimelineScrollableNodeState | null | undefined,
 ): boolean | undefined {

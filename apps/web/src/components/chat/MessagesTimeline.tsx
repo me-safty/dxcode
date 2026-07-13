@@ -79,6 +79,7 @@ import {
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapTopPercent,
   resolveTimelineScrollableNodeIsAtEnd,
+  timelineScrollableNodeCanNavigateTowardHistory,
   timelineManualNavigationReachedEnd,
   timelineNavigationInputMovesTowardHistory,
   type StableMessagesTimelineRowsState,
@@ -445,11 +446,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const handleTimelineWheelCapture = useCallback(
     (event: WheelEvent<HTMLDivElement>) => {
-      if (timelineNavigationInputMovesTowardHistory({ type: "wheel", deltaY: event.deltaY })) {
+      if (
+        timelineNavigationInputMovesTowardHistory({ type: "wheel", deltaY: event.deltaY }) &&
+        timelineScrollableNodeCanNavigateTowardHistory(listRef.current?.getScrollableNode())
+      ) {
         markTimelineManualNavigation();
       }
     },
-    [markTimelineManualNavigation],
+    [listRef, markTimelineManualNavigation],
   );
   const handleTimelineTouchStartCapture = useCallback((event: TouchEvent<HTMLDivElement>) => {
     timelineTouchYRef.current = event.touches[0]?.clientY ?? null;
@@ -462,13 +466,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           type: "touch",
           previousY: timelineTouchYRef.current,
           currentY,
-        })
+        }) &&
+        timelineScrollableNodeCanNavigateTowardHistory(listRef.current?.getScrollableNode())
       ) {
         markTimelineManualNavigation();
       }
       timelineTouchYRef.current = currentY;
     },
-    [markTimelineManualNavigation],
+    [listRef, markTimelineManualNavigation],
   );
   const resetTimelineTouchTracking = useCallback(() => {
     timelineTouchYRef.current = null;
@@ -484,12 +489,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           type: "keyboard",
           key: event.key,
           shiftKey: event.shiftKey,
-        })
+        }) &&
+        timelineScrollableNodeCanNavigateTowardHistory(listRef.current?.getScrollableNode())
       ) {
         markTimelineManualNavigation();
       }
     },
-    [markTimelineManualNavigation],
+    [listRef, markTimelineManualNavigation],
   );
   const handleTimelinePointerDownCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {

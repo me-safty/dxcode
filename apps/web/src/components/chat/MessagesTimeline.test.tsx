@@ -268,6 +268,7 @@ describe("MessagesTimeline", () => {
       resolveTimelineScrollableNodeIsAtEnd,
       timelineManualNavigationReachedEnd,
       timelineNavigationInputMovesTowardHistory,
+      timelineScrollableNodeCanNavigateTowardHistory,
     } = await import("./MessagesTimeline.logic");
 
     expect(timelineNavigationInputMovesTowardHistory({ type: "wheel", deltaY: -0.1 })).toBe(true);
@@ -280,6 +281,27 @@ describe("MessagesTimeline", () => {
         type: "keyboard",
         key: "PageUp",
         shiftKey: false,
+      }),
+    ).toBe(true);
+    expect(
+      timelineScrollableNodeCanNavigateTowardHistory({
+        clientHeight: 400,
+        scrollHeight: 400,
+        scrollTop: 0,
+      }),
+    ).toBe(false);
+    expect(
+      timelineScrollableNodeCanNavigateTowardHistory({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 0,
+      }),
+    ).toBe(false);
+    expect(
+      timelineScrollableNodeCanNavigateTowardHistory({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 400,
       }),
     ).toBe(true);
     expect(
