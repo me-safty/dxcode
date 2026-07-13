@@ -65,6 +65,12 @@ import { previewEnvironment } from "../state/preview";
 import { terminalEnvironment } from "../state/terminal";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useClientSettings } from "../hooks/useSettings";
+import {
+  applyTerminalAppearance,
+  resolveTerminalFontFamily,
+  type TerminalAppearanceUpdateState,
+} from "../terminalAppearance";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -310,6 +316,9 @@ export function TerminalViewport({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const terminalAppearanceUpdateRef = useRef<TerminalAppearanceUpdateState>({ generation: 0 });
+  const { terminalFontFamily, terminalFontSize } = useClientSettings();
+  const resolvedTerminalFontFamily = resolveTerminalFontFamily(terminalFontFamily);
   const environmentId = threadRef.environmentId;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const openInPreferredEditor = useOpenInPreferredEditor(
@@ -388,10 +397,9 @@ export function TerminalViewport({
     const terminal = new Terminal({
       cursorBlink: true,
       lineHeight: 1,
-      fontSize: 12,
+      fontSize: terminalFontSize,
       scrollback: 5_000,
-      fontFamily:
-        '"SF Mono", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
+      fontFamily: resolvedTerminalFontFamily,
       theme: terminalThemeFromApp(mount),
     });
     terminal.loadAddon(fitAddon);
@@ -706,6 +714,28 @@ export function TerminalViewport({
     // it is only read at mount time and must not trigger terminal teardown/recreation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, environmentId, runtimeEnvKey, terminalId, threadId, worktreePath]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) return;
+    return applyTerminalAppearance({
+      state: terminalAppearanceUpdateRef.current,
+      terminal,
+      fontFamily: resolvedTerminalFontFamily,
+      fontSize: terminalFontSize,
+      ...(document.fonts?.ready ? { fontsReady: document.fonts.ready } : {}),
+      fit: () => {
+        fitTerminalSafely(fitAddon);
+      },
+      resize: (cols, rows) => {
+        void resizeTerminal(cols, rows);
+      },
+      isTargetCurrent: () => terminalRef.current === terminal && fitAddonRef.current === fitAddon,
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      cancelFrame: (frame) => window.cancelAnimationFrame(frame),
+    });
+  }, [resolvedTerminalFontFamily, terminalFontSize]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
