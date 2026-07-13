@@ -331,6 +331,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     null,
   );
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
+  const [keyboardNavigationTimelineKey, setKeyboardNavigationTimelineKey] = useState<string | null>(
+    null,
+  );
   const timelineTouchYRef = useRef<number | null>(null);
   const manualNavigationRef = useRef<{
     readonly timelineKey: string;
@@ -498,14 +501,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         cancelAnimationFrame(keyboardNavigationFrameRef.current);
       }
       const scrollTop = scrollNode.scrollTop;
+      flushSync(() => setKeyboardNavigationTimelineKey(routeThreadKey));
       keyboardNavigationFrameRef.current = requestAnimationFrame(() => {
         keyboardNavigationFrameRef.current = null;
         if (scrollNode.scrollTop < scrollTop) {
           markTimelineManualNavigation();
         }
+        setKeyboardNavigationTimelineKey((timelineKey) =>
+          timelineKey === routeThreadKey ? null : timelineKey,
+        );
       });
     },
-    [listRef, markTimelineManualNavigation],
+    [listRef, markTimelineManualNavigation, routeThreadKey],
   );
   const handleTimelinePointerDownCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -537,6 +544,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       cancelAnimationFrame(keyboardNavigationFrameRef.current);
       keyboardNavigationFrameRef.current = null;
     }
+    setKeyboardNavigationTimelineKey(null);
     return () => {
       if (keyboardNavigationFrameRef.current !== null) {
         cancelAnimationFrame(keyboardNavigationFrameRef.current);
@@ -674,7 +682,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={contentInsetEndAdjustment}
             maintainScrollAtEnd={
-              anchoredEndSpace || !autoFollowEnabled
+              anchoredEndSpace ||
+              !autoFollowEnabled ||
+              keyboardNavigationTimelineKey === routeThreadKey
                 ? false
                 : {
                     animated: false,
