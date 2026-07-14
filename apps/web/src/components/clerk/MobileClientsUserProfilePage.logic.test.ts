@@ -80,5 +80,17 @@ describe("mobile client presentation", () => {
         }),
       ),
     ).toBe("Android");
+    // The relay omits androidApiLevel entirely for devices that never
+    // reported one, so an absent field must fall back like null does.
+    expect(
+      mobileClientPlatformLabel(
+        device({
+          platform: "android",
+          iosMajorVersion: null,
+          androidApiLevel: undefined,
+          appVersion: null,
+        }),
+      ),
+    ).toBe("Android");
   });
 });

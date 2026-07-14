@@ -4,10 +4,7 @@ import type {
   RelayDeliveryKind,
   RelayDeliveryResult,
 } from "@t3tools/contracts/relay";
-import {
-  RelayAgentActivityAggregateState as RelayAgentActivityAggregateStateSchema,
-  RelayDeliveryKind as RelayDeliveryKindSchema,
-} from "@t3tools/contracts/relay";
+import { RelayDeliveryKind as RelayDeliveryKindSchema } from "@t3tools/contracts/relay";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -44,8 +41,14 @@ import {
   alertAllowedForPhase,
   parseAgentAwarenessPreferences,
 } from "./agentAwarenessPreferences.ts";
+import {
+  TERMINAL_NOTIFICATION_FRESHNESS_MS,
+  freshNewlyTerminalRows,
+  newlyAttentionRows,
+  parseAggregate,
+  shouldUpdateLiveActivity,
+} from "./agentActivityTransitions.ts";
 
-const MIN_LIVE_ACTIVITY_UPDATE_INTERVAL_MS = 15_000;
 // How long a just-armed card may sit with an empty aggregate before an end is
 // warranted; covers the gap between arming on send and the environment's
 // first publish reaching the relay.
@@ -124,51 +127,16 @@ export class ApnsDeliveryTransportError extends Schema.TaggedErrorClass<ApnsDeli
 
 export const isApnsDeliveryTransportError = Schema.is(ApnsDeliveryTransportError);
 
-const decodeRelayAgentActivityAggregateStateJson = Schema.decodeUnknownOption(
-  Schema.fromJsonString(RelayAgentActivityAggregateStateSchema),
-);
 const decodeSignedApnsDeliveryJob = Schema.decodeUnknownEffect(SignedApnsDeliveryJob);
 
-function parseAggregate(value: string | null): RelayAgentActivityAggregateState | null {
-  if (!value) {
-    return null;
-  }
-  return Option.getOrNull(decodeRelayAgentActivityAggregateStateJson(value));
-}
-
-function aggregateNeedsAttention(aggregate: RelayAgentActivityAggregateState): boolean {
-  return aggregate.activities.some(
-    (row) => row.phase === "waiting_for_approval" || row.phase === "waiting_for_input",
-  );
-}
-
-function isAttentionPhase(phase: string): boolean {
-  return phase === "waiting_for_approval" || phase === "waiting_for_input";
-}
-
 // Alert copy for an update whose aggregate contains threads that were NOT in an
-// attention phase in the previously delivered aggregate. A null previous
-// aggregate means there is no known baseline (fresh registration, replay after
-// data loss) — alerting there would buzz on reconnect, not on a transition.
+// attention phase in the previously delivered aggregate.
 export function alertForAttentionTransition(input: {
   readonly previousAggregate: RelayAgentActivityAggregateState | null;
   readonly nextAggregate: RelayAgentActivityAggregateState;
   readonly preferences: RelayAgentAwarenessPreferences | null;
 }): ApnsLiveActivityAlert | null {
-  if (input.previousAggregate === null) {
-    return null;
-  }
-  const previouslyAttention = new Set(
-    input.previousAggregate.activities
-      .filter((row) => isAttentionPhase(row.phase))
-      .map((row) => row.threadId),
-  );
-  const newlyAttention = input.nextAggregate.activities.filter(
-    (row) =>
-      isAttentionPhase(row.phase) &&
-      !previouslyAttention.has(row.threadId) &&
-      alertAllowedForPhase(input.preferences, row.phase),
-  );
+  const newlyAttention = newlyAttentionRows(input);
   const first = newlyAttention[0];
   if (!first) {
     return null;
@@ -184,54 +152,14 @@ export function alertForAttentionTransition(input: {
 
 // Alert copy for an update whose aggregate contains threads that finished
 // (Done/Failed) since the previously delivered aggregate — the mid-flight
-// completion buzz while other agents keep the activity alive. Requires the
-// thread to have been present and non-terminal before, so a baseline-less
-// replay or a row that merely fell off the display cap never rings.
-function newlyTerminalRows(
-  previousAggregate: RelayAgentActivityAggregateState | null,
-  nextAggregate: RelayAgentActivityAggregateState,
-): ReadonlyArray<RelayAgentActivityAggregateState["activities"][number]> {
-  if (previousAggregate === null) {
-    return [];
-  }
-  const previousPhases = new Map(
-    previousAggregate.activities.map((row) => [row.threadId, row.phase]),
-  );
-  return nextAggregate.activities.filter((row) => {
-    if (row.phase !== "completed" && row.phase !== "failed") {
-      return false;
-    }
-    const previousPhase = previousPhases.get(row.threadId);
-    return (
-      previousPhase !== undefined && previousPhase !== "completed" && previousPhase !== "failed"
-    );
-  });
-}
-
-function isFreshTerminalRow(
-  row: RelayAgentActivityAggregateState["activities"][number],
-  nowMs: number,
-): boolean {
-  const updatedAtMs = Option.match(DateTime.make(row.updatedAt), {
-    onNone: () => null,
-    onSome: (dt) => dt.epochMilliseconds,
-  });
-  return updatedAtMs !== null && nowMs - updatedAtMs <= TERMINAL_NOTIFICATION_FRESHNESS_MS;
-}
-
+// completion buzz while other agents keep the activity alive.
 export function alertForNewlyTerminal(input: {
   readonly previousAggregate: RelayAgentActivityAggregateState | null;
   readonly nextAggregate: RelayAgentActivityAggregateState;
   readonly preferences: RelayAgentAwarenessPreferences | null;
   readonly nowMs: number;
 }): ApnsLiveActivityAlert | null {
-  const newlyTerminal = newlyTerminalRows(input.previousAggregate, input.nextAggregate).filter(
-    (row) =>
-      alertAllowedForPhase(input.preferences, row.phase) &&
-      // Replays of old aggregates (server restarts, redeliveries) repaint
-      // state without ringing; only fresh completions buzz.
-      isFreshTerminalRow(row, input.nowMs),
-  );
+  const newlyTerminal = freshNewlyTerminalRows(input);
   const first = newlyTerminal[0];
   if (!first) {
     return null;
@@ -259,48 +187,6 @@ export function alertForTerminalAggregate(input: {
   }
   return { title: row.threadTitle, body: `${row.status}: ${row.projectTitle}` };
 }
-
-function shouldUpdateLiveActivity(input: {
-  readonly previousAggregate: RelayAgentActivityAggregateState | null;
-  readonly nextAggregate: RelayAgentActivityAggregateState;
-  readonly lastDeliveryAt: string | null;
-  readonly nowMs: number;
-}): boolean {
-  if (!input.previousAggregate) {
-    return true;
-  }
-  if (JSON.stringify(input.previousAggregate) === JSON.stringify(input.nextAggregate)) {
-    return false;
-  }
-  if (input.previousAggregate.activeCount !== input.nextAggregate.activeCount) {
-    return true;
-  }
-  if (aggregateNeedsAttention(input.nextAggregate)) {
-    return true;
-  }
-  // A thread finishing must never be throttled away: when a completion and a
-  // new start land in the same window, activeCount is unchanged and the Done
-  // transition (and its alert) would otherwise be suppressed.
-  if (newlyTerminalRows(input.previousAggregate, input.nextAggregate).length > 0) {
-    return true;
-  }
-  const lastDeliveryAtMs =
-    input.lastDeliveryAt === null
-      ? null
-      : Option.match(DateTime.make(input.lastDeliveryAt), {
-          onNone: () => Number.NaN,
-          onSome: (dt) => dt.epochMilliseconds,
-        });
-  return (
-    lastDeliveryAtMs === null ||
-    Number.isNaN(lastDeliveryAtMs) ||
-    input.nowMs - lastDeliveryAtMs >= MIN_LIVE_ACTIVITY_UPDATE_INTERVAL_MS
-  );
-}
-
-// Completions replayed long after the fact (server restarts republish every
-// recently-finished thread) must not ring the device again.
-const TERMINAL_NOTIFICATION_FRESHNESS_MS = 2 * 60 * 1_000;
 
 function notificationForAggregate(input: {
   readonly target: LiveActivities.TargetRow;

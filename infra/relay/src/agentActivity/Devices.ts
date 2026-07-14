@@ -239,10 +239,19 @@ export const make = Effect.gen(function* () {
                 ${relayMobileDevices.apsEnvironment}
               )`,
             pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
-            expoPushToken: sql`coalesce(
-                excluded.expo_push_token,
-                ${relayMobileDevices.expoPushToken}
-              )`,
+            // Android registrations are authoritative for the Expo token: the
+            // client always sends one when it can mint one, so an omitted
+            // token means notification permission was revoked and keeping the
+            // old value would leave deliveries targeting a token the device
+            // can no longer use. iOS rows never carry one, so the coalesce
+            // only ever preserved stale Android tokens.
+            expoPushToken:
+              registration.platform === "android"
+                ? (registration.expoPushToken ?? null)
+                : sql`coalesce(
+                    excluded.expo_push_token,
+                    ${relayMobileDevices.expoPushToken}
+                  )`,
             pushToStartToken: sql`coalesce(
                 excluded.push_to_start_token,
                 ${relayMobileDevices.pushToStartToken}

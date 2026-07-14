@@ -80,6 +80,7 @@ const ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS = 60_000;
 const registeredActivityPushTokens = new Map<string, number>();
 let pushTokenSubscription: { remove: () => void } | null = null;
 let appStateSubscription: { remove: () => void } | null = null;
+let pushTokenRotationCount = 0;
 
 // Whether the relay has actually accepted this device's registration. The
 // notification/Live Activity settings toggles must reflect this rather than
@@ -125,6 +126,13 @@ let pendingDeviceRegistration: {
 
 interface DeviceRegistrationInput {
   readonly observedPushToken?: string;
+  // Monotonic marker for Android FCM token rotations. Rotation events carry no
+  // token payload (the fresh Expo token is resolved during registration), so
+  // without this they would coalesce into an already active registration that
+  // may have read the pre-rotation token — leaving the relay stale until some
+  // unrelated trigger re-registers. A new nonce always counts as new
+  // information, so a rotation observed mid-registration queues another run.
+  readonly pushTokenRotation?: number;
 }
 
 interface RegisterDeviceInput extends DeviceRegistrationInput {
@@ -643,7 +651,11 @@ function mergeDeviceRegistrationInput(
   next: DeviceRegistrationInput,
 ): DeviceRegistrationInput {
   const observedPushToken = next.observedPushToken ?? current.observedPushToken;
-  return observedPushToken ? { observedPushToken } : {};
+  const pushTokenRotation = next.pushTokenRotation ?? current.pushTokenRotation;
+  return {
+    ...(observedPushToken ? { observedPushToken } : {}),
+    ...(pushTokenRotation === undefined ? {} : { pushTokenRotation }),
+  };
 }
 
 function registrationAddsInformation(
@@ -651,7 +663,9 @@ function registrationAddsInformation(
   next: DeviceRegistrationInput,
 ): boolean {
   return (
-    next.observedPushToken !== undefined && next.observedPushToken !== current.observedPushToken
+    (next.observedPushToken !== undefined &&
+      next.observedPushToken !== current.observedPushToken) ||
+    (next.pushTokenRotation !== undefined && next.pushTokenRotation !== current.pushTokenRotation)
   );
 }
 
@@ -804,8 +818,14 @@ function ensurePushTokenListener(): void {
     if (Platform.OS === "android") {
       // Expo reports native token rotation here. Resolve a fresh Expo token
       // before registering because the relay intentionally stores only the
-      // Expo Push Service address, never a direct FCM token.
-      enqueueDeviceRegistration({}, "Expo push token rotation registration failed");
+      // Expo Push Service address, never a direct FCM token. The nonce keeps
+      // the rotation from coalescing into an in-flight registration that
+      // already read the pre-rotation token.
+      pushTokenRotationCount += 1;
+      enqueueDeviceRegistration(
+        { pushTokenRotation: pushTokenRotationCount },
+        "Expo push token rotation registration failed",
+      );
     } else if (
       token.type === "ios" &&
       typeof token.data === "string" &&

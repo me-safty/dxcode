@@ -17,9 +17,11 @@ const NOTIFICATION_PREFERENCES = [
 export function mobileClientPlatformLabel(device: RelayClientDeviceRecord): string {
   const platform =
     device.platform === "android"
-      ? device.androidApiLevel === null
-        ? "Android"
-        : `Android API ${device.androidApiLevel}`
+      ? // The relay omits androidApiLevel entirely when unknown, so undefined
+        // must read as missing alongside null.
+        typeof device.androidApiLevel === "number"
+        ? `Android API ${device.androidApiLevel}`
+        : "Android"
       : device.iosMajorVersion === null
         ? "iOS"
         : `iOS ${device.iosMajorVersion}`;

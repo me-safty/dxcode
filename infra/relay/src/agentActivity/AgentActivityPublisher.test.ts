@@ -134,7 +134,7 @@ const publisherLayer = AgentActivityPublisher.layer.pipe(
       ExpoPushDeliveries.ExpoPushDeliveries,
       ExpoPushDeliveries.ExpoPushDeliveries.of({
         reconcileReceipts: Effect.void,
-        sendForTarget: () => Effect.succeed(null),
+        sendForTarget: () => Effect.succeed([]),
       }),
     ),
   ),

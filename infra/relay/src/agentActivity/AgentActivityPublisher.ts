@@ -117,14 +117,14 @@ export const make = Effect.gen(function* () {
             expoPushDeliveries.sendForTarget({
               target,
               aggregate: androidAggregate,
-              eventState: input.state,
+              nowMs: input.nowMs,
             }),
           { concurrency: 4 },
         ),
       ],
       { concurrency: 2 },
     );
-    return [...iosDeliveries.flat(), ...androidDeliveries];
+    return [...iosDeliveries.flat(), ...androidDeliveries.flat()];
   });
 
   return AgentActivityPublisher.of({

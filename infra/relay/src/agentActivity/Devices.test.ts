@@ -119,6 +119,59 @@ describe("Devices", () => {
     );
   });
 
+  it.effect("treats Android registrations as authoritative for the Expo push token", () => {
+    const conflictSets: Array<Record<string, unknown>> = [];
+
+    const fakeDb = {
+      update: () => ({
+        set: () => ({
+          where: () => Effect.void,
+        }),
+      }),
+      insert: () => ({
+        values: () => ({
+          onConflictDoUpdate: (config: { set: Record<string, unknown> }) => {
+            conflictSets.push(config.set);
+            return Effect.void;
+          },
+        }),
+      }),
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    const androidRegistration: RelayDeviceRegistrationRequest = {
+      deviceId: registration.deviceId,
+      label: "Pixel 9",
+      platform: "android",
+      androidApiLevel: 36,
+      appVersion: registration.appVersion,
+      preferences: registration.preferences,
+    };
+
+    return Effect.gen(function* () {
+      const devices = yield* Devices.Devices;
+      // Permission revoked: the client re-registers without an Expo token and
+      // the stored token must clear instead of coalescing back.
+      yield* devices.register({ userId: "user-2", registration: androidRegistration });
+      yield* devices.register({
+        userId: "user-2",
+        registration: {
+          ...androidRegistration,
+          expoPushToken:
+            "ExponentPushToken[test]" as RelayDeviceRegistrationRequest["expoPushToken"],
+        },
+      });
+      yield* devices.register({ userId: "user-2", registration });
+
+      expect(conflictSets[0]?.expoPushToken).toBeNull();
+      expect(conflictSets[1]?.expoPushToken).toBe("ExponentPushToken[test]");
+      // iOS rows never carry an Expo token, so the update keeps the coalesce
+      // SQL expression rather than a literal value.
+      expect(conflictSets[2]?.expoPushToken).toBeTypeOf("object");
+    }).pipe(
+      Effect.provide(Devices.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb)))),
+    );
+  });
+
   it.effect("unregisters APNs state only for the current user device", () => {
     const calls: Array<string> = [];
     const deleteConditions: Array<SQL> = [];

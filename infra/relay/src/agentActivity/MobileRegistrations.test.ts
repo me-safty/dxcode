@@ -160,7 +160,7 @@ function makeRegistrationReplayLayer(input: {
             ExpoPushDeliveries.ExpoPushDeliveries,
             ExpoPushDeliveries.ExpoPushDeliveries.of({
               reconcileReceipts: Effect.void,
-              sendForTarget: () => Effect.succeed(null),
+              sendForTarget: () => Effect.succeed([]),
             }),
           ),
         ),

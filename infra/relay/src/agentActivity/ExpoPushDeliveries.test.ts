@@ -1,15 +1,14 @@
-import type {
-  RelayAgentActivityAggregateState,
-  RelayAgentActivityState,
-} from "@t3tools/contracts/relay";
+import type { RelayAgentActivityAggregateState } from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 
 import type * as LiveActivities from "./LiveActivities.ts";
 import {
   ANDROID_ACTIVITY_CHANNEL_ID,
   ANDROID_ALERTS_CHANNEL_ID,
-  messageForAndroidTarget,
+  messagesForAndroidTarget,
 } from "./ExpoPushDeliveries.ts";
+
+const NOW_MS = Date.parse("2026-07-13T00:00:30.000Z");
 
 const preferences = {
   liveActivitiesEnabled: true,
@@ -20,7 +19,7 @@ const preferences = {
   notifyOnFailure: true,
 };
 
-function target(): LiveActivities.TargetRow {
+function target(overrides: Partial<LiveActivities.TargetRow> = {}): LiveActivities.TargetRow {
   return {
     user_id: "user-1",
     device_id: "device-1",
@@ -40,58 +39,63 @@ function target(): LiveActivities.TargetRow {
     ended_at: null,
     last_aggregate_json: null,
     last_live_activity_delivery_at: null,
+    ...overrides,
   };
 }
 
-function aggregate(phase: "running" | "waiting_for_approval"): RelayAgentActivityAggregateState {
-  return {
-    title: "T3 Code",
-    subtitle: "Agent work in progress",
-    activeCount: 1,
-    updatedAt: "2026-07-13T00:00:00.000Z",
-    activities: [
-      {
-        environmentId:
-          "env" as RelayAgentActivityAggregateState["activities"][number]["environmentId"],
-        threadId: "thread" as RelayAgentActivityAggregateState["activities"][number]["threadId"],
-        projectTitle: "Project",
-        threadTitle: "Thread",
-        modelTitle: "Fable 5",
-        phase,
-        status: phase === "running" ? "Working" : "Approval",
-        updatedAt: "2026-07-13T00:00:00.000Z",
-        deepLink: "/threads/env/thread",
-      },
-    ],
-  };
-}
+type AggregatePhase = "running" | "waiting_for_approval" | "completed";
 
-function eventState(
-  phase: "running" | "waiting_for_approval",
-  threadId = "thread",
-): RelayAgentActivityState {
+function row(phase: AggregatePhase, threadId = "thread") {
   return {
-    environmentId: "env" as RelayAgentActivityState["environmentId"],
-    threadId: threadId as RelayAgentActivityState["threadId"],
+    environmentId: "env" as RelayAgentActivityAggregateState["activities"][number]["environmentId"],
+    threadId: threadId as RelayAgentActivityAggregateState["activities"][number]["threadId"],
     projectTitle: "Project",
     threadTitle: threadId === "thread" ? "Thread" : "Second thread",
     modelTitle: "Fable 5",
     phase,
-    headline: phase === "running" ? "Running" : "Approval needed",
+    status: phase === "running" ? "Working" : phase === "completed" ? "Done" : "Approval",
     updatedAt: "2026-07-13T00:00:00.000Z",
     deepLink: `/threads/env/${threadId}`,
   };
 }
 
-describe("ExpoPushDeliveries", () => {
-  it("uses the quiet replaceable channel for live status", () => {
-    expect(
-      messageForAndroidTarget({
-        target: target(),
-        aggregate: aggregate("running"),
-        eventState: eventState("running"),
-      }),
-    ).toMatchObject({
+function aggregate(
+  phase: AggregatePhase,
+  overrides: Partial<RelayAgentActivityAggregateState> = {},
+): RelayAgentActivityAggregateState {
+  return {
+    title: "T3 Code",
+    subtitle: "Agent work in progress",
+    activeCount: phase === "completed" ? 0 : 1,
+    updatedAt: "2026-07-13T00:00:00.000Z",
+    activities: [row(phase)],
+    ...overrides,
+  };
+}
+
+function withBaseline(
+  baseline: RelayAgentActivityAggregateState,
+  overrides: Partial<LiveActivities.TargetRow> = {},
+): LiveActivities.TargetRow {
+  return target({
+    last_aggregate_json: JSON.stringify(baseline),
+    last_live_activity_delivery_at: "2026-07-13T00:00:00.000Z",
+    ...overrides,
+  });
+}
+
+describe("messagesForAndroidTarget", () => {
+  it("sends a quiet status without an alert for a fresh baseline", () => {
+    const { status, alert, baselineRefresh } = messagesForAndroidTarget({
+      target: target(),
+      aggregate: aggregate("waiting_for_approval"),
+      nowMs: NOW_MS,
+    });
+
+    // No baseline means reconnect/registration replay: repaint, never ring.
+    expect(alert).toBeNull();
+    expect(baselineRefresh).toBe(false);
+    expect(status).toMatchObject({
       channelId: ANDROID_ACTIVITY_CHANNEL_ID,
       tag: "t3-connect-agent-status",
       collapseId: "t3-connect-agent-status",
@@ -100,49 +104,86 @@ describe("ExpoPushDeliveries", () => {
     });
   });
 
-  it("uses the alert channel for an enabled approval notification", () => {
-    expect(
-      messageForAndroidTarget({
-        target: target(),
-        aggregate: aggregate("waiting_for_approval"),
-        eventState: eventState("waiting_for_approval"),
-      }),
-    ).toMatchObject({
+  it("alerts on an attention transition and repaints the status alongside", () => {
+    const { status, alert } = messagesForAndroidTarget({
+      target: withBaseline(aggregate("running")),
+      aggregate: aggregate("waiting_for_approval"),
+      nowMs: NOW_MS,
+    });
+
+    expect(alert).toMatchObject({
       channelId: ANDROID_ALERTS_CHANNEL_ID,
       tag: "t3-connect-agent-alert",
       collapseId: "t3-connect-agent-alert",
       priority: "high",
       sound: "default",
       title: "Thread",
+      body: "Approval: Project",
+    });
+    // The shade must not keep stale "Working" content beside the alert.
+    expect(status).toMatchObject({
+      channelId: ANDROID_ACTIVITY_CHANNEL_ID,
+      priority: "default",
     });
   });
 
-  it("suppresses routine status when live updates are disabled", () => {
-    const disabled = {
-      ...target(),
-      preferences_json: JSON.stringify({ ...preferences, liveActivitiesEnabled: false }),
-    };
-    expect(
-      messageForAndroidTarget({
-        target: disabled,
-        aggregate: aggregate("running"),
-        eventState: eventState("running"),
-      }),
-    ).toBeNull();
-  });
-
-  it("uses the current event for alerts when another agent is first in the aggregate", () => {
-    const multiAgentAggregate = aggregate("running");
-    const message = messageForAndroidTarget({
-      target: target(),
-      aggregate: { ...multiAgentAggregate, activeCount: 2 },
-      eventState: eventState("waiting_for_approval", "thread-2"),
+  it("does not re-alert when the same attention aggregate is republished", () => {
+    const approval = aggregate("waiting_for_approval");
+    const { status, alert } = messagesForAndroidTarget({
+      target: withBaseline(approval),
+      aggregate: approval,
+      nowMs: NOW_MS,
     });
 
-    expect(message).toMatchObject({
+    expect(alert).toBeNull();
+    expect(status).toBeNull();
+  });
+
+  it("alerts on a fresh completion transition", () => {
+    const { alert } = messagesForAndroidTarget({
+      target: withBaseline(aggregate("running")),
+      aggregate: aggregate("completed"),
+      nowMs: NOW_MS,
+    });
+
+    expect(alert).toMatchObject({
       channelId: ANDROID_ALERTS_CHANNEL_ID,
+      title: "Thread",
+      body: "Done: Project",
+    });
+  });
+
+  it("stays silent for stale completion replays", () => {
+    const staleNowMs = Date.parse("2026-07-13T01:00:00.000Z");
+    const { alert } = messagesForAndroidTarget({
+      target: withBaseline(aggregate("running")),
+      aggregate: aggregate("completed"),
+      nowMs: staleNowMs,
+    });
+
+    expect(alert).toBeNull();
+  });
+
+  it("alerts for a transition on a non-first aggregate row", () => {
+    const previous: RelayAgentActivityAggregateState = {
+      ...aggregate("running"),
+      activeCount: 2,
+      activities: [row("running"), row("running", "thread-2")],
+    };
+    const next: RelayAgentActivityAggregateState = {
+      ...previous,
+      activities: [row("running"), row("waiting_for_approval", "thread-2")],
+    };
+
+    const { alert } = messagesForAndroidTarget({
+      target: withBaseline(previous),
+      aggregate: next,
+      nowMs: NOW_MS,
+    });
+
+    expect(alert).toMatchObject({
       title: "Second thread",
-      body: "Approval needed: Project",
+      body: "Approval: Project",
       data: {
         threadId: "thread-2",
         deepLink: "/threads/env/thread-2",
@@ -150,14 +191,105 @@ describe("ExpoPushDeliveries", () => {
     });
   });
 
-  it("sends a quiet final status to replace stale active-agent content", () => {
-    expect(
-      messageForAndroidTarget({ target: target(), aggregate: null, eventState: null }),
-    ).toMatchObject({
+  it("suppresses phase-preference-disabled alerts but keeps the status", () => {
+    const disabledApprovals = withBaseline(aggregate("running"), {
+      preferences_json: JSON.stringify({ ...preferences, notifyOnApproval: false }),
+    });
+    const { status, alert } = messagesForAndroidTarget({
+      target: disabledApprovals,
+      aggregate: aggregate("waiting_for_approval"),
+      nowMs: NOW_MS,
+    });
+
+    expect(alert).toBeNull();
+    expect(status).not.toBeNull();
+  });
+
+  it("alerts without a status when live updates are disabled, then refreshes silently", () => {
+    const noLiveUpdates = {
+      preferences_json: JSON.stringify({ ...preferences, liveActivitiesEnabled: false }),
+    };
+    const transition = messagesForAndroidTarget({
+      target: withBaseline(aggregate("running"), noLiveUpdates),
+      aggregate: aggregate("waiting_for_approval"),
+      nowMs: NOW_MS,
+    });
+    expect(transition.alert).toMatchObject({ channelId: ANDROID_ALERTS_CHANNEL_ID });
+    expect(transition.status).toBeNull();
+
+    // Quiet drift with no status channel: nothing to send, but the baseline
+    // must advance or a later re-approval would never alert.
+    const drift = messagesForAndroidTarget({
+      target: withBaseline(aggregate("waiting_for_approval"), noLiveUpdates),
+      aggregate: aggregate("running"),
+      nowMs: NOW_MS,
+    });
+    expect(drift.alert).toBeNull();
+    expect(drift.status).toBeNull();
+    expect(drift.baselineRefresh).toBe(true);
+  });
+
+  it("sends the final quiet status only on the transition to no activity", () => {
+    const ended = messagesForAndroidTarget({
+      target: withBaseline(aggregate("running")),
+      aggregate: null,
+      nowMs: NOW_MS,
+    });
+    expect(ended.status).toMatchObject({
       channelId: ANDROID_ACTIVITY_CHANNEL_ID,
       tag: "t3-connect-agent-status",
       title: "T3 Code",
       body: "No active agents",
     });
+
+    const alreadyEmpty = messagesForAndroidTarget({
+      target: target(),
+      aggregate: null,
+      nowMs: NOW_MS,
+    });
+    expect(alreadyEmpty.status).toBeNull();
+    expect(alreadyEmpty.alert).toBeNull();
+    expect(alreadyEmpty.baselineRefresh).toBe(false);
+  });
+
+  it("throttles quiet content drift inside the minimum update interval", () => {
+    const drifted = {
+      ...aggregate("running"),
+      updatedAt: "2026-07-13T00:00:20.000Z",
+    };
+    const throttled = messagesForAndroidTarget({
+      target: withBaseline(aggregate("running"), {
+        last_live_activity_delivery_at: "2026-07-13T00:00:25.000Z",
+      }),
+      aggregate: drifted,
+      nowMs: NOW_MS,
+    });
+    expect(throttled.status).toBeNull();
+
+    const dueAgain = messagesForAndroidTarget({
+      target: withBaseline(aggregate("running"), {
+        last_live_activity_delivery_at: "2026-07-13T00:00:00.000Z",
+      }),
+      aggregate: drifted,
+      nowMs: NOW_MS,
+    });
+    expect(dueAgain.status).not.toBeNull();
+  });
+
+  it("sends nothing for devices without an Expo token or for iOS rows", () => {
+    expect(
+      messagesForAndroidTarget({
+        target: target({ expo_push_token: null }),
+        aggregate: aggregate("waiting_for_approval"),
+        nowMs: NOW_MS,
+      }),
+    ).toEqual({ status: null, alert: null, baselineRefresh: false });
+    expect(
+      messagesForAndroidTarget({
+        target: target({ platform: "ios", push_token: "apns" }),
+        aggregate: aggregate("waiting_for_approval"),
+        nowMs: NOW_MS,
+      }),
+    ).toEqual({ status: null, alert: null, baselineRefresh: false });
   });
 });
