@@ -108,6 +108,7 @@ import { getProviderDisplayName, getProviderInteractionModeToggle } from "../../
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
+  resolveSelectableProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
@@ -715,7 +716,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     for (const candidate of candidates) {
       if (!candidate) continue;
       const match = providerInstanceEntries.find(
-        (entry) => entry.instanceId === candidate && entry.enabled,
+        (entry) => entry.instanceId === candidate && entry.enabled && entry.isAvailable,
       );
       if (match) {
         // When locked to a specific driver kind, ignore persisted instance
@@ -730,19 +731,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return match.instanceId;
       }
     }
-    if (explicitSelectedInstanceId) {
-      return ProviderInstanceId.make(explicitSelectedInstanceId);
-    }
     const byKind = providerInstanceEntries.find(
       (entry) =>
         entry.enabled &&
+        entry.isAvailable &&
         entry.driverKind === selectedProvider &&
         (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey),
     );
     if (byKind) return byKind.instanceId;
-    const anyEnabled = providerInstanceEntries.find((entry) => entry.enabled);
+    const selectableEntries = providerInstanceEntries.filter(
+      (entry) =>
+        (!lockedProvider || entry.driverKind === lockedProvider) &&
+        (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey),
+    );
+    const selectableInstanceId = resolveSelectableProviderInstance(selectableEntries, undefined);
     return (
-      anyEnabled?.instanceId ??
+      selectableInstanceId ??
       providerInstanceEntries[0]?.instanceId ??
       activeThreadModelSelection?.instanceId ??
       activeProjectDefaultModelSelection?.instanceId ??
@@ -753,7 +757,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThread?.session?.providerInstanceId,
     activeThreadModelSelection?.instanceId,
     composerDraft.activeProvider,
-    explicitSelectedInstanceId,
     lockedContinuationGroupKey,
     lockedProvider,
     providerInstanceEntries,
