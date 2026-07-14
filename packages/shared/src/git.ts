@@ -62,14 +62,25 @@ export function normalizeWorktreeBranchPrefix(
   return prefix.length > 0 ? prefix : DEFAULT_WORKTREE_BRANCH_PREFIX;
 }
 
-export function extractTemporaryWorktreeBranchPrefix(refName: string): WorktreeBranchPrefix | null {
+/**
+ * Require the configured namespace because an eight-hex suffix alone also
+ * matches ordinary branches such as release dates.
+ */
+export function extractTemporaryWorktreeBranchPrefix(
+  refName: string,
+  expectedPrefix: WorktreeBranchPrefix = DEFAULT_WORKTREE_BRANCH_PREFIX,
+): WorktreeBranchPrefix | null {
   const normalized = refName
     .trim()
     .toLowerCase()
     .replace(/^refs\/heads\//, "");
-  const match = /^(?<prefix>.+)\/(?<token>[0-9a-f]{8})$/u.exec(normalized);
-  const prefix = match?.groups?.prefix?.trim();
-  return prefix ? normalizeWorktreeBranchPrefix(prefix) : null;
+  const prefixWithSeparator = `${expectedPrefix}/`;
+  if (!normalized.startsWith(prefixWithSeparator)) {
+    return null;
+  }
+
+  const token = normalized.slice(prefixWithSeparator.length);
+  return /^[0-9a-f]{8}$/u.test(token) ? expectedPrefix : null;
 }
 
 export function buildGeneratedWorktreeBranchName(
@@ -148,8 +159,11 @@ export function buildTemporaryWorktreeBranchName(
   return `${normalizeWorktreeBranchPrefix(prefix)}/${token}`;
 }
 
-export function isTemporaryWorktreeBranch(refName: string): boolean {
-  return extractTemporaryWorktreeBranchPrefix(refName) !== null;
+export function isTemporaryWorktreeBranch(
+  refName: string,
+  expectedPrefix: WorktreeBranchPrefix = DEFAULT_WORKTREE_BRANCH_PREFIX,
+): boolean {
+  return extractTemporaryWorktreeBranchPrefix(refName, expectedPrefix) !== null;
 }
 
 /**

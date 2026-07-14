@@ -15,7 +15,6 @@ import {
 import {
   buildGeneratedWorktreeBranchName,
   extractTemporaryWorktreeBranchPrefix,
-  isTemporaryWorktreeBranch,
 } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -637,16 +636,16 @@ const make = Effect.gen(function* () {
     if (!input.branch || !input.worktreePath) {
       return;
     }
-    if (!isTemporaryWorktreeBranch(input.branch)) {
-      return;
-    }
-
     const oldBranch = input.branch;
     const cwd = input.worktreePath;
     const attachments = input.attachments ?? [];
     yield* Effect.gen(function* () {
-      const { textGenerationModelSelection: modelSelection } =
+      const { textGenerationModelSelection: modelSelection, worktreeBranchPrefix: expectedPrefix } =
         yield* serverSettingsService.getSettings;
+      const temporaryPrefix = extractTemporaryWorktreeBranchPrefix(oldBranch, expectedPrefix);
+      if (!temporaryPrefix) {
+        return;
+      }
 
       const generated = yield* textGeneration.generateBranchName({
         cwd,
@@ -656,10 +655,7 @@ const make = Effect.gen(function* () {
       });
       if (!generated) return;
 
-      const targetBranch = buildGeneratedWorktreeBranchName(
-        generated.branch,
-        extractTemporaryWorktreeBranchPrefix(oldBranch),
-      );
+      const targetBranch = buildGeneratedWorktreeBranchName(generated.branch, temporaryPrefix);
       if (targetBranch === oldBranch) return;
 
       const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });

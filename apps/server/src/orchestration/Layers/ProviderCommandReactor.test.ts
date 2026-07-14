@@ -145,6 +145,7 @@ describe("ProviderCommandReactor", () => {
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly requiresNewThreadForModelChange?: boolean;
+    readonly worktreeBranchPrefix?: string;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
@@ -368,7 +369,13 @@ describe("ProviderCommandReactor", () => {
           generateThreadTitle,
         }),
       ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(
+        ServerSettingsService.layerTest(
+          input?.worktreeBranchPrefix
+            ? { worktreeBranchPrefix: input.worktreeBranchPrefix }
+            : undefined,
+        ),
+      ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -608,7 +615,7 @@ describe("ProviderCommandReactor", () => {
   });
 
   it("preserves the temporary branch prefix when naming the first turn", async () => {
-    const harness = await createHarness();
+    const harness = await createHarness({ worktreeBranchPrefix: "codex/team" });
     const now = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(

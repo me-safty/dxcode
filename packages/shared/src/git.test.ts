@@ -71,7 +71,7 @@ describe("isTemporaryWorktreeBranch", () => {
   it("matches generated temporary worktree refs", () => {
     expect(isTemporaryWorktreeBranch(`${DEFAULT_WORKTREE_BRANCH_PREFIX}/deadbeef`)).toBe(true);
     expect(isTemporaryWorktreeBranch(` ${DEFAULT_WORKTREE_BRANCH_PREFIX}/deadbeef `)).toBe(true);
-    expect(isTemporaryWorktreeBranch("codex/feature/DEADBEEF")).toBe(true);
+    expect(isTemporaryWorktreeBranch("codex/feature/DEADBEEF", "codex/feature")).toBe(true);
   });
 
   it("rejects non-temporary refName names", () => {
@@ -80,6 +80,9 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(isTemporaryWorktreeBranch(`${DEFAULT_WORKTREE_BRANCH_PREFIX}/deadbeef-extra`)).toBe(
       false,
     );
+    expect(isTemporaryWorktreeBranch("release/20260714")).toBe(false);
+    expect(isTemporaryWorktreeBranch("codex/feature/deadbeef", "codex/team")).toBe(false);
+    expect(isTemporaryWorktreeBranch("codex/team/release/deadbeef", "codex/team")).toBe(false);
   });
 });
 
@@ -95,7 +98,9 @@ describe("worktree branch prefixes", () => {
     expect(buildTemporaryWorktreeBranchName(() => "DEADBEEF", "codex/feature")).toBe(
       "codex/feature/deadbeef",
     );
-    expect(extractTemporaryWorktreeBranchPrefix("codex/feature/deadbeef")).toBe("codex/feature");
+    expect(extractTemporaryWorktreeBranchPrefix("codex/feature/deadbeef", "codex/feature")).toBe(
+      "codex/feature",
+    );
     expect(buildGeneratedWorktreeBranchName("codex/feature/add-search", "codex/feature")).toBe(
       "codex/feature/add-search",
     );

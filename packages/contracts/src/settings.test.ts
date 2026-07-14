@@ -105,6 +105,7 @@ describe("ServerSettings worktree defaults", () => {
 
   it("rejects branch prefixes that are not canonical Git namespaces", () => {
     expect(() => decodeServerSettingsPatch({ worktreeBranchPrefix: "Codex Branch" })).toThrow();
+    expect(() => decodeServerSettingsPatch({ worktreeBranchPrefix: "team//feature" })).toThrow();
   });
 });
 

@@ -105,7 +105,7 @@ export type ThreadEnvMode = typeof ThreadEnvMode.Type;
 export const DEFAULT_WORKTREE_BRANCH_PREFIX = "t3code";
 export const WorktreeBranchPrefix = TrimmedNonEmptyString.check(
   Schema.isMaxLength(64),
-  Schema.isPattern(/^[a-z0-9](?:[a-z0-9/_-]*[a-z0-9])?$/),
+  Schema.isPattern(/^(?!.*\/\/)[a-z0-9](?:[a-z0-9/_-]*[a-z0-9])?$/),
 );
 export type WorktreeBranchPrefix = typeof WorktreeBranchPrefix.Type;
 
