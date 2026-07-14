@@ -5,7 +5,12 @@ import {
   requiresDefaultBranchConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import {
+  CommonActions,
+  StackActions,
+  useNavigation,
+  type StaticScreenProps,
+} from "@react-navigation/native";
 import { SymbolView } from "../../../components/AppSymbol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
@@ -24,6 +29,7 @@ import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
 import { vcsEnvironment } from "../../../state/vcs";
+import { resolveGitOverviewReviewNavigationAction } from "./git-overview-navigation";
 import { MetaCard, SheetListRow, menuItemIconName, statusSummary } from "./gitSheetComponents";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
@@ -256,7 +262,14 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
           title="Review changes"
           subtitle="Inspect turn diffs, worktree changes, and base branch diff"
           disabled={busy || !isRepo}
-          onPress={() => navigation.navigate("ThreadReview", { environmentId, threadId })}
+          onPress={() => {
+            const params = { environmentId, threadId };
+            navigation.dispatch(
+              resolveGitOverviewReviewNavigationAction(presentation) === "replace"
+                ? StackActions.replace("ThreadReview", params)
+                : CommonActions.navigate("ThreadReview", params),
+            );
+          }}
         />
         <View className="ml-12 h-px bg-border" />
         <SheetListRow
