@@ -199,9 +199,6 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
   });
-  const diffSelection = useDiffPanelStore((state) =>
-    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
-  );
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const activeThread = useThread(routeThreadRef);
   const activeProjectId = activeThread?.projectId ?? null;
@@ -228,6 +225,13 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
           input: { cwd: activeCwd },
         })
       : null,
+  );
+  const diffSelection = useDiffPanelStore((state) =>
+    selectThreadDiffPanelSelection(
+      state.byThreadKey,
+      routeThreadRef,
+      gitStatusQuery.data?.hasWorkingTreeChanges === true,
+    ),
   );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
