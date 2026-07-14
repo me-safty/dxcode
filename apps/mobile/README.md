@@ -72,15 +72,6 @@ EXPO_PUBLIC_REVIEW_HIGHLIGHTER_ENGINE=javascript vp run ios:dev
 
 `javascript` is the default and recommended setting for the review diff screen. Set `EXPO_PUBLIC_REVIEW_HIGHLIGHTER_ENGINE=native` only when you explicitly want to test the native Shiki engine.
 
-To test a deployed privacy-policy preview in the app, set the override in the repository-root
-`.env.local` and restart Metro:
-
-```bash
-EXPO_PUBLIC_PRIVACY_POLICY_URL=https://preview.example.com/privacy-policy
-```
-
-The WebView uses `https://t3.codes/privacy-policy` when the override is unset or invalid.
-
 Inspect the resolved Expo config for a variant:
 
 ```bash
