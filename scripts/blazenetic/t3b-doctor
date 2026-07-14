@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# t3b-doctor — diagnose the T3 Code — Blazenetic environment. Read-only: it
+# never mutates git state, never installs anything, and never prints secrets.
+set -Eeuo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}")"
+# shellcheck source=lib/common.sh
+source "$(dirname "$_self")/lib/common.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: t3b-doctor
+  Report on the downstream development environment (OS, session, repo, git
+  topology, toolchain, provider CLIs, installed wrappers). Read-only.
+EOF
+}
+case "${1:-}" in -h|--help) usage; exit 0 ;; esac
+
+t3b::load_env
+
+# Track remediation hints for the summary.
+declare -a REMEDIATION=()
+note() { REMEDIATION+=("$1"); }
+
+# ver <cmd> [args] — echo first line of version output, or "n/a".
+ver() {
+  local out
+  if out="$("$@" 2>&1)"; then printf '%s' "$out" | head -n1; else printf 'n/a'; fi
+}
+
+# --- System -----------------------------------------------------------------
+t3b::heading "System"
+os_name="$(. /etc/os-release 2>/dev/null && printf '%s' "${PRETTY_NAME:-}")"
+[[ -n "$os_name" ]] || os_name="$(uname -s)"
+t3b::status INFO "OS:      $os_name"
+t3b::status INFO "Kernel:  $(uname -r)   Arch: $(uname -m)"
+t3b::status INFO "Shell:   ${SHELL:-unknown}   (running under: bash)"
+t3b::status INFO "Desktop: ${XDG_CURRENT_DESKTOP:-unknown}   Session: $(t3b::session_type)"
+
+# --- Repository & git -------------------------------------------------------
+t3b::heading "Repository"
+repo="${T3B_REPO:-$HOME/Code/t3code}"
+if [[ -d "$repo" ]] && git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  repo="$(git -C "$repo" rev-parse --show-toplevel)"
+  t3b::status OK "Repo path: $repo"
+  cur_branch="$(t3b::branch "$repo")"
+  t3b::status INFO "Current branch: $cur_branch"
+  if [[ -z "$(git -C "$repo" status --porcelain)" ]]; then
+    t3b::status OK "Working tree: clean"
+  else
+    t3b::status WARN "Working tree: dirty (uncommitted changes present)"
+  fi
+  # remotes
+  if git -C "$repo" remote get-url origin >/dev/null 2>&1; then
+    t3b::status OK "origin:   $(git -C "$repo" remote get-url origin)"
+  else
+    t3b::status FAIL "origin remote missing"
+    note "Add origin: git -C \"$repo\" remote add origin https://github.com/Blazenetic/t3code"
+  fi
+  if git -C "$repo" remote get-url upstream >/dev/null 2>&1; then
+    t3b::status OK "upstream: $(git -C "$repo" remote get-url upstream)"
+  else
+    t3b::status WARN "upstream remote missing"
+    note "Add upstream: git -C \"$repo\" remote add upstream https://github.com/pingdotgg/t3code.git"
+  fi
+  # divergence (best-effort; needs a prior fetch to be meaningful)
+  if ab="$(t3b::ahead_behind "$repo" main upstream/main 2>/dev/null)"; then
+    t3b::status INFO "main vs upstream/main: ahead ${ab% *}, behind ${ab#* }  (run t3b-sync to update)"
+  else
+    t3b::status INFO "main vs upstream/main: unknown (fetch upstream first)"
+  fi
+  if ab="$(t3b::ahead_behind "$repo" "$(t3b::default_branch)" main 2>/dev/null)"; then
+    t3b::status INFO "$(t3b::default_branch) vs main: ahead ${ab% *}, behind ${ab#* }"
+  fi
+  # workspace files
+  for f in package.json pnpm-workspace.yaml apps/desktop apps/web; do
+    if [[ -e "$repo/$f" ]]; then t3b::status OK "found $f"; else t3b::status WARN "missing $f"; fi
+  done
+  if [[ -d "$repo/node_modules" ]]; then
+    t3b::status OK "dependencies installed (node_modules present)"
+  else
+    t3b::status FAIL "node_modules missing"
+    note "Install deps: (cd \"$repo\" && vp i)"
+  fi
+else
+  t3b::status FAIL "No git working tree at: $repo"
+  note "Clone the fork: git clone https://github.com/Blazenetic/t3code \"$repo\"  (or set T3B_REPO)"
+fi
+
+# --- Toolchain --------------------------------------------------------------
+t3b::heading "Toolchain"
+t3b::status INFO "git:  $(ver git --version)"
+# vp: probe without installing
+if t3b::have vp || [[ -x "$HOME/.vite-plus/bin/vp" ]]; then
+  PATH="$HOME/.vite-plus/bin:$PATH"
+  t3b::status OK "vp (Vite+): $(ver vp --version)"
+else
+  t3b::status FAIL "vp (Vite+) not found — mandated task runner"
+  note "Install vp: curl -fsSL https://vite.plus | bash"
+fi
+if t3b::have vpr; then
+  t3b::status OK "vpr: present"
+else
+  t3b::status INFO "vpr: no standalone binary (use 'vp run <task>'; equivalent)"
+fi
+if t3b::have bun; then t3b::status OK "bun:  $(ver bun --version)  (used for 'bun run sync:repos')"
+else t3b::status WARN "bun: not found (needed only for vendored-repo sync)"; fi
+if t3b::have node; then t3b::status INFO "node (system/fnm): $(ver node --version)"
+else t3b::status INFO "node: not on PATH (vp bundles its own runtime)"; fi
+if t3b::have mise; then t3b::status OK "mise: $(ver mise --version)"
+else t3b::status INFO "mise: not found (optional)"; fi
+if t3b::have shellcheck; then t3b::status OK "shellcheck: $(ver shellcheck --version | tail -n1)"
+else t3b::status INFO "shellcheck: not found (optional, for script linting)"; fi
+
+# --- Terminals --------------------------------------------------------------
+t3b::heading "Terminals (for the KDE launcher)"
+for term in konsole alacritty; do
+  if t3b::have "$term"; then t3b::status OK "$term: present"; else t3b::status INFO "$term: not found"; fi
+done
+
+# --- Provider CLIs ----------------------------------------------------------
+t3b::heading "Provider CLIs (auth managed by you; no tokens shown)"
+provider() {
+  local bin=$1 hint=$2
+  if t3b::have "$bin"; then
+    t3b::status OK "$bin: present  — auth: $hint"
+  else
+    t3b::status INFO "$bin: not found — $hint"
+  fi
+}
+provider codex    "run 'codex' and follow its login prompt"
+provider claude   "run 'claude' / '/login' to authenticate"
+provider opencode "run 'opencode auth login'"
+provider cursor   "Cursor GUI login (no headless cursor-agent detected)"
+
+# --- Local integration ------------------------------------------------------
+t3b::heading "Local integration"
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) t3b::status OK "$HOME/.local/bin is on PATH" ;;
+  *) t3b::status WARN "$HOME/.local/bin is NOT on PATH"
+     note "Add to ~/.zshrc: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+esac
+
+desktop_entry="$HOME/.local/share/applications/t3code-blazenetic-dev.desktop"
+if [[ -f "$desktop_entry" ]]; then
+  t3b::status OK "KDE desktop entry installed"
+else
+  t3b::status WARN "KDE desktop entry not installed"
+  note "Install it: scripts/blazenetic/install-local-tools.sh"
+fi
+
+for w in t3b t3b-web t3b-desktop t3b-sync t3b-check t3b-doctor t3b-shell; do
+  link="$HOME/.local/bin/$w"
+  if [[ -L "$link" ]]; then
+    target="$(readlink -f "$link" 2>/dev/null || true)"
+    if [[ -n "$target" && -e "$target" ]]; then
+      t3b::status OK "$w -> $target"
+    else
+      t3b::status FAIL "$w -> broken symlink"
+      note "Reinstall wrappers: scripts/blazenetic/install-local-tools.sh"
+    fi
+  elif [[ -e "$link" ]]; then
+    t3b::status WARN "$w exists but is not a symlink (not managed by installer)"
+  else
+    t3b::status WARN "$w not installed"
+    note "Install wrappers: scripts/blazenetic/install-local-tools.sh"
+  fi
+done
+
+# --- Summary ----------------------------------------------------------------
+t3b::heading "Remediation summary"
+if [[ ${#REMEDIATION[@]} -eq 0 ]]; then
+  t3b::status OK "No problems detected."
+else
+  # De-duplicate while preserving first-seen order.
+  declare -A _seen=()
+  for r in "${REMEDIATION[@]}"; do
+    [[ -n "${_seen[$r]:-}" ]] && continue
+    _seen[$r]=1
+    t3b::status WARN "$r"
+  done
+fi

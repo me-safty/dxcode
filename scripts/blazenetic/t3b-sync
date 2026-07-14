@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# t3b-sync — safely integrate upstream changes into the downstream fork.
+#
+# Flow (default = rebase):
+#   1. require a clean working tree
+#   2. verify origin + upstream remotes
+#   3. fetch origin and upstream
+#   4. verify local `main` has NO commits absent from upstream/main
+#   5. create a backup ref of `blazenetic`
+#   6. fast-forward local `main` to upstream/main
+#   7. rebase `blazenetic` onto `main` (stop on conflict with recovery notes)
+#   8. run t3b-check (unless --no-check)
+#   9. print — but never run — the push commands
+#
+# Safeguards: never deletes uncommitted work; never uses plain `git push
+# --force`; never auto-pushes; always leaves a recoverable pre-rebase ref.
+set -Eeuo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}")"
+_dir="$(dirname "$_self")"
+# shellcheck source=lib/common.sh
+source "$_dir/lib/common.sh"
+
+UPSTREAM_URL="https://github.com/pingdotgg/t3code.git"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: t3b-sync [--merge] [--no-check]
+  Integrate upstream/main into the downstream `blazenetic` branch.
+    (default)   rebase blazenetic onto an updated main
+    --merge     merge main into blazenetic instead of rebasing (shared-branch mode)
+    --no-check  skip t3b-check after integration (discouraged)
+  Never pushes automatically. Prints the exact push commands for you to run
+  after review.
+EOF
+}
+
+do_merge=0
+do_check=1
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)   usage; exit 0 ;;
+    --merge)     do_merge=1 ;;
+    --no-check)  do_check=0 ;;
+    *)           t3b::err "Unknown option: $1"; usage; exit 2 ;;
+  esac
+  shift
+done
+
+t3b::load_env
+repo="$(t3b::repo)"
+branch="$(t3b::default_branch)"
+
+# 1. clean working tree
+t3b::require_clean "$repo" || exit 1
+
+# 2. verify remotes
+if ! git -C "$repo" remote get-url origin >/dev/null 2>&1; then
+  t3b::die "No 'origin' remote. Expected the fork: https://github.com/Blazenetic/t3code"
+fi
+if ! git -C "$repo" remote get-url upstream >/dev/null 2>&1; then
+  t3b::err "No 'upstream' remote. Add it with:"
+  t3b::die "    git -C \"$repo\" remote add upstream $UPSTREAM_URL"
+fi
+
+# 3. fetch
+t3b::info "Fetching origin and upstream..."
+git -C "$repo" fetch origin
+git -C "$repo" fetch upstream
+
+# Ensure the branches we rely on exist.
+git -C "$repo" rev-parse --verify --quiet upstream/main >/dev/null \
+  || t3b::die "upstream/main not found after fetch."
+git -C "$repo" rev-parse --verify --quiet main >/dev/null \
+  || t3b::die "Local 'main' branch not found. Create it: git -C \"$repo\" branch main origin/main"
+git -C "$repo" rev-parse --verify --quiet "$branch" >/dev/null \
+  || t3b::die "Downstream branch '$branch' not found."
+
+# 4. main must contain no commits missing from upstream/main
+unique_on_main="$(git -C "$repo" rev-list upstream/main..main)"
+if [[ -n "$unique_on_main" ]]; then
+  t3b::err "Local 'main' has commits NOT present on upstream/main:"
+  git -C "$repo" log --oneline upstream/main..main >&2
+  t3b::err "Refusing to move 'main'. Downstream commits belong on '$branch', not 'main'."
+  t3b::err "Move them to '$branch' first, then re-run t3b-sync."
+  exit 1
+fi
+
+# 5. backup ref before rewriting history
+backup="backup/${branch}-before-sync-$(date +%Y%m%d-%H%M%S)"
+git -C "$repo" branch "$backup" "$branch"
+t3b::info "Created backup ref: $backup"
+
+# 6. fast-forward main to upstream/main
+main_ab="$(t3b::ahead_behind "$repo" main upstream/main || true)"
+t3b::info "main vs upstream/main (ahead behind): ${main_ab:-unknown}"
+git -C "$repo" switch main
+if ! git -C "$repo" merge --ff-only upstream/main; then
+  t3b::err "Could not fast-forward 'main' to upstream/main."
+  t3b::err "This means 'main' diverged. Investigate before proceeding; backup: $backup"
+  exit 1
+fi
+t3b::info "main is now aligned with upstream/main."
+
+# 7. integrate into the downstream branch
+git -C "$repo" switch "$branch"
+if [[ "$do_merge" -eq 1 ]]; then
+  t3b::info "Merging main into $branch..."
+  if ! git -C "$repo" merge --no-edit main; then
+    t3b::err "Merge conflict. Resolve, then:"
+    t3b::err "    git -C \"$repo\" status"
+    t3b::err "    git -C \"$repo\" add <resolved-files>"
+    t3b::err "    git -C \"$repo\" commit"
+    t3b::err "  or abort:  git -C \"$repo\" merge --abort"
+    t3b::err "Backup ref: $backup"
+    exit 1
+  fi
+else
+  t3b::info "Rebasing $branch onto main..."
+  if ! git -C "$repo" rebase main; then
+    t3b::err "Rebase conflict. Resolve, then:"
+    t3b::err "    git -C \"$repo\" status"
+    t3b::err "    git -C \"$repo\" add <resolved-files>"
+    t3b::err "    git -C \"$repo\" rebase --continue"
+    t3b::err "  or abort:  git -C \"$repo\" rebase --abort"
+    t3b::err "Backup ref: $backup"
+    exit 1
+  fi
+fi
+t3b::info "Integration complete on $branch."
+
+# 8. validation
+if [[ "$do_check" -eq 1 ]]; then
+  t3b::info "Running t3b-check..."
+  if ! "$_dir/t3b-check"; then
+    t3b::err "Validation failed after sync. Review before pushing. Backup: $backup"
+    exit 1
+  fi
+else
+  t3b::warn "Skipping validation (--no-check)."
+fi
+
+# 9. print next steps — never executed automatically
+cat >&2 <<EOF
+
+${T3B_C_GREEN}Sync succeeded.${T3B_C_RESET} Nothing has been pushed. Review, then run:
+
+  # update the fork's clean mirror (fast-forward):
+  git -C "$repo" push origin main
+
+  # publish the rebased downstream branch (rewrites history — review first):
+  git -C "$repo" push --force-with-lease origin $branch
+
+Backup of the pre-sync branch: $backup
+(Delete it once you have confirmed everything is good:
+  git -C "$repo" branch -D $backup )
+EOF

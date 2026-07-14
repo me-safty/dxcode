@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# t3b-check — run downstream validation using the repository's own quality gates.
+#
+# Modes:
+#   (default)   vp check  ->  vp run typecheck  ->  vp run test
+#   --quick     vp check  ->  vp run typecheck                     (no tests)
+#   --desktop   default sequence  +  vp run test:desktop-smoke
+#   --full      vp check  ->  vp run typecheck  ->  vp run test  ->  vp run test:desktop-smoke
+#
+# --full does NOT build release artefacts (no dist:desktop:linux).
+set -Eeuo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}")"
+# shellcheck source=lib/common.sh
+source "$(dirname "$_self")/lib/common.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: t3b-check [--quick|--desktop|--full]
+  Run T3 Code quality gates against the live working tree.
+    (default)   format+lint (vp check), typecheck, tests
+    --quick     format+lint and typecheck only (fast)
+    --desktop   default checks plus the desktop smoke test
+    --full      all of the above (does not build release artefacts)
+EOF
+}
+
+mode="default"
+case "${1:-}" in
+  -h|--help)  usage; exit 0 ;;
+  --quick)    mode="quick" ;;
+  --desktop)  mode="desktop" ;;
+  --full)     mode="full" ;;
+  "")         mode="default" ;;
+  *)          t3b::err "Unknown option: $1"; usage; exit 2 ;;
+esac
+
+t3b::load_env
+repo="$(t3b::repo)"
+t3b::ensure_vp
+t3b::require_deps "$repo" || t3b::die "Install dependencies before validating."
+cd "$repo"
+
+# Build the ordered list of steps for the selected mode.
+steps=()
+case "$mode" in
+  quick)
+    steps+=("vp check" "vp run typecheck") ;;
+  default)
+    steps+=("vp check" "vp run typecheck" "vp run test") ;;
+  desktop)
+    steps+=("vp check" "vp run typecheck" "vp run test" "vp run test:desktop-smoke") ;;
+  full)
+    steps+=("vp check" "vp run typecheck" "vp run test" "vp run test:desktop-smoke") ;;
+esac
+
+t3b::info "Repo: $repo   Mode: $mode"
+failed=""
+for step in "${steps[@]}"; do
+  t3b::heading ">> $step"
+  # Intentional word-splitting: each step is a fixed, known command string.
+  # shellcheck disable=SC2086
+  if ! $step; then
+    failed="$step"
+    t3b::err "FAILED: $step"
+    break
+  fi
+done
+
+if [[ -n "$failed" ]]; then
+  t3b::err "Validation failed at: $failed"
+  exit 1
+fi
+t3b::info "All checks passed ($mode)."
