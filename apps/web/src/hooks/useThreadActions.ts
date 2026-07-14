@@ -26,6 +26,10 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
+import {
+  optimisticallyHideArchivedThread,
+  revealOptimisticallyArchivedThread,
+} from "../optimisticThreadArchiveStore";
 
 export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
@@ -108,25 +112,31 @@ export function useThreadActions() {
       const shouldNavigateToDraft =
         currentRouteThreadRef?.threadId === threadRef.threadId &&
         currentRouteThreadRef.environmentId === threadRef.environmentId;
-      const archiveResult = await archiveThreadMutation({
+      optimisticallyHideArchivedThread(threadRef);
+      const archivePromise = archiveThreadMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId },
       });
-      if (archiveResult._tag === "Failure") {
-        return archiveResult;
-      }
-
       if (shouldNavigateToDraft) {
         const navigationResult = await settlePromise(() =>
           handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId)),
         );
         if (navigationResult._tag === "Failure") {
+          revealOptimisticallyArchivedThread(threadRef);
           return navigationResult;
         }
-        refreshArchivedThreadsForEnvironment(threadRef.environmentId);
+      }
+
+      const archiveResult = await archivePromise;
+      if (archiveResult._tag === "Failure") {
+        revealOptimisticallyArchivedThread(threadRef);
         return archiveResult;
       }
 
+      // The domain event is published before the command acknowledgement, so
+      // the shell now owns visibility. Do not retain a local tombstone that
+      // could hide a later unarchive performed by another client.
+      revealOptimisticallyArchivedThread(threadRef);
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       return archiveResult;
     },
@@ -135,6 +145,7 @@ export function useThreadActions() {
 
   const unarchiveThread = useCallback(
     async (target: ScopedThreadRef) => {
+      revealOptimisticallyArchivedThread(target);
       const result = await unarchiveThreadMutation({
         environmentId: target.environmentId,
         input: { threadId: target.threadId },

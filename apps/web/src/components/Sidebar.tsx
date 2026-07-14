@@ -92,6 +92,7 @@ import { useThreadDiscoveredPorts } from "../portDiscoveryState";
 import { openDiscoveredPort } from "./preview/openDiscoveredPort";
 import { useAtomCommand } from "../state/use-atom-command";
 import { previewEnvironment } from "../state/preview";
+import { useOptimisticThreadArchiveStore } from "../optimisticThreadArchiveStore";
 import {
   legacyProjectCwdPreferenceKey,
   resolveProjectExpanded,
@@ -3107,6 +3108,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 export default function Sidebar() {
   const projects = useProjects();
   const sidebarThreads = useThreadShells();
+  const optimisticallyArchivedThreadKeys = useOptimisticThreadArchiveStore(
+    (state) => state.threadKeys,
+  );
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
@@ -3368,8 +3372,15 @@ export default function Sidebar() {
   }, []);
 
   const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
-    [sidebarThreads],
+    () =>
+      sidebarThreads.filter(
+        (thread) =>
+          thread.archivedAt === null &&
+          !optimisticallyArchivedThreadKeys.has(
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          ),
+      ),
+    [optimisticallyArchivedThreadKeys, sidebarThreads],
   );
   const sortedProjects = useMemo(() => {
     const sortableProjects = sidebarProjects.map((project) => ({

@@ -31,6 +31,7 @@ import { useThemeColor } from "../../lib/useThemeColor";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { createNativeMailSearchToolbarItem } from "../layout/native-mail-search-toolbar";
 import type { ArchivedThreadGroup, ArchivedThreadSortOrder } from "./archivedThreadList";
+import { scopedThreadKey } from "../../lib/scopedEntities";
 
 export interface ArchivedThreadsHeaderEnvironment {
   readonly environmentId: EnvironmentId;
@@ -383,6 +384,7 @@ function ArchivedThreadRow(props: {
   readonly environmentLabel: string | null;
   readonly isFirst: boolean;
   readonly isLast: boolean;
+  readonly isUnarchiving: boolean;
   readonly onDelete: () => void;
   readonly onSwipeableClose: (methods: SwipeableMethods) => void;
   readonly onSwipeableWillOpen: (methods: SwipeableMethods) => void;
@@ -420,7 +422,7 @@ function ArchivedThreadRow(props: {
         accessibilityLabel: `Unarchive ${props.thread.title}`,
         icon: "arrow.uturn.backward",
         label: "Unarchive",
-        onPress: props.onUnarchive,
+        onPress: props.isUnarchiving ? () => undefined : props.onUnarchive,
       }}
       simultaneousWithExternalGesture={props.simultaneousSwipeGesture}
       threadTitle={props.thread.title}
@@ -434,7 +436,16 @@ function ArchivedThreadRow(props: {
           }}
         >
           <View className="h-[34px] w-[34px] items-center justify-center rounded-[11px] bg-subtle">
-            <SymbolView name="archivebox.fill" size={15} tintColor={iconColor} type="monochrome" />
+            {props.isUnarchiving ? (
+              <ActivityIndicator color={iconColor} size="small" />
+            ) : (
+              <SymbolView
+                name="archivebox.fill"
+                size={15}
+                tintColor={iconColor}
+                type="monochrome"
+              />
+            )}
           </View>
 
           <View className="min-w-0 flex-1 gap-1">
@@ -500,6 +511,7 @@ export function ArchivedThreadsScreen(props: {
   readonly onSearchQueryChange: (query: string) => void;
   readonly onSortOrderChange: (sortOrder: ArchivedThreadSortOrder) => void;
   readonly onUnarchiveThread: (thread: EnvironmentThreadShell) => void;
+  readonly unarchivingThreadKeys: ReadonlySet<string>;
 }) {
   const { onDeleteThread, onUnarchiveThread } = props;
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
@@ -564,6 +576,9 @@ export function ArchivedThreadsScreen(props: {
           environmentLabel={item.environmentLabel}
           isFirst={item.isFirst}
           isLast={item.isLast}
+          isUnarchiving={props.unarchivingThreadKeys.has(
+            scopedThreadKey(item.thread.environmentId, item.thread.id),
+          )}
           onDelete={() => onDeleteThread(item.thread)}
           onSwipeableClose={handleSwipeableClose}
           onSwipeableWillOpen={handleSwipeableWillOpen}
@@ -579,6 +594,7 @@ export function ArchivedThreadsScreen(props: {
       handleSwipeableWillOpen,
       onDeleteThread,
       onUnarchiveThread,
+      props.unarchivingThreadKeys,
     ],
   );
   const listEmptyComponent = useMemo(() => {

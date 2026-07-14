@@ -45,6 +45,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import { ThreadColdStorage } from "../Services/ThreadColdStorage.ts";
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 );
@@ -82,6 +83,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const threadColdStorage = yield* Effect.serviceOption(ThreadColdStorage);
   const crypto = yield* Crypto.Crypto;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -148,6 +150,24 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             commandId: envelope.command.commandId,
             detail: existingReceipt.value.error ?? "Previously rejected.",
           });
+        }
+
+        const unarchiveThreadId =
+          envelope.command.type === "thread.unarchive" ? envelope.command.threadId : null;
+        if (unarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
+          const restored = yield* threadColdStorage.value.restoreTree(unarchiveThreadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationCommandInvariantError({
+                  commandType: envelope.command.type,
+                  detail: "Failed to restore the archived conversation.",
+                  cause,
+                }),
+            ),
+          );
+          if (restored) {
+            commandReadModel = yield* projectionSnapshotQuery.getCommandReadModel();
+          }
         }
 
         const eventBase = yield* decideOrchestrationCommand({
@@ -227,6 +247,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               Duration.millis(Math.max(0, (yield* Clock.currentTimeMillis) - envelope.startedAtMs)),
             );
           }
+        }
+        if (unarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
+          yield* threadColdStorage.value.finishRestoreTree(unarchiveThreadId).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to finalize restored archive bundle", {
+                threadId: unarchiveThreadId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
         }
         return { sequence: committedCommand.lastSequence };
       }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
