@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, type CSSProperties, type ReactNode } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -55,6 +55,9 @@ function SidebarControl() {
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   const macosWindowControlsStyle =
     isElectron && isMacPlatform(navigator.platform)
       ? ({ "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET } as CSSProperties)
@@ -68,7 +71,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
-        void navigate({ to: "/settings" });
+        const isSettingsRoute = /^\/settings(\/|$)/.test(pathnameRef.current);
+        if (!isSettingsRoute) {
+          void navigate({ to: "/settings" });
+        }
       }
     });
 
