@@ -1,9 +1,9 @@
 import {
-  ORCHESTRATION_WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
   type EnvironmentId as EnvironmentIdType,
-  type OrchestrationThread,
-  type OrchestrationThreadDetailSnapshot,
-  type OrchestrationThreadStreamItem,
+  type OrchestrationV2ThreadDetailSnapshot,
+  type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadStreamItem,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -15,7 +15,6 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom } from "effect/unstable/reactivity";
 
-import { causeFailureMessage } from "../errors/causeMessage.ts";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { connectionProjectionPhase } from "../connection/model.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
@@ -23,7 +22,7 @@ import { EnvironmentCacheStore } from "../platform/persistence.ts";
 import { subscribe } from "../rpc/client.ts";
 import { ThreadSnapshotLoader } from "./threadSnapshotHttp.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
-import { applyThreadDetailEvent } from "./threadReducer.ts";
+import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 import { THREAD_STATE_IDLE_TTL_MS } from "./threadRetention.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 import {
@@ -32,12 +31,17 @@ import {
   type EnvironmentThreadStatus,
 } from "./threadState.ts";
 
-function statusWithoutLiveData(data: Option.Option<OrchestrationThread>): EnvironmentThreadStatus {
+function statusWithoutLiveData(
+  data: Option.Option<OrchestrationV2ThreadProjection>,
+): EnvironmentThreadStatus {
   return Option.isSome(data) ? "cached" : "empty";
 }
 
 function formatThreadError(cause: Cause.Cause<unknown>): string {
-  return causeFailureMessage(cause, "Could not synchronize the thread.");
+  const error = Cause.squash(cause);
+  return error instanceof Error && error.message.trim().length > 0
+    ? error.message
+    : "Could not synchronize the thread.";
 }
 
 export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make")(function* (
@@ -55,11 +59,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           threadId,
           error: error.message,
         }),
-        Effect.as(Option.none<OrchestrationThreadDetailSnapshot>()),
+        Effect.as(Option.none<OrchestrationV2ThreadDetailSnapshot>()),
       ),
     ),
   );
-  const cachedThread = Option.map(cached, (snapshot) => snapshot.thread);
+  const cachedThread = Option.map(cached, (snapshot) => snapshot.projection);
   const state = yield* SubscriptionRef.make<EnvironmentThreadState>({
     data: cachedThread,
     status: statusWithoutLiveData(cachedThread),
@@ -70,7 +74,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const lastSequence = yield* SubscriptionRef.make(
     Option.match(cached, { onNone: () => 0, onSome: (snapshot) => snapshot.snapshotSequence }),
   );
-  const persistence = yield* Queue.sliding<OrchestrationThreadDetailSnapshot>(1);
+  const persistence = yield* Queue.sliding<OrchestrationV2ThreadDetailSnapshot>(1);
   // When the server advertises threadResumeCompletionMarker and we request it on
   // resume, keep status synchronizing until the stream marker arrives (including
   // through catch-up events). Legacy servers never set this path.
@@ -80,7 +84,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const awaitingCompletion = yield* Ref.make(false);
 
   const persist = Effect.fn("EnvironmentThreadState.persist")(function* (
-    snapshot: OrchestrationThreadDetailSnapshot,
+    snapshot: OrchestrationV2ThreadDetailSnapshot,
   ) {
     yield* cache.saveThread(environmentId, snapshot).pipe(
       Effect.catch((error) =>
@@ -154,7 +158,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     });
 
   const setThread = Effect.fn("EnvironmentThreadState.setThread")(function* (
-    thread: OrchestrationThread,
+    thread: OrchestrationV2ThreadProjection,
   ) {
     const waiting = yield* Ref.get(awaitingCompletion);
     yield* SubscriptionRef.set(state, {
@@ -165,7 +169,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     // Persist the thread together with the sequence it reflects so the next warm
     // cache can resume from exactly here.
     const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
-    yield* Queue.offer(persistence, { snapshotSequence, thread });
+    yield* Queue.offer(persistence, { snapshotSequence, projection: thread });
   });
 
   const setDeleted = Effect.fn("EnvironmentThreadState.setDeleted")(function* () {
@@ -189,7 +193,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   });
 
   const applyItem = Effect.fn("EnvironmentThreadState.applyItem")(function* (
-    item: OrchestrationThreadStreamItem,
+    item: OrchestrationV2ThreadStreamItem,
   ) {
     if (item.kind === "synchronized") {
       yield* Ref.set(awaitingCompletion, false);
@@ -202,16 +206,16 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }
 
     if (item.kind === "snapshot") {
-      yield* SubscriptionRef.set(lastSequence, item.snapshot.snapshotSequence);
-      yield* setThread(item.snapshot.thread);
+      yield* SubscriptionRef.set(lastSequence, item.snapshotSequence);
+      yield* setThread(item.projection);
       return;
     }
 
     const sequence = yield* SubscriptionRef.get(lastSequence);
-    if (item.event.sequence <= sequence) {
+    if (item.sequence <= sequence) {
       return;
     }
-    yield* SubscriptionRef.set(lastSequence, item.event.sequence);
+    yield* SubscriptionRef.set(lastSequence, item.sequence);
 
     const current = yield* SubscriptionRef.get(state);
     if (Option.isNone(current.data)) {
@@ -220,11 +224,13 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       }
       return;
     }
-    const result = applyThreadDetailEvent(current.data.value, item.event);
-    if (result.kind === "updated") {
-      yield* setThread(result.thread);
-    } else if (result.kind === "deleted") {
+    if (item.event.type === "thread.deleted") {
       yield* setDeleted();
+      return;
+    }
+    const next = applyOrchestrationV2ProjectionEvent(current.data.value, item.event);
+    if (next !== null) {
+      yield* setThread(next);
     }
   });
 
@@ -267,7 +273,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
             );
             return Option.isSome(prepared)
               ? yield* snapshotLoader.load(prepared.value, threadId)
-              : Option.none<OrchestrationThreadDetailSnapshot>();
+              : Option.none<OrchestrationV2ThreadDetailSnapshot>();
           });
 
       const session = yield* SubscriptionRef.get(supervisor.session);
@@ -284,7 +290,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       }
 
       if (Option.isSome(base)) {
-        yield* applyItem({ kind: "snapshot", snapshot: base.value });
+        yield* applyItem({
+          kind: "snapshot",
+          snapshotSequence: base.value.snapshotSequence,
+          projection: base.value.projection,
+        });
       }
 
       const subscribeInput = Option.match(base, {
@@ -299,7 +309,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
             : { threadId, afterSequence: snapshot.snapshotSequence },
       });
 
-      yield* subscribe(ORCHESTRATION_WS_METHODS.subscribeThread, subscribeInput, {
+      yield* subscribe(ORCHESTRATION_V2_WS_METHODS.subscribeThread, subscribeInput, {
         onExpectedFailure: (cause) => setStreamError(cause),
         retryExpectedFailureAfter: "250 millis",
       }).pipe(Stream.runForEach(applyItem));
@@ -311,7 +321,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       Effect.flatMap(([current, snapshotSequence]) =>
         Option.match(current.data, {
           onNone: () => Effect.void,
-          onSome: (thread) => persist({ snapshotSequence, thread }),
+          onSome: (projection) => persist({ snapshotSequence, projection }),
         }),
       ),
     ),
@@ -357,6 +367,5 @@ export * from "./threadSnapshotHttp.ts";
 export * from "./composerPathSearch.ts";
 export * from "./threadCommands.ts";
 export * from "./threadDetail.ts";
-export * from "./threadReducer.ts";
 export * from "./threadShell.ts";
 export * from "./threadState.ts";

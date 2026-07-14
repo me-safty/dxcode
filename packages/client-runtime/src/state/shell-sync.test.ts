@@ -1,8 +1,8 @@
 import {
   EnvironmentId,
-  ORCHESTRATION_WS_METHODS,
-  type OrchestrationShellSnapshot,
-  type OrchestrationShellStreamItem,
+  ORCHESTRATION_V2_WS_METHODS,
+  type OrchestrationV2ShellSnapshot,
+  type OrchestrationV2ShellStreamItem,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -24,6 +24,7 @@ import * as Persistence from "../platform/persistence.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { makeEnvironmentShellState, ShellSnapshotLoader } from "./shell.ts";
+import { v2ShellSnapshot } from "./orchestrationV2TestFixtures.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -41,11 +42,9 @@ const PREPARED: PreparedConnection = {
   target: TARGET,
 };
 
-const LIVE_SHELL_SNAPSHOT: OrchestrationShellSnapshot = {
+const LIVE_SHELL_SNAPSHOT: OrchestrationV2ShellSnapshot = {
+  ...v2ShellSnapshot,
   snapshotSequence: 1,
-  projects: [],
-  threads: [],
-  updatedAt: "2026-06-06T00:00:00.000Z",
 };
 
 function session(client: WsRpcProtocolClient): RpcSession.RpcSession {
@@ -61,9 +60,9 @@ function session(client: WsRpcProtocolClient): RpcSession.RpcSession {
 describe("environment shell synchronization", () => {
   it.effect("publishes live state before persistence and preserves it when ready", () =>
     Effect.gen(function* () {
-      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
       } as unknown as WsRpcProtocolClient;
       const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
       const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
@@ -80,7 +79,7 @@ describe("environment shell synchronization", () => {
       } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
       const cache = Persistence.EnvironmentCacheStore.of({
         loadShell: () => Effect.succeed(Option.none()),
-        saveShell: () => Effect.never,
+        saveShell: () => Effect.void,
         loadThread: () => Effect.succeed(Option.none()),
         saveThread: () => Effect.void,
         removeThread: () => Effect.void,
@@ -142,9 +141,9 @@ describe("environment shell synchronization", () => {
 
   it.effect("restores live status after reconnect when no new shell events arrive", () =>
     Effect.gen(function* () {
-      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
       } as unknown as WsRpcProtocolClient;
       const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
       const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
@@ -222,40 +221,30 @@ describe("environment shell synchronization", () => {
 
   it.effect("heals warm cache membership from HTTP before resuming afterSequence", () =>
     Effect.gen(function* () {
-      const cachedSnapshot: OrchestrationShellSnapshot = {
+      const cachedSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
         snapshotSequence: 5,
-        projects: [],
-        threads: [
-          {
-            id: "thread-1" as never,
-            projectId: "project-1" as never,
-            title: "Stale active",
-            createdAt: "2026-06-01T00:00:00.000Z",
-            updatedAt: "2026-06-01T00:00:00.000Z",
-            archivedAt: null,
-            deletedAt: null,
-          } as never,
-        ],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
       // Server already archived the thread, but a high-sequence warm cache still
       // lists it as active because the archive delta was dropped earlier.
-      const httpSnapshot: OrchestrationShellSnapshot = {
+      const httpSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
         snapshotSequence: 4,
-        projects: [],
-        threads: [
+        threads: [],
+        archivedThreads: [
           {
-            ...(cachedSnapshot.threads[0] as object),
-            archivedAt: "2026-06-02T00:00:00.000Z",
-          } as never,
+            ...v2ShellSnapshot.threads[0]!,
+            archivedAt: v2ShellSnapshot.threads[0]!.updatedAt,
+          },
         ],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
-      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const capturedAfterSequence = yield* SubscriptionRef.make<number | undefined>(undefined);
       const loaderCalls = yield* SubscriptionRef.make(0);
       const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input: { readonly afterSequence?: number }) =>
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input: {
+          readonly afterSequence?: number;
+        }) =>
           Stream.unwrap(
             SubscriptionRef.set(capturedAfterSequence, input.afterSequence).pipe(
               Effect.as(Stream.fromQueue(events)),
@@ -305,51 +294,41 @@ describe("environment shell synchronization", () => {
       );
       yield* SubscriptionRef.changes(shellState).pipe(
         Stream.filter(
-          (state) =>
-            Option.isSome(state.snapshot) && state.snapshot.value.threads[0]?.archivedAt !== null,
+          (state) => Option.isSome(state.snapshot) && state.snapshot.value.threads.length === 0,
         ),
         Stream.runHead,
       );
 
+      // HTTP heal is authoritative even when its sequence is behind the cache.
       expect(yield* SubscriptionRef.get(loaderCalls)).toBe(1);
       expect(yield* SubscriptionRef.get(capturedAfterSequence)).toBe(4);
       const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
-      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
+      expect(snapshot.threads).toEqual([]);
+      expect(snapshot.archivedThreads).toHaveLength(1);
     }),
   );
 
   it.effect("does not paint stale disk membership before the HTTP heal arrives", () =>
     Effect.gen(function* () {
-      const staleActive = {
-        id: "thread-1" as never,
-        projectId: "project-1" as never,
-        title: "Stale active",
-        createdAt: "2026-06-01T00:00:00.000Z",
-        updatedAt: "2026-06-01T00:00:00.000Z",
-        archivedAt: null,
-        deletedAt: null,
-      } as never;
-      const cachedSnapshot: OrchestrationShellSnapshot = {
+      const cachedSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
         snapshotSequence: 5,
-        projects: [],
-        threads: [staleActive],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
-      const httpSnapshot: OrchestrationShellSnapshot = {
+      const httpSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
         snapshotSequence: 6,
-        projects: [],
-        threads: [
+        threads: [],
+        archivedThreads: [
           {
-            ...(staleActive as object),
-            archivedAt: "2026-06-02T00:00:00.000Z",
-          } as never,
+            ...v2ShellSnapshot.threads[0]!,
+            archivedAt: v2ShellSnapshot.threads[0]!.updatedAt,
+          },
         ],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
       const httpReady = yield* Deferred.make<void>();
-      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
       } as unknown as WsRpcProtocolClient;
       // Normal online connect starts with session:None while the lease opens.
       // Disk must not paint during that window either.
@@ -411,39 +390,29 @@ describe("environment shell synchronization", () => {
       yield* Deferred.succeed(httpReady, undefined);
       yield* SubscriptionRef.changes(shellState).pipe(
         Stream.filter(
-          (state) =>
-            Option.isSome(state.snapshot) && state.snapshot.value.threads[0]?.archivedAt !== null,
+          (state) => Option.isSome(state.snapshot) && state.snapshot.value.threads.length === 0,
         ),
         Stream.runHead,
       );
       const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
-      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
+      expect(snapshot.archivedThreads).toHaveLength(1);
     }),
   );
 
   it.effect("forces a full socket snapshot when HTTP heal fails with a warm cache", () =>
     Effect.gen(function* () {
-      const staleThread = {
-        id: "thread-stale" as never,
-        projectId: "project-1" as never,
-        title: "Ghost active",
-        createdAt: "2026-06-01T00:00:00.000Z",
-        updatedAt: "2026-06-01T00:00:00.000Z",
-        archivedAt: null,
-        deletedAt: null,
-      } as never;
-      const cachedSnapshot: OrchestrationShellSnapshot = {
+      const cachedSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
         snapshotSequence: 50,
-        projects: [],
-        threads: [staleThread],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
-      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const capturedAfterSequence = yield* SubscriptionRef.make<number | undefined | "missing">(
         "missing",
       );
       const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input: { readonly afterSequence?: number }) =>
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input: {
+          readonly afterSequence?: number;
+        }) =>
           Stream.unwrap(
             SubscriptionRef.set(
               capturedAfterSequence,
@@ -495,68 +464,59 @@ describe("environment shell synchronization", () => {
 
       // Server membership is correct but sequence is behind the warm cache.
       // The socket heal must still apply (authoritative) or ghost threads remain.
+      const archivedThread = {
+        ...cachedSnapshot.threads[0]!,
+        archivedAt: cachedSnapshot.threads[0]!.updatedAt,
+      };
       yield* Queue.offer(events, {
         kind: "snapshot",
         snapshot: {
+          ...cachedSnapshot,
           snapshotSequence: 40,
-          projects: [],
-          threads: [
-            {
-              ...(staleThread as object),
-              archivedAt: "2026-06-02T00:00:00.000Z",
-            } as never,
-          ],
-          updatedAt: "2026-06-06T00:00:00.000Z",
+          threads: [],
+          archivedThreads: [archivedThread],
         },
       });
       yield* SubscriptionRef.changes(shellState).pipe(
         Stream.filter(
-          (state) =>
-            Option.isSome(state.snapshot) && state.snapshot.value.threads[0]?.archivedAt !== null,
+          (state) => Option.isSome(state.snapshot) && state.snapshot.value.snapshotSequence === 40,
         ),
         Stream.runHead,
       );
       const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
-      expect(snapshot.snapshotSequence).toBe(40);
-      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
+      expect(snapshot.threads).toEqual([]);
+      expect(snapshot.archivedThreads).toHaveLength(1);
     }),
   );
 
   it.effect("clears socket-authoritative flag after a successful HTTP heal on reconnect", () =>
     Effect.gen(function* () {
-      const staleThread = {
-        id: "thread-stale" as never,
-        projectId: "project-1" as never,
-        title: "Ghost active",
-        createdAt: "2026-06-01T00:00:00.000Z",
-        updatedAt: "2026-06-01T00:00:00.000Z",
-        archivedAt: null,
-        deletedAt: null,
-      } as never;
-      const cachedSnapshot: OrchestrationShellSnapshot = {
+      const cachedSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
         snapshotSequence: 50,
-        projects: [],
-        threads: [staleThread],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
-      const httpHealed: OrchestrationShellSnapshot = {
+      // Server already archived the thread; the heal must win over the stale
+      // warm cache and later stale socket snapshots.
+      const httpHealed: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
         snapshotSequence: 60,
-        projects: [],
-        threads: [
+        threads: [],
+        archivedThreads: [
           {
-            ...(staleThread as object),
-            archivedAt: "2026-06-02T00:00:00.000Z",
-          } as never,
+            ...v2ShellSnapshot.threads[0]!,
+            archivedAt: v2ShellSnapshot.threads[0]!.updatedAt,
+          },
         ],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
-      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const subscribeCount = yield* Ref.make(0);
       const capturedAfterSequence = yield* SubscriptionRef.make<number | undefined | "missing">(
         "missing",
       );
       const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input: { readonly afterSequence?: number }) =>
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input: {
+          readonly afterSequence?: number;
+        }) =>
           Stream.unwrap(
             Ref.update(subscribeCount, (count) => count + 1).pipe(
               Effect.andThen(
@@ -633,10 +593,8 @@ describe("environment shell synchronization", () => {
       yield* Queue.offer(events, {
         kind: "snapshot",
         snapshot: {
+          ...v2ShellSnapshot,
           snapshotSequence: 40,
-          projects: [],
-          threads: [staleThread],
-          updatedAt: "2026-06-06T00:00:00.000Z",
         },
       });
       for (let index = 0; index < 10; index += 1) {
@@ -644,15 +602,16 @@ describe("environment shell synchronization", () => {
       }
       const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot);
       expect(snapshot.snapshotSequence).toBe(60);
-      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-02T00:00:00.000Z");
+      expect(snapshot.threads).toEqual([]);
+      expect(snapshot.archivedThreads).toHaveLength(1);
     }),
   );
 
-  it.effect("rejects a stale full snapshot after a newer archive upsert", () =>
+  it.effect("rejects a stale full snapshot after a newer archive delta", () =>
     Effect.gen(function* () {
-      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
       } as unknown as WsRpcProtocolClient;
       const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
       const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
@@ -688,21 +647,9 @@ describe("environment shell synchronization", () => {
         Effect.provideService(ShellSnapshotLoader, snapshotLoader),
       );
 
-      const liveSnapshot: OrchestrationShellSnapshot = {
+      const liveSnapshot: OrchestrationV2ShellSnapshot = {
+        ...LIVE_SHELL_SNAPSHOT,
         snapshotSequence: 2,
-        projects: [],
-        threads: [
-          {
-            id: "thread-1" as never,
-            projectId: "project-1" as never,
-            title: "Live",
-            createdAt: "2026-06-01T00:00:00.000Z",
-            updatedAt: "2026-06-01T00:00:00.000Z",
-            archivedAt: null,
-            deletedAt: null,
-          } as never,
-        ],
-        updatedAt: "2026-06-06T00:00:00.000Z",
       };
       yield* Queue.offer(events, { kind: "snapshot", snapshot: liveSnapshot });
       yield* SubscriptionRef.changes(shellState).pipe(
@@ -711,13 +658,13 @@ describe("environment shell synchronization", () => {
       );
 
       const archivedThread = {
-        ...(liveSnapshot.threads[0] as object),
-        archivedAt: "2026-06-03T00:00:00.000Z",
-        updatedAt: "2026-06-03T00:00:00.000Z",
-      } as never;
+        ...liveSnapshot.threads[0]!,
+        archivedAt: liveSnapshot.threads[0]!.updatedAt,
+      };
       yield* Queue.offer(events, {
-        kind: "thread-upserted",
+        kind: "thread.updated",
         sequence: 3,
+        location: "archive",
         thread: archivedThread,
       });
       yield* SubscriptionRef.changes(shellState).pipe(
@@ -730,7 +677,12 @@ describe("environment shell synchronization", () => {
       // Older full snapshot that still lists the thread as active must not win.
       yield* Queue.offer(events, {
         kind: "snapshot",
-        snapshot: liveSnapshot,
+        snapshot: {
+          ...liveSnapshot,
+          snapshotSequence: 2,
+          threads: liveSnapshot.threads,
+          archivedThreads: [],
+        },
       });
       for (let index = 0; index < 10; index += 1) {
         yield* Effect.yieldNow;
@@ -739,7 +691,8 @@ describe("environment shell synchronization", () => {
       const state = yield* SubscriptionRef.get(shellState);
       const snapshot = Option.getOrThrow(state.snapshot);
       expect(snapshot.snapshotSequence).toBe(3);
-      expect(snapshot.threads[0]?.archivedAt).toBe("2026-06-03T00:00:00.000Z");
+      expect(snapshot.threads).toEqual([]);
+      expect(snapshot.archivedThreads.map((thread) => thread.id)).toEqual([archivedThread.id]);
     }),
   );
 });
