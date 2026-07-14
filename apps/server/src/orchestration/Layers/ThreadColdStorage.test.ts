@@ -20,14 +20,12 @@ const insertArchivedThread = Effect.fn("insertArchivedThreadTestFixture")(functi
   yield* sql`
     INSERT INTO projection_threads (
       thread_id, project_id, title, model_selection_json, runtime_mode,
-      interaction_mode, created_at, updated_at, archived_at, parent_kind,
-      root_thread_id
+      interaction_mode, created_at, updated_at, archived_at
     ) VALUES (
       ${threadId}, 'project-1', ${title},
       '{"instanceId":"codex","model":"gpt-5.5","options":[]}',
       'full-access', 'default', '2026-07-01T00:00:00.000Z',
-      '2026-07-02T00:00:00.000Z', '2026-07-02T00:00:00.000Z',
-      'root', ${threadId}
+      '2026-07-02T00:00:00.000Z', '2026-07-02T00:00:00.000Z'
     )
   `;
 });
@@ -175,9 +173,10 @@ layer("ThreadColdStorage", (it) => {
       yield* insertArchivedThread(threadId, "Traversal thread");
       yield* fs.writeFileString(path.join(config.attachmentsDir, attachmentName), "image bytes");
       yield* storage.archiveThread(threadId);
+      const escapedPath = path.join(config.attachmentsDir, "..", "thread-traversal-escape");
       yield* sql`
         UPDATE cold_archive.archive_thread_chunks
-        SET kind = 'attachment:..'
+        SET kind = 'attachment:../thread-traversal-escape'
         WHERE thread_id = ${threadId} AND kind LIKE 'attachment:%'
       `;
 
@@ -186,6 +185,82 @@ layer("ThreadColdStorage", (it) => {
         SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
       `;
       assert.deepStrictEqual(manifest, [{ status: "restored" }]);
+      assert.isFalse(yield* fs.exists(escapedPath));
+    }),
+  );
+
+  it.effect("keeps cold SQL data authoritative when attachment restore fails", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const threadId = ThreadId.make("thread-attachment-restore-failure");
+      const attachmentName =
+        "thread-attachment-restore-failure-00000000-0000-4000-8000-000000000001.png";
+
+      yield* insertArchivedThread(threadId, "Attachment restore failure");
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (
+          'message-attachment-restore-failure', ${threadId}, NULL, 'user', 'keep me cold',
+          '[]', 0, '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z'
+        )
+      `;
+      yield* fs.writeFileString(path.join(config.attachmentsDir, attachmentName), "image bytes");
+      yield* storage.archiveThread(threadId);
+
+      const blockedTarget = path.join(config.attachmentsDir, "blocked-restore.bin");
+      yield* fs.makeDirectory(blockedTarget);
+      yield* fs.writeFileString(path.join(blockedTarget, "keep"), "prevent replacement");
+      yield* sql`
+        UPDATE cold_archive.archive_thread_chunks
+        SET kind = 'attachment:blocked-restore.bin'
+        WHERE thread_id = ${threadId} AND kind LIKE 'attachment:%'
+      `;
+
+      const failure = yield* Effect.flip(storage.restoreTree(threadId));
+      assert.strictEqual(failure.operation, "restore");
+      const messages = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM projection_thread_messages WHERE thread_id = ${threadId}
+      `;
+      const manifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      const chunks = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM cold_archive.archive_thread_chunks WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(messages, [{ count: 0 }]);
+      assert.deepStrictEqual(manifest, [{ status: "cold" }]);
+      assert.isAbove(chunks[0]?.count ?? 0, 0);
+    }),
+  );
+
+  it.effect("round-trips binary SQL values", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const threadId = ThreadId.make("thread-binary");
+      const diffBytes = new Uint8Array([0, 1, 2, 127, 128, 255]);
+
+      yield* insertArchivedThread(threadId, "Binary thread");
+      yield* sql.unsafe(
+        `INSERT INTO checkpoint_diff_blobs
+          (thread_id, from_turn_count, to_turn_count, diff, created_at)
+         VALUES (?, 0, 1, ?, '2026-07-01T00:00:00.000Z')`,
+        [threadId, diffBytes],
+      );
+
+      yield* storage.archiveThread(threadId);
+      assert.isTrue(yield* storage.restoreTree(threadId));
+      const restored = (yield* sql.unsafe(
+        `SELECT diff FROM checkpoint_diff_blobs WHERE thread_id = ?`,
+        [threadId],
+      )) as ReadonlyArray<{ readonly diff: Uint8Array }>;
+      assert.deepStrictEqual(restored[0]?.diff, diffBytes);
     }),
   );
 

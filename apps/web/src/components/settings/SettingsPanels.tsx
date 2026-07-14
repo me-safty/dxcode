@@ -1591,60 +1591,60 @@ export function ArchivedThreadsPanel() {
               return (
                 <SettingsRow
                   key={thread.id}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  if (isUnarchiving) return;
-                  void (async () => {
-                    const result = await settlePromise(() =>
-                      handleArchivedThreadContextMenu(
-                        scopeThreadRef(thread.environmentId, thread.id),
-                        {
-                          x: event.clientX,
-                          y: event.clientY,
-                        },
-                      ),
-                    );
-                    if (result._tag === "Failure") {
-                      const error = squashAtomCommandFailure(result);
-                      toastManager.add(
-                        stackedThreadToast({
-                          type: "error",
-                          title: "Archived thread action failed",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        }),
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    if (isUnarchiving) return;
+                    void (async () => {
+                      const result = await settlePromise(() =>
+                        handleArchivedThreadContextMenu(
+                          scopeThreadRef(thread.environmentId, thread.id),
+                          {
+                            x: event.clientX,
+                            y: event.clientY,
+                          },
+                        ),
                       );
-                    }
-                  })();
-                }}
-                title={thread.title}
-                description={
-                  <>
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
-                  </>
-                }
-                control={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
-                    disabled={isUnarchiving}
-                    onClick={() => {
-                      void handleUnarchiveThread(threadRef);
-                    }}
-                  >
-                    {isUnarchiving ? (
-                      <LoaderIcon className="size-3.5 animate-spin" />
-                    ) : (
-                      <ArchiveX className="size-3.5" />
-                    )}
-                    <span>{isUnarchiving ? "Unarchiving" : "Unarchive"}</span>
-                  </Button>
-                }
-              />
+                      if (result._tag === "Failure") {
+                        const error = squashAtomCommandFailure(result);
+                        toastManager.add(
+                          stackedThreadToast({
+                            type: "error",
+                            title: "Archived thread action failed",
+                            description:
+                              error instanceof Error ? error.message : "An error occurred.",
+                          }),
+                        );
+                      }
+                    })();
+                  }}
+                  title={thread.title}
+                  description={
+                    <>
+                      Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                      {" \u00b7 Created "}
+                      {formatRelativeTimeLabel(thread.createdAt)}
+                    </>
+                  }
+                  control={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                      disabled={isUnarchiving}
+                      onClick={() => {
+                        void handleUnarchiveThread(threadRef);
+                      }}
+                    >
+                      {isUnarchiving ? (
+                        <LoaderIcon className="size-3.5 animate-spin" />
+                      ) : (
+                        <ArchiveX className="size-3.5" />
+                      )}
+                      <span>{isUnarchiving ? "Unarchiving" : "Unarchive"}</span>
+                    </Button>
+                  }
+                />
               );
             })}
           </SettingsSection>

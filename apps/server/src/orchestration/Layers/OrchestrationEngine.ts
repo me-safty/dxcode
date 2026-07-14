@@ -250,11 +250,11 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             );
           }
         }
-        if (unarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
-          yield* threadColdStorage.value.finishRestoreTree(unarchiveThreadId).pipe(
+        if (restoredUnarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
+          yield* threadColdStorage.value.finishRestoreTree(restoredUnarchiveThreadId).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("failed to finalize restored archive bundle", {
-                threadId: unarchiveThreadId,
+                threadId: restoredUnarchiveThreadId,
                 cause: Cause.pretty(cause),
               }),
             ),

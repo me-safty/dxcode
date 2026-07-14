@@ -9,10 +9,11 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { parseAttachmentIdFromRelativePath } from "../../attachmentStore.ts";
 import {
+  parseAttachmentIdFromRelativePath,
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
@@ -28,6 +29,10 @@ const gunzipAsync = NodeUtil.promisify(NodeZlib.gunzip);
 const ARCHIVE_SCHEMA = "cold_archive";
 const ARCHIVE_VERSION = 1;
 const ROW_CHUNK_SIZE = 250;
+const RESTORE_CHUNK_PAGE_SIZE = 32;
+const BINARY_VALUE_KEY = "__t3_archive_binary_base64";
+const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString);
+const decodeUnknownJsonString = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString);
 
 type SqlRow = Record<string, unknown>;
 
@@ -52,12 +57,84 @@ function storageError(operation: string, threadId: string, cause: unknown) {
   return new ThreadColdStorageError({ operation, threadId, cause });
 }
 
-function encodeRows(rows: ReadonlyArray<SqlRow>): Uint8Array {
-  return Buffer.from(JSON.stringify(rows), "utf8");
+function encodeRows(rows: ReadonlyArray<SqlRow>): Effect.Effect<Uint8Array, ArchiveCodecError> {
+  return encodeUnknownJsonString(
+    rows.map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([column, value]) => [
+          column,
+          value instanceof Uint8Array
+            ? { [BINARY_VALUE_KEY]: Buffer.from(value).toString("base64") }
+            : value,
+        ]),
+      ),
+    ),
+  ).pipe(
+    Effect.map((encoded) => Buffer.from(encoded, "utf8")),
+    Effect.mapError((cause) => new ArchiveCodecError({ cause })),
+  );
 }
 
-function decodeRows(data: Uint8Array): ReadonlyArray<SqlRow> {
-  return JSON.parse(Buffer.from(data).toString("utf8")) as ReadonlyArray<SqlRow>;
+function decodeRows(data: Uint8Array): Effect.Effect<ReadonlyArray<SqlRow>, ArchiveCodecError> {
+  return decodeUnknownJsonString(Buffer.from(data).toString("utf8")).pipe(
+    Effect.flatMap((decoded) =>
+      Effect.try({
+        try: () => {
+          if (!Array.isArray(decoded)) {
+            throw new TypeError("Archived table chunk must contain an array of rows");
+          }
+          return decoded.map((row): SqlRow => {
+            if (row === null || typeof row !== "object" || Array.isArray(row)) {
+              throw new TypeError("Archived table chunk contains an invalid row");
+            }
+            return Object.fromEntries(
+              Object.entries(row).map(([column, value]) => {
+                if (
+                  value !== null &&
+                  typeof value === "object" &&
+                  !Array.isArray(value) &&
+                  Object.keys(value).length === 1 &&
+                  typeof (value as Record<string, unknown>)[BINARY_VALUE_KEY] === "string"
+                ) {
+                  return [
+                    column,
+                    new Uint8Array(
+                      Buffer.from(
+                        (value as Record<string, string>)[BINARY_VALUE_KEY] as string,
+                        "base64",
+                      ),
+                    ),
+                  ];
+                }
+                return [column, value];
+              }),
+            );
+          });
+        },
+        catch: (cause) => new ArchiveCodecError({ cause }),
+      }),
+    ),
+    Effect.mapError((cause) =>
+      cause instanceof ArchiveCodecError ? cause : new ArchiveCodecError({ cause }),
+    ),
+  );
+}
+
+const THREAD_TABLE_NAMES = new Set<string>(THREAD_TABLES.map(([table]) => table));
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+function isSafeAttachmentEntry(entry: string): boolean {
+  return (
+    entry.length > 0 &&
+    entry !== "." &&
+    entry !== ".." &&
+    !entry.includes("/") &&
+    !entry.includes("\\") &&
+    !entry.includes("\0")
+  );
 }
 
 const compress = (data: Uint8Array) =>
@@ -137,10 +214,15 @@ const make = Effect.gen(function* () {
       .readDirectory(config.providerLogsDir, { recursive: false })
       .pipe(Effect.orElseSucceed(() => [] as string[]));
     yield* Effect.forEach(
-      entries.filter(
-        (entry) =>
-          entry === baseName || new RegExp(`^${baseName.replace(".", "\\.")}\\.\\d+$`).test(entry),
-      ),
+      entries.filter((entry) => {
+        if (entry === baseName) return true;
+        if (!entry.startsWith(`${baseName}.`)) return false;
+        const rotation = entry.slice(baseName.length + 1);
+        return (
+          rotation.length > 0 &&
+          [...rotation].every((character) => character >= "0" && character <= "9")
+        );
+      }),
       (entry) => fs.remove(path.join(config.providerLogsDir, entry), { force: true }),
       { concurrency: 4, discard: true },
     );
@@ -243,7 +325,7 @@ const make = Effect.gen(function* () {
           lastRowId = Number(__archive_rowid);
           return stored;
         });
-        const encoded = encodeRows(normalizedRows);
+        const encoded = yield* encodeRows(normalizedRows);
         const compressed = yield* compress(encoded);
         yield* insertChunk({
           threadId,
@@ -274,6 +356,8 @@ const make = Effect.gen(function* () {
       compressedBytes += compressed.byteLength;
     }
 
+    // Chunk creation stays retryable outside the hot-row deletion transaction.
+    // A retry replaces every partial chunk before deleting source data.
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql.unsafe(
@@ -303,34 +387,102 @@ const make = Effect.gen(function* () {
     table: string,
     rows: ReadonlyArray<SqlRow>,
   ) {
+    if (!THREAD_TABLE_NAMES.has(table)) {
+      return yield* new ArchiveCodecError({
+        cause: new TypeError(`Archive chunk targets unknown table '${table}'`),
+      });
+    }
+    const tableInfo = (yield* sql.unsafe(
+      `PRAGMA main.table_info(${quoteIdentifier(table)})`,
+    )) as ReadonlyArray<SqlRow>;
+    const currentColumns = new Set(
+      tableInfo.flatMap((column) =>
+        typeof column.name === "string" && column.name.length > 0 ? [column.name] : [],
+      ),
+    );
     for (const row of rows) {
-      const columns = Object.keys(row);
+      // Archived rows can outlive schema migrations. Ignore columns that no
+      // longer exist and let newly-added columns use their database defaults.
+      const columns = Object.keys(row).filter((column) => currentColumns.has(column));
       if (columns.length === 0) continue;
       const placeholders = columns.map(() => "?").join(", ");
       yield* sql.unsafe(
-        `INSERT OR REPLACE INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`,
+        `INSERT OR REPLACE INTO ${quoteIdentifier(table)} (${columns.map(quoteIdentifier).join(", ")}) VALUES (${placeholders})`,
         columns.map((column) => row[column]),
       );
     }
   });
 
   const restoreThread = Effect.fn("restoreArchivedThread")(function* (threadId: ThreadId) {
-    const chunks = (yield* sql.unsafe(
-      `SELECT chunk_index, kind, data
-       FROM ${ARCHIVE_SCHEMA}.archive_thread_chunks
-       WHERE thread_id = ?
-       ORDER BY chunk_index ASC`,
+    const bundleRows = (yield* sql.unsafe(
+      `SELECT 1 AS present FROM ${ARCHIVE_SCHEMA}.archive_threads WHERE thread_id = ? LIMIT 1`,
       [threadId],
     )) as ReadonlyArray<SqlRow>;
-    if (chunks.length === 0) return false;
+    if (bundleRows.length === 0) return false;
+
+    const invalidKinds = (yield* sql.unsafe(
+      `SELECT kind FROM ${ARCHIVE_SCHEMA}.archive_thread_chunks
+       WHERE thread_id = ? AND kind NOT LIKE 'table:%' AND kind NOT LIKE 'attachment:%'
+       LIMIT 1`,
+      [threadId],
+    )) as ReadonlyArray<SqlRow>;
+    if (invalidKinds.length > 0) {
+      return yield* new ArchiveCodecError({
+        cause: new TypeError(
+          `Archive contains unknown chunk kind '${String(invalidKinds[0]?.kind)}'`,
+        ),
+      });
+    }
+
+    // Restore files before changing SQL state. A failed or interrupted file
+    // write leaves the cold bundle authoritative and can be retried safely.
+    let attachmentChunkIndex = -1;
+    while (true) {
+      const attachmentChunks = (yield* sql.unsafe(
+        `SELECT chunk_index, kind, data
+         FROM ${ARCHIVE_SCHEMA}.archive_thread_chunks
+         WHERE thread_id = ? AND chunk_index > ? AND kind LIKE 'attachment:%'
+         ORDER BY chunk_index ASC
+         LIMIT ${RESTORE_CHUNK_PAGE_SIZE}`,
+        [threadId, attachmentChunkIndex],
+      )) as ReadonlyArray<SqlRow>;
+      if (attachmentChunks.length === 0) break;
+      for (const chunk of attachmentChunks) {
+        attachmentChunkIndex = Number(chunk.chunk_index);
+        const entry = String(chunk.kind).slice("attachment:".length);
+        if (!isSafeAttachmentEntry(entry)) continue;
+        const data = yield* decompress(chunk.data as Uint8Array);
+        const targetPath = path.join(config.attachmentsDir, entry);
+        const temporaryPath = `${targetPath}.t3-restore`;
+        yield* fs
+          .writeFile(temporaryPath, data)
+          .pipe(
+            Effect.andThen(fs.remove(targetPath, { force: true })),
+            Effect.andThen(fs.rename(temporaryPath, targetPath)),
+            Effect.ensuring(fs.remove(temporaryPath, { force: true }).pipe(Effect.ignore)),
+          );
+      }
+    }
 
     yield* sql.withTransaction(
       Effect.gen(function* () {
-        for (const chunk of chunks) {
-          const kind = String(chunk.kind);
-          const data = yield* decompress(chunk.data as Uint8Array);
-          if (!kind.startsWith("table:")) continue;
-          yield* insertRows(kind.slice("table:".length), decodeRows(data));
+        let tableChunkIndex = -1;
+        while (true) {
+          const tableChunks = (yield* sql.unsafe(
+            `SELECT chunk_index, kind, data
+             FROM ${ARCHIVE_SCHEMA}.archive_thread_chunks
+             WHERE thread_id = ? AND chunk_index > ? AND kind LIKE 'table:%'
+             ORDER BY chunk_index ASC
+             LIMIT ${RESTORE_CHUNK_PAGE_SIZE}`,
+            [threadId, tableChunkIndex],
+          )) as ReadonlyArray<SqlRow>;
+          if (tableChunks.length === 0) break;
+          for (const chunk of tableChunks) {
+            tableChunkIndex = Number(chunk.chunk_index);
+            const kind = String(chunk.kind);
+            const data = yield* decompress(chunk.data as Uint8Array);
+            yield* insertRows(kind.slice("table:".length), yield* decodeRows(data));
+          }
         }
         yield* sql.unsafe(
           `UPDATE thread_archive_manifests
@@ -341,22 +493,6 @@ const make = Effect.gen(function* () {
       }),
     );
 
-    for (const chunk of chunks) {
-      const kind = String(chunk.kind);
-      if (!kind.startsWith("attachment:")) continue;
-      const entry = kind.slice("attachment:".length);
-      if (
-        entry.length === 0 ||
-        entry === "." ||
-        entry === ".." ||
-        entry.includes("/") ||
-        entry.includes("\\")
-      ) {
-        continue;
-      }
-      const data = yield* decompress(chunk.data as Uint8Array);
-      yield* fs.writeFile(path.join(config.attachmentsDir, entry), data);
-    }
     return true;
   });
 
