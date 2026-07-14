@@ -19,6 +19,17 @@ describe("classifyTerminalExitTransition", () => {
     ).toBe("initial");
   });
 
+  it("treats the synthetic closed baseline as an initial closed snapshot", () => {
+    expect(
+      classifyTerminalExitTransition({
+        previousVersion: 0,
+        previousStatus: "closed",
+        currentStatus: "closed",
+        hasHandledExit: false,
+      }),
+    ).toBe("initial");
+  });
+
   it("distinguishes a live exit from unchanged or already-handled state", () => {
     expect(
       classifyTerminalExitTransition({

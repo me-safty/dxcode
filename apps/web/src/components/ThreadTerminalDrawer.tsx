@@ -211,7 +211,7 @@ export function classifyTerminalExitTransition(options: {
 }): "none" | "initial" | "live" {
   if (
     (options.currentStatus !== "closed" && options.currentStatus !== "exited") ||
-    options.currentStatus === options.previousStatus ||
+    (options.previousVersion !== 0 && options.currentStatus === options.previousStatus) ||
     options.hasHandledExit
   ) {
     return "none";
