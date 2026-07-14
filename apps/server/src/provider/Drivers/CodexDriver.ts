@@ -44,7 +44,11 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
+  makeManualOnlyProviderMaintenanceCapabilities,
   makePackageManagedProviderMaintenanceResolver,
+  normalizeCommandPath,
+  type ProviderMaintenanceCapabilityResolutionOptions,
+  type ProviderMaintenanceCapabilitiesResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
 import {
@@ -61,12 +65,79 @@ const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
-const UPDATE = makePackageManagedProviderMaintenanceResolver({
+
+// The standalone installer's `current` entry is a symlink into `releases/`,
+// so the realpath of an on-PATH codex is the versioned binary — which sits
+// directly in the release dir, without a `bin/` segment.
+const CODEX_STANDALONE_RELEASE_BINARY_PATTERN =
+  /\/packages\/standalone\/releases\/[^/]+\/(?:bin\/)?codex(?:\.exe)?$/;
+const CODEX_STANDALONE_ROOT_SEGMENT_PATTERN = /\/packages\/standalone\//i;
+const CODEX_NPM_PACKAGE_NAME = "@openai/codex";
+
+export function isCodexStandaloneCommandPath(commandPath: string): boolean {
+  const normalized = normalizeCommandPath(commandPath);
+  return (
+    normalized.includes("/packages/standalone/") &&
+    (normalized.endsWith("/bin/codex") ||
+      normalized.endsWith("/bin/codex.exe") ||
+      normalized.endsWith("/packages/standalone/current/codex") ||
+      normalized.endsWith("/packages/standalone/current/codex.exe") ||
+      CODEX_STANDALONE_RELEASE_BINARY_PATTERN.test(normalized))
+  );
+}
+
+export function deriveCodexStandaloneUpdateEnvironment(
+  commandPath: string,
+): Readonly<Record<string, string>> | null {
+  // `codex update` locates the standalone install via $CODEX_HOME, and the
+  // maintenance runner spawns with the server's own environment — pin
+  // CODEX_HOME to the install root the matched binary actually lives in.
+  const match = CODEX_STANDALONE_ROOT_SEGMENT_PATTERN.exec(commandPath.replaceAll("\\", "/"));
+  if (!match || match.index === 0) {
+    return null;
+  }
+  return { CODEX_HOME: commandPath.slice(0, match.index) };
+}
+
+const PACKAGE_MANAGED_UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
-  npmPackageName: "@openai/codex",
+  npmPackageName: CODEX_NPM_PACKAGE_NAME,
   homebrewFormula: "codex",
-  nativeUpdate: null,
+  nativeUpdate: {
+    args: ["update"],
+    lockKey: "codex-native",
+    isCommandPath: isCodexStandaloneCommandPath,
+    deriveEnv: deriveCodexStandaloneUpdateEnvironment,
+  },
 });
+
+export function resolveCodexProviderMaintenanceCapabilities(
+  options?: ProviderMaintenanceCapabilityResolutionOptions,
+) {
+  const binaryPath = options?.binaryPath?.trim();
+  const resolvedCommandPath = options?.resolvedCommandPath?.trim() ?? binaryPath;
+
+  // A command that resolves directly to a release path stays pinned after
+  // `codex update`: the installer adds a sibling release and repoints
+  // `current`, but it does not replace that path. Keep matching release
+  // *realpaths* below so movable aliases still get native updates; only the
+  // path the provider will continue invoking makes this manual-only.
+  if (
+    resolvedCommandPath &&
+    CODEX_STANDALONE_RELEASE_BINARY_PATTERN.test(normalizeCommandPath(resolvedCommandPath))
+  ) {
+    return makeManualOnlyProviderMaintenanceCapabilities({
+      provider: DRIVER_KIND,
+      packageName: CODEX_NPM_PACKAGE_NAME,
+    });
+  }
+
+  return PACKAGE_MANAGED_UPDATE.resolve(options);
+}
+
+const UPDATE = {
+  resolve: resolveCodexProviderMaintenanceCapabilities,
+} satisfies ProviderMaintenanceCapabilitiesResolver;
 
 /**
  * Services the driver needs to materialize an instance. Surfaced as the

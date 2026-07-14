@@ -42,10 +42,20 @@ const nativePackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
   npmPackageName: "@example/native-package-tool",
   homebrewFormula: "native-package-tool",
   nativeUpdate: {
-    executable: "native-package-tool",
     args: ["update"],
     lockKey: "native-package-tool-native",
     isCommandPath: isNativeTestCommandPath("/.local/bin/native-package-tool"),
+  },
+});
+const envPackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
+  provider: driver("envPackageTool"),
+  npmPackageName: "@example/env-package-tool",
+  homebrewFormula: "env-package-tool",
+  nativeUpdate: {
+    args: ["update"],
+    lockKey: "env-package-tool-native",
+    isCommandPath: isNativeTestCommandPath("/.env-package-tool/bin/env-package-tool"),
+    deriveEnv: (commandPath) => ({ TOOL_HOME: commandPath }),
   },
 });
 const scopedPackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
@@ -53,7 +63,6 @@ const scopedPackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
   npmPackageName: "@example/scoped-package-tool",
   homebrewFormula: "example/tap/scoped-package-tool",
   nativeUpdate: {
-    executable: "scoped-package-tool",
     args: ["upgrade"],
     lockKey: "scoped-package-tool-native",
     isCommandPath: isNativeTestCommandPath("/.scoped-package-tool/bin/scoped-package-tool"),
@@ -356,9 +365,9 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
           provider: driver("nativePackageTool"),
           packageName: "@example/native-package-tool",
           update: {
-            command: "native-package-tool update",
+            command: `${nativePackageToolPath} update`,
 
-            executable: "native-package-tool",
+            executable: nativePackageToolPath,
 
             args: ["update"],
 
@@ -393,9 +402,9 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
           provider: driver("scopedPackageTool"),
           packageName: "@example/scoped-package-tool",
           update: {
-            command: "scoped-package-tool upgrade",
+            command: `${scopedPackageToolPath} upgrade`,
 
-            executable: "scoped-package-tool",
+            executable: scopedPackageToolPath,
 
             args: ["upgrade"],
 
@@ -426,6 +435,100 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
         lockKey: "homebrew",
       },
     });
+  });
+
+  it("uses explicit native binary paths as the native update executable", () => {
+    expect(
+      nativePackageToolUpdate.resolve({
+        binaryPath: "/custom/.local/bin/native-package-tool",
+      }),
+    ).toEqual({
+      provider: driver("nativePackageTool"),
+      packageName: "@example/native-package-tool",
+      update: {
+        command: "/custom/.local/bin/native-package-tool update",
+
+        executable: "/custom/.local/bin/native-package-tool",
+
+        args: ["update"],
+
+        lockKey: "native-package-tool-native",
+      },
+    });
+  });
+
+  it("derives the native update environment from the matched command path", () => {
+    expect(
+      envPackageToolUpdate.resolve({
+        binaryPath: "env-package-tool",
+        platform: "linux",
+        resolvedCommandPath: "/home/u/.local/bin/env-package-tool",
+        realCommandPath: "/home/u/.env-package-tool/bin/env-package-tool",
+      }),
+    ).toEqual({
+      provider: driver("envPackageTool"),
+      packageName: "@example/env-package-tool",
+      update: {
+        command:
+          "TOOL_HOME=/home/u/.env-package-tool/bin/env-package-tool /home/u/.local/bin/env-package-tool update",
+
+        executable: "/home/u/.local/bin/env-package-tool",
+
+        args: ["update"],
+
+        lockKey: "env-package-tool-native",
+
+        env: { TOOL_HOME: "/home/u/.env-package-tool/bin/env-package-tool" },
+      },
+    });
+  });
+
+  it("shell-escapes native manual update commands and includes their environment", () => {
+    expect(
+      makeProviderMaintenanceCapabilities({
+        provider: driver("nativePackageTool"),
+        packageName: "@example/native-package-tool",
+        updateExecutable: "/home/user/Native Tool/bin/native-package-tool",
+        updateArgs: ["update", "channel; echo injected"],
+        updateLockKey: "native-package-tool-native",
+        updateEnv: { TOOL_HOME: "/home/user/It's Native Tool" },
+        platform: "linux",
+      }).update?.command,
+    ).toBe(
+      "TOOL_HOME='/home/user/It'\\''s Native Tool' '/home/user/Native Tool/bin/native-package-tool' update 'channel; echo injected'",
+    );
+  });
+
+  it("formats native manual update commands for PowerShell on Windows", () => {
+    expect(
+      makeProviderMaintenanceCapabilities({
+        provider: driver("nativePackageTool"),
+        packageName: "@example/native-package-tool",
+        updateExecutable: "C:\\Program Files\\Native Tool\\native-package-tool.exe",
+        updateArgs: ["update", "release candidate"],
+        updateLockKey: "native-package-tool-native",
+        updateEnv: {
+          TOOL_HOME: "C:\\Users\\O'Brien\\Native Tool",
+          UPDATE_CHANNEL: "stable",
+        },
+        platform: "win32",
+      }).update?.command,
+    ).toBe(
+      "$env:TOOL_HOME = 'C:\\Users\\O''Brien\\Native Tool'; $env:UPDATE_CHANNEL = 'stable'; & 'C:\\Program Files\\Native Tool\\native-package-tool.exe' update 'release candidate'",
+    );
+  });
+
+  it("keeps existing package-manager commands copyable in PowerShell", () => {
+    expect(
+      makeProviderMaintenanceCapabilities({
+        provider: driver("packageTool"),
+        packageName: "@example/package-tool",
+        updateExecutable: "npm",
+        updateArgs: ["install", "-g", "@example/package-tool@latest"],
+        updateLockKey: "npm-global",
+        platform: "win32",
+      }).update?.command,
+    ).toBe("npm install -g @example/package-tool@latest");
   });
 
   it("switches scoped-package-tool to Homebrew updates when the binary resolves through Homebrew", () => {

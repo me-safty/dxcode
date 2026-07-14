@@ -94,6 +94,11 @@ function ProviderUpdateEnvironmentsNotification() {
     () => collectProviderUpdateCandidates(updateGroups.flatMap((group) => group.candidates)),
     [updateGroups],
   );
+  const runnableCandidateUnion = useMemo(
+    () =>
+      collectProviderUpdateCandidates(updateGroups.flatMap((group) => group.runnableCandidates)),
+    [updateGroups],
+  );
 
   // Defer while any local backend is still connecting, up to the grace period.
   const [settleGraceElapsed, setSettleGraceElapsed] = useState(false);
@@ -115,6 +120,14 @@ function ProviderUpdateEnvironmentsNotification() {
     }
     void navigate({ to: "/settings/providers" });
   }, [navigate]);
+
+  const closeEmptyPrompt = useCallback(() => {
+    const active = activeToastRef.current;
+    if (active !== null) {
+      toastManager.close(active.toastId);
+      activeToastRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     // Whether a fresh prompt can actually be shown for the current update set.
@@ -162,13 +175,14 @@ function ProviderUpdateEnvironmentsNotification() {
         type: "warning",
         title: getProviderUpdateInitialToastView({
           updateProviders: candidateUnion,
-          oneClickProviders: candidateUnion,
+          oneClickProviders: runnableCandidateUnion,
         }).title,
         description: (
           <ProviderUpdateEnvironmentRows
             onInteract={() => {
               hasInteractedRef.current = true;
             }}
+            onEmpty={closeEmptyPrompt}
           />
         ),
         timeout: 0,
@@ -189,9 +203,11 @@ function ProviderUpdateEnvironmentsNotification() {
     notificationKey,
     isGated,
     candidateUnion,
+    runnableCandidateUnion,
     dismissedNotificationKeys,
     dismissNotificationKey,
     openProviderSettings,
+    closeEmptyPrompt,
   ]);
 
   return null;

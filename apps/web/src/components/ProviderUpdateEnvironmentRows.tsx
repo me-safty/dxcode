@@ -1,5 +1,5 @@
 import { CheckIcon } from "lucide-react";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
@@ -16,10 +16,12 @@ import {
   firstRejectedProviderUpdateMessage,
   getProviderUpdateProgressToastView,
   getProviderUpdateSidebarPillView,
+  isProviderUpdateActive,
   isTerminalProviderUpdatePhase,
   resolveEnvironmentUpdateRowStatus,
   type LocalEnvironmentUpdateGroup,
   type LocalProviderUpdateOutcome,
+  type ProviderUpdateCandidate,
   type ProviderUpdateRowStatus,
   type ProviderUpdateRowStatusKind,
   type ProviderUpdateToastView,
@@ -31,6 +33,25 @@ type ProviderUpdateCommandResult = AtomCommandResult<
   { readonly providers: ReadonlyArray<ServerProvider> },
   unknown
 >;
+
+interface EnvironmentUpdateResult {
+  readonly view: ProviderUpdateToastView;
+  readonly attemptedCandidateKeys: ReadonlySet<string>;
+}
+
+interface EnvironmentUpdateError {
+  readonly message: string;
+  readonly attemptedCandidateKeys: ReadonlySet<string>;
+}
+
+function providerUpdateResultKey(candidate: ProviderUpdateCandidate): string {
+  const advisory = candidate.versionAdvisory;
+  return JSON.stringify([
+    candidate.driver,
+    advisory.latestVersion,
+    advisory.updateActionKey ?? advisory.updateCommand,
+  ]);
+}
 
 /**
  * Map one targeted instance's update command result into the settled-outcome
@@ -109,10 +130,12 @@ function rowToneClass(kind: ProviderUpdateRowStatusKind): string {
 function EnvironmentUpdateRow({
   group,
   status,
+  canUpdate,
   onUpdate,
 }: {
   readonly group: LocalEnvironmentUpdateGroup;
   readonly status: ProviderUpdateRowStatus;
+  readonly canUpdate: boolean;
   readonly onUpdate: () => void;
 }) {
   let trailing: ReactNode;
@@ -125,18 +148,18 @@ function EnvironmentUpdateRow({
       break;
     case "failed":
     case "unchanged":
-      trailing = (
+      trailing = canUpdate ? (
         <Button size="xs" variant="outline" onClick={onUpdate}>
           Retry
         </Button>
-      );
+      ) : null;
       break;
     default:
-      trailing = (
+      trailing = canUpdate ? (
         <Button size="xs" onClick={onUpdate}>
           Update
         </Button>
-      );
+      ) : null;
       break;
   }
 
@@ -153,14 +176,17 @@ function EnvironmentUpdateRow({
 
 /**
  * The launch popover's body when WSL is present: one row per local environment
- * (Windows + WSL), each with its own "update all" trigger that targets only
- * that environment's backend.
+ * (Windows + WSL). Each row targets only its own backend and exposes an update
+ * trigger only for candidates whose actions can be safely dispatched.
  */
 export function ProviderUpdateEnvironmentRows({
   onInteract,
+  onEmpty,
 }: {
   /** Called the first time the user triggers an update, so the host can stop refreshing the prompt. */
   readonly onInteract?: () => void;
+  /** Called once no update, progress, or result row remains for the host toast to display. */
+  readonly onEmpty?: () => void;
 }) {
   const { groups } = useLocalEnvironmentUpdateGroups();
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider, {
@@ -191,12 +217,17 @@ export function ProviderUpdateEnvironmentRows({
   const [pendingEnvironments, setPendingEnvironments] = useState<ReadonlySet<EnvironmentId>>(
     () => new Set(),
   );
-  const [errorByEnvironment, setErrorByEnvironment] = useState<ReadonlyMap<EnvironmentId, string>>(
-    () => new Map(),
-  );
-  const [resultByEnvironment, setResultByEnvironment] = useState<
-    ReadonlyMap<EnvironmentId, ProviderUpdateToastView>
+  const [errorByEnvironment, setErrorByEnvironment] = useState<
+    ReadonlyMap<EnvironmentId, EnvironmentUpdateError>
   >(() => new Map());
+  const [resultByEnvironment, setResultByEnvironment] = useState<
+    ReadonlyMap<EnvironmentId, EnvironmentUpdateResult>
+  >(() => new Map());
+  // Remember only environments where this mounted prompt actually accepted an
+  // update attempt. If an interrupted request loses its row while that backend
+  // reconnects, this keeps the prompt alive until its snapshot is authoritative
+  // again without letting an unrelated offline candidate strand the prompt.
+  const attemptedEnvironmentIdsRef = useRef<Set<EnvironmentId>>(new Set());
 
   const clearPending = useCallback((environmentId: EnvironmentId) => {
     setPendingEnvironments((previous) => {
@@ -212,20 +243,22 @@ export function ProviderUpdateEnvironmentRows({
   const handleUpdate = useCallback(
     async (environmentId: EnvironmentId) => {
       const group = groupByEnvironment.get(environmentId);
-      if (!group || group.candidates.length === 0) {
+      if (!group || group.runnableCandidates.length === 0) {
         return;
       }
       if (inFlightEnvironmentsRef.current.has(environmentId)) {
         return;
       }
       inFlightEnvironmentsRef.current.add(environmentId);
+      attemptedEnvironmentIdsRef.current.add(environmentId);
       const requestVersion = (requestVersionRef.current.get(environmentId) ?? 0) + 1;
       requestVersionRef.current.set(environmentId, requestVersion);
       const isCurrentRequest = () =>
         requestVersionRef.current.get(environmentId) === requestVersion;
       onInteract?.();
-      const providerCount = group.candidates.length;
-      const targets = group.candidates.map((candidate) => ({
+      const providerCount = group.runnableCandidates.length;
+      const attemptedCandidateKeys = new Set(group.runnableCandidates.map(providerUpdateResultKey));
+      const targets = group.runnableCandidates.map((candidate) => ({
         driver: candidate.driver,
         instanceId: candidate.instanceId,
       }));
@@ -261,7 +294,10 @@ export function ProviderUpdateEnvironmentRows({
         inFlightEnvironmentsRef.current.delete(environmentId);
         clearPending(environmentId);
         setErrorByEnvironment((previous) =>
-          new Map(previous).set(environmentId, "Update timed out — try again."),
+          new Map(previous).set(environmentId, {
+            message: "Update timed out — try again.",
+            attemptedCandidateKeys,
+          }),
         );
       }, PENDING_EXPIRY_MS);
       try {
@@ -306,17 +342,20 @@ export function ProviderUpdateEnvironmentRows({
         });
         if (results.length === 0) {
           setErrorByEnvironment((previous) =>
-            new Map(previous).set(
-              environmentId,
-              "This environment isn’t connected — try again once it reconnects.",
-            ),
+            new Map(previous).set(environmentId, {
+              message: "This environment isn’t connected — try again once it reconnects.",
+              attemptedCandidateKeys,
+            }),
           );
           return;
         }
         const rejectedMessage = firstRejectedProviderUpdateMessage(results);
         if (rejectedMessage) {
           setErrorByEnvironment((previous) =>
-            new Map(previous).set(environmentId, rejectedMessage),
+            new Map(previous).set(environmentId, {
+              message: rejectedMessage,
+              attemptedCandidateKeys,
+            }),
           );
           return;
         }
@@ -334,15 +373,17 @@ export function ProviderUpdateEnvironmentRows({
         // the live per-environment provider state (pill) plus the pending expiry
         // drive the row, so it self-heals to whatever the backend actually did.
         if (isTerminalProviderUpdatePhase(view.phase)) {
-          setResultByEnvironment((previous) => new Map(previous).set(environmentId, view));
+          setResultByEnvironment((previous) =>
+            new Map(previous).set(environmentId, { view, attemptedCandidateKeys }),
+          );
         }
       } catch (error) {
         if (isCurrentRequest()) {
           setErrorByEnvironment((previous) =>
-            new Map(previous).set(
-              environmentId,
-              error instanceof Error ? error.message : "Provider update failed.",
-            ),
+            new Map(previous).set(environmentId, {
+              message: error instanceof Error ? error.message : "Provider update failed.",
+              attemptedCandidateKeys,
+            }),
           );
         }
       } finally {
@@ -359,24 +400,79 @@ export function ProviderUpdateEnvironmentRows({
   );
 
   const rows = groups
-    .map((group) => ({
-      group,
-      status: resolveEnvironmentUpdateRowStatus({
+    .map((group) => {
+      const storedResult = resultByEnvironment.get(group.environmentId);
+      const storedError = errorByEnvironment.get(group.environmentId);
+      const hasAttemptedCandidate =
+        storedResult !== undefined &&
+        group.candidates.some((candidate) =>
+          storedResult.attemptedCandidateKeys.has(providerUpdateResultKey(candidate)),
+        );
+      const hasUnattemptedCandidate =
+        storedResult !== undefined &&
+        group.candidates.some(
+          (candidate) =>
+            !storedResult.attemptedCandidateKeys.has(providerUpdateResultKey(candidate)),
+        );
+      const oneClickCandidateKeys = new Set(group.oneClickCandidates.map(providerUpdateResultKey));
+      const hasSettingsOnlyCandidate = group.candidates.some(
+        (candidate) => !oneClickCandidateKeys.has(providerUpdateResultKey(candidate)),
+      );
+      const pillProviders = group.oneClickCandidates.map(
+        (candidate) =>
+          group.providers.find(
+            (provider) => provider.driver === candidate.driver && isProviderUpdateActive(provider),
+          ) ?? candidate,
+      );
+      const pill = getProviderUpdateSidebarPillView(pillProviders, {
+        visibleAfterIso: visibleAfterIsoRef.current,
+      });
+      const hasErrorTarget =
+        storedError !== undefined &&
+        group.candidates.some((candidate) =>
+          storedError.attemptedCandidateKeys.has(providerUpdateResultKey(candidate)),
+        );
+      const visibleError =
+        storedError !== undefined && group.connectionState === "ready" && !hasErrorTarget
+          ? undefined
+          : storedError?.message;
+      const visibleResult =
+        (group.candidates.length > 0 && storedResult !== undefined && !hasAttemptedCandidate) ||
+        (storedResult?.view.phase === "succeeded" && hasUnattemptedCandidate)
+          ? undefined
+          : storedResult?.view;
+      const visiblePill = pill?.tone === "success" && hasSettingsOnlyCandidate ? null : pill;
+
+      return {
         group,
-        error: errorByEnvironment.get(group.environmentId),
-        result: resultByEnvironment.get(group.environmentId),
-        // Derive the live pill from the candidates this row is actually
-        // tracking, not every provider in the environment. Otherwise an
-        // unrelated provider's recent success (or one candidate succeeding while
-        // another was interrupted) makes the pill report success and hides the
-        // Update action for candidates that are still outdated.
-        pill: getProviderUpdateSidebarPillView(group.candidates, {
-          visibleAfterIso: visibleAfterIsoRef.current,
+        status: resolveEnvironmentUpdateRowStatus({
+          group,
+          error: visibleError,
+          result: visibleResult,
+          // Derive the live pill from the candidates this row is actually
+          // tracking, not every provider in the environment. Otherwise an
+          // unrelated provider's recent success (or one candidate succeeding while
+          // another was interrupted) makes the pill report success and hides the
+          // Update action for candidates that are still outdated.
+          pill: visiblePill,
+          isPending: pendingEnvironments.has(group.environmentId),
         }),
-        isPending: pendingEnvironments.has(group.environmentId),
-      }),
-    }))
+      };
+    })
     .filter(({ group, status }) => group.candidates.length > 0 || status.kind !== "idle");
+
+  useEffect(() => {
+    // Empty provider snapshots from connecting, disconnected, or failed
+    // backends are not authoritative. Keep an interacted toast mounted until
+    // every backend that contributed an update or attempt is ready; unrelated
+    // offline environments must not strand an otherwise-empty toast.
+    const attemptedGroups = groups.filter((group) =>
+      attemptedEnvironmentIdsRef.current.has(group.environmentId),
+    );
+    if (rows.length === 0 && attemptedGroups.every((group) => group.connectionState === "ready")) {
+      onEmpty?.();
+    }
+  }, [groups, onEmpty, rows.length]);
 
   if (rows.length === 0) {
     return null;
@@ -389,6 +485,7 @@ export function ProviderUpdateEnvironmentRows({
           key={group.environmentId}
           group={group}
           status={status}
+          canUpdate={group.runnableCandidates.length > 0}
           onUpdate={() => handleUpdate(group.environmentId)}
         />
       ))}

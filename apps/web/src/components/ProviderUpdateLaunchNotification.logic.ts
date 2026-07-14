@@ -165,7 +165,7 @@ export function hasOneClickUpdateProviderCandidate(
     return false;
   }
 
-  const updateCommands = new Set<string>();
+  const updateActionKeys = new Set<string>();
   for (const provider of driverProviders) {
     if (!isProviderUpdateCandidate(provider)) {
       continue;
@@ -174,10 +174,10 @@ export function hasOneClickUpdateProviderCandidate(
     if (!advisory || advisory.canUpdate !== true || advisory.updateCommand === null) {
       return false;
     }
-    updateCommands.add(advisory.updateCommand);
+    updateActionKeys.add(advisory.updateActionKey ?? advisory.updateCommand);
   }
 
-  return updateCommands.size === 1;
+  return updateActionKeys.size === 1;
 }
 
 export function canOneClickUpdateProviderCandidate(
@@ -185,7 +185,9 @@ export function canOneClickUpdateProviderCandidate(
   providers: ReadonlyArray<ServerProvider>,
 ): boolean {
   return (
-    !isProviderUpdateActive(candidate) && hasOneClickUpdateProviderCandidate(candidate, providers)
+    !providers.some(
+      (provider) => provider.driver === candidate.driver && isProviderUpdateActive(provider),
+    ) && hasOneClickUpdateProviderCandidate(candidate, providers)
   );
 }
 
@@ -409,8 +411,12 @@ export function getProviderUpdateSidebarPillView(
   providers: ReadonlyArray<ServerProvider>,
   options?: ProviderUpdateSidebarPillOptions,
 ): ProviderUpdateSidebarPillView | null {
+  // Check activity before choosing one representative instance per driver. A
+  // shared driver update may be running on a non-default instance while the
+  // default instance remains idle; preferring the default first would hide the
+  // live update and allow the same driver action to be queued again.
+  const activeProviders = dedupeProvidersByDriver(providers.filter(isProviderUpdateActive));
   const dedupedProviders = dedupeProvidersByDriver(providers);
-  const activeProviders = dedupedProviders.filter(isProviderUpdateActive);
   if (activeProviders.length > 0) {
     const activeProvider = activeProviders[0]!;
     const activeProviderName =
@@ -709,39 +715,55 @@ export interface LocalEnvironmentUpdateGroup {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly isPrimary: boolean;
+  /** Whether this backend's provider snapshot is authoritative right now. */
+  readonly connectionState: EnvironmentUpdateConnectionState;
   /** True while this environment's backend is still connecting (e.g. WSL booting). */
   readonly isSettling: boolean;
-  /** Outdated, one-click-updatable providers in this environment. */
+  /** Outdated driver candidates, including settings-only updates. */
   readonly candidates: ProviderUpdateCandidate[];
+  /** Outdated providers whose update actions can be safely grouped. */
+  readonly oneClickCandidates: ProviderUpdateCandidate[];
+  /** Group-safe providers that are not already queued or running. */
+  readonly runnableCandidates: ProviderUpdateCandidate[];
   /** Full provider list for this environment, used to derive live update progress. */
   readonly providers: ReadonlyArray<ServerProvider>;
 }
 
 /**
- * Build one update group per local environment, pairing each environment's
- * outdated one-click candidates with its own provider list, and report whether
- * any environment is still settling (so the caller can defer the popover).
+ * Build one update group per local environment, retaining each outdated driver
+ * candidate for notification while separately identifying the candidates that
+ * are safe to update with one click. Also report whether any environment is
+ * still settling (so the caller can defer the popover).
  */
 export function buildLocalEnvironmentUpdateGroups(
   environments: ReadonlyArray<LocalEnvironmentProvidersInput>,
 ): { groups: LocalEnvironmentUpdateGroup[]; isAnySettling: boolean } {
-  const groups = environments.map((environment) => ({
-    environmentId: environment.environmentId,
-    label: environment.label,
-    isPrimary: environment.isPrimary,
-    isSettling: environment.connectionState === "connecting",
-    candidates: collectProviderUpdateCandidates(environment.providers).filter((candidate) =>
-      canOneClickUpdateProviderCandidate(candidate, environment.providers),
-    ),
-    providers: environment.providers,
-  }));
+  const groups = environments.map((environment) => {
+    const candidates = collectProviderUpdateCandidates(environment.providers);
+    const oneClickCandidates = candidates.filter((candidate) =>
+      hasOneClickUpdateProviderCandidate(candidate, environment.providers),
+    );
+    return {
+      environmentId: environment.environmentId,
+      label: environment.label,
+      isPrimary: environment.isPrimary,
+      connectionState: environment.connectionState,
+      isSettling: environment.connectionState === "connecting",
+      candidates,
+      oneClickCandidates,
+      runnableCandidates: oneClickCandidates.filter((candidate) =>
+        canOneClickUpdateProviderCandidate(candidate, environment.providers),
+      ),
+      providers: environment.providers,
+    };
+  });
   const isAnySettling = environments.some(
     (environment) => environment.connectionState === "connecting",
   );
   return { groups, isAnySettling };
 }
 
-/** Groups that actually have a one-click update available, in display order (primary first). */
+/** Groups that have an update available, including settings-only updates. */
 export function environmentGroupsWithUpdates(
   groups: ReadonlyArray<LocalEnvironmentUpdateGroup>,
 ): LocalEnvironmentUpdateGroup[] {
