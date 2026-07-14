@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { isCommandPaletteOpen } from "../commandPaletteContext";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useThreadActions } from "../hooks/useThreadActions";
 import {
   startNewLocalThreadFromContext,
   startNewThreadFromContext,
@@ -24,6 +25,7 @@ function ChatRouteGlobalShortcuts() {
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
+  const { attemptArchiveThread } = useThreadActions();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
@@ -125,6 +127,15 @@ function ChatRouteGlobalShortcuts() {
                   ? "zoom-out"
                   : "reset-zoom";
         dispatchPreviewAction(action);
+        return;
+      }
+
+      if (command === "thread.archiveCurrent") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!routeThreadRef) return;
+        void attemptArchiveThread(routeThreadRef);
+        return;
       }
     };
 
@@ -135,6 +146,7 @@ function ChatRouteGlobalShortcuts() {
   }, [
     activeDraftThread,
     activeThread,
+    attemptArchiveThread,
     clearSelection,
     handleNewThread,
     keybindings,
