@@ -21,6 +21,11 @@ vi.mock("expo-secure-store", () => ({
   setItemAsync: vi.fn(),
 }));
 
+vi.mock("expo-crypto", () => ({
+  randomUUID: () => "00000000-0000-4000-a000-000000000001",
+  getRandomBytes: (length: number) => new Uint8Array(length),
+}));
+
 vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
 }));

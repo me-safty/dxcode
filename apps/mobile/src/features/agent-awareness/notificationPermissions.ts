@@ -2,6 +2,7 @@ import * as Notifications from "expo-notifications";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Platform } from "react-native";
+import { configureAgentAwarenessNotificationChannels } from "./notificationChannels";
 
 export type NotificationPermissionResult =
   | { readonly type: "unsupported" }
@@ -15,7 +16,7 @@ export class NotificationPermissionReadError extends Schema.TaggedErrorClass<Not
   },
 ) {
   override get message(): string {
-    return "Failed to read notification permissions on iOS.";
+    return "Failed to read notification permissions.";
   }
 }
 
@@ -26,7 +27,7 @@ export class NotificationPermissionRequestError extends Schema.TaggedErrorClass<
   },
 ) {
   override get message(): string {
-    return "Failed to request notification permissions on iOS.";
+    return "Failed to request notification permissions.";
   }
 }
 
@@ -34,9 +35,14 @@ export const requestAgentNotificationPermission: Effect.Effect<
   NotificationPermissionResult,
   NotificationPermissionReadError | NotificationPermissionRequestError
 > = Effect.gen(function* () {
-  if (Platform.OS !== "ios") {
+  if (Platform.OS !== "ios" && Platform.OS !== "android") {
     return { type: "unsupported" };
   }
+
+  yield* Effect.tryPromise({
+    try: () => configureAgentAwarenessNotificationChannels(),
+    catch: (cause) => new NotificationPermissionRequestError({ cause }),
+  });
 
   const existing = yield* Effect.tryPromise({
     try: () => Notifications.getPermissionsAsync(),
@@ -52,13 +58,15 @@ export const requestAgentNotificationPermission: Effect.Effect<
 
   const requested = yield* Effect.tryPromise({
     try: () =>
-      Notifications.requestPermissionsAsync({
-        ios: {
-          allowAlert: true,
-          allowBadge: true,
-          allowSound: true,
-        },
-      }),
+      Platform.OS === "ios"
+        ? Notifications.requestPermissionsAsync({
+            ios: {
+              allowAlert: true,
+              allowBadge: true,
+              allowSound: true,
+            },
+          })
+        : Notifications.requestPermissionsAsync(),
     catch: (cause) => new NotificationPermissionRequestError({ cause }),
   });
   return requested.granted

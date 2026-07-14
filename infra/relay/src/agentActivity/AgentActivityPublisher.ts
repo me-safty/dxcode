@@ -22,6 +22,7 @@ import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
+import * as ExpoPushDeliveries from "./ExpoPushDeliveries.ts";
 
 export type AgentActivityPublishError =
   | AgentActivityRows.AgentActivityRowUpsertPersistenceError
@@ -29,7 +30,8 @@ export type AgentActivityPublishError =
   | AgentActivityRows.AgentActivityRowListPersistenceError
   | EnvironmentLinks.EnvironmentLinkUserListPersistenceError
   | LiveActivities.LiveActivityTargetListPersistenceError
-  | ApnsDeliveries.ApnsDeliveryError;
+  | ApnsDeliveries.ApnsDeliveryError
+  | ExpoPushDeliveries.ExpoPushDeliveryError;
 
 export class AgentActivityPublisher extends Context.Service<
   AgentActivityPublisher,
@@ -52,6 +54,7 @@ export const make = Effect.gen(function* () {
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const liveActivities = yield* LiveActivities.LiveActivities;
   const apnsDeliveries = yield* ApnsDeliveries.ApnsDeliveries;
+  const expoPushDeliveries = yield* ExpoPushDeliveries.ExpoPushDeliveries;
 
   const publishForDeliveryUser = Effect.fnUntraced(function* (input: {
     readonly deliveryUser: EnvironmentLinks.AgentAwarenessDeliveryUserRecord;
@@ -76,29 +79,52 @@ export const make = Effect.gen(function* () {
             nowMs: input.nowMs,
           })
         : null;
+    const androidAggregate =
+      input.deliveryUser.liveActivitiesEnabled || input.deliveryUser.notificationsEnabled
+        ? makeAggregateState({
+            activeStates,
+            terminalState: input.state && isTerminalPhase(input.state) ? input.state : null,
+            nowMs: input.nowMs,
+          })
+        : null;
     const targets = yield* liveActivities.listTargets({ userId: input.deliveryUser.userId });
-    const deliveriesByTarget = yield* Effect.forEach(
-      targets,
-      (target) =>
-        Effect.all(
-          [
-            apnsDeliveries.sendForTarget({
+    const [iosDeliveries, androidDeliveries] = yield* Effect.all(
+      [
+        Effect.forEach(
+          targets.filter((target) => target.platform === "ios"),
+          (target) =>
+            Effect.all(
+              [
+                apnsDeliveries.sendForTarget({
+                  target,
+                  aggregate: liveActivityAggregate,
+                  nowMs: input.nowMs,
+                }),
+                notificationOnlyAggregate === null
+                  ? Effect.succeed(null)
+                  : apnsDeliveries.sendPushNotificationForTarget({
+                      target,
+                      aggregate: notificationOnlyAggregate,
+                    }),
+              ],
+              { concurrency: 2 },
+            ),
+          { concurrency: 4 },
+        ),
+        Effect.forEach(
+          targets.filter((target) => target.platform === "android"),
+          (target) =>
+            expoPushDeliveries.sendForTarget({
               target,
-              aggregate: liveActivityAggregate,
+              aggregate: androidAggregate,
               nowMs: input.nowMs,
             }),
-            notificationOnlyAggregate === null
-              ? Effect.succeed(null)
-              : apnsDeliveries.sendPushNotificationForTarget({
-                  target,
-                  aggregate: notificationOnlyAggregate,
-                }),
-          ],
-          { concurrency: 2 },
+          { concurrency: 4 },
         ),
-      { concurrency: 4 },
+      ],
+      { concurrency: 2 },
     );
-    return deliveriesByTarget.flat();
+    return [...iosDeliveries.flat(), ...androidDeliveries.flat()];
   });
 
   return AgentActivityPublisher.of({
@@ -116,7 +142,8 @@ export const make = Effect.gen(function* () {
         },
         { concurrency: 2 },
       );
-      const target = targets.find((row) => row.device_id === input.deviceId) ?? null;
+      const target =
+        targets.find((row) => row.device_id === input.deviceId && row.platform === "ios") ?? null;
       if (target === null) {
         return null;
       }

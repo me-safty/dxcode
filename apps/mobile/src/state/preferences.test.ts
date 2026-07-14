@@ -14,6 +14,14 @@ vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
 }));
 
+vi.mock("expo-crypto", () => ({
+  getRandomBytes: vi.fn(() => new Uint8Array(16)),
+}));
+
+vi.mock("expo-sqlite", () => ({
+  openDatabaseAsync: vi.fn(),
+}));
+
 vi.mock("../lib/runtime", async () => {
   const Layer = await import("effect/Layer");
   return {

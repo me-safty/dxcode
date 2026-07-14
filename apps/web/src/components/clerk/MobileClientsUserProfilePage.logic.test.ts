@@ -13,6 +13,7 @@ function device(overrides: Partial<RelayClientDeviceRecord> = {}): RelayClientDe
     label: "Julius’s iPhone",
     platform: "ios",
     iosMajorVersion: 18,
+    androidApiLevel: null,
     appVersion: "1.2.3",
     notifications: {
       enabled: true,
@@ -61,5 +62,35 @@ describe("mobile client presentation", () => {
   it("handles missing app versions and invalid update timestamps", () => {
     expect(mobileClientPlatformLabel(device({ appVersion: null }))).toBe("iOS 18");
     expect(mobileClientUpdatedAtLabel("not-a-date")).toBe("Update time unavailable");
+  });
+
+  it("describes Android clients without an iOS placeholder", () => {
+    expect(
+      mobileClientPlatformLabel(
+        device({ platform: "android", iosMajorVersion: null, androidApiLevel: 36 }),
+      ),
+    ).toBe("Android API 36 · T3 Code 1.2.3");
+    expect(
+      mobileClientPlatformLabel(
+        device({
+          platform: "android",
+          iosMajorVersion: null,
+          androidApiLevel: null,
+          appVersion: null,
+        }),
+      ),
+    ).toBe("Android");
+    // The relay omits androidApiLevel entirely for devices that never
+    // reported one, so an absent field must fall back like null does.
+    expect(
+      mobileClientPlatformLabel(
+        device({
+          platform: "android",
+          iosMajorVersion: null,
+          androidApiLevel: undefined,
+          appVersion: null,
+        }),
+      ),
+    ).toBe("Android");
   });
 });

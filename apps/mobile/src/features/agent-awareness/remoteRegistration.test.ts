@@ -39,6 +39,7 @@ import {
   unregisterAgentAwarenessConnection,
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const widgetMocks = vi.hoisted(() => ({
@@ -83,7 +84,13 @@ vi.mock("../../widgets/AgentActivity", () => ({
 vi.mock("expo-notifications", () => ({
   addPushTokenListener: vi.fn(() => ({ remove: vi.fn() })),
   getDevicePushTokenAsync: vi.fn(() => Promise.resolve({ type: "ios", data: "apns-token" })),
+  getExpoPushTokenAsync: vi.fn(() =>
+    Promise.resolve({ type: "expo", data: "ExponentPushToken[android-test]" }),
+  ),
   getPermissionsAsync: vi.fn(() => Promise.resolve({ granted: true })),
+  setNotificationHandler: vi.fn(),
+  setNotificationChannelAsync: vi.fn(() => Promise.resolve(null)),
+  AndroidImportance: { DEFAULT: 3, HIGH: 4 },
 }));
 
 vi.mock("expo-crypto", () => ({
@@ -258,6 +265,29 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         notifyOnInput: true,
         notifyOnCompletion: true,
         notifyOnFailure: true,
+      },
+    });
+  });
+
+  it("builds an Android registration with an Expo push token", () => {
+    expect(
+      makeRelayDeviceRegistrationRequest({
+        platform: "android",
+        deviceId: "device-1",
+        label: "Pixel",
+        androidApiLevel: 36,
+        appVersion: "1.0.0",
+        expoPushToken: "ExponentPushToken[test]",
+        notificationsEnabled: true,
+        preferences: { liveActivitiesEnabled: true },
+      }),
+    ).toMatchObject({
+      platform: "android",
+      androidApiLevel: 36,
+      expoPushToken: "ExponentPushToken[test]",
+      preferences: {
+        liveActivitiesEnabled: true,
+        notificationsEnabled: true,
       },
     });
   });
@@ -816,6 +846,59 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       yield* runBackgroundOperations();
       expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1);
     }).pipe(Effect.provide(relayTestLayer));
+  });
+
+  it.effect("queues an Android token rotation observed while a registration is in flight", () => {
+    const fetchMock = vi.fn((request: RequestInfo | URL) => {
+      const url = request instanceof Request ? request.url : String(request);
+      return Promise.resolve(
+        Response.json(
+          url.endsWith("/v1/client/dpop-token")
+            ? {
+                access_token: "relay-dpop-token",
+                issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+                token_type: "DPoP",
+                expires_in: 300,
+                scope: "mobile:registration",
+              }
+            : { ok: true },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    Constants.expoConfig!.extra = {
+      relay: {
+        url: "https://relay.example.test/",
+      },
+      eas: { projectId: "project-1" },
+    };
+
+    (Platform as { OS: string }).OS = "android";
+    vi.mocked(Notifications.getExpoPushTokenAsync).mockClear();
+    vi.mocked(Notifications.getExpoPushTokenAsync)
+      .mockResolvedValueOnce({ type: "expo", data: "ExponentPushToken[before-rotation]" } as never)
+      .mockResolvedValueOnce({ type: "expo", data: "ExponentPushToken[after-rotation]" } as never);
+
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    // The sign-in registration is still in flight (its background operation
+    // has not been drained yet) when FCM rotates the token. The rotation
+    // carries no payload, so without the rotation marker it would coalesce
+    // into the active run that already resolved the pre-rotation token.
+    const tokenListener = vi.mocked(Notifications.addPushTokenListener).mock.calls.at(-1)?.[0];
+    expect(tokenListener).toBeDefined();
+    tokenListener?.({ type: "android", data: "rotated-fcm-token" } as never);
+
+    return Effect.gen(function* () {
+      yield* runBackgroundOperations();
+      expect(Notifications.getExpoPushTokenAsync).toHaveBeenCalledTimes(2);
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          (Platform as { OS: string }).OS = "ios";
+        }),
+      ),
+      Effect.provide(relayTestLayer),
+    );
   });
 
   it.effect(

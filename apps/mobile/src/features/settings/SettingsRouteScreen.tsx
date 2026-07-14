@@ -157,7 +157,7 @@ function ConfiguredSettingsRouteScreen() {
   }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
 
   const refreshNotifications = useCallback(async () => {
-    if (process.env.EXPO_OS !== "ios") {
+    if (Platform.OS !== "ios" && Platform.OS !== "android") {
       setNotificationStatus("unsupported");
       return;
     }
@@ -224,7 +224,7 @@ function ConfiguredSettingsRouteScreen() {
       if (getAgentAwarenessRegistrationStatus() === "registered") {
         Alert.alert(
           "Notifications enabled",
-          "Live Activity notifications are enabled for this device.",
+          "T3 Connect notifications are enabled for this device.",
         );
       } else {
         Alert.alert(
@@ -238,7 +238,7 @@ function ConfiguredSettingsRouteScreen() {
       setNotificationStatus("unsupported");
       Alert.alert(
         "Notifications unavailable",
-        "Live Activity notifications are only available on iOS.",
+        "T3 Connect notifications are not available on this platform.",
       );
       return;
     }
@@ -354,7 +354,7 @@ function ConfiguredSettingsRouteScreen() {
 
       Alert.alert(
         "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for T3 Code.",
+        `Notification permission is controlled by ${Platform.OS === "android" ? "Android" : "iOS"}. Open Settings to disable notifications for T3 Code.`,
         [
           { text: "Cancel", style: "cancel" },
           { text: "Open Settings", onPress: () => void Linking.openSettings() },
@@ -486,15 +486,17 @@ function ConfiguredSettingsRouteScreen() {
             disabled={
               !agentAwarenessPushAvailable ||
               !isLoaded ||
+              (Platform.OS === "android" && notificationStatus !== "enabled") ||
               liveActivityStatus === "checking" ||
               liveActivityStatus === "linking"
             }
             icon="bolt.circle"
-            label="Live Activity Updates"
+            label={Platform.OS === "android" ? "Live Status Updates" : "Live Activity Updates"}
             // Same gate: a saved preference is meaningless until the device
             // registration the relay needs to push updates has succeeded.
             value={
               agentAwarenessPushAvailable &&
+              (Platform.OS !== "android" || notificationStatus === "enabled") &&
               (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
               deviceRegistered
             }

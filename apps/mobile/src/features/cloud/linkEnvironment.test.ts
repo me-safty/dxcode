@@ -45,6 +45,14 @@ vi.mock("expo-secure-store", () => ({
   setItemAsync: vi.fn(),
 }));
 
+vi.mock("expo-crypto", () => ({
+  getRandomBytes: vi.fn(() => new Uint8Array(16)),
+}));
+
+vi.mock("expo-sqlite", () => ({
+  openDatabaseAsync: vi.fn(),
+}));
+
 const loadPreferences = vi.fn(() => Effect.succeed({}));
 
 const savedConnection = {

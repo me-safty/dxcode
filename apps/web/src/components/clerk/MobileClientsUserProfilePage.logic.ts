@@ -15,7 +15,17 @@ const NOTIFICATION_PREFERENCES = [
 >;
 
 export function mobileClientPlatformLabel(device: RelayClientDeviceRecord): string {
-  return `iOS ${device.iosMajorVersion}${device.appVersion ? ` · T3 Code ${device.appVersion}` : ""}`;
+  const platform =
+    device.platform === "android"
+      ? // The relay omits androidApiLevel entirely when unknown, so undefined
+        // must read as missing alongside null.
+        typeof device.androidApiLevel === "number"
+        ? `Android API ${device.androidApiLevel}`
+        : "Android"
+      : device.iosMajorVersion === null
+        ? "iOS"
+        : `iOS ${device.iosMajorVersion}`;
+  return `${platform}${device.appVersion ? ` · T3 Code ${device.appVersion}` : ""}`;
 }
 
 export function mobileClientNotificationDetail(device: RelayClientDeviceRecord): string {

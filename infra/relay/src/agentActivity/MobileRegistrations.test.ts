@@ -19,6 +19,7 @@ import * as LiveActivities from "./LiveActivities.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as AgentActivityPublisher from "./AgentActivityPublisher.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
+import * as ExpoPushDeliveries from "./ExpoPushDeliveries.ts";
 import * as ApnsClient from "./ApnsClient.ts";
 import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
 import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
@@ -44,6 +45,8 @@ function makeDevices(
   overrides: Partial<Devices.Devices["Service"]> = {},
 ): Devices.Devices["Service"] {
   return {
+    invalidateExpoPushToken: () => Effect.void,
+    invalidateExpoPushTokenSuffix: () => Effect.void,
     register: () => Effect.void,
     unregister: () => Effect.void,
     listForUser: () => Effect.succeed([]),
@@ -116,6 +119,8 @@ function makeDeliveryAttempts(
   overrides: Partial<DeliveryAttempts.DeliveryAttempts["Service"]> = {},
 ): DeliveryAttempts.DeliveryAttempts["Service"] {
   return {
+    listPendingExpoReceipts: () => Effect.succeed([]),
+    completeExpoReceipt: () => Effect.void,
     record: () => Effect.void,
     claimSourceJob: () => Effect.succeed("claimed"),
     completeSourceJob: () => Effect.void,
@@ -148,7 +153,19 @@ function makeRegistrationReplayLayer(input: {
   readonly queuedJobs: Array<SignedApnsDeliveryJob>;
 }) {
   return MobileRegistrations.layer.pipe(
-    Layer.provide(AgentActivityPublisher.layer),
+    Layer.provide(
+      AgentActivityPublisher.layer.pipe(
+        Layer.provide(
+          Layer.succeed(
+            ExpoPushDeliveries.ExpoPushDeliveries,
+            ExpoPushDeliveries.ExpoPushDeliveries.of({
+              reconcileReceipts: Effect.void,
+              sendForTarget: () => Effect.succeed([]),
+            }),
+          ),
+        ),
+      ),
+    ),
     Layer.provide(
       ApnsDeliveries.layer.pipe(
         Layer.provide(ApnsClient.layer.pipe(Layer.provide(ApnsProviderTokens.layer))),
