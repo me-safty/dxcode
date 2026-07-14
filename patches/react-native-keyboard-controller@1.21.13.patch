@@ -808,3 +808,691 @@ index 833acbe78..143baf951 100644
    );
  }
  
+diff --git a/lib/commonjs/components/KeyboardAvoidingView/index.js b/lib/commonjs/components/KeyboardAvoidingView/index.js
+--- a/lib/commonjs/components/KeyboardAvoidingView/index.js
++++ b/lib/commonjs/components/KeyboardAvoidingView/index.js
+@@ -48,6 +48,7 @@
+ }, ref) => {
+   const initialFrame = (0, _reactNativeReanimated.useSharedValue)(null);
+   const internalRef = _react.default.useRef(null);
++  const lastLayoutRef = _react.default.useRef(null);
+   const frame = (0, _reactNativeReanimated.useDerivedValue)(() => initialFrame.value || defaultLayout);
+   const {
+     translate,
+@@ -76,29 +77,48 @@
+       initialFrame.value = layout;
+     }
+   }, [behavior]);
++  const measureWithAbsolutePosition = (0, _react.useCallback)(layout => {
++    const tag = (0, _findNodeHandle.findNodeHandle)(internalRef.current);
++    if (tag !== null) {
++      // Use native `viewPositionInWindow` to get true screen-absolute coordinates.
++      // This fixes current RN bugs:
++      // - https://github.com/facebook/react-native/pull/56062
++      // - https://github.com/facebook/react-native/pull/56056
++      return _bindings.KeyboardControllerNative.viewPositionInWindow(tag).then(position => {
++        (0, _reactNativeReanimated.runOnUI)(onLayoutWorklet)({
++          ...layout,
++          x: position.x,
++          y: position.y
++        });
++      }).catch(() => {
++        (0, _reactNativeReanimated.runOnUI)(onLayoutWorklet)(layout);
++      });
++    }
++    return (0, _reactNativeReanimated.runOnUI)(onLayoutWorklet)(layout);
++  }, [onLayoutWorklet]);
+   const onLayout = (0, _react.useCallback)(e => {
+     onLayoutProps === null || onLayoutProps === void 0 || onLayoutProps(e);
+     const layout = e.nativeEvent.layout;
++    lastLayoutRef.current = layout;
+     if (automaticOffset) {
+-      const tag = (0, _findNodeHandle.findNodeHandle)(internalRef.current);
+-      if (tag !== null) {
+-        // Use native `viewPositionInWindow` to get true screen-absolute coordinates.
+-        // This fixes current RN bugs:
+-        // - https://github.com/facebook/react-native/pull/56062
+-        // - https://github.com/facebook/react-native/pull/56056
+-        return _bindings.KeyboardControllerNative.viewPositionInWindow(tag).then(position => {
+-          (0, _reactNativeReanimated.runOnUI)(onLayoutWorklet)({
+-            ...layout,
+-            x: position.x,
+-            y: position.y
+-          });
+-        }).catch(() => {
+-          (0, _reactNativeReanimated.runOnUI)(onLayoutWorklet)(layout);
+-        });
+-      }
++      return measureWithAbsolutePosition(layout);
+     }
+     return (0, _reactNativeReanimated.runOnUI)(onLayoutWorklet)(layout);
+-  }, [onLayoutProps, automaticOffset]);
++  }, [onLayoutProps, automaticOffset, measureWithAbsolutePosition]);
++  (0, _react.useEffect)(() => {
++    if (!automaticOffset) {
++      return;
++    }
++    // The mount-time measurement can run mid navigation transition and cache a
++    // stale absolute position, so re-measure when the keyboard starts opening.
++    const subscription = _bindings.KeyboardEvents.addListener("keyboardWillShow", () => {
++      const layout = lastLayoutRef.current;
++      if (layout) {
++        measureWithAbsolutePosition(layout);
++      }
++    });
++    return () => subscription.remove();
++  }, [automaticOffset, measureWithAbsolutePosition]);
+   const animatedStyle = (0, _reactNativeReanimated.useAnimatedStyle)(() => {
+     if (!enabled) {
+       return {};
+diff --git a/lib/module/components/KeyboardAvoidingView/index.js b/lib/module/components/KeyboardAvoidingView/index.js
+--- a/lib/module/components/KeyboardAvoidingView/index.js
++++ b/lib/module/components/KeyboardAvoidingView/index.js
+@@ -1,8 +1,8 @@
+ function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
+-import React, { forwardRef, useCallback, useMemo } from "react";
++import React, { forwardRef, useCallback, useEffect, useMemo } from "react";
+ import { View } from "react-native";
+ import Reanimated, { interpolate, runOnUI, useAnimatedStyle, useDerivedValue, useSharedValue } from "react-native-reanimated";
+-import { KeyboardControllerNative } from "../../bindings";
++import { KeyboardControllerNative, KeyboardEvents } from "../../bindings";
+ import { useWindowDimensions } from "../../hooks";
+ import { findNodeHandle } from "../../utils/findNodeHandle";
+ import useCombinedRef from "../hooks/useCombinedRef";
+@@ -40,6 +40,7 @@
+ }, ref) => {
+   const initialFrame = useSharedValue(null);
+   const internalRef = React.useRef(null);
++  const lastLayoutRef = React.useRef(null);
+   const frame = useDerivedValue(() => initialFrame.value || defaultLayout);
+   const {
+     translate,
+@@ -68,29 +69,48 @@
+       initialFrame.value = layout;
+     }
+   }, [behavior]);
++  const measureWithAbsolutePosition = useCallback(layout => {
++    const tag = findNodeHandle(internalRef.current);
++    if (tag !== null) {
++      // Use native `viewPositionInWindow` to get true screen-absolute coordinates.
++      // This fixes current RN bugs:
++      // - https://github.com/facebook/react-native/pull/56062
++      // - https://github.com/facebook/react-native/pull/56056
++      return KeyboardControllerNative.viewPositionInWindow(tag).then(position => {
++        runOnUI(onLayoutWorklet)({
++          ...layout,
++          x: position.x,
++          y: position.y
++        });
++      }).catch(() => {
++        runOnUI(onLayoutWorklet)(layout);
++      });
++    }
++    return runOnUI(onLayoutWorklet)(layout);
++  }, [onLayoutWorklet]);
+   const onLayout = useCallback(e => {
+     onLayoutProps === null || onLayoutProps === void 0 || onLayoutProps(e);
+     const layout = e.nativeEvent.layout;
++    lastLayoutRef.current = layout;
+     if (automaticOffset) {
+-      const tag = findNodeHandle(internalRef.current);
+-      if (tag !== null) {
+-        // Use native `viewPositionInWindow` to get true screen-absolute coordinates.
+-        // This fixes current RN bugs:
+-        // - https://github.com/facebook/react-native/pull/56062
+-        // - https://github.com/facebook/react-native/pull/56056
+-        return KeyboardControllerNative.viewPositionInWindow(tag).then(position => {
+-          runOnUI(onLayoutWorklet)({
+-            ...layout,
+-            x: position.x,
+-            y: position.y
+-          });
+-        }).catch(() => {
+-          runOnUI(onLayoutWorklet)(layout);
+-        });
+-      }
++      return measureWithAbsolutePosition(layout);
+     }
+     return runOnUI(onLayoutWorklet)(layout);
+-  }, [onLayoutProps, automaticOffset]);
++  }, [onLayoutProps, automaticOffset, measureWithAbsolutePosition]);
++  useEffect(() => {
++    if (!automaticOffset) {
++      return;
++    }
++    // The mount-time measurement can run mid navigation transition and cache a
++    // stale absolute position, so re-measure when the keyboard starts opening.
++    const subscription = KeyboardEvents.addListener("keyboardWillShow", () => {
++      const layout = lastLayoutRef.current;
++      if (layout) {
++        measureWithAbsolutePosition(layout);
++      }
++    });
++    return () => subscription.remove();
++  }, [automaticOffset, measureWithAbsolutePosition]);
+   const animatedStyle = useAnimatedStyle(() => {
+     if (!enabled) {
+       return {};
+diff --git a/src/components/KeyboardAvoidingView/index.tsx b/src/components/KeyboardAvoidingView/index.tsx
+--- a/src/components/KeyboardAvoidingView/index.tsx
++++ b/src/components/KeyboardAvoidingView/index.tsx
+@@ -1,4 +1,4 @@
+-import React, { forwardRef, useCallback, useMemo } from "react";
++import React, { forwardRef, useCallback, useEffect, useMemo } from "react";
+ import { View } from "react-native";
+ import Reanimated, {
+   interpolate,
+@@ -8,7 +8,7 @@
+   useSharedValue,
+ } from "react-native-reanimated";
+
+-import { KeyboardControllerNative } from "../../bindings";
++import { KeyboardControllerNative, KeyboardEvents } from "../../bindings";
+ import { useWindowDimensions } from "../../hooks";
+ import { findNodeHandle } from "../../utils/findNodeHandle";
+ import useCombinedRef from "../hooks/useCombinedRef";
+@@ -93,6 +93,7 @@
+   ) => {
+     const initialFrame = useSharedValue<LayoutRectangle | null>(null);
+     const internalRef = React.useRef<View | null>(null);
++    const lastLayoutRef = React.useRef<LayoutRectangle | null>(null);
+     const frame = useDerivedValue(() => initialFrame.value || defaultLayout);
+
+     const { translate, padding } = useTranslateAnimation();
+@@ -131,6 +132,32 @@
+       },
+       [behavior],
+     );
++    const measureWithAbsolutePosition = useCallback(
++      (layout: LayoutRectangle) => {
++        const tag = findNodeHandle(internalRef.current);
++
++        if (tag !== null) {
++          // Use native `viewPositionInWindow` to get true screen-absolute coordinates.
++          // This fixes current RN bugs:
++          // - https://github.com/facebook/react-native/pull/56062
++          // - https://github.com/facebook/react-native/pull/56056
++          return KeyboardControllerNative.viewPositionInWindow(tag)
++            .then((position) => {
++              runOnUI(onLayoutWorklet)({
++                ...layout,
++                x: position.x,
++                y: position.y,
++              });
++            })
++            .catch(() => {
++              runOnUI(onLayoutWorklet)(layout);
++            });
++        }
++
++        return runOnUI(onLayoutWorklet)(layout);
++      },
++      [onLayoutWorklet],
++    );
+     const onLayout = useCallback<NonNullable<ViewProps["onLayout"]>>(
+       (e) => {
+         onLayoutProps?.(e);
+@@ -137,33 +164,36 @@
+
+         const layout = e.nativeEvent.layout;
+
+-        if (automaticOffset) {
+-          const tag = findNodeHandle(internalRef.current);
++        lastLayoutRef.current = layout;
+
+-          if (tag !== null) {
+-            // Use native `viewPositionInWindow` to get true screen-absolute coordinates.
+-            // This fixes current RN bugs:
+-            // - https://github.com/facebook/react-native/pull/56062
+-            // - https://github.com/facebook/react-native/pull/56056
+-            return KeyboardControllerNative.viewPositionInWindow(tag)
+-              .then((position) => {
+-                runOnUI(onLayoutWorklet)({
+-                  ...layout,
+-                  x: position.x,
+-                  y: position.y,
+-                });
+-              })
+-              .catch(() => {
+-                runOnUI(onLayoutWorklet)(layout);
+-              });
+-          }
++        if (automaticOffset) {
++          return measureWithAbsolutePosition(layout);
+         }
+
+         return runOnUI(onLayoutWorklet)(layout);
+       },
+-      [onLayoutProps, automaticOffset],
++      [onLayoutProps, automaticOffset, measureWithAbsolutePosition],
+     );
+
++    useEffect(() => {
++      if (!automaticOffset) {
++        return;
++      }
++
++      // The mount-time measurement can run mid navigation transition and cache
++      // a stale absolute position, so re-measure when the keyboard starts
++      // opening.
++      const subscription = KeyboardEvents.addListener("keyboardWillShow", () => {
++        const layout = lastLayoutRef.current;
++
++        if (layout) {
++          measureWithAbsolutePosition(layout);
++        }
++      });
++
++      return () => subscription.remove();
++    }, [automaticOffset, measureWithAbsolutePosition]);
++
+     const animatedStyle = useAnimatedStyle(() => {
+       if (!enabled) {
+         return {};
+diff --git a/src/components/KeyboardChatScrollView/useChatKeyboard/index.ts b/src/components/KeyboardChatScrollView/useChatKeyboard/index.ts
+--- a/src/components/KeyboardChatScrollView/useChatKeyboard/index.ts
++++ b/src/components/KeyboardChatScrollView/useChatKeyboard/index.ts
+@@ -50,6 +50,8 @@
+   const closing = useSharedValue(false);
+   const minimumPaddingFractionOnOpen = useSharedValue(0);
+   const actualOpenShift = useSharedValue(0);
++  const extraPaddingOnStart = useSharedValue(0);
++  const anchorToEnd = useSharedValue(false);
+   const {
+     layout,
+     size,
+@@ -138,6 +140,15 @@
+           minimumPaddingFractionOnOpen.value = visibleFraction >= 1 ? 1 : 0;
+           padding.value = effective;
+           offsetBeforeScroll.value = scroll.value;
++          extraPaddingOnStart.value = extraContentPadding.value;
++          // Rest position at the very end of the scroll range (all bottom
++          // inset visible). Composer growth can race this capture (its
++          // corrective scroll is rAF-deferred), so record the stronger
++          // "anchored to end" fact instead of relying on offset deltas alone.
++          anchorToEnd.value =
++            !inverted &&
++            scroll.value + layout.value.height - size.value.height >=
++              blankSpace.value - 1;
+ 
+           if (!inverted && keyboardLiftBehavior === "whenAtEnd" && !atEnd) {
+             // Sentinel: don't scroll in onMove (non-inverted only)
+@@ -151,6 +162,12 @@
+           }
+         } else {
+           // Android: keyboard closing — re-capture scroll position
++          extraPaddingOnStart.value = extraContentPadding.value;
++          anchorToEnd.value =
++            !inverted &&
++            scroll.value + layout.value.height - size.value.height >=
++              blankSpace.value - 1;
++
+           if (inverted) {
+             offsetBeforeScroll.value = scroll.value;
+           } else {
+@@ -321,8 +338,36 @@
+             return;
+           }
+ 
++          if (anchorToEnd.value) {
++            // Anchored to the end of the scroll range: target the end
++            // directly (it tracks extraContentPadding live) so the rest
++            // position stays correct even when the composer grows around
++            // the animation start.
++            const target = Math.max(
++              size.value.height - layout.value.height + actualTotalPadding,
++              0,
++            );
++
++            scrollTo(scrollViewRef, 0, target, false);
++
++            if (!closing.value) {
++              actualOpenShift.value =
++                target -
++                offsetBeforeScroll.value -
++                (extraContentPadding.value - extraPaddingOnStart.value);
++            }
++
++            return;
++          }
++
++          // The composer can grow/shrink mid-animation (focus editors), which
++          // shifts extraContentPadding; include the delta since capture so the
++          // per-frame targets don't clobber that scroll correction.
++          const extraPaddingDelta =
++            extraContentPadding.value - extraPaddingOnStart.value;
++
+           const target = clampedScrollTarget(
+-            offsetBeforeScroll.value,
++            offsetBeforeScroll.value + extraPaddingDelta,
+             scrollEffective,
+             size.value.height,
+             layout.value.height,
+@@ -331,9 +376,11 @@
+ 
+           scrollTo(scrollViewRef, 0, target, false);
+ 
+-          // Track actual (clamped) displacement during open for symmetric close
++          // Track actual (clamped) keyboard-only displacement during open so
++          // close stays symmetric even when the composer height changed too
+           if (!closing.value) {
+-            actualOpenShift.value = target - offsetBeforeScroll.value;
++            actualOpenShift.value =
++              target - offsetBeforeScroll.value - extraPaddingDelta;
+           }
+         }
+       },
+@@ -352,10 +399,78 @@
+ 
+         padding.value = effective;
+ 
+-        // Record actual scroll displacement so close can be symmetric
+-        if (effective > 0 && offsetBeforeScroll.value !== -1) {
+-          actualOpenShift.value = scroll.value - offsetBeforeScroll.value;
++        if (
++          inverted ||
++          offsetBeforeScroll.value === -1 ||
++          !shouldShiftContent(keyboardLiftBehavior, true)
++        ) {
++          return;
++        }
++
++        const extraPaddingDelta =
++          extraContentPadding.value - extraPaddingOnStart.value;
++
++        // Record actual keyboard-only scroll displacement so close can be
++        // symmetric (extraContentPadding shifts are compensated separately)
++        if (effective > 0) {
++          actualOpenShift.value =
++            scroll.value - offsetBeforeScroll.value - extraPaddingDelta;
++        }
++
++        // Composer growth around the animation can leave the rendered
++        // position out of sync with the reported offset (per-frame scrollTo
++        // calls race the native inset commit). Once the animation settles,
++        // re-assert the final target (deferred, like useExtraContentPadding's
++        // scrollToTarget).
++        if (!anchorToEnd.value && (effective === 0 || extraPaddingDelta === 0)) {
++          return;
++        }
++        if (
++          anchorToEnd.value &&
++          effective === 0 &&
++          keyboardLiftBehavior === "persistent"
++        ) {
++          // Persistent close holds position instead of returning to the end
++          return;
++        }
++
++        const actualTotalPadding = Math.max(
++          blankSpace.value,
++          effective + extraContentPadding.value,
++        );
++        let target: number;
++
++        if (anchorToEnd.value) {
++          target = Math.max(
++            size.value.height - layout.value.height + actualTotalPadding,
++            0,
++          );
++        } else {
++          const minimumPaddingAbsorbed =
++            getMinimumPaddingAbsorbed(
++              blankSpace.value,
++              extraContentPadding.value,
++            ) * minimumPaddingFractionOnOpen.value;
++          const scrollEffective = getScrollEffective(
++            effective,
++            minimumPaddingAbsorbed,
++          );
++
++          target = clampedScrollTarget(
++            offsetBeforeScroll.value + extraPaddingDelta,
++            scrollEffective,
++            size.value.height,
++            layout.value.height,
++            actualTotalPadding,
++          );
+         }
++
++        requestAnimationFrame(() => {
++          if (!scrollViewRef()) {
++            return;
++          }
++          scrollTo(scrollViewRef, 0, target, false);
++        });
+       },
+     },
+     [inverted, keyboardLiftBehavior, offset],
+diff --git a/lib/module/components/KeyboardChatScrollView/useChatKeyboard/index.js b/lib/module/components/KeyboardChatScrollView/useChatKeyboard/index.js
+--- a/lib/module/components/KeyboardChatScrollView/useChatKeyboard/index.js
++++ b/lib/module/components/KeyboardChatScrollView/useChatKeyboard/index.js
+@@ -31,6 +31,8 @@
+   const closing = useSharedValue(false);
+   const minimumPaddingFractionOnOpen = useSharedValue(0);
+   const actualOpenShift = useSharedValue(0);
++  const extraPaddingOnStart = useSharedValue(0);
++  const anchorToEnd = useSharedValue(false);
+   const {
+     layout,
+     size,
+@@ -79,6 +81,12 @@
+         minimumPaddingFractionOnOpen.value = visibleFraction >= 1 ? 1 : 0;
+         padding.value = effective;
+         offsetBeforeScroll.value = scroll.value;
++        extraPaddingOnStart.value = extraContentPadding.value;
++        // Rest position at the very end of the scroll range (all bottom
++        // inset visible). Composer growth can race this capture (its
++        // corrective scroll is rAF-deferred), so record the stronger
++        // "anchored to end" fact instead of relying on offset deltas alone.
++        anchorToEnd.value = !inverted && scroll.value + layout.value.height - size.value.height >= blankSpace.value - 1;
+         if (!inverted && keyboardLiftBehavior === "whenAtEnd" && !atEnd) {
+           // Sentinel: don't scroll in onMove (non-inverted only)
+           offsetBeforeScroll.value = -1;
+@@ -91,6 +99,8 @@
+         }
+       } else {
+         // Android: keyboard closing — re-capture scroll position
++        extraPaddingOnStart.value = extraContentPadding.value;
++        anchorToEnd.value = !inverted && scroll.value + layout.value.height - size.value.height >= blankSpace.value - 1;
+         if (inverted) {
+           offsetBeforeScroll.value = scroll.value;
+         } else {
+@@ -195,12 +205,30 @@
+           scrollTo(scrollViewRef, 0, Math.min(keepAt, maxScroll), false);
+           return;
+         }
+-        const target = clampedScrollTarget(offsetBeforeScroll.value, scrollEffective, size.value.height, layout.value.height, actualTotalPadding);
++        if (anchorToEnd.value) {
++          // Anchored to the end of the scroll range: target the end
++          // directly (it tracks extraContentPadding live) so the rest
++          // position stays correct even when the composer grows around
++          // the animation start.
++          const target = Math.max(size.value.height - layout.value.height + actualTotalPadding, 0);
++          scrollTo(scrollViewRef, 0, target, false);
++          if (!closing.value) {
++            actualOpenShift.value = target - offsetBeforeScroll.value - (extraContentPadding.value - extraPaddingOnStart.value);
++          }
++          return;
++        }
++
++        // The composer can grow/shrink mid-animation (focus editors), which
++        // shifts extraContentPadding; include the delta since capture so the
++        // per-frame targets don't clobber that scroll correction.
++        const extraPaddingDelta = extraContentPadding.value - extraPaddingOnStart.value;
++        const target = clampedScrollTarget(offsetBeforeScroll.value + extraPaddingDelta, scrollEffective, size.value.height, layout.value.height, actualTotalPadding);
+         scrollTo(scrollViewRef, 0, target, false);
+ 
+-        // Track actual (clamped) displacement during open for symmetric close
++        // Track actual (clamped) keyboard-only displacement during open so
++        // close stays symmetric even when the composer height changed too
+         if (!closing.value) {
+-          actualOpenShift.value = target - offsetBeforeScroll.value;
++          actualOpenShift.value = target - offsetBeforeScroll.value - extraPaddingDelta;
+         }
+       }
+     },
+@@ -213,10 +241,44 @@
+       const effective = getEffectiveHeight(e.height, targetKeyboardHeight.value, offset);
+       padding.value = effective;
+ 
+-      // Record actual scroll displacement so close can be symmetric
+-      if (effective > 0 && offsetBeforeScroll.value !== -1) {
+-        actualOpenShift.value = scroll.value - offsetBeforeScroll.value;
++      if (inverted || offsetBeforeScroll.value === -1 || !shouldShiftContent(keyboardLiftBehavior, true)) {
++        return;
++      }
++      const extraPaddingDelta = extraContentPadding.value - extraPaddingOnStart.value;
++
++      // Record actual keyboard-only scroll displacement so close can be
++      // symmetric (extraContentPadding shifts are compensated separately)
++      if (effective > 0) {
++        actualOpenShift.value = scroll.value - offsetBeforeScroll.value - extraPaddingDelta;
++      }
++
++      // Composer growth around the animation can leave the rendered
++      // position out of sync with the reported offset (per-frame scrollTo
++      // calls race the native inset commit). Once the animation settles,
++      // re-assert the final target (deferred, like useExtraContentPadding's
++      // scrollToTarget).
++      if (!anchorToEnd.value && (effective === 0 || extraPaddingDelta === 0)) {
++        return;
+       }
++      if (anchorToEnd.value && effective === 0 && keyboardLiftBehavior === "persistent") {
++        // Persistent close holds position instead of returning to the end
++        return;
++      }
++      const actualTotalPadding = Math.max(blankSpace.value, effective + extraContentPadding.value);
++      let target;
++      if (anchorToEnd.value) {
++        target = Math.max(size.value.height - layout.value.height + actualTotalPadding, 0);
++      } else {
++        const minimumPaddingAbsorbed = getMinimumPaddingAbsorbed(blankSpace.value, extraContentPadding.value) * minimumPaddingFractionOnOpen.value;
++        const scrollEffective = getScrollEffective(effective, minimumPaddingAbsorbed);
++        target = clampedScrollTarget(offsetBeforeScroll.value + extraPaddingDelta, scrollEffective, size.value.height, layout.value.height, actualTotalPadding);
++      }
++      requestAnimationFrame(() => {
++        if (!scrollViewRef()) {
++          return;
++        }
++        scrollTo(scrollViewRef, 0, target, false);
++      });
+     }
+   }, [inverted, keyboardLiftBehavior, offset]);
+   return {
+diff --git a/lib/commonjs/components/KeyboardChatScrollView/useChatKeyboard/index.js b/lib/commonjs/components/KeyboardChatScrollView/useChatKeyboard/index.js
+--- a/lib/commonjs/components/KeyboardChatScrollView/useChatKeyboard/index.js
++++ b/lib/commonjs/components/KeyboardChatScrollView/useChatKeyboard/index.js
+@@ -38,6 +38,8 @@
+   const closing = (0, _reactNativeReanimated.useSharedValue)(false);
+   const minimumPaddingFractionOnOpen = (0, _reactNativeReanimated.useSharedValue)(0);
+   const actualOpenShift = (0, _reactNativeReanimated.useSharedValue)(0);
++  const extraPaddingOnStart = (0, _reactNativeReanimated.useSharedValue)(0);
++  const anchorToEnd = (0, _reactNativeReanimated.useSharedValue)(false);
+   const {
+     layout,
+     size,
+@@ -86,6 +88,12 @@
+         minimumPaddingFractionOnOpen.value = visibleFraction >= 1 ? 1 : 0;
+         padding.value = effective;
+         offsetBeforeScroll.value = scroll.value;
++        extraPaddingOnStart.value = extraContentPadding.value;
++        // Rest position at the very end of the scroll range (all bottom
++        // inset visible). Composer growth can race this capture (its
++        // corrective scroll is rAF-deferred), so record the stronger
++        // "anchored to end" fact instead of relying on offset deltas alone.
++        anchorToEnd.value = !inverted && scroll.value + layout.value.height - size.value.height >= blankSpace.value - 1;
+         if (!inverted && keyboardLiftBehavior === "whenAtEnd" && !atEnd) {
+           // Sentinel: don't scroll in onMove (non-inverted only)
+           offsetBeforeScroll.value = -1;
+@@ -98,6 +106,8 @@
+         }
+       } else {
+         // Android: keyboard closing — re-capture scroll position
++        extraPaddingOnStart.value = extraContentPadding.value;
++        anchorToEnd.value = !inverted && scroll.value + layout.value.height - size.value.height >= blankSpace.value - 1;
+         if (inverted) {
+           offsetBeforeScroll.value = scroll.value;
+         } else {
+@@ -202,12 +212,30 @@
+           (0, _reactNativeReanimated.scrollTo)(scrollViewRef, 0, Math.min(keepAt, maxScroll), false);
+           return;
+         }
+-        const target = (0, _helpers.clampedScrollTarget)(offsetBeforeScroll.value, scrollEffective, size.value.height, layout.value.height, actualTotalPadding);
++        if (anchorToEnd.value) {
++          // Anchored to the end of the scroll range: target the end
++          // directly (it tracks extraContentPadding live) so the rest
++          // position stays correct even when the composer grows around
++          // the animation start.
++          const target = Math.max(size.value.height - layout.value.height + actualTotalPadding, 0);
++          (0, _reactNativeReanimated.scrollTo)(scrollViewRef, 0, target, false);
++          if (!closing.value) {
++            actualOpenShift.value = target - offsetBeforeScroll.value - (extraContentPadding.value - extraPaddingOnStart.value);
++          }
++          return;
++        }
++
++        // The composer can grow/shrink mid-animation (focus editors), which
++        // shifts extraContentPadding; include the delta since capture so the
++        // per-frame targets don't clobber that scroll correction.
++        const extraPaddingDelta = extraContentPadding.value - extraPaddingOnStart.value;
++        const target = (0, _helpers.clampedScrollTarget)(offsetBeforeScroll.value + extraPaddingDelta, scrollEffective, size.value.height, layout.value.height, actualTotalPadding);
+         (0, _reactNativeReanimated.scrollTo)(scrollViewRef, 0, target, false);
+ 
+-        // Track actual (clamped) displacement during open for symmetric close
++        // Track actual (clamped) keyboard-only displacement during open so
++        // close stays symmetric even when the composer height changed too
+         if (!closing.value) {
+-          actualOpenShift.value = target - offsetBeforeScroll.value;
++          actualOpenShift.value = target - offsetBeforeScroll.value - extraPaddingDelta;
+         }
+       }
+     },
+@@ -220,10 +248,44 @@
+       const effective = (0, _helpers.getEffectiveHeight)(e.height, targetKeyboardHeight.value, offset);
+       padding.value = effective;
+ 
+-      // Record actual scroll displacement so close can be symmetric
+-      if (effective > 0 && offsetBeforeScroll.value !== -1) {
+-        actualOpenShift.value = scroll.value - offsetBeforeScroll.value;
++      if (inverted || offsetBeforeScroll.value === -1 || !(0, _helpers.shouldShiftContent)(keyboardLiftBehavior, true)) {
++        return;
++      }
++      const extraPaddingDelta = extraContentPadding.value - extraPaddingOnStart.value;
++
++      // Record actual keyboard-only scroll displacement so close can be
++      // symmetric (extraContentPadding shifts are compensated separately)
++      if (effective > 0) {
++        actualOpenShift.value = scroll.value - offsetBeforeScroll.value - extraPaddingDelta;
++      }
++
++      // Composer growth around the animation can leave the rendered
++      // position out of sync with the reported offset (per-frame scrollTo
++      // calls race the native inset commit). Once the animation settles,
++      // re-assert the final target (deferred, like useExtraContentPadding's
++      // scrollToTarget).
++      if (!anchorToEnd.value && (effective === 0 || extraPaddingDelta === 0)) {
++        return;
+       }
++      if (anchorToEnd.value && effective === 0 && keyboardLiftBehavior === "persistent") {
++        // Persistent close holds position instead of returning to the end
++        return;
++      }
++      const actualTotalPadding = Math.max(blankSpace.value, effective + extraContentPadding.value);
++      let target;
++      if (anchorToEnd.value) {
++        target = Math.max(size.value.height - layout.value.height + actualTotalPadding, 0);
++      } else {
++        const minimumPaddingAbsorbed = (0, _helpers.getMinimumPaddingAbsorbed)(blankSpace.value, extraContentPadding.value) * minimumPaddingFractionOnOpen.value;
++        const scrollEffective = (0, _helpers.getScrollEffective)(effective, minimumPaddingAbsorbed);
++        target = (0, _helpers.clampedScrollTarget)(offsetBeforeScroll.value + extraPaddingDelta, scrollEffective, size.value.height, layout.value.height, actualTotalPadding);
++      }
++      requestAnimationFrame(() => {
++        if (!scrollViewRef()) {
++          return;
++        }
++        (0, _reactNativeReanimated.scrollTo)(scrollViewRef, 0, target, false);
++      });
+     }
+   }, [inverted, keyboardLiftBehavior, offset]);
+   return {
