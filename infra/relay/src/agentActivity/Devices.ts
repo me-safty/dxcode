@@ -33,6 +33,8 @@ export class DeviceRegistrationPersistenceError extends Schema.TaggedErrorClass<
   }
 }
 
+const isDeviceRegistrationPersistenceError = Schema.is(DeviceRegistrationPersistenceError);
+
 export class DeviceUnregistrationPersistenceError extends Schema.TaggedErrorClass<DeviceUnregistrationPersistenceError>()(
   "DeviceUnregistrationPersistenceError",
   {
@@ -152,125 +154,150 @@ export const make = Effect.gen(function* () {
       // the raw Proxy into the fiber runtime, which spins the isolate at 100%
       // CPU (registrations then hang until the client aborts) — keep every db
       // chain directly yielded.
-      if (registration.pushToken) {
-        yield* db
-          .update(relayMobileDevices)
-          .set({ pushToken: null, updatedAt })
-          .where(eq(relayMobileDevices.pushToken, registration.pushToken))
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new DeviceRegistrationPersistenceError({
-                  userId: input.userId,
-                  deviceId: registration.deviceId,
-                  stage: "claim-push-token",
-                  cause,
-                }),
-            ),
-          );
-      }
-      if (registration.expoPushToken) {
-        yield* db
-          .update(relayMobileDevices)
-          .set({ expoPushToken: null, updatedAt })
-          .where(eq(relayMobileDevices.expoPushToken, registration.expoPushToken))
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new DeviceRegistrationPersistenceError({
-                  userId: input.userId,
-                  deviceId: registration.deviceId,
-                  stage: "claim-expo-push-token",
-                  cause,
-                }),
-            ),
-          );
-      }
-      if (registration.pushToStartToken) {
-        yield* db
-          .update(relayMobileDevices)
-          .set({ pushToStartToken: null, updatedAt })
-          .where(eq(relayMobileDevices.pushToStartToken, registration.pushToStartToken))
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new DeviceRegistrationPersistenceError({
-                  userId: input.userId,
-                  deviceId: registration.deviceId,
-                  stage: "claim-push-to-start-token",
-                  cause,
-                }),
-            ),
-          );
-      }
+      //
+      // Claims and the upsert commit atomically: the claims null the unique
+      // token columns on whichever rows currently own them (the unique
+      // indexes make claim-before-insert mandatory), so a failed upsert
+      // without a rollback would strand the token with no owning row and
+      // silently disable push delivery until the next registration.
+      const registerInTransaction = (tx: Pick<typeof db, "update" | "insert">) =>
+        Effect.gen(function* () {
+          if (registration.pushToken) {
+            yield* tx
+              .update(relayMobileDevices)
+              .set({ pushToken: null, updatedAt })
+              .where(eq(relayMobileDevices.pushToken, registration.pushToken))
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new DeviceRegistrationPersistenceError({
+                      userId: input.userId,
+                      deviceId: registration.deviceId,
+                      stage: "claim-push-token",
+                      cause,
+                    }),
+                ),
+              );
+          }
+          if (registration.expoPushToken) {
+            yield* tx
+              .update(relayMobileDevices)
+              .set({ expoPushToken: null, updatedAt })
+              .where(eq(relayMobileDevices.expoPushToken, registration.expoPushToken))
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new DeviceRegistrationPersistenceError({
+                      userId: input.userId,
+                      deviceId: registration.deviceId,
+                      stage: "claim-expo-push-token",
+                      cause,
+                    }),
+                ),
+              );
+          }
+          if (registration.pushToStartToken) {
+            yield* tx
+              .update(relayMobileDevices)
+              .set({ pushToStartToken: null, updatedAt })
+              .where(eq(relayMobileDevices.pushToStartToken, registration.pushToStartToken))
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new DeviceRegistrationPersistenceError({
+                      userId: input.userId,
+                      deviceId: registration.deviceId,
+                      stage: "claim-push-to-start-token",
+                      cause,
+                    }),
+                ),
+              );
+          }
+          yield* upsertDevice(tx);
+        });
 
-      yield* db
-        .insert(relayMobileDevices)
-        .values({
-          userId: input.userId,
-          deviceId: registration.deviceId,
-          label: registration.label,
-          platform: registration.platform,
-          iosMajorVersion: registration.iosMajorVersion ?? null,
-          androidApiLevel: registration.androidApiLevel ?? null,
-          appVersion: registration.appVersion ?? null,
-          bundleId: registration.bundleId ?? null,
-          apsEnvironment: registration.apsEnvironment ?? null,
-          pushToken: registration.pushToken ?? null,
-          expoPushToken: registration.expoPushToken ?? null,
-          pushToStartToken: registration.pushToStartToken ?? null,
-          preferencesJson: registration.preferences,
-          createdAt: updatedAt,
-          updatedAt,
-        })
-        .onConflictDoUpdate({
-          target: [relayMobileDevices.userId, relayMobileDevices.deviceId],
-          set: {
-            platform: registration.platform,
+      const upsertDevice = (tx: Pick<typeof db, "insert">) =>
+        tx
+          .insert(relayMobileDevices)
+          .values({
+            userId: input.userId,
+            deviceId: registration.deviceId,
             label: registration.label,
+            platform: registration.platform,
             iosMajorVersion: registration.iosMajorVersion ?? null,
             androidApiLevel: registration.androidApiLevel ?? null,
             appVersion: registration.appVersion ?? null,
-            // Preserve routing from newer app builds when an older build
-            // re-registers without these fields.
-            bundleId: sql`coalesce(excluded.bundle_id, ${relayMobileDevices.bundleId})`,
-            apsEnvironment: sql`coalesce(
+            bundleId: registration.bundleId ?? null,
+            apsEnvironment: registration.apsEnvironment ?? null,
+            pushToken: registration.pushToken ?? null,
+            expoPushToken: registration.expoPushToken ?? null,
+            pushToStartToken: registration.pushToStartToken ?? null,
+            preferencesJson: registration.preferences,
+            createdAt: updatedAt,
+            updatedAt,
+          })
+          .onConflictDoUpdate({
+            target: [relayMobileDevices.userId, relayMobileDevices.deviceId],
+            set: {
+              platform: registration.platform,
+              label: registration.label,
+              iosMajorVersion: registration.iosMajorVersion ?? null,
+              androidApiLevel: registration.androidApiLevel ?? null,
+              appVersion: registration.appVersion ?? null,
+              // Preserve routing from newer app builds when an older build
+              // re-registers without these fields.
+              bundleId: sql`coalesce(excluded.bundle_id, ${relayMobileDevices.bundleId})`,
+              apsEnvironment: sql`coalesce(
                 excluded.aps_environment,
                 ${relayMobileDevices.apsEnvironment}
               )`,
-            pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
-            // Android registrations are authoritative for the Expo token: the
-            // client always sends one when it can mint one, so an omitted
-            // token means notification permission was revoked and keeping the
-            // old value would leave deliveries targeting a token the device
-            // can no longer use. iOS rows never carry one, so the coalesce
-            // only ever preserved stale Android tokens.
-            expoPushToken:
-              registration.platform === "android"
-                ? (registration.expoPushToken ?? null)
-                : sql`coalesce(
+              pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
+              // Android registrations are authoritative for the Expo token: the
+              // client always sends one when it can mint one, so an omitted
+              // token means notification permission was revoked and keeping the
+              // old value would leave deliveries targeting a token the device
+              // can no longer use. iOS rows never carry one, so the coalesce
+              // only ever preserved stale Android tokens.
+              expoPushToken:
+                registration.platform === "android"
+                  ? (registration.expoPushToken ?? null)
+                  : sql`coalesce(
                     excluded.expo_push_token,
                     ${relayMobileDevices.expoPushToken}
                   )`,
-            pushToStartToken: sql`coalesce(
+              pushToStartToken: sql`coalesce(
                 excluded.push_to_start_token,
                 ${relayMobileDevices.pushToStartToken}
               )`,
-            preferencesJson: registration.preferences,
-            updatedAt,
-          },
-        })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
+              preferencesJson: registration.preferences,
+              updatedAt,
+            },
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new DeviceRegistrationPersistenceError({
+                  userId: input.userId,
+                  deviceId: registration.deviceId,
+                  stage: "upsert-device",
+                  cause,
+                }),
+            ),
+          );
+
+      yield* db.transaction(registerInTransaction).pipe(
+        Effect.mapError((cause) =>
+          isDeviceRegistrationPersistenceError(cause)
+            ? cause
+            : // Transaction begin/commit failures arrive as raw SqlErrors.
               new DeviceRegistrationPersistenceError({
                 userId: input.userId,
                 deviceId: registration.deviceId,
                 stage: "upsert-device",
                 cause,
               }),
-          ),
-        );
+        ),
+      );
     }),
     unregister: Effect.fn("relay.devices.unregister")(function* (input) {
       yield* Effect.annotateCurrentSpan({

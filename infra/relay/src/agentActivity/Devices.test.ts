@@ -9,6 +9,15 @@ import * as RelayDb from "../db.ts";
 import { relayLiveActivities, relayMobileDevices } from "../persistence/schema.ts";
 import * as Devices from "./Devices.ts";
 
+// register runs its claims + upsert inside db.transaction; the fake executes
+// the body against the same statement recorder so tests observe the order.
+function withFakeTransaction<T extends object>(fakeDb: T): RelayDb.RelayDb["Service"] {
+  return {
+    ...fakeDb,
+    transaction: (body: (tx: T) => unknown) => body(fakeDb),
+  } as unknown as RelayDb.RelayDb["Service"];
+}
+
 const registration: RelayDeviceRegistrationRequest = {
   deviceId: "device-1" as RelayDeviceRegistrationRequest["deviceId"],
   label: "Julius's iPhone",
@@ -37,7 +46,7 @@ describe("Devices", () => {
     const insertedValues: Array<Record<string, unknown>> = [];
     const dialect = new PgDialect();
 
-    const fakeDb = {
+    const fakeDb = withFakeTransaction({
       update: (table: unknown) => {
         expect(table).toBe(relayMobileDevices);
         calls.push("update");
@@ -73,7 +82,7 @@ describe("Devices", () => {
           },
         };
       },
-    } as unknown as RelayDb.RelayDb["Service"];
+    });
 
     return Effect.gen(function* () {
       const devices = yield* Devices.Devices;
@@ -122,7 +131,7 @@ describe("Devices", () => {
   it.effect("treats Android registrations as authoritative for the Expo push token", () => {
     const conflictSets: Array<Record<string, unknown>> = [];
 
-    const fakeDb = {
+    const fakeDb = withFakeTransaction({
       update: () => ({
         set: () => ({
           where: () => Effect.void,
@@ -136,7 +145,7 @@ describe("Devices", () => {
           },
         }),
       }),
-    } as unknown as RelayDb.RelayDb["Service"];
+    });
 
     const androidRegistration: RelayDeviceRegistrationRequest = {
       deviceId: registration.deviceId,
@@ -283,13 +292,13 @@ describe("Devices", () => {
 
   it.effect("identifies the failed device registration stage", () => {
     const cause = new Error("push-token claim failed");
-    const fakeDb = {
+    const fakeDb = withFakeTransaction({
       update: () => ({
         set: (values: Record<string, unknown>) => ({
           where: () => ("pushToken" in values ? Effect.fail(cause) : Effect.void),
         }),
       }),
-    } as unknown as RelayDb.RelayDb["Service"];
+    });
 
     return Effect.gen(function* () {
       const devices = yield* Devices.Devices;
