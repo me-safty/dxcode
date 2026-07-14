@@ -1,0 +1,21 @@
+[Desktop Entry]
+# Downstream (Blazenetic) development launcher — generated/managed by
+# scripts/blazenetic/install-local-tools.sh. The installer substitutes
+# @T3B_DESKTOP_BIN@ with the absolute path to ~/.local/bin/t3b-desktop.
+#
+# It launches konsole running a LOGIN shell (zsh -l) so that `vp` is on PATH,
+# then execs the wrapper. --hold keeps the konsole window open after exit so
+# any error output stays visible. If you prefer alacritty, replace
+#   konsole --hold -e
+# with
+#   alacritty --hold -e
+Type=Application
+Name=T3 Code — Blazenetic Dev
+GenericName=T3 Code Desktop (dev, live source)
+Comment=Launch the live-source T3 Code desktop app in development mode
+Exec=konsole --hold -e /usr/bin/zsh -lc "@T3B_DESKTOP_BIN@"
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;IDE;
+Keywords=t3;t3code;blazenetic;electron;dev;desktop;
+X-T3B-Managed=true
