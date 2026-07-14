@@ -402,6 +402,7 @@ function ArchivedThreadRow(props: {
   const subtitle = [props.environmentLabel, props.thread.branch].filter((part): part is string =>
     Boolean(part),
   );
+  const onDelete = props.isUnarchiving ? () => undefined : props.onDelete;
   return (
     <ThreadSwipeable
       backgroundColor={cardColor}
@@ -414,8 +415,9 @@ function ArchivedThreadRow(props: {
         borderBottomRightRadius: props.isLast ? 20 : 0,
         overflow: "hidden",
       }}
+      enabled={!props.isUnarchiving}
       fullSwipeWidth={windowWidth - 32}
-      onDelete={props.onDelete}
+      onDelete={onDelete}
       onSwipeableClose={props.onSwipeableClose}
       onSwipeableWillOpen={props.onSwipeableWillOpen}
       primaryAction={{

@@ -12,6 +12,26 @@ import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ThreadColdStorage } from "../Services/ThreadColdStorage.ts";
 import { ThreadColdStorageLive } from "./ThreadColdStorage.ts";
 
+const insertArchivedThread = Effect.fn("insertArchivedThreadTestFixture")(function* (
+  threadId: ThreadId,
+  title: string,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    INSERT INTO projection_threads (
+      thread_id, project_id, title, model_selection_json, runtime_mode,
+      interaction_mode, created_at, updated_at, archived_at, parent_kind,
+      root_thread_id
+    ) VALUES (
+      ${threadId}, 'project-1', ${title},
+      '{"instanceId":"codex","model":"gpt-5.5","options":[]}',
+      'full-access', 'default', '2026-07-01T00:00:00.000Z',
+      '2026-07-02T00:00:00.000Z', '2026-07-02T00:00:00.000Z',
+      'root', ${threadId}
+    )
+  `;
+});
+
 const layer = it.layer(
   ThreadColdStorageLive.pipe(
     Layer.provideMerge(SqlitePersistenceMemory),
@@ -103,6 +123,19 @@ layer("ThreadColdStorage", (it) => {
       assert.strictEqual(yield* fs.readFileString(attachmentPath), "image bytes");
       assert.isFalse(yield* fs.exists(providerLogPath));
 
+      yield* storage.rollbackRestoreTree(threadId);
+      const rolledBackMessages = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM projection_thread_messages WHERE thread_id = ${threadId}
+      `;
+      const rolledBackManifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(rolledBackMessages, [{ count: 0 }]);
+      assert.deepStrictEqual(rolledBackManifest, [{ status: "cold" }]);
+
+      assert.isTrue(yield* storage.restoreTree(threadId));
+      assert.strictEqual(yield* fs.readFileString(attachmentPath), "image bytes");
+
       yield* storage.finishRestoreTree(threadId);
       const remainingManifestCount = yield* sql<{ readonly count: number }>`
         SELECT COUNT(*) AS count FROM thread_archive_manifests WHERE thread_id = ${threadId}
@@ -126,6 +159,110 @@ layer("ThreadColdStorage", (it) => {
         WHERE task = 'compact-legacy-thread-storage'
       `;
       assert.deepStrictEqual(maintenance, [{ status: "complete" }]);
+    }),
+  );
+
+  it.effect("ignores traversal attachment entries while restoring", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const threadId = ThreadId.make("thread-traversal");
+      const attachmentName = "thread-traversal-00000000-0000-4000-8000-000000000001.png";
+
+      yield* insertArchivedThread(threadId, "Traversal thread");
+      yield* fs.writeFileString(path.join(config.attachmentsDir, attachmentName), "image bytes");
+      yield* storage.archiveThread(threadId);
+      yield* sql`
+        UPDATE cold_archive.archive_thread_chunks
+        SET kind = 'attachment:..'
+        WHERE thread_id = ${threadId} AND kind LIKE 'attachment:%'
+      `;
+
+      assert.isTrue(yield* storage.restoreTree(threadId));
+      const manifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(manifest, [{ status: "restored" }]);
+    }),
+  );
+
+  it.effect("retries archive cleanup without rebuilding deleted hot data", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const threadId = ThreadId.make("thread-cleanup-retry");
+      const providerLogPath = path.join(config.providerLogsDir, "thread-cleanup-retry.log");
+
+      yield* insertArchivedThread(threadId, "Cleanup retry thread");
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (
+          'message-cleanup-retry', ${threadId}, NULL, 'user', 'preserve across cleanup retry',
+          '[]', 0, '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z'
+        )
+      `;
+      yield* fs.makeDirectory(providerLogPath);
+      yield* fs.writeFileString(path.join(providerLogPath, "keep"), "force cleanup failure");
+
+      const archiveFailure = yield* Effect.flip(storage.archiveThread(threadId));
+      assert.strictEqual(archiveFailure.operation, "archive");
+      const pendingManifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(pendingManifest, [{ status: "cleanup_pending" }]);
+      assert.deepInclude(yield* storage.listPendingArchiveThreadIds, threadId);
+
+      yield* fs.remove(providerLogPath, { recursive: true });
+      yield* storage.archiveThread(threadId);
+      const coldManifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(coldManifest, [{ status: "cold" }]);
+
+      assert.isTrue(yield* storage.restoreTree(threadId));
+      const restoredMessages = yield* sql<{ readonly text: string }>`
+        SELECT text FROM projection_thread_messages WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(restoredMessages, [{ text: "preserve across cleanup retry" }]);
+    }),
+  );
+
+  it.effect("keeps the delete cleanup queue entry until external cleanup succeeds", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const threadId = ThreadId.make("thread-delete-retry");
+      const attachmentName = "thread-delete-retry-00000000-0000-4000-8000-000000000001.png";
+      const attachmentPath = path.join(config.attachmentsDir, attachmentName);
+
+      yield* insertArchivedThread(threadId, "Delete retry thread");
+      yield* fs.makeDirectory(attachmentPath);
+      yield* fs.writeFileString(path.join(attachmentPath, "keep"), "force cleanup failure");
+
+      const deleteFailure = yield* Effect.flip(storage.deleteThread(threadId));
+      assert.strictEqual(deleteFailure.operation, "delete");
+      const pendingCleanup = yield* sql<{ readonly reason: string }>`
+        SELECT reason FROM thread_cleanup_queue WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(pendingCleanup, [{ reason: "deleted" }]);
+
+      yield* fs.remove(attachmentPath, { recursive: true });
+      yield* storage.deleteThread(threadId);
+      const completedCleanup = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM thread_cleanup_queue WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(completedCleanup, [{ count: 0 }]);
     }),
   );
 });

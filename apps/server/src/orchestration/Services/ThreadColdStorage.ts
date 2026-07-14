@@ -19,6 +19,7 @@ export class ThreadColdStorageError extends Schema.TaggedErrorClass<ThreadColdSt
 export interface ThreadColdStorageShape {
   readonly archiveThread: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
   readonly restoreTree: (threadId: ThreadId) => Effect.Effect<boolean, ThreadColdStorageError>;
+  readonly rollbackRestoreTree: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
   readonly finishRestoreTree: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
   readonly deleteThread: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
   readonly removeProviderLogs: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;

@@ -107,6 +107,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     let processingStartedAtMs = 0;
+    let restoredUnarchiveThreadId: ThreadId | null = null;
     const aggregateRef = commandToAggregateRef(envelope.command);
     const baseMetricAttributes = {
       commandType: envelope.command.type,
@@ -166,6 +167,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             ),
           );
           if (restored) {
+            restoredUnarchiveThreadId = unarchiveThreadId;
             commandReadModel = yield* projectionSnapshotQuery.getCommandReadModel();
           }
         }
@@ -289,6 +291,36 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           if (Exit.isSuccess(exit)) {
             yield* Deferred.succeed(envelope.result, exit.value);
             return;
+          }
+
+          if (restoredUnarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
+            const rolledBack = yield* threadColdStorage.value
+              .rollbackRestoreTree(restoredUnarchiveThreadId)
+              .pipe(
+                Effect.as(true),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("failed to roll back restored archive bundle", {
+                    threadId: restoredUnarchiveThreadId,
+                    cause: Cause.pretty(cause),
+                  }).pipe(Effect.as(false)),
+                ),
+              );
+            if (rolledBack) {
+              const refreshedReadModel = yield* projectionSnapshotQuery.getCommandReadModel().pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(
+                    "failed to refresh orchestration read model after archive rollback",
+                    {
+                      threadId: restoredUnarchiveThreadId,
+                      cause: Cause.pretty(cause),
+                    },
+                  ).pipe(Effect.as(null)),
+                ),
+              );
+              if (refreshedReadModel !== null) {
+                commandReadModel = refreshedReadModel;
+              }
+            }
           }
 
           const error = Cause.squash(exit.cause) as OrchestrationDispatchError;

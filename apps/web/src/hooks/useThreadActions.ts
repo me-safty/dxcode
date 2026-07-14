@@ -123,6 +123,11 @@ export function useThreadActions() {
         );
         if (navigationResult._tag === "Failure") {
           revealOptimisticallyArchivedThread(threadRef);
+          void archivePromise.then((archiveResult) => {
+            if (archiveResult._tag === "Success") {
+              refreshArchivedThreadsForEnvironment(threadRef.environmentId);
+            }
+          });
           return navigationResult;
         }
       }

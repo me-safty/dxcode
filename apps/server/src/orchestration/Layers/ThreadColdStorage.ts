@@ -151,6 +151,20 @@ const make = Effect.gen(function* () {
     yield* sql.unsafe(`PRAGMA ${ARCHIVE_SCHEMA}.incremental_vacuum(2048)`);
   });
 
+  const completeArchiveCleanup = Effect.fn("completeThreadArchiveCleanup")(function* (
+    threadId: ThreadId,
+  ) {
+    yield* removeAttachments(threadId);
+    yield* removeProviderLogsImpl(threadId);
+    yield* reclaimFreePages();
+    yield* sql.unsafe(
+      `UPDATE thread_archive_manifests
+       SET status = 'cold', updated_at = CURRENT_TIMESTAMP, error = NULL
+       WHERE thread_id = ? AND status = 'cleanup_pending'`,
+      [threadId],
+    );
+  });
+
   const insertChunk = Effect.fn("insertArchiveChunk")(function* (input: {
     readonly threadId: string;
     readonly chunkIndex: number;
@@ -182,6 +196,10 @@ const make = Effect.gen(function* () {
     const source = manifestRows[0] ?? threadRows[0];
     if (!source) return;
     if (source.status === "cold") return;
+    if (source.status === "cleanup_pending") {
+      yield* completeArchiveCleanup(threadId);
+      return;
+    }
     const rootThreadId = String(source.root_thread_id ?? threadId);
     const archivedAt = String(source.archived_at ?? DateTime.formatIso(yield* DateTime.now));
 
@@ -270,7 +288,7 @@ const make = Effect.gen(function* () {
         }
         yield* sql.unsafe(
           `UPDATE thread_archive_manifests
-           SET status = 'cold', original_bytes = ?, compressed_bytes = ?,
+           SET status = 'cleanup_pending', original_bytes = ?, compressed_bytes = ?,
                updated_at = CURRENT_TIMESTAMP, error = NULL
            WHERE thread_id = ?`,
           [originalBytes, compressedBytes, threadId],
@@ -278,9 +296,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-    yield* removeAttachments(threadId);
-    yield* removeProviderLogsImpl(threadId);
-    yield* reclaimFreePages();
+    yield* completeArchiveCleanup(threadId);
   });
 
   const insertRows = Effect.fn("restoreArchiveRows")(function* (
@@ -329,7 +345,15 @@ const make = Effect.gen(function* () {
       const kind = String(chunk.kind);
       if (!kind.startsWith("attachment:")) continue;
       const entry = kind.slice("attachment:".length);
-      if (entry.length === 0 || entry.includes("/") || entry.includes("\\")) continue;
+      if (
+        entry.length === 0 ||
+        entry === "." ||
+        entry === ".." ||
+        entry.includes("/") ||
+        entry.includes("\\")
+      ) {
+        continue;
+      }
       const data = yield* decompress(chunk.data as Uint8Array);
       yield* fs.writeFile(path.join(config.attachmentsDir, entry), data);
     }
@@ -362,6 +386,22 @@ const make = Effect.gen(function* () {
       restored = (yield* restoreThread(ThreadId.make(String(row.thread_id)))) || restored;
     }
     return restored;
+  });
+
+  const rollbackRestoreTreeImpl = Effect.fn("rollbackRestoreArchiveTreeImpl")(function* (
+    threadId: ThreadId,
+  ) {
+    const rootThreadId = yield* resolveTreeRoot(threadId);
+    const rows = (yield* sql.unsafe(
+      `SELECT thread_id
+       FROM thread_archive_manifests
+       WHERE root_thread_id = ? AND status = 'restored'
+       ORDER BY CASE WHEN thread_id = ? THEN 1 ELSE 0 END, thread_id ASC`,
+      [rootThreadId, rootThreadId],
+    )) as ReadonlyArray<SqlRow>;
+    for (const row of rows) {
+      yield* archiveImpl(ThreadId.make(String(row.thread_id)));
+    }
   });
 
   const finishRestoreTreeImpl = Effect.fn("finishRestoreArchiveTreeImpl")(function* (
@@ -424,12 +464,12 @@ const make = Effect.gen(function* () {
           threadId,
         ]);
         yield* sql.unsafe(`DELETE FROM thread_archive_manifests WHERE thread_id = ?`, [threadId]);
-        yield* sql.unsafe(`DELETE FROM thread_cleanup_queue WHERE thread_id = ?`, [threadId]);
       }),
     );
     yield* removeAttachments(threadId);
     yield* removeProviderLogsImpl(threadId);
     yield* reclaimFreePages();
+    yield* sql.unsafe(`DELETE FROM thread_cleanup_queue WHERE thread_id = ?`, [threadId]);
   });
 
   const compactLegacyStorageImpl = Effect.fn("compactLegacyThreadStorage")(function* () {
@@ -469,6 +509,8 @@ const make = Effect.gen(function* () {
   return {
     archiveThread: (threadId) => wrap("archive", threadId, archiveImpl(threadId)),
     restoreTree: (threadId) => wrap("restore", threadId, restoreTreeImpl(threadId)),
+    rollbackRestoreTree: (threadId) =>
+      wrap("rollback-restore", threadId, rollbackRestoreTreeImpl(threadId)),
     finishRestoreTree: (threadId) =>
       wrap("finish-restore", threadId, finishRestoreTreeImpl(threadId)),
     deleteThread: (threadId) => wrap("delete", threadId, deleteImpl(threadId)),
@@ -478,7 +520,7 @@ const make = Effect.gen(function* () {
       Effect.mapError((cause) => storageError("compact-legacy-storage", "startup", cause)),
     ),
     listPendingArchiveThreadIds: listIds(
-      `SELECT thread_id FROM thread_archive_manifests WHERE status IN ('pending', 'archiving') ORDER BY archived_at ASC, thread_id ASC`,
+      `SELECT thread_id FROM thread_archive_manifests WHERE status IN ('pending', 'archiving', 'cleanup_pending') ORDER BY archived_at ASC, thread_id ASC`,
       "list-pending-archives",
     ),
     listPendingDeleteThreadIds: listIds(
