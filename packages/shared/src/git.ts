@@ -63,8 +63,8 @@ export function normalizeWorktreeBranchPrefix(
 }
 
 /**
- * Require the configured namespace because an eight-hex suffix alone also
- * matches ordinary branches such as release dates.
+ * Limit temporary branch detection to the configured namespace or the legacy
+ * default so ordinary branches with an eight-hex suffix remain untouched.
  */
 export function extractTemporaryWorktreeBranchPrefix(
   refName: string,
@@ -74,13 +74,22 @@ export function extractTemporaryWorktreeBranchPrefix(
     .trim()
     .toLowerCase()
     .replace(/^refs\/heads\//, "");
-  const prefixWithSeparator = `${expectedPrefix}/`;
-  if (!normalized.startsWith(prefixWithSeparator)) {
-    return null;
-  }
+  const matchPrefix = (prefix: WorktreeBranchPrefix): WorktreeBranchPrefix | null => {
+    const prefixWithSeparator = `${prefix}/`;
+    if (!normalized.startsWith(prefixWithSeparator)) {
+      return null;
+    }
 
-  const token = normalized.slice(prefixWithSeparator.length);
-  return /^[0-9a-f]{8}$/u.test(token) ? expectedPrefix : null;
+    const token = normalized.slice(prefixWithSeparator.length);
+    return /^[0-9a-f]{8}$/u.test(token) ? prefix : null;
+  };
+
+  return (
+    matchPrefix(expectedPrefix) ??
+    (expectedPrefix === DEFAULT_WORKTREE_BRANCH_PREFIX
+      ? null
+      : matchPrefix(DEFAULT_WORKTREE_BRANCH_PREFIX))
+  );
 }
 
 export function buildGeneratedWorktreeBranchName(

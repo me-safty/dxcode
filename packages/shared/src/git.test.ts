@@ -101,6 +101,9 @@ describe("worktree branch prefixes", () => {
     expect(extractTemporaryWorktreeBranchPrefix("codex/feature/deadbeef", "codex/feature")).toBe(
       "codex/feature",
     );
+    expect(extractTemporaryWorktreeBranchPrefix("t3code/deadbeef", "codex/feature")).toBe(
+      DEFAULT_WORKTREE_BRANCH_PREFIX,
+    );
     expect(buildGeneratedWorktreeBranchName("codex/feature/add-search", "codex/feature")).toBe(
       "codex/feature/add-search",
     );

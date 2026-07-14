@@ -1107,6 +1107,16 @@ describe("resolveLiveThreadBranchUpdate", () => {
     assert.equal(update, null);
   });
 
+  it("does not regress a semantic legacy ref after the prefix changes", () => {
+    const update = resolveLiveThreadBranchUpdate({
+      threadBranch: "t3code/github-query-rate-limit",
+      gitStatus: status({ refName: "t3code/bda76797" }),
+      worktreeBranchPrefix: "codex/team",
+    });
+
+    assert.equal(update, null);
+  });
+
   it("allows a temporary worktree ref to reconcile to a semantic branch", () => {
     const update = resolveLiveThreadBranchUpdate({
       threadBranch: "t3code/a9628676",
