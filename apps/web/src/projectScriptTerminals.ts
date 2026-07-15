@@ -578,7 +578,7 @@ function terminalAttachEventCompletesReadyWait(
   event: TerminalAttachStreamEvent,
   appendAndCheck: (data: string) => boolean,
 ): boolean {
-  if (event.type === "snapshot") {
+  if (event.type === "snapshot" || event.type === "restarted") {
     return appendAndCheck(event.snapshot.history);
   }
   if (event.type === "output") {
@@ -739,7 +739,7 @@ export async function openTerminalAndWaitForInputReady(
     }
 
     function onEvent(event: TerminalAttachStreamEvent) {
-      if (event.type === "snapshot") {
+      if (event.type === "snapshot" || event.type === "restarted") {
         appendAndCheck(event.snapshot.history);
         return;
       }

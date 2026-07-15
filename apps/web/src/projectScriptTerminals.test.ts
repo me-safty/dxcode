@@ -73,29 +73,40 @@ const makeSupervisor = Effect.gen(function* () {
   } satisfies EnvironmentSupervisor["Service"]);
 });
 
+function terminalSnapshot(history: string) {
+  return {
+    threadId: OPEN_INPUT.threadId,
+    terminalId: OPEN_INPUT.terminalId,
+    cwd: OPEN_INPUT.cwd,
+    worktreePath: null,
+    status: "running" as const,
+    pid: 123,
+    history,
+    exitCode: null,
+    exitSignal: null,
+    label: "Terminal",
+    updatedAt: "2026-06-15T00:00:00.000Z",
+  };
+}
+
 function createReadyApi(
   snapshotHistory: string,
   unsubscribe = vi.fn(),
+  eventType: "snapshot" | "restarted" = "snapshot",
 ): Pick<EnvironmentApi, "terminal"> {
   return {
     terminal: {
       attach: vi.fn((_input: TerminalAttachInput, callback) => {
-        const snapshotEvent: Extract<TerminalAttachStreamEvent, { type: "snapshot" }> = {
-          type: "snapshot",
-          snapshot: {
-            threadId: OPEN_INPUT.threadId,
-            terminalId: OPEN_INPUT.terminalId,
-            cwd: OPEN_INPUT.cwd,
-            worktreePath: null,
-            status: "running",
-            pid: 123,
-            history: snapshotHistory,
-            exitCode: null,
-            exitSignal: null,
-            label: "Terminal",
-            updatedAt: "2026-06-15T00:00:00.000Z",
-          },
-        };
+        const snapshot = terminalSnapshot(snapshotHistory);
+        const snapshotEvent: TerminalAttachStreamEvent =
+          eventType === "snapshot"
+            ? { type: "snapshot", snapshot }
+            : {
+                type: "restarted",
+                threadId: OPEN_INPUT.threadId,
+                terminalId: OPEN_INPUT.terminalId,
+                snapshot,
+              };
         callback(snapshotEvent);
         return unsubscribe;
       }),
@@ -1027,6 +1038,16 @@ describe("openTerminalAndWaitForInputReady", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it("resolves from a prompt present in a restarted snapshot", async () => {
+    vi.useFakeTimers();
+    const unsubscribe = vi.fn();
+    const api = createReadyApi("ready\n$ ", unsubscribe, "restarted");
+
+    await openTerminalAndWaitForInputReady(api, OPEN_INPUT);
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for prompt output after the snapshot", async () => {
     vi.useFakeTimers();
     const listenerRef: { current: ((event: TerminalAttachStreamEvent) => void) | null } = {
@@ -1188,6 +1209,24 @@ describe("openTerminalAndWaitForInputReady", () => {
     expect(settled).toBe(true);
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  effectIt.effect("resolves strict readiness from a restarted snapshot", () =>
+    Effect.gen(function* () {
+      const supervisor = yield* makeSupervisor;
+      subscribeMock.mockReturnValueOnce(
+        Stream.make({
+          type: "restarted",
+          threadId: OPEN_INPUT.threadId,
+          terminalId: OPEN_INPUT.terminalId,
+          snapshot: terminalSnapshot("ready\n$ "),
+        }),
+      );
+
+      yield* waitForProjectActionTerminalInputReadyStrict(OPEN_INPUT, 1_000).pipe(
+        Effect.provideService(EnvironmentSupervisor, supervisor),
+      );
+    }),
+  );
 
   effectIt.effect(
     "fails strict readiness on terminal closure but preserves best-effort fallback",
