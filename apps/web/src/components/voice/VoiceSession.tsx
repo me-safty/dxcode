@@ -205,7 +205,6 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const [panelOpen, setPanelOpen] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [currentTitle, setCurrentTitle] = useState("Current task");
-  const [userTranscript, setUserTranscript] = useState("");
   const [assistantTranscript, setAssistantTranscript] = useState("");
   const [displayTraceSessionId, setDisplayTraceSessionId] = useState<string | null>(null);
   const traceSessions = useVoiceTraceStore((state) => state.sessions);
@@ -218,9 +217,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const toolQueueRef = useRef<VoiceEvent[]>([]);
   const toolTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const traceSessionIdRef = useRef<string | null>(null);
-  const userTranscriptRef = useRef("");
+  const activeUserTraceEntryIdRef = useRef<string | null>(null);
+  const userTraceSequenceRef = useRef(0);
   const assistantTranscriptRef = useRef("");
-  const lastCommittedUserTranscriptRef = useRef("");
   const lastCommittedAssistantTranscriptRef = useRef("");
   const panelGeometry = useVoicePanelGeometry();
 
@@ -237,6 +236,18 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     },
     [],
   );
+
+  const upsertUserTrace = useCallback((transcript: string) => {
+    const sessionId = traceSessionIdRef.current;
+    const text = transcript.trim();
+    if (!sessionId || text.length === 0) return;
+    activeUserTraceEntryIdRef.current ??= `user-turn-${Date.now().toString(36)}-${(++userTraceSequenceRef.current).toString(36)}`;
+    useVoiceTraceStore.getState().upsertEntry(sessionId, activeUserTraceEntryIdRef.current, {
+      kind: "user",
+      title: "You",
+      text,
+    });
+  }, []);
 
   const completeTrace = useCallback((status: "completed" | "error" = "completed") => {
     const sessionId = traceSessionIdRef.current;
@@ -404,9 +415,8 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     setMuted(false);
     setPanelOpen(false);
     setErrorText(null);
-    setUserTranscript("");
     setAssistantTranscript("");
-    userTranscriptRef.current = "";
+    activeUserTraceEntryIdRef.current = null;
     assistantTranscriptRef.current = "";
   }, [appendTrace, completeTrace]);
 
@@ -435,11 +445,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     setStatus("connecting");
     setPanelOpen(true);
     setErrorText(null);
-    setUserTranscript("");
     setAssistantTranscript("");
-    userTranscriptRef.current = "";
+    activeUserTraceEntryIdRef.current = null;
     assistantTranscriptRef.current = "";
-    lastCommittedUserTranscriptRef.current = "";
     lastCommittedAssistantTranscriptRef.current = "";
 
     void (async () => {
@@ -531,9 +539,6 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
           case "input_audio_buffer.speech_started":
             audio.stopPlayback();
             setStatus("listening");
-            setUserTranscript("");
-            userTranscriptRef.current = "";
-            lastCommittedUserTranscriptRef.current = "";
             break;
           case "input_audio_buffer.speech_stopped":
           case "response.created":
@@ -544,21 +549,12 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
             break;
           case "conversation.item.input_audio_transcription.updated":
             if (typeof event.transcript === "string") {
-              userTranscriptRef.current = event.transcript;
-              setUserTranscript(event.transcript);
+              upsertUserTrace(event.transcript);
             }
             break;
           case "conversation.item.input_audio_transcription.completed":
             if (typeof event.transcript === "string") {
-              userTranscriptRef.current = event.transcript;
-              setUserTranscript(event.transcript);
-              if (
-                event.transcript.trim().length > 0 &&
-                event.transcript !== lastCommittedUserTranscriptRef.current
-              ) {
-                appendTrace({ kind: "user", title: "You", text: event.transcript });
-                lastCommittedUserTranscriptRef.current = event.transcript;
-              }
+              upsertUserTrace(event.transcript);
             }
             break;
           case "response.output_audio_transcript.delta":
@@ -629,6 +625,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
               });
               lastCommittedAssistantTranscriptRef.current = assistantTranscriptRef.current;
             }
+            activeUserTraceEntryIdRef.current = null;
             if (toolQueueRef.current.length === 0) setStatus("listening");
             break;
           case "error":
@@ -665,7 +662,14 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       appendTrace({ kind: "error", title: "Voice session failed", text: message });
       completeTrace("error");
     });
-  }, [appendTrace, completeTrace, createVoiceSession, flushToolCalls, resolveComposer]);
+  }, [
+    appendTrace,
+    completeTrace,
+    createVoiceSession,
+    flushToolCalls,
+    resolveComposer,
+    upsertUserTrace,
+  ]);
 
   const toggleMuted = useCallback(() => {
     setMuted((current) => {
@@ -758,11 +762,6 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
               <VoiceTraceTimeline
                 className="flex-1 rounded-xl border border-border/60 bg-background/35"
                 entries={displayTraceSession?.entries ?? []}
-                streamingUserText={
-                  userTranscript === lastCommittedUserTranscriptRef.current
-                    ? undefined
-                    : userTranscript
-                }
                 streamingAssistantText={
                   assistantTranscript === lastCommittedAssistantTranscriptRef.current
                     ? undefined

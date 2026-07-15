@@ -32,12 +32,10 @@ function TraceIcon({ kind }: { readonly kind: VoiceTraceEntry["kind"] }) {
 
 export function VoiceTraceTimeline({
   entries,
-  streamingUserText,
   streamingAssistantText,
   className,
 }: {
   readonly entries: readonly VoiceTraceEntry[];
-  readonly streamingUserText?: string | undefined;
   readonly streamingAssistantText?: string | undefined;
   readonly className?: string;
 }) {
@@ -48,7 +46,7 @@ export function VoiceTraceTimeline({
     if (!pinnedToBottomRef.current) return;
     const element = scrollRef.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [entries, streamingAssistantText, streamingUserText]);
+  }, [entries, streamingAssistantText]);
 
   return (
     <div
@@ -61,7 +59,7 @@ export function VoiceTraceTimeline({
       }}
     >
       <div className="space-y-2 p-2.5">
-        {entries.length === 0 && !streamingUserText && !streamingAssistantText ? (
+        {entries.length === 0 && !streamingAssistantText ? (
           <p className="px-1 py-6 text-center text-xs text-muted-foreground">
             Conversation and tool activity will appear here.
           </p>
@@ -99,18 +97,6 @@ export function VoiceTraceTimeline({
             ) : null}
           </div>
         ))}
-        {streamingUserText ? (
-          <div className="rounded-lg border border-border/55 bg-background/55 px-2.5 py-2 text-xs">
-            <div className="flex items-center gap-1.5 font-medium">
-              <MessageCircleIcon className="size-3.5" />
-              You
-              <span className="ml-auto text-[10px] font-normal text-muted-foreground">Live</span>
-            </div>
-            <p className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed text-foreground/75">
-              {streamingUserText}
-            </p>
-          </div>
-        ) : null}
         {streamingAssistantText ? (
           <div className="rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-2 text-xs">
             <div className="flex items-center gap-1.5 font-medium">

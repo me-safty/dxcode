@@ -63,6 +63,11 @@ interface VoiceTraceState {
   readonly activeSessionId: string | null;
   readonly startSession: (input: StartVoiceTraceInput) => string;
   readonly appendEntry: (sessionId: string, input: AppendVoiceTraceEntryInput) => void;
+  readonly upsertEntry: (
+    sessionId: string,
+    entryId: string,
+    input: AppendVoiceTraceEntryInput,
+  ) => void;
   readonly completeSession: (sessionId: string, status?: "completed" | "error") => void;
   readonly clearHistory: () => void;
 }
@@ -96,6 +101,32 @@ function trimVoiceTraceEntries(entries: readonly VoiceTraceEntry[]): readonly Vo
   return kept.toReversed();
 }
 
+function makeTraceEntry(id: string, input: AppendVoiceTraceEntryInput): VoiceTraceEntry {
+  return {
+    id,
+    timestamp: new Date().toISOString(),
+    kind: input.kind,
+    title: input.title,
+    ...(input.text === undefined ? {} : { text: clampText(input.text) }),
+    ...(input.callId === undefined ? {} : { callId: input.callId }),
+    ...(input.details === undefined ? {} : { details: clampText(input.details) }),
+  };
+}
+
+export function upsertVoiceTraceEntry(
+  entries: readonly VoiceTraceEntry[],
+  entry: VoiceTraceEntry,
+): readonly VoiceTraceEntry[] {
+  const existing = entries.find((item) => item.id === entry.id);
+  if (!existing) return trimVoiceTraceEntries([...entries, entry]);
+
+  return trimVoiceTraceEntries(
+    entries.map((item) =>
+      item.id === entry.id ? { ...entry, timestamp: existing.timestamp } : item,
+    ),
+  );
+}
+
 export const useVoiceTraceStore = create<VoiceTraceState>()(
   persist(
     (set) => ({
@@ -120,21 +151,26 @@ export const useVoiceTraceStore = create<VoiceTraceState>()(
         return id;
       },
       appendEntry: (sessionId, input) => {
-        const entry: VoiceTraceEntry = {
-          id: nextTraceId("entry"),
-          timestamp: new Date().toISOString(),
-          kind: input.kind,
-          title: input.title,
-          ...(input.text === undefined ? {} : { text: clampText(input.text) }),
-          ...(input.callId === undefined ? {} : { callId: input.callId }),
-          ...(input.details === undefined ? {} : { details: clampText(input.details) }),
-        };
+        const entry = makeTraceEntry(nextTraceId("entry"), input);
         set((state) => ({
           sessions: state.sessions.map((session) =>
             session.id === sessionId
               ? {
                   ...session,
                   entries: trimVoiceTraceEntries([...session.entries, entry]),
+                }
+              : session,
+          ),
+        }));
+      },
+      upsertEntry: (sessionId, entryId, input) => {
+        const entry = makeTraceEntry(entryId, input);
+        set((state) => ({
+          sessions: state.sessions.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  entries: upsertVoiceTraceEntry(session.entries, entry),
                 }
               : session,
           ),

@@ -2,9 +2,27 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   trimVoiceTraceSessions,
+  upsertVoiceTraceEntry,
   type VoiceTraceEntry,
   type VoiceTraceSession,
 } from "./voiceTraceStore";
+
+describe("upsertVoiceTraceEntry", () => {
+  it("updates a cumulative transcript in place", () => {
+    const partial = { ...entry(1, "What does the"), kind: "user" as const };
+    const refined = {
+      ...partial,
+      timestamp: "2026-07-15T00:00:01.000Z",
+      text: "What does the save function do in WordPress?",
+    };
+
+    const entries = upsertVoiceTraceEntry([partial], refined);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.text).toBe("What does the save function do in WordPress?");
+    expect(entries[0]?.timestamp).toBe(partial.timestamp);
+  });
+});
 
 function entry(index: number, text = `entry ${index}`): VoiceTraceEntry {
   return {
