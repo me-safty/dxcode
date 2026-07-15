@@ -20,11 +20,7 @@ import {
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import {
-  ThreadColdStorage,
-  ThreadColdStorageError,
-  type ThreadColdStorageShape,
-} from "../Services/ThreadColdStorage.ts";
+import { ThreadColdStorage, ThreadColdStorageError } from "../Services/ThreadColdStorage.ts";
 
 const gzipAsync = NodeUtil.promisify(NodeZlib.gzip);
 const gunzipAsync = NodeUtil.promisify(NodeZlib.gunzip);
@@ -793,7 +789,7 @@ const make = Effect.gen(function* () {
       `SELECT thread_id FROM thread_cleanup_queue WHERE reason = 'deleted' ORDER BY created_at ASC, thread_id ASC`,
       "list-pending-deletes",
     ),
-  } satisfies ThreadColdStorageShape;
+  } satisfies ThreadColdStorage["Service"];
 });
 
 export const ThreadColdStorageLive = Layer.effect(ThreadColdStorage, make);

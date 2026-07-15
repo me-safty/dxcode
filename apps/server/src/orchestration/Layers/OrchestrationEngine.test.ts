@@ -39,7 +39,7 @@ import {
 } from "../Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
-import { ThreadColdStorage, type ThreadColdStorageShape } from "../Services/ThreadColdStorage.ts";
+import { ThreadColdStorage } from "../Services/ThreadColdStorage.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
@@ -899,7 +899,7 @@ describe("OrchestrationEngine", () => {
         return Stream.fromIterable(events);
       },
     };
-    const coldStorage: ThreadColdStorageShape = {
+    const coldStorage: ThreadColdStorage["Service"] = {
       archiveThread: () => Effect.void,
       restoreTree: () => Effect.succeed(restoreOnUnarchive),
       rollbackRestoreTree: (threadId) =>

@@ -16,24 +16,27 @@ export class ThreadColdStorageError extends Schema.TaggedErrorClass<ThreadColdSt
   }
 }
 
-export interface ThreadColdStorageShape {
-  readonly archiveThread: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
-  readonly restoreTree: (threadId: ThreadId) => Effect.Effect<boolean, ThreadColdStorageError>;
-  readonly rollbackRestoreTree: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
-  readonly finishRestoreTree: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
-  readonly deleteThread: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
-  readonly removeProviderLogs: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
-  readonly compactLegacyStorage: Effect.Effect<void, ThreadColdStorageError>;
-  readonly listPendingArchiveThreadIds: Effect.Effect<
-    ReadonlyArray<ThreadId>,
-    ThreadColdStorageError
-  >;
-  readonly listPendingDeleteThreadIds: Effect.Effect<
-    ReadonlyArray<ThreadId>,
-    ThreadColdStorageError
-  >;
-}
-
-export class ThreadColdStorage extends Context.Service<ThreadColdStorage, ThreadColdStorageShape>()(
-  "t3/orchestration/Services/ThreadColdStorage",
-) {}
+export class ThreadColdStorage extends Context.Service<
+  ThreadColdStorage,
+  {
+    readonly archiveThread: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
+    readonly restoreTree: (threadId: ThreadId) => Effect.Effect<boolean, ThreadColdStorageError>;
+    readonly rollbackRestoreTree: (
+      threadId: ThreadId,
+    ) => Effect.Effect<void, ThreadColdStorageError>;
+    readonly finishRestoreTree: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
+    readonly deleteThread: (threadId: ThreadId) => Effect.Effect<void, ThreadColdStorageError>;
+    readonly removeProviderLogs: (
+      threadId: ThreadId,
+    ) => Effect.Effect<void, ThreadColdStorageError>;
+    readonly compactLegacyStorage: Effect.Effect<void, ThreadColdStorageError>;
+    readonly listPendingArchiveThreadIds: Effect.Effect<
+      ReadonlyArray<ThreadId>,
+      ThreadColdStorageError
+    >;
+    readonly listPendingDeleteThreadIds: Effect.Effect<
+      ReadonlyArray<ThreadId>,
+      ThreadColdStorageError
+    >;
+  }
+>()("t3/orchestration/Services/ThreadColdStorage") {}
