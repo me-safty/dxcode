@@ -208,13 +208,13 @@ export function classifyTerminalExitTransition(options: {
   previousStatus: string;
   currentStatus: string;
 }): "none" | "initial" | "live" {
-  if (
-    (options.currentStatus !== "closed" && options.currentStatus !== "exited") ||
-    (options.previousVersion !== 0 && options.currentStatus === options.previousStatus)
-  ) {
+  if (options.currentStatus !== "closed" && options.currentStatus !== "exited") {
     return "none";
   }
-  return options.previousVersion === 0 ? "initial" : "live";
+  if (options.previousVersion === 0) {
+    return "initial";
+  }
+  return options.previousStatus === "running" ? "live" : "none";
 }
 
 export function shouldHandleLiveTerminalExit(options: {

@@ -29,7 +29,7 @@ describe("classifyTerminalExitTransition", () => {
     ).toBe("initial");
   });
 
-  it("distinguishes a live exit from unchanged or already-handled state", () => {
+  it("distinguishes a live exit from later exit snapshots", () => {
     expect(
       classifyTerminalExitTransition({
         previousVersion: 3,
@@ -40,6 +40,13 @@ describe("classifyTerminalExitTransition", () => {
     expect(
       classifyTerminalExitTransition({
         previousVersion: 4,
+        previousStatus: "closed",
+        currentStatus: "exited",
+      }),
+    ).toBe("none");
+    expect(
+      classifyTerminalExitTransition({
+        previousVersion: 5,
         previousStatus: "exited",
         currentStatus: "exited",
       }),
