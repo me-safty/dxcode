@@ -1,0 +1,76 @@
+{
+  "planSlug": "issue-780-native-desktop-notifications",
+  "linkedAt": "2026-07-15T00:43:17.078Z",
+  "progress": 9,
+  "phases": {
+    "planning": {
+      "phaseId": "planning",
+      "status": "completed",
+      "startedAt": "2026-07-15T00:45:28.430Z",
+      "steps": [
+        {
+          "stepIndex": 1,
+          "description": "Review issue",
+          "status": "completed",
+          "deliverables": [
+            "Upstream research"
+          ],
+          "completedAt": "2026-07-15T00:45:28.430Z",
+          "notes": "Issue and prior PR state reviewed; no new maintainer stop or direction change."
+        }
+      ],
+      "completedAt": "2026-07-15T00:45:28.430Z"
+    }
+  },
+  "decisions": [
+    {
+      "title": "Use canonical thread shell state",
+      "description": "Derive alerts from settled latestTurn and rising pending flags in OrchestrationThreadShell, gated by environment synchronization. Provider-specific events remain outside the feature.",
+      "phase": "P",
+      "alternatives": [
+        "Intermediate assistant or diff events",
+        "Provider-specific stream parsing"
+      ],
+      "status": "accepted",
+      "id": "dec-1784076328367",
+      "decidedAt": "2026-07-15T00:45:28.367Z"
+    },
+    {
+      "title": "Deliver from Electron main",
+      "description": "Use Electron Notification in the main process so native delivery, real BrowserWindow focus, process-lifetime deduplication, and click restoration share one policy boundary.",
+      "phase": "P",
+      "alternatives": [
+        "Browser Notification API in renderer",
+        "Remote push service"
+      ],
+      "status": "accepted",
+      "id": "dec-1784076328377",
+      "decidedAt": "2026-07-15T00:45:28.377Z"
+    },
+    {
+      "title": "Keep notification payload generic",
+      "description": "Renderer sends only event kind, stable ID, environment ID, and thread ID. Desktop owns fixed copy and silent delivery, preventing agent output, prompts, diffs, commands, titles, or project names from appearing.",
+      "phase": "P",
+      "alternatives": [
+        "Thread titles in copy",
+        "Agent response previews"
+      ],
+      "status": "accepted",
+      "id": "dec-1784076328394",
+      "decidedAt": "2026-07-15T00:45:28.394Z"
+    },
+    {
+      "title": "Use pending navigation consumption",
+      "description": "On click, Electron stores one pending target, restores or creates and focuses the main window, signals the renderer, and lets the renderer consume the target once. This closes the startup-listener race.",
+      "phase": "P",
+      "alternatives": [
+        "Immediate webContents navigation only",
+        "Custom protocol deep link"
+      ],
+      "status": "accepted",
+      "id": "dec-1784076328412",
+      "decidedAt": "2026-07-15T00:45:28.412Z"
+    }
+  ],
+  "lastUpdated": "2026-07-15T00:45:28.430Z"
+}

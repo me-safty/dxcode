@@ -1,0 +1,52 @@
+{
+  "id": "15d4f0a8-126f-4b6f-9348-aff8bd9b081b",
+  "title": "Issue #780 native desktop notifications",
+  "description": "Implement default-off, privacy-safe native Electron notifications for settled thread attention transitions with replay-safe derivation and exact click navigation.",
+  "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
+  "owner": "solo-dev",
+  "status": "ready",
+  "inputs": [],
+  "expectedOutputs": [
+    "Persisted default-off desktop setting and UI",
+    "Pure transition tracker with focused tests",
+    "Electron native notification delivery and focus policy",
+    "Click restore/focus/deep-link flow",
+    "Validation evidence and draft PR handoff"
+  ],
+  "acceptanceCriteria": [
+    "Initial bootstrap emits no notification",
+    "running to completed emits once only while unfocused",
+    "running to failed emits once only while unfocused",
+    "New approval emits once",
+    "New user input emits once",
+    "Stable state does not repeat",
+    "Reconnect replay and reseed emit no false positive",
+    "Archived or removed thread does not notify",
+    "Focused window does not notify",
+    "Disabled setting does not notify",
+    "Denied or unavailable native delivery is non-fatal",
+    "Click opens the correct environment and thread",
+    "Legacy settings decode disabled",
+    "Restore defaults disables notifications",
+    "Notification contains no sensitive dynamic content",
+    "No sounds pets overlays tray mobile push or daemon changes"
+  ],
+  "requiredSensors": [
+    "test",
+    "check",
+    "typecheck",
+    "diff-check"
+  ],
+  "requiredArtifacts": [
+    {
+      "kind": "path",
+      "path": ".context/evidence/issue-780-native-desktop-notifications-validation.md"
+    },
+    {
+      "kind": "path",
+      "path": ".context/handoffs/issue-780-native-desktop-notifications-pr.md"
+    }
+  ],
+  "createdAt": "2026-07-15T00:43:17.097Z",
+  "updatedAt": "2026-07-15T00:43:17.097Z"
+}

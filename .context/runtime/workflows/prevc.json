@@ -1,0 +1,127 @@
+{
+  "version": 2,
+  "workflowType": "prevc",
+  "updatedAt": "2026-07-15T00:45:28.434Z",
+  "status": {
+    "project": {
+      "name": "issue-780-native-desktop-notifications",
+      "scale": 2,
+      "started": "2026-07-15T00:34:34.817Z",
+      "current_phase": "P",
+      "settings": {
+        "autonomous_mode": false,
+        "require_plan": true,
+        "require_approval": true
+      },
+      "plan": "issue-780-native-desktop-notifications"
+    },
+    "phases": {
+      "P": {
+        "status": "in_progress",
+        "started_at": "2026-07-15T00:34:34.817Z"
+      },
+      "R": {
+        "status": "pending"
+      },
+      "E": {
+        "status": "pending"
+      },
+      "V": {
+        "status": "pending"
+      },
+      "C": {
+        "status": "skipped",
+        "reason": "Not required for scale MEDIUM"
+      }
+    },
+    "agents": {},
+    "roles": {
+      "planner": {
+        "status": "pending"
+      },
+      "architect": {
+        "status": "pending"
+      },
+      "developer": {
+        "status": "pending"
+      },
+      "qa": {
+        "status": "pending"
+      },
+      "reviewer": {
+        "status": "pending"
+      }
+    },
+    "approval": {
+      "plan_created": true,
+      "plan_approved": false
+    },
+    "execution": {
+      "history": [
+        {
+          "phase": "P",
+          "action": "started",
+          "timestamp": "2026-07-15T00:34:34.817Z"
+        },
+        {
+          "phase": "C",
+          "action": "phase_skipped",
+          "timestamp": "2026-07-15T00:34:34.817Z"
+        },
+        {
+          "phase": "P",
+          "action": "plan_linked",
+          "plan": "issue-780-native-desktop-notifications",
+          "timestamp": "2026-07-15T00:45:16.351Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Use canonical thread shell state",
+          "timestamp": "2026-07-15T00:45:28.368Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Deliver from Electron main",
+          "timestamp": "2026-07-15T00:45:28.379Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Keep notification payload generic",
+          "timestamp": "2026-07-15T00:45:28.396Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Use pending navigation consumption",
+          "timestamp": "2026-07-15T00:45:28.414Z"
+        },
+        {
+          "phase": "P",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "planning",
+          "stepIndex": 1,
+          "stepDescription": "Review issue",
+          "notes": "Issue and prior PR state reviewed; no new maintainer stop or direction change.",
+          "timestamp": "2026-07-15T00:45:28.434Z"
+        }
+      ],
+      "last_activity": "2026-07-15T00:45:28.434Z",
+      "resume_context": "Concluído: Review issue"
+    }
+  },
+  "binding": {
+    "workflowName": "issue-780-native-desktop-notifications",
+    "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
+    "activeTaskId": "e2b0a0c8-3c4a-4b2c-adf7-f1cd8d4f27ac",
+    "createdAt": "2026-07-15T00:34:34.820Z",
+    "updatedAt": "2026-07-15T00:45:16.348Z"
+  }
+}
