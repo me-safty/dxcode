@@ -1,5 +1,11 @@
-import { useNavigation } from "@react-navigation/native";
-import { useCallback, useRef, useState } from "react";
+import {
+  type NavigationProp,
+  type ParamListBase,
+  type RouteProp,
+  useNavigation,
+  useRoute,
+} from "@react-navigation/native";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, View } from "react-native";
 import { WebView } from "react-native-webview";
 
@@ -7,7 +13,11 @@ import { AppText as Text } from "../../../components/AppText";
 import { LoadingStrip } from "../../../components/LoadingStrip";
 import { SymbolView } from "../../../components/AppSymbol";
 import { useThemeColor } from "../../../lib/useThemeColor";
-import { LEGAL_URL } from "../lib/legal-document-url";
+import { isLegalDocumentUrl, LEGAL_URL } from "../lib/legal-document-url";
+
+type SettingsLegalRouteParams = {
+  SettingsLegal: { readonly externalUrl?: string } | undefined;
+};
 
 export function SettingsLegalDocumentCloseHeaderButton() {
   const navigation = useNavigation();
@@ -34,13 +44,18 @@ export function SettingsLegalDocumentCloseHeaderButton() {
 
 export function SettingsLegalDocumentExternalHeaderButton() {
   const iconColor = useThemeColor("--color-icon");
+  const route = useRoute<RouteProp<SettingsLegalRouteParams, "SettingsLegal">>();
+  const externalUrl =
+    route.params?.externalUrl && isLegalDocumentUrl(route.params.externalUrl)
+      ? route.params.externalUrl
+      : LEGAL_URL;
 
   return (
     <Pressable
       accessibilityLabel="Open legal documents in external browser"
       accessibilityRole="button"
       hitSlop={12}
-      onPress={() => void Linking.openURL(LEGAL_URL).catch(() => undefined)}
+      onPress={() => void Linking.openURL(externalUrl).catch(() => undefined)}
       className="p-2 active:opacity-60"
     >
       <SymbolView
@@ -54,34 +69,17 @@ export function SettingsLegalDocumentExternalHeaderButton() {
   );
 }
 
-function webDocumentIdentity(value: string): string | null {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-
-    const pathname = url.pathname.replace(/\/+$/, "") || "/";
-    return `${url.origin}${pathname}`;
-  } catch {
-    return null;
-  }
-}
-
 interface SettingsLegalDocumentRouteScreenProps {
   readonly documentName: string;
   readonly documentUrl: string;
-  readonly allowedDocumentUrls: readonly string[];
 }
 
 export function SettingsLegalDocumentRouteScreen({
   documentName,
   documentUrl,
-  allowedDocumentUrls,
 }: SettingsLegalDocumentRouteScreenProps) {
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const iconColor = useThemeColor("--color-icon");
-  const allowedDocumentIdentities = new Set(
-    allowedDocumentUrls.map(webDocumentIdentity).filter((value): value is string => value !== null),
-  );
-  const isInitialLoadRef = useRef(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -111,7 +109,6 @@ export function SettingsLegalDocumentRouteScreen({
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              isInitialLoadRef.current = true;
               setLoadError(null);
               setReloadKey((value) => value + 1);
             }}
@@ -149,11 +146,7 @@ export function SettingsLegalDocumentRouteScreen({
         thirdPartyCookiesEnabled={false}
         startInLoadingState
         onShouldStartLoadWithRequest={(request) => {
-          const requestIdentity = webDocumentIdentity(request.url);
-          const isConfiguredDocument =
-            requestIdentity !== null && allowedDocumentIdentities.has(requestIdentity);
-          const isInitialRedirect = isInitialLoadRef.current && request.navigationType === "other";
-          if (isConfiguredDocument || isInitialRedirect) return true;
+          if (isLegalDocumentUrl(request.url)) return true;
 
           openExternalUrl(request.url);
           return false;
@@ -165,17 +158,18 @@ export function SettingsLegalDocumentRouteScreen({
           setLoadProgress(0.05);
           setLoadError(null);
         }}
-        onLoadEnd={() => {
-          isInitialLoadRef.current = false;
+        onLoadEnd={(event) => {
+          if (isLegalDocumentUrl(event.nativeEvent.url)) {
+            navigation.setParams({ externalUrl: event.nativeEvent.url });
+          }
           setLoadProgress(0);
         }}
         onError={(event) => {
-          isInitialLoadRef.current = false;
           setLoadProgress(0);
           setLoadError(event.nativeEvent.description || "The page could not be loaded.");
         }}
         onHttpError={(event) => {
-          isInitialLoadRef.current = false;
+          if (!isLegalDocumentUrl(event.nativeEvent.url)) return;
           setLoadProgress(0);
           setLoadError(`The server returned status ${event.nativeEvent.statusCode}.`);
         }}

@@ -252,6 +252,7 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   "GitConfirm",
   "GitOverview",
   "NewTaskSheet",
+  "SettingsLegal",
   "SettingsSheet",
   "ThreadReviewComment",
 ]);
