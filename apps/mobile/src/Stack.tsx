@@ -47,6 +47,8 @@ import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnv
 import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsWaitlistRouteScreen } from "./features/settings/SettingsWaitlistRouteScreen";
+import { ShowcaseRouteScreen } from "./features/showcase/ShowcaseRouteScreen";
+import { getNativeShowcaseScene } from "./features/showcase/nativeShowcaseScene";
 import {
   SettingsLegalDocumentCloseHeaderButton,
   SettingsLegalDocumentExternalHeaderButton,
@@ -56,6 +58,7 @@ import { nativeHeaderScrollEdgeEffects } from "./native/StackHeader";
 import { useThreadOutboxDrain } from "./state/use-thread-outbox-drain";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
+const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
 
 // Matches --color-sheet in global.css (light/dark). DynamicColorIOS lets the header
 // background stay STATIC config while still adapting to appearance changes.
@@ -286,13 +289,18 @@ function RootStackLayout(props: {
   const path = getPathFromState(props.state, navigationPathConfig);
   const pathname = path.startsWith("/") ? path : `/${path}`;
   const workspacePathname = workspacePathFromState(props.state);
+  const isShowcaseRoute = pathname.startsWith("/showcase/");
 
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
       <ClerkSettingsSheetDetentProvider initiallyExpanded={false}>
-        <AdaptiveWorkspaceLayout pathname={workspacePathname}>
-          {props.children}
-        </AdaptiveWorkspaceLayout>
+        {isShowcaseRoute ? (
+          props.children
+        ) : (
+          <AdaptiveWorkspaceLayout pathname={workspacePathname}>
+            {props.children}
+          </AdaptiveWorkspaceLayout>
+        )}
       </ClerkSettingsSheetDetentProvider>
     </HardwareKeyboardCommandProvider>
   );
@@ -338,7 +346,7 @@ function NotFoundScreen() {
 }
 
 export const RootStack = createNativeStackNavigator({
-  initialRouteName: "Home",
+  initialRouteName: SHOWCASE_ENABLED ? "Showcase" : "Home",
   layout: RootStackLayout,
   screenOptions: {
     headerShown: false,
@@ -354,6 +362,20 @@ export const RootStack = createNativeStackNavigator({
         title: "Threads",
       },
     }),
+    ...(SHOWCASE_ENABLED
+      ? {
+          Showcase: createNativeStackScreen({
+            screen: ShowcaseRouteScreen,
+            linking: "showcase/:scene",
+            initialParams: { scene: getNativeShowcaseScene() },
+            options: {
+              ...GLASS_HEADER_OPTIONS,
+              contentStyle: { backgroundColor: "transparent" },
+              headerBackVisible: false,
+            },
+          }),
+        }
+      : {}),
     Thread: createNativeStackScreen({
       screen: ThreadRouteScreen,
       linking: THREAD_LINKING_PREFIX,

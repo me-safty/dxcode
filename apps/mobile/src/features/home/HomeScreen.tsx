@@ -61,6 +61,8 @@ interface HomeScreenProps {
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly threadSortOrder: SidebarThreadSortOrder;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
+  /** Showcase/test surfaces can opt out so persisted collapse state cannot change the frame. */
+  readonly persistGroupDisplayState?: boolean;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void;
@@ -167,10 +169,11 @@ export function HomeScreen(props: HomeScreenProps) {
   const listRef = useRef<LegendListRef | null>(null);
   const insets = useSafeAreaInsets();
   const accentColor = useThemeColor("--color-icon-muted");
+  const persistGroupDisplayState = props.persistGroupDisplayState ?? true;
 
   const effectiveGroupDisplayStates = useMemo(() => {
     const next = new Map(groupDisplayStates);
-    if (!AsyncResult.isSuccess(preferencesResult)) {
+    if (!persistGroupDisplayState || !AsyncResult.isSuccess(preferencesResult)) {
       return next;
     }
     for (const key of preferencesResult.value.collapsedProjectGroups ?? []) {
@@ -181,7 +184,7 @@ export function HomeScreen(props: HomeScreenProps) {
       });
     }
     return next;
-  }, [groupDisplayStates, preferencesResult]);
+  }, [groupDisplayStates, persistGroupDisplayState, preferencesResult]);
   const effectiveGroupDisplayStatesRef = useRef(effectiveGroupDisplayStates);
   effectiveGroupDisplayStatesRef.current = effectiveGroupDisplayStates;
 
@@ -191,7 +194,7 @@ export function HomeScreen(props: HomeScreenProps) {
       next.set(key, nextGroupDisplayState(next.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action));
       effectiveGroupDisplayStatesRef.current = next;
       setGroupDisplayStates(next);
-      if (action === "toggle-collapsed") {
+      if (action === "toggle-collapsed" && persistGroupDisplayState) {
         const collapsedProjectGroups: string[] = [];
         for (const [groupKey, state] of next) {
           if (state.collapsed) {
@@ -201,7 +204,7 @@ export function HomeScreen(props: HomeScreenProps) {
         savePreferences({ collapsedProjectGroups });
       }
     },
-    [savePreferences],
+    [persistGroupDisplayState, savePreferences],
   );
 
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
