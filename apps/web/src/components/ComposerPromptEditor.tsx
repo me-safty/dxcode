@@ -74,6 +74,7 @@ import {
 import { FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
 import { formatProviderSkillDisplayName } from "~/providerSkillPresentation";
+import { type ComposerSkillMetadata, resolveComposerSkillMetadata } from "./composerSkillMetadata";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
@@ -218,11 +219,6 @@ function resolveSkillDescription(
   return description || null;
 }
 
-type ComposerSkillMetadata = {
-  label: string;
-  description: string | null;
-};
-
 function skillMetadataByName(
   skills: ReadonlyArray<ServerProviderSkill>,
 ): ReadonlyMap<string, ComposerSkillMetadata> {
@@ -365,10 +361,7 @@ function $updateComposerSkillMetadata(
 ): void {
   const visit = (node: LexicalNode): void => {
     if (node instanceof ComposerSkillNode) {
-      const metadata = skillMetadata.get(node.__skillName);
-      if (!metadata) {
-        return;
-      }
+      const metadata = resolveComposerSkillMetadata(node.__skillName, skillMetadata);
       const { label, description } = metadata;
       if (node.__skillLabel === label && node.__skillDescription === description) {
         return;
