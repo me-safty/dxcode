@@ -108,7 +108,6 @@ import { getProviderDisplayName, getProviderInteractionModeToggle } from "../../
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
-  resolveComposerProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
@@ -422,7 +421,7 @@ export interface ChatComposerHandle {
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
-  } | null;
+  };
 }
 
 // --------------------------------------------------------------------------
@@ -679,7 +678,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       providerStatuses,
       explicitSelectedInstanceId,
     ) ?? ProviderDriverKind.make("codex");
-  const requestedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
+  const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const lockedContinuationGroupKey = useMemo((): string | null => {
     if (!lockedProvider || !activeThread) return null;
     const lockedInstanceId =
@@ -703,43 +702,63 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   //      ignore picker selections).
   //   2. Thread's persisted instance id (server-side saved selection).
   //   3. Project default's instance id.
-  //   4. First enabled and available entry matching the current driver kind.
-  //   5. First enabled and available entry allowed by the thread lock.
+  //   4. First enabled entry matching the current driver kind.
+  //   5. First enabled entry overall / default instance for the kind.
   //
-  const selectedInstanceId = useMemo<ProviderInstanceId | undefined>(() => {
-    return resolveComposerProviderInstance({
-      entries: providerInstanceEntries,
-      candidates: [
-        composerDraft.activeProvider,
-        activeThread?.session?.providerInstanceId,
-        activeThreadModelSelection?.instanceId,
-        activeProjectDefaultModelSelection?.instanceId,
-      ],
-      selectedProvider: requestedProvider,
-      lockedProvider,
-      lockedContinuationGroupKey,
-    });
+  const selectedInstanceId = useMemo<ProviderInstanceId>(() => {
+    const candidates: Array<string | null | undefined> = [
+      composerDraft.activeProvider,
+      activeThread?.session?.providerInstanceId,
+      activeThreadModelSelection?.instanceId,
+      activeProjectDefaultModelSelection?.instanceId,
+    ];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const match = providerInstanceEntries.find(
+        (entry) => entry.instanceId === candidate && entry.enabled,
+      );
+      if (match) {
+        // When locked to a specific driver kind, ignore persisted instance
+        // ids from a different kind or continuation group.
+        if (lockedProvider && match.driverKind !== lockedProvider) continue;
+        if (
+          lockedContinuationGroupKey &&
+          match.continuationGroupKey !== lockedContinuationGroupKey
+        ) {
+          continue;
+        }
+        return match.instanceId;
+      }
+    }
+    if (explicitSelectedInstanceId) {
+      return ProviderInstanceId.make(explicitSelectedInstanceId);
+    }
+    const byKind = providerInstanceEntries.find(
+      (entry) =>
+        entry.enabled &&
+        entry.driverKind === selectedProvider &&
+        (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey),
+    );
+    if (byKind) return byKind.instanceId;
+    const anyEnabled = providerInstanceEntries.find((entry) => entry.enabled);
+    return (
+      anyEnabled?.instanceId ??
+      providerInstanceEntries[0]?.instanceId ??
+      activeThreadModelSelection?.instanceId ??
+      activeProjectDefaultModelSelection?.instanceId ??
+      ProviderInstanceId.make("codex")
+    );
   }, [
     activeProjectDefaultModelSelection?.instanceId,
     activeThread?.session?.providerInstanceId,
     activeThreadModelSelection?.instanceId,
     composerDraft.activeProvider,
+    explicitSelectedInstanceId,
     lockedContinuationGroupKey,
     lockedProvider,
     providerInstanceEntries,
-    requestedProvider,
+    selectedProvider,
   ]);
-  const providerSelectionUnavailable = selectedInstanceId === undefined;
-  const selectedProviderEntry = useMemo(
-    () =>
-      selectedInstanceId
-        ? providerInstanceEntries.find((entry) => entry.instanceId === selectedInstanceId)
-        : undefined,
-    [providerInstanceEntries, selectedInstanceId],
-  );
-  const selectedProvider = selectedProviderEntry?.driverKind ?? requestedProvider;
-  const selectedInstanceIdForPicker =
-    selectedInstanceId ?? ProviderInstanceId.make(selectedProvider);
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadRef: composerDraftTarget,
@@ -754,6 +773,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Resolve the active instance's snapshot by `instanceId` so a custom
   // instance gets its own slash commands, skills, and model list — not
   // the first snapshot for the same driver kind.
+  const selectedProviderEntry = useMemo(
+    () => providerInstanceEntries.find((entry) => entry.instanceId === selectedInstanceId),
+    [providerInstanceEntries, selectedInstanceId],
+  );
   const selectedProviderStatus = useMemo(
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
@@ -774,7 +797,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         model: selectedModel,
         models: selectedProviderModels,
         promptInjectionState: composerPromptInjectionState,
-        modelOptions: selectedInstanceId ? composerModelOptions?.[selectedInstanceId] : undefined,
+        modelOptions: composerModelOptions?.[selectedInstanceId],
       }),
     [
       composerModelOptions,
@@ -797,11 +820,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }),
     [providerStatuses, selectedProvider],
   );
-  const selectedModelSelection = useMemo<ModelSelection | null>(
-    () =>
-      selectedInstanceId
-        ? createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch)
-        : null,
+  const selectedModelSelection = useMemo<ModelSelection>(
+    () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
     [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
   const selectedModelForPicker = selectedModel;
@@ -819,9 +839,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return out;
   }, [providerInstanceEntries, settings]);
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
-    const currentOptions = selectedInstanceId
-      ? (modelOptionsByInstance.get(selectedInstanceId) ?? [])
-      : [];
+    const currentOptions = modelOptionsByInstance.get(selectedInstanceId) ?? [];
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
       ? selectedModelForPicker
       : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
@@ -1083,23 +1101,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
-    ...(selectedInstanceId ? { instanceId: selectedInstanceId } : {}),
+    instanceId: selectedInstanceId,
     ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
     ...(routeKind === "draft" && draftId ? { draftId } : {}),
     model: selectedModel,
     models: selectedProviderModels,
-    modelOptions: selectedInstanceId ? composerModelOptions?.[selectedInstanceId] : undefined,
+    modelOptions: composerModelOptions?.[selectedInstanceId],
     prompt,
     onPromptChange: setPromptFromTraits,
   });
   const providerTraitsPicker = renderProviderTraitsPicker({
     provider: selectedProvider,
-    ...(selectedInstanceId ? { instanceId: selectedInstanceId } : {}),
+    instanceId: selectedInstanceId,
     ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
     ...(routeKind === "draft" && draftId ? { draftId } : {}),
     model: selectedModel,
     models: selectedProviderModels,
-    modelOptions: selectedInstanceId ? composerModelOptions?.[selectedInstanceId] : undefined,
+    modelOptions: composerModelOptions?.[selectedInstanceId],
     prompt,
     onPromptChange: setPromptFromTraits,
   });
@@ -1117,11 +1135,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
   const collapsedComposerPrimaryActionDisabled =
-    phase === "running" ||
-    isSendBusy ||
-    isConnecting ||
-    providerSelectionUnavailable ||
-    !composerSendState.hasSendableContent;
+    phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
@@ -1659,9 +1673,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const shouldBlurMobileComposerOnSubmit = useCallback(() => {
     if (!isMobileViewport) return false;
-    if (isSendBusy || isConnecting || providerSelectionUnavailable || phase === "running") {
-      return false;
-    }
+    if (isSendBusy || isConnecting || phase === "running") return false;
     if (activePendingProgress) {
       return activePendingProgress.isLastQuestion && Boolean(activePendingResolvedAnswers);
     }
@@ -1674,27 +1686,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isMobileViewport,
     isSendBusy,
     phase,
-    providerSelectionUnavailable,
     showPlanFollowUpPrompt,
   ]);
 
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }) => {
-      if (providerSelectionUnavailable) {
-        event?.preventDefault();
-        return;
-      }
       onSend(event);
       if (shouldBlurMobileComposerOnSubmit()) {
         blurMobileComposerAfterSend();
       }
     },
-    [
-      blurMobileComposerAfterSend,
-      onSend,
-      providerSelectionUnavailable,
-      shouldBlurMobileComposerOnSubmit,
-    ],
+    [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
   );
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
@@ -1992,23 +1994,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
       },
-      getSendContext: () =>
-        selectedModelSelection
-          ? {
-              prompt: promptRef.current,
-              images: composerImagesRef.current,
-              terminalContexts: composerTerminalContextsRef.current,
-              elementContexts: composerElementContextsRef.current,
-              previewAnnotations: composerPreviewAnnotations,
-              reviewComments: composerReviewComments,
-              selectedPromptEffort,
-              selectedModelOptionsForDispatch,
-              selectedModelSelection,
-              selectedProvider,
-              selectedModel,
-              selectedProviderModels,
-            }
-          : null,
+      getSendContext: () => ({
+        prompt: promptRef.current,
+        images: composerImagesRef.current,
+        terminalContexts: composerTerminalContextsRef.current,
+        elementContexts: composerElementContextsRef.current,
+        previewAnnotations: composerPreviewAnnotations,
+        reviewComments: composerReviewComments,
+        selectedPromptEffort,
+        selectedModelOptionsForDispatch,
+        selectedModelSelection,
+        selectedProvider,
+        selectedModel,
+        selectedProviderModels,
+      }),
     }),
     [
       activeThread,
@@ -2473,7 +2472,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <ProviderModelPicker
                   compact={isComposerFooterCompact}
-                  activeInstanceId={selectedInstanceIdForPicker}
+                  activeInstanceId={selectedInstanceId}
                   model={selectedModelForPickerWithCustomFallback}
                   lockedProvider={lockedProvider}
                   lockedContinuationGroupKey={lockedContinuationGroupKey}
@@ -2482,7 +2481,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   modelOptionsByInstance={modelOptionsByInstance}
                   terminalOpen={terminalOpen}
                   open={isComposerModelPickerOpen}
-                  disabled={providerSelectionUnavailable}
                   {...(composerProviderState.modelPickerIconClassName
                     ? {
                         activeProviderIconClassName: composerProviderState.modelPickerIconClassName,
@@ -2549,9 +2547,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}
                   isConnecting={isConnecting}
-                  isEnvironmentUnavailable={
-                    environmentUnavailable !== null || providerSelectionUnavailable
-                  }
+                  isEnvironmentUnavailable={environmentUnavailable !== null}
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
