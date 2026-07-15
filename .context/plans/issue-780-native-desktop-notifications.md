@@ -95,9 +95,9 @@ phases:
         deliverables: [Draft PR URL and handoff]
 generated: "2026-07-15"
 status: filled
-progress: 27
+progress: 36
 scaffoldVersion: "2.0.0"
-lastUpdated: "2026-07-15T00:45:28.704Z"
+lastUpdated: "2026-07-15T00:50:08.662Z"
 ---
 
 # Issue #780 native desktop notifications
@@ -123,7 +123,8 @@ Notify only opted-in desktop users when a live, non-archived thread settles or n
 6. Send only kind, event ID, environment ID, and thread ID over the preload bridge.
 7. In Electron main, recheck persisted opt-in, `Notification.isSupported()`, dedupe, and actual `BrowserWindow` focus immediately before showing a silent native notification.
 8. Treat native delivery failure, including denied permission or unsigned development builds, as a non-fatal skipped result.
-9. On click, store a pending route, reveal or create the main window, focus the app, notify the renderer, then consume the route exactly once.
+9. On macOS, hide rather than destroy the main window on close only while the opt-in is active and the app is not quitting, preserving the live observer without a daemon or tray.
+10. On click, store a pending route, reveal or create the main window, focus the app, notify the renderer, then consume the route exactly once.
 
 ## Fixed copy
 
@@ -159,6 +160,18 @@ No dynamic title, response, prompt, diff, command, project name, or thread title
 - Stream replay may resemble live updates. Explicit synchronization generations and baselines must gate transition derivation.
 - Renderer reload can repeat derived events. Stable IDs plus bounded main-process deduplication prevent duplicate delivery while the desktop process lives.
 - Notification clicks can race renderer startup. Pending navigation is stored main-side and consumed after the route is ready.
+- A destroyed renderer cannot observe future thread changes. Opted-in macOS close therefore hides the window; this behavior must remain gated by the persisted setting and must never block Quit.
+
+## Review findings
+
+| Concern | Resolution |
+| --- | --- |
+| Intermediate assistant messages looked complete in older attempts | Require same-turn `running` to settled `completed`/`error` plus inactive session. |
+| Reconnect/reseed can replay stale attention state | Key tracker baselines by connection generation and shell snapshot revision. |
+| A closed macOS window destroys the observer | Hide the opted-in window while keeping standard Quit semantics. |
+| Renderer payload could expose content | Contract accepts only kind and opaque IDs; main owns fixed copy. |
+| Click can precede renderer listener registration | Store and consume a pending target exactly once. |
+| Permission denial can surface asynchronously | Handle unsupported, synchronous throw, and native `failed` events without failing IPC or app state. |
 
 ## Out of scope
 
@@ -170,11 +183,11 @@ None.
 
 ## Execution History
 
-> Last updated: 2026-07-15T00:45:28.704Z | Progress: 27%
+> Last updated: 2026-07-15T00:50:08.662Z | Progress: 36%
 
 ### planning [DONE]
 - Started: 2026-07-15T00:45:28.430Z
-- Completed: 2026-07-15T00:45:28.704Z
+- Completed: 2026-07-15T00:45:28.814Z
 
 - [x] Step 1: Review issue *(2026-07-15T00:45:28.430Z)*
   - Notes: Issue and prior PR state reviewed; no new maintainer stop or direction change.
@@ -182,3 +195,10 @@ None.
   - Notes: Mapped shell/projector, settings persistence, Electron window/IPC, and environment-thread routing.
 - [x] Step 3: Define implementation and validation gates *(2026-07-15T00:45:28.704Z)*
   - Notes: Canonical design, acceptance matrix, sensors, evidence, and PR boundaries recorded.
+
+### review [DONE]
+- Started: 2026-07-15T00:50:08.662Z
+- Completed: 2026-07-15T00:50:08.662Z
+
+- [x] Step 1: Review design against acceptance criteria and prior PR failures *(2026-07-15T00:50:08.662Z)*
+  - Notes: Reviewed prior failure modes, canonical settled state, replay generations, privacy boundary, native failure handling, close retention, and click startup race. No unresolved blocker.

@@ -1,7 +1,7 @@
 {
   "planSlug": "issue-780-native-desktop-notifications",
   "linkedAt": "2026-07-15T00:43:17.078Z",
-  "progress": 27,
+  "progress": 36,
   "phases": {
     "planning": {
       "phaseId": "planning",
@@ -39,11 +39,29 @@
           "notes": "Canonical design, acceptance matrix, sensors, evidence, and PR boundaries recorded."
         }
       ],
-      "completedAt": "2026-07-15T00:45:28.704Z",
-      "commitHash": "e5b4f5fde75db53bc26aa4c03eefbce5ba2cd18e",
-      "commitShortHash": "e5b4f5fde",
-      "committedAt": "2026-07-15T00:45:28.694Z",
+      "completedAt": "2026-07-15T00:45:28.814Z",
+      "commitHash": "806efc7dc8b79f5b860cda65c4fb27d95b618ac9",
+      "commitShortHash": "806efc7dc",
+      "committedAt": "2026-07-15T00:45:28.805Z",
       "committedBy": "AI Context Agent"
+    },
+    "review": {
+      "phaseId": "review",
+      "status": "completed",
+      "startedAt": "2026-07-15T00:50:08.662Z",
+      "steps": [
+        {
+          "stepIndex": 1,
+          "description": "Review design against acceptance criteria and prior PR failures",
+          "status": "completed",
+          "deliverables": [
+            "Review notes"
+          ],
+          "completedAt": "2026-07-15T00:50:08.662Z",
+          "notes": "Reviewed prior failure modes, canonical settled state, replay generations, privacy boundary, native failure handling, close retention, and click startup race. No unresolved blocker."
+        }
+      ],
+      "completedAt": "2026-07-15T00:50:08.662Z"
     }
   },
   "decisions": [
@@ -94,7 +112,20 @@
       "status": "accepted",
       "id": "dec-1784076328412",
       "decidedAt": "2026-07-15T00:45:28.412Z"
+    },
+    {
+      "title": "Retain opted-in macOS renderer on close",
+      "description": "When desktop notifications are enabled on macOS and the app is not quitting, prevent main-window destruction and hide it. This preserves live shell observation while the standard macOS process remains active. Disabled settings and Quit keep existing destruction semantics.",
+      "phase": "R",
+      "alternatives": [
+        "Duplicate environment subscriptions in Electron main",
+        "Create a separate hidden observer window",
+        "Drop notifications after window close"
+      ],
+      "status": "accepted",
+      "id": "dec-1784076608650",
+      "decidedAt": "2026-07-15T00:50:08.650Z"
     }
   ],
-  "lastUpdated": "2026-07-15T00:45:28.704Z"
+  "lastUpdated": "2026-07-15T00:50:08.662Z"
 }

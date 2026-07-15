@@ -23,6 +23,7 @@ scaffoldVersion: "2.0.0"
 - Focus, native capability, persisted opt-in, deduplication, and notification delivery stay in the Electron main process.
 - IPC carries only event kind and opaque environment/thread identifiers. Notification copy is fixed in desktop code and never contains agent output, diffs, commands, or prompts.
 - Click navigation uses the existing `/$environmentId/$threadId` route after Electron restores or creates the main window.
+- On macOS only, closing an opted-in main window hides it instead of destroying its renderer. This preserves live shell observation while matching the existing process-stays-alive lifecycle. Quit still destroys the window and process; disabled users retain the current close behavior.
 
 ## Reliability rules
 
