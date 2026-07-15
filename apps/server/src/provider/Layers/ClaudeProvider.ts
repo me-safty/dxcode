@@ -643,11 +643,11 @@ const probeClaudeCapabilities = (
   const abort = new AbortController();
   return Effect.gen(function* () {
     const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
-    const probeCwd = resolveClaudeCapabilitiesProbeCwd();
+    const probeCwd = resolveClaudeCapabilitiesProbeCwd(claudeEnvironment.HOME || undefined);
     yield* Effect.tryPromise({
       try: () => NodeFS.promises.mkdir(probeCwd, { recursive: true }),
       catch: (cause) => cause,
-    }).pipe(Effect.orDie);
+    });
     return yield* Effect.tryPromise(async () => {
       const q = claudeQuery({
         // Never yield — we only need initialization data, not a conversation.
