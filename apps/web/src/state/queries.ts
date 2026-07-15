@@ -23,7 +23,7 @@ import { useEnvironmentQuery } from "./query";
 import { useEnvironmentThread } from "./threads";
 import { vcsEnvironment } from "./vcs";
 
-const COMPOSER_PATH_SEARCH_DEBOUNCE_MS = 120;
+const PROJECT_PATH_SEARCH_DEBOUNCE_MS = 120;
 const COMPOSER_PATH_SEARCH_LIMIT = 80;
 const VCS_REF_LIST_LIMIT = 100;
 const EMPTY_REFS: ReadonlyArray<VcsRef> = [];
@@ -181,7 +181,7 @@ export function usePaginatedBranches(target: VcsRefTarget) {
   };
 }
 
-export function useComposerPathSearch(target: ComposerPathSearchTarget) {
+export function useProjectPathSearch(target: ComposerPathSearchTarget, limit: number) {
   const normalizedTarget = useMemo(
     () => ({
       environmentId: target.environmentId,
@@ -190,7 +190,7 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
     }),
     [target.cwd, target.environmentId, target.query],
   );
-  const debouncedTarget = useDebouncedValue(normalizedTarget, COMPOSER_PATH_SEARCH_DEBOUNCE_MS);
+  const debouncedTarget = useDebouncedValue(normalizedTarget, PROJECT_PATH_SEARCH_DEBOUNCE_MS);
   const result = useEnvironmentQuery(
     debouncedTarget.environmentId !== null &&
       debouncedTarget.cwd !== null &&
@@ -200,7 +200,7 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
           input: {
             cwd: debouncedTarget.cwd,
             query: debouncedTarget.query,
-            limit: COMPOSER_PATH_SEARCH_LIMIT,
+            limit,
           },
         })
       : null,
@@ -210,8 +210,13 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
     entries: result.data?.entries ?? [],
     error: result.error,
     isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
+    searchedQuery: debouncedTarget.query,
     refresh: result.refresh,
   };
+}
+
+export function useComposerPathSearch(target: ComposerPathSearchTarget) {
+  return useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT);
 }
 
 export function useCheckpointDiff(
