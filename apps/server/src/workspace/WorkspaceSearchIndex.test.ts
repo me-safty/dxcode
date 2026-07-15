@@ -105,6 +105,35 @@ it.effect("falls back when FileFinder returns creation diagnostics", () =>
   }),
 );
 
+it.effect("destroys the native finder before falling back after scan initialization fails", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cwd = yield* Effect.promise(makeFallbackWorkspace);
+      const cause = new Error("native scan failed");
+      const finder = {
+        destroy: vi.fn(),
+        isScanning: vi.fn(() => {
+          throw cause;
+        }),
+      } as unknown as FileFinder;
+      const FileFinderModule = {
+        FileFinder: {
+          create: vi.fn(() => ({ ok: true, value: finder })),
+        },
+      };
+
+      const searchIndex = yield* WorkspaceSearchIndex.make(cwd, () =>
+        Promise.resolve(FileFinderModule as never),
+      );
+
+      expect(finder.destroy).toHaveBeenCalledTimes(1);
+      expect((yield* searchIndex.search("composer", 10)).entries).toEqual(
+        expect.arrayContaining([{ path: "src/components/Composer.tsx", kind: "file" }]),
+      );
+    }),
+  ),
+);
+
 it.effect("preserves FileFinder destroy failures as structured defects", () =>
   Effect.gen(function* () {
     const cause = new Error("native destroy failed");

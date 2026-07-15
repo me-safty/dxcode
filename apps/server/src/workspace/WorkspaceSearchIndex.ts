@@ -6,10 +6,12 @@ import * as NodePath from "node:path";
 import type { FileFinder, MixedItem, MixedSearchResult } from "@ff-labs/fff-node";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as LayerMap from "effect/LayerMap";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 
 import type {
   ProjectEntry,
@@ -497,9 +499,17 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
   cwd: string,
   loadModule: FileFinderModuleLoader = loadFileFinderModule,
 ) {
-  return yield* makeNativeIndex(cwd, loadModule).pipe(
-    Effect.catch((cause) => makeFallbackIndex(cwd, cause)),
+  const parentScope = yield* Scope.Scope;
+  const nativeScope = yield* Scope.fork(parentScope);
+  const nativeResult = yield* Effect.result(
+    makeNativeIndex(cwd, loadModule).pipe(Scope.provide(nativeScope)),
   );
+  if (nativeResult._tag === "Success") {
+    return nativeResult.success;
+  }
+
+  yield* Scope.close(nativeScope, Exit.fail(nativeResult.failure));
+  return yield* makeFallbackIndex(cwd, nativeResult.failure);
 });
 
 /**
