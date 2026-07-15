@@ -60,6 +60,7 @@ import {
   serializeTableElementToCsv,
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
+import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
 import {
   normalizeMarkdownLinkDestination,
   resolveMarkdownFileLinkMeta,
@@ -1546,8 +1547,8 @@ function ChatMarkdown({
       <ReactMarkdown
         remarkPlugins={
           lineBreaks
-            ? [remarkGfm, remarkBreaks, remarkPreserveCodeMeta]
-            : [remarkGfm, remarkPreserveCodeMeta]
+            ? [remarkGfm, remarkBreaks, remarkNormalizeListItemIndentation, remarkPreserveCodeMeta]
+            : [remarkGfm, remarkNormalizeListItemIndentation, remarkPreserveCodeMeta]
         }
         rehypePlugins={[rehypeRaw, [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA]]}
         components={markdownComponents}
