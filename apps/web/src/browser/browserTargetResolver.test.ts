@@ -41,6 +41,17 @@ describe("browser target resolver", () => {
     });
   });
 
+  it("preserves URL credentials when mapping localhost onto a remote host", async () => {
+    readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://100.65.180.100:3773" });
+    const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
+    expect(
+      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
+        kind: "url",
+        url: "http://user:p%40ss@localhost:5173/dashboard",
+      }).resolvedUrl,
+    ).toBe("http://user:p%40ss@100.65.180.100:5173/dashboard");
+  });
+
   it("maps schemeless localhost navigation onto a remote environment host", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.25:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
@@ -63,6 +74,22 @@ describe("browser target resolver", () => {
     ).toEqual({
       requestedUrl: "localhost:3000/app",
       resolvedUrl: "localhost:3000/app",
+      resolutionKind: "direct",
+      environmentId: "environment-1",
+    });
+  });
+
+  it("keeps localhost navigation local for the full IPv4 loopback range", async () => {
+    readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://127.0.0.2:3773" });
+    const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
+    expect(
+      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
+        kind: "url",
+        url: "http://localhost:3000/app",
+      }),
+    ).toEqual({
+      requestedUrl: "http://localhost:3000/app",
+      resolvedUrl: "http://localhost:3000/app",
       resolutionKind: "direct",
       environmentId: "environment-1",
     });
