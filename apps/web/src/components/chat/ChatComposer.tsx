@@ -2270,6 +2270,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     composerTrigger.query.trim().length === 0
                   }
                   emptyStateText={composerMenuEmptyState}
+                  errorText={composerTriggerKind === "skill" ? providerWorkspaceSkills.error : null}
                   activeItemId={activeComposerMenuItem?.id ?? null}
                   onHighlightedItemChange={onComposerMenuItemHighlighted}
                   onSelect={onSelectComposerItem}
