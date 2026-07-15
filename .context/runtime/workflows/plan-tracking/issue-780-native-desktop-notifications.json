@@ -1,7 +1,7 @@
 {
   "planSlug": "issue-780-native-desktop-notifications",
   "linkedAt": "2026-07-15T00:43:17.078Z",
-  "progress": 64,
+  "progress": 73,
   "phases": {
     "planning": {
       "phaseId": "planning",
@@ -90,12 +90,21 @@
           "completedAt": "2026-07-15T01:52:04.298Z",
           "output": "Desktop service and tests",
           "notes": "Electron main service rechecks opt-in, focus, support, dedupe, fixed private copy, silent delivery, and non-fatal failure handling."
+        },
+        {
+          "stepIndex": 4,
+          "description": "Add click restore, focus, and pending deep-link navigation",
+          "status": "completed",
+          "deliverables": ["IPC and renderer integration"],
+          "completedAt": "2026-07-15T01:52:05.322Z",
+          "output": "IPC and renderer integration",
+          "notes": "Validated preload IPC, opted-in macOS close retention, pending target consumption, reveal/focus, and exact environment/thread navigation implemented and tested."
         }
       ],
-      "completedAt": "2026-07-15T01:52:04.298Z",
-      "commitHash": "c4947d9f851289316ce1e51e7d6229e96bd1783e",
-      "commitShortHash": "c4947d9f8",
-      "committedAt": "2026-07-15T01:52:04.286Z",
+      "completedAt": "2026-07-15T01:52:05.322Z",
+      "commitHash": "460c0cf15867bedbdec1b4f5094206efcb80868b",
+      "commitShortHash": "460c0cf15",
+      "committedAt": "2026-07-15T01:52:05.311Z",
       "committedBy": "AI Context Agent"
     }
   },
@@ -153,5 +162,5 @@
       "decidedAt": "2026-07-15T00:50:08.650Z"
     }
   ],
-  "lastUpdated": "2026-07-15T01:52:04.298Z"
+  "lastUpdated": "2026-07-15T01:52:05.322Z"
 }

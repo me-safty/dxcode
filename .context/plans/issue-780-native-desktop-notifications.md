@@ -95,9 +95,9 @@ phases:
         deliverables: [Draft PR URL and handoff]
 generated: "2026-07-15"
 status: filled
-progress: 64
+progress: 73
 scaffoldVersion: "2.0.0"
-lastUpdated: "2026-07-15T01:52:04.298Z"
+lastUpdated: "2026-07-15T01:52:05.322Z"
 ---
 
 # Issue #780 native desktop notifications
@@ -183,12 +183,12 @@ None.
 
 ## Execution History
 
-> Last updated: 2026-07-15T01:52:04.298Z | Progress: 64%
+> Last updated: 2026-07-15T01:52:05.322Z | Progress: 73%
 
 ### execution [DONE]
 
 - Started: 2026-07-15T01:52:01.284Z
-- Completed: 2026-07-15T01:52:04.298Z
+- Completed: 2026-07-15T01:52:05.322Z
 
 - [x] Step 1: Add default-off persisted desktop preference _(2026-07-15T01:52:01.284Z)_
   - Output: Settings schema and UI
@@ -199,6 +199,9 @@ None.
 - [x] Step 3: Add native Electron delivery and focus policy _(2026-07-15T01:52:04.298Z)_
   - Output: Desktop service and tests
   - Notes: Electron main service rechecks opt-in, focus, support, dedupe, fixed private copy, silent delivery, and non-fatal failure handling.
+- [x] Step 4: Add click restore, focus, and pending deep-link navigation _(2026-07-15T01:52:05.322Z)_
+  - Output: IPC and renderer integration
+  - Notes: Validated preload IPC, opted-in macOS close retention, pending target consumption, reveal/focus, and exact environment/thread navigation implemented and tested.
 
 ### planning [DONE]
 
