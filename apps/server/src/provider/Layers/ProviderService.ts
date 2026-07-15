@@ -238,6 +238,47 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       Effect.asVoid,
     );
 
+  const refreshBindingFromTurnCompletion = Effect.fn(
+    "ProviderService.refreshBindingFromTurnCompletion",
+  )(function* (
+    source: {
+      readonly instanceId: ProviderInstanceId;
+      readonly provider: ProviderDriverKind;
+    },
+    event: ProviderRuntimeEvent,
+  ) {
+    if (event.type !== "turn.completed") {
+      return;
+    }
+
+    const binding = Option.getOrUndefined(yield* directory.getBinding(event.threadId));
+    if (!binding) {
+      return;
+    }
+    if (binding.provider !== source.provider || binding.providerInstanceId !== source.instanceId) {
+      yield* Effect.logDebug("provider.session.turn-completion-binding-mismatch", {
+        threadId: event.threadId,
+        eventProvider: source.provider,
+        eventProviderInstanceId: source.instanceId,
+        bindingProvider: binding.provider,
+        bindingProviderInstanceId: binding.providerInstanceId,
+      });
+      return;
+    }
+
+    const hasPendingWork = event.payload?.hasPendingWork;
+    yield* directory.upsert({
+      threadId: event.threadId,
+      provider: binding.provider,
+      providerInstanceId: source.instanceId,
+      ...(hasPendingWork !== undefined
+        ? {
+            runtimePayload: { hasPendingWork },
+          }
+        : {}),
+    });
+  });
+
   const requireBindingInstanceId = (
     operation: string,
     payload: {
@@ -290,10 +331,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   ): Effect.Effect<void> =>
     Effect.sync(() => correlateRuntimeEventWithInstance(source, event)).pipe(
       Effect.flatMap((canonicalEvent) =>
-        increment(providerRuntimeEventsTotal, {
-          provider: canonicalEvent.provider,
-          eventType: canonicalEvent.type,
-        }).pipe(Effect.andThen(publishRuntimeEvent(canonicalEvent))),
+        refreshBindingFromTurnCompletion(source, canonicalEvent).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider.session.turn-completion-refresh-failed", {
+              threadId: canonicalEvent.threadId,
+              provider: canonicalEvent.provider,
+              providerInstanceId: source.instanceId,
+              cause,
+            }),
+          ),
+          Effect.andThen(
+            increment(providerRuntimeEventsTotal, {
+              provider: canonicalEvent.provider,
+              eventType: canonicalEvent.type,
+            }),
+          ),
+          Effect.andThen(publishRuntimeEvent(canonicalEvent)),
+        ),
       ),
     );
 

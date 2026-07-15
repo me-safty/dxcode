@@ -8,6 +8,7 @@
  */
 import {
   type CanUseTool,
+  type HookCallback,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -199,6 +200,9 @@ interface ClaudeSessionContext {
   lastKnownTotalProcessedTokens: number | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
+  readonly pendingWorkState: {
+    hasPendingWork: boolean;
+  };
   stopped: boolean;
 }
 
@@ -220,6 +224,13 @@ export interface ClaudeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+}
+
+export function hasPendingClaudeWork(input: {
+  readonly background_tasks?: ReadonlyArray<unknown>;
+  readonly session_crons?: ReadonlyArray<unknown>;
+}): boolean {
+  return (input.background_tasks?.length ?? 0) > 0 || (input.session_crons?.length ?? 0) > 0;
 }
 
 function isUuid(value: string): boolean {
@@ -1968,6 +1979,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         threadId: context.session.threadId,
         payload: {
           state: status,
+          hasPendingWork: context.pendingWorkState.hasPendingWork,
           ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
           ...(result?.usage ? { usage: result.usage } : {}),
           ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
@@ -2043,6 +2055,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       turnId: turnState.turnId,
       payload: {
         state: status,
+        hasPendingWork: context.pendingWorkState.hasPendingWork,
         ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
         ...(result?.usage ? { usage: result.usage } : {}),
         ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
@@ -3112,6 +3125,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
       const inFlightTools = new Map<number, ToolInFlight>();
       const claudeTasks = new Map<string, ClaudeTaskState>();
+      const pendingWorkState = { hasPendingWork: false };
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
 
@@ -3405,6 +3419,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const canUseTool: CanUseTool = (toolName, toolInput, callbackOptions) =>
         runPromise(canUseToolEffect(toolName, toolInput, callbackOptions));
 
+      const stopHook: HookCallback = async (hookInput) => {
+        try {
+          if (hookInput.hook_event_name === "Stop") {
+            pendingWorkState.hasPendingWork = hasPendingClaudeWork(hookInput);
+          }
+        } catch (cause) {
+          runFork(
+            Effect.logWarning("claude.session.pending-work-hook-failed", {
+              threadId,
+              cause,
+            }),
+          );
+        }
+        return {};
+      };
+
       const claudeBinaryPath = claudeSettings.binaryPath;
       const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
       const modelSelection =
@@ -3461,6 +3491,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
+        hooks: {
+          Stop: [{ hooks: [stopHook] }],
+        },
         canUseTool,
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
@@ -3559,6 +3592,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTotalProcessedTokens: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
+        pendingWorkState,
         stopped: false,
       };
       yield* Ref.set(contextRef, context);

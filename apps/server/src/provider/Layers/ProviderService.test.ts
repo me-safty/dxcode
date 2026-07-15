@@ -1536,6 +1536,75 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
     }),
   );
 
+  it.effect("refreshes the session binding and persists pending work on turn completion", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("thread-completion-refresh");
+      yield* provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const before = (yield* directory.listBindings()).find(
+        (binding) => binding.threadId === threadId,
+      );
+      assert.isDefined(before);
+
+      yield* advanceTestClock(1_000);
+      fanout.claude.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-completion-refresh-pending"),
+        provider: CLAUDE_AGENT_DRIVER,
+        createdAt: "2026-01-01T00:00:01.000Z",
+        threadId,
+        turnId: asTurnId("turn-completion-refresh-pending"),
+        payload: {
+          state: "completed",
+          hasPendingWork: true,
+        },
+      });
+      yield* advanceTestClock(50);
+
+      const pending = (yield* directory.listBindings()).find(
+        (binding) => binding.threadId === threadId,
+      );
+      assert.isDefined(pending);
+      assert.notEqual(pending.lastSeenAt, before.lastSeenAt);
+      assert.equal(
+        (pending.runtimePayload as { readonly hasPendingWork?: boolean } | null)?.hasPendingWork,
+        true,
+      );
+
+      yield* advanceTestClock(1_000);
+      fanout.claude.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-completion-refresh-cleared"),
+        provider: CLAUDE_AGENT_DRIVER,
+        createdAt: "2026-01-01T00:00:02.000Z",
+        threadId,
+        turnId: asTurnId("turn-completion-refresh-cleared"),
+        payload: {
+          state: "completed",
+          hasPendingWork: false,
+        },
+      });
+      yield* advanceTestClock(50);
+
+      const cleared = (yield* directory.listBindings()).find(
+        (binding) => binding.threadId === threadId,
+      );
+      assert.isDefined(cleared);
+      assert.notEqual(cleared.lastSeenAt, pending.lastSeenAt);
+      assert.equal(
+        (cleared.runtimePayload as { readonly hasPendingWork?: boolean } | null)?.hasPendingWork,
+        false,
+      );
+    }),
+  );
+
   it.effect("fans out canonical runtime events in emission order", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
