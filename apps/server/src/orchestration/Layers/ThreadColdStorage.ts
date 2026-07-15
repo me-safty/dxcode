@@ -16,7 +16,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
   parseAttachmentIdFromRelativePath,
-  parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -193,8 +192,40 @@ const make = Effect.gen(function* () {
   const attachmentEntriesForThread = Effect.fn("attachmentEntriesForThread")(function* (
     threadId: string,
   ) {
-    const segment = toSafeThreadAttachmentSegment(threadId);
-    if (!segment) return [] as string[];
+    const attachmentIds = new Set<string>();
+    const attachmentRows = (yield* sql.unsafe(
+      `SELECT attachments_json
+       FROM projection_thread_messages
+       WHERE thread_id = ? AND attachments_json IS NOT NULL`,
+      [threadId],
+    )) as ReadonlyArray<SqlRow>;
+    for (const row of attachmentRows) {
+      const attachments = yield* decodeUnknownJsonString(String(row.attachments_json));
+      if (!Array.isArray(attachments)) continue;
+      for (const attachment of attachments) {
+        if (attachment === null || typeof attachment !== "object" || Array.isArray(attachment)) {
+          continue;
+        }
+        const id = (attachment as Record<string, unknown>).id;
+        if (typeof id === "string" && id.length > 0) {
+          attachmentIds.add(id);
+        }
+      }
+    }
+
+    const archivedEntries = new Set(
+      (
+        (yield* sql.unsafe(
+          `SELECT kind
+           FROM ${ARCHIVE_SCHEMA}.archive_thread_chunks
+           WHERE thread_id = ? AND kind LIKE 'attachment:%'`,
+          [threadId],
+        )) as ReadonlyArray<SqlRow>
+      ).flatMap((row) => {
+        const entry = String(row.kind).slice("attachment:".length);
+        return isSafeAttachmentEntry(entry) ? [entry] : [];
+      }),
+    );
     const entries = yield* fs
       .readDirectory(config.attachmentsDir, { recursive: false })
       .pipe(
@@ -203,8 +234,9 @@ const make = Effect.gen(function* () {
         ),
       );
     return entries.filter((entry) => {
+      if (archivedEntries.has(entry)) return true;
       const attachmentId = parseAttachmentIdFromRelativePath(entry);
-      return attachmentId !== null && parseThreadSegmentFromAttachmentId(attachmentId) === segment;
+      return attachmentId !== null && attachmentIds.has(attachmentId);
     });
   });
 
@@ -317,15 +349,15 @@ const make = Effect.gen(function* () {
     const manifest = manifestRows[0];
     const source = manifest ?? threadRows[0];
     if (!source) return;
+    if (source.status === "cold") return;
+    if (source.status === "cleanup_pending") {
+      yield* completeArchiveCleanup(threadId);
+      return;
+    }
     if (threadRows.length === 0) {
       if (source.status === "pending" || source.status === "archiving") {
         yield* discardIncompleteArchive(threadId);
       }
-      return;
-    }
-    if (source.status === "cold") return;
-    if (source.status === "cleanup_pending") {
-      yield* completeArchiveCleanup(threadId);
       return;
     }
     if (source.status === "restored" && !allowRestored) return;
@@ -646,6 +678,10 @@ const make = Effect.gen(function* () {
        VALUES (?, 'deleted', CURRENT_TIMESTAMP)`,
       [threadId],
     );
+    // Keep the hot rows or cold chunks available until external cleanup has
+    // succeeded so an interrupted delete can recover exact attachment owners.
+    yield* removeAttachments(threadId);
+    yield* removeProviderLogsImpl(threadId);
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql.unsafe(
@@ -674,8 +710,6 @@ const make = Effect.gen(function* () {
         yield* sql.unsafe(`DELETE FROM thread_archive_manifests WHERE thread_id = ?`, [threadId]);
       }),
     );
-    yield* removeAttachments(threadId);
-    yield* removeProviderLogsImpl(threadId);
     yield* reclaimFreePages();
     yield* sql.unsafe(`DELETE FROM thread_cleanup_queue WHERE thread_id = ?`, [threadId]);
   });

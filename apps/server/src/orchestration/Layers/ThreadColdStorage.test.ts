@@ -5,12 +5,15 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerConfig from "../../config.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ThreadColdStorage } from "../Services/ThreadColdStorage.ts";
 import { ThreadColdStorageLive } from "./ThreadColdStorage.ts";
+
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
 const insertArchivedThread = Effect.fn("insertArchivedThreadTestFixture")(function* (
   threadId: ThreadId,
@@ -194,6 +197,26 @@ layer("ThreadColdStorage", (it) => {
       const attachmentName = "thread-traversal-00000000-0000-4000-8000-000000000001.png";
 
       yield* insertArchivedThread(threadId, "Traversal thread");
+      yield* sql.unsafe(
+        `INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (?, ?, NULL, 'user', 'validate attachment name', ?, 0, ?, ?)`,
+        [
+          "message-traversal",
+          threadId,
+          encodeUnknownJsonString([
+            {
+              type: "image",
+              id: attachmentName.slice(0, -4),
+              name: "image.png",
+              mimeType: "image/png",
+            },
+          ]),
+          "2026-07-01T00:00:00.000Z",
+          "2026-07-01T00:00:00.000Z",
+        ],
+      );
       yield* fs.writeFileString(path.join(config.attachmentsDir, attachmentName), "image bytes");
       yield* storage.archiveThread(threadId);
       const escapedPath = path.join(config.attachmentsDir, "..", "thread-traversal-escape");
@@ -230,7 +253,8 @@ layer("ThreadColdStorage", (it) => {
           is_streaming, created_at, updated_at
         ) VALUES (
           'message-attachment-restore-failure', ${threadId}, NULL, 'user', 'keep me cold',
-          '[]', 0, '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z'
+          '[{"type":"image","id":"thread-attachment-restore-failure-00000000-0000-4000-8000-000000000001","name":"image.png","mimeType":"image/png"}]',
+          0, '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z'
         )
       `;
       yield* fs.writeFileString(path.join(config.attachmentsDir, attachmentName), "image bytes");
@@ -330,6 +354,112 @@ layer("ThreadColdStorage", (it) => {
         SELECT text FROM projection_thread_messages WHERE thread_id = ${threadId}
       `;
       assert.deepStrictEqual(restoredMessages, [{ text: "preserve across cleanup retry" }]);
+    }),
+  );
+
+  it.effect("finishes cleanup-pending archives after their shell is removed", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const threadId = ThreadId.make("thread-cleanup-missing-shell");
+      const providerLogPath = path.join(config.providerLogsDir, "thread-cleanup-missing-shell.log");
+
+      yield* insertArchivedThread(threadId, "Cleanup missing shell thread");
+      yield* fs.makeDirectory(providerLogPath);
+      yield* fs.writeFileString(path.join(providerLogPath, "keep"), "force cleanup failure");
+
+      const archiveFailure = yield* Effect.flip(storage.archiveThread(threadId));
+      assert.strictEqual(archiveFailure.operation, "archive");
+      yield* sql`DELETE FROM projection_threads WHERE thread_id = ${threadId}`;
+      yield* fs.remove(providerLogPath, { recursive: true });
+
+      yield* storage.archiveThread(threadId);
+      const manifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(manifest, [{ status: "cold" }]);
+      assert.notDeepInclude(yield* storage.listPendingArchiveThreadIds, threadId);
+    }),
+  );
+
+  it.effect("archives only attachments owned by colliding thread segments", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const archivedThreadId = ThreadId.make("Thread.Foo");
+      const liveThreadId = ThreadId.make("thread foo");
+      const archivedAttachmentId = "thread-foo-00000000-0000-4000-8000-000000000001";
+      const liveAttachmentId = "thread-foo-00000000-0000-4000-8000-000000000002";
+      const archivedAttachmentName = `${archivedAttachmentId}.png`;
+      const liveAttachmentName = `${liveAttachmentId}.png`;
+
+      yield* insertArchivedThread(archivedThreadId, "Archived colliding thread");
+      yield* insertArchivedThread(liveThreadId, "Live colliding thread");
+      yield* sql`
+        UPDATE projection_threads SET archived_at = NULL WHERE thread_id = ${liveThreadId}
+      `;
+      yield* sql.unsafe(
+        `INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (?, ?, NULL, 'user', ?, ?, 0, ?, ?)`,
+        [
+          "message-archived-collision",
+          archivedThreadId,
+          "archive only my attachment",
+          encodeUnknownJsonString([
+            {
+              type: "image",
+              id: archivedAttachmentId,
+              name: "archived.png",
+              mimeType: "image/png",
+            },
+          ]),
+          "2026-07-01T00:00:00.000Z",
+          "2026-07-01T00:00:00.000Z",
+        ],
+      );
+      yield* sql.unsafe(
+        `INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (?, ?, NULL, 'user', ?, ?, 0, ?, ?)`,
+        [
+          "message-live-collision",
+          liveThreadId,
+          "keep my attachment live",
+          encodeUnknownJsonString([
+            {
+              type: "image",
+              id: liveAttachmentId,
+              name: "live.png",
+              mimeType: "image/png",
+            },
+          ]),
+          "2026-07-01T00:00:00.000Z",
+          "2026-07-01T00:00:00.000Z",
+        ],
+      );
+      const archivedAttachmentPath = path.join(config.attachmentsDir, archivedAttachmentName);
+      const liveAttachmentPath = path.join(config.attachmentsDir, liveAttachmentName);
+      yield* fs.writeFileString(archivedAttachmentPath, "archived image");
+      yield* fs.writeFileString(liveAttachmentPath, "live image");
+
+      yield* storage.archiveThread(archivedThreadId);
+
+      assert.isFalse(yield* fs.exists(archivedAttachmentPath));
+      assert.strictEqual(yield* fs.readFileString(liveAttachmentPath), "live image");
+      const archivedChunks = yield* sql<{ readonly kind: string }>`
+        SELECT kind FROM cold_archive.archive_thread_chunks
+        WHERE thread_id = ${archivedThreadId} AND kind LIKE 'attachment:%'
+      `;
+      assert.deepStrictEqual(archivedChunks, [{ kind: `attachment:${archivedAttachmentName}` }]);
     }),
   );
 
@@ -462,6 +592,26 @@ layer("ThreadColdStorage", (it) => {
       const attachmentPath = path.join(config.attachmentsDir, attachmentName);
 
       yield* insertArchivedThread(threadId, "Delete retry thread");
+      yield* sql.unsafe(
+        `INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (?, ?, NULL, 'user', 'delete me', ?, 0, ?, ?)`,
+        [
+          "message-delete-retry",
+          threadId,
+          encodeUnknownJsonString([
+            {
+              type: "image",
+              id: attachmentName.slice(0, -4),
+              name: "delete.png",
+              mimeType: "image/png",
+            },
+          ]),
+          "2026-07-01T00:00:00.000Z",
+          "2026-07-01T00:00:00.000Z",
+        ],
+      );
       yield* fs.makeDirectory(attachmentPath);
       yield* fs.writeFileString(path.join(attachmentPath, "keep"), "force cleanup failure");
 
