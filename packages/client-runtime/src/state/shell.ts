@@ -30,12 +30,14 @@ export interface EnvironmentShellState {
   readonly snapshot: Option.Option<OrchestrationShellSnapshot>;
   readonly status: EnvironmentShellStatus;
   readonly error: Option.Option<string>;
+  readonly baselineRevision: number;
 }
 
 const EMPTY_SHELL_STATE: EnvironmentShellState = {
   snapshot: Option.none(),
   status: "empty",
   error: Option.none(),
+  baselineRevision: 0,
 };
 
 function shellStatusForSnapshot(
@@ -66,6 +68,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     snapshot: cachedSnapshot,
     status: shellStatusForSnapshot(cachedSnapshot),
     error: Option.none(),
+    baselineRevision: 0,
   });
   const persistence = yield* Queue.sliding<OrchestrationShellSnapshot>(1);
 
@@ -145,6 +148,8 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       snapshot: Option.some(nextSnapshot),
       status: "live",
       error: Option.none(),
+      baselineRevision:
+        item.kind === "snapshot" ? current.baselineRevision + 1 : current.baselineRevision,
     });
     yield* Queue.offer(persistence, nextSnapshot);
   });

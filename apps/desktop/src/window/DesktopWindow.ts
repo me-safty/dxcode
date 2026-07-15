@@ -10,6 +10,7 @@ import type * as Electron from "electron";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
@@ -17,6 +18,7 @@ import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { MENU_ACTION_CHANNEL } from "../ipc/channels.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
@@ -40,6 +42,8 @@ type WindowTitleBarOptions = Pick<
 
 type DesktopWindowRuntimeServices =
   | DesktopEnvironment.DesktopEnvironment
+  | DesktopClientSettings.DesktopClientSettings
+  | DesktopState.DesktopState
   | DesktopAssets.DesktopAssets
   | ElectronMenu.ElectronMenu
   | ElectronShell.ElectronShell
@@ -76,6 +80,10 @@ export class DesktopWindow extends Context.Service<
     // produce a stranded window pointing at nothing.
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+    readonly dispatchRendererEvent: (
+      channel: string,
+      ...args: readonly unknown[]
+    ) => Effect.Effect<void, DesktopWindowError>;
     readonly syncAppearance: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/window/DesktopWindow") {}
@@ -138,6 +146,14 @@ export function isRetryableDevelopmentRendererLoadFailure(input: {
   );
 }
 
+export function shouldRetainMainWindowOnClose(input: {
+  readonly platform: NodeJS.Platform;
+  readonly notificationsEnabled: boolean;
+  readonly isQuitting: boolean;
+}): boolean {
+  return input.platform === "darwin" && input.notificationsEnabled && !input.isQuitting;
+}
+
 function getWindowTitleBarOptions(
   shouldUseDarkColors: boolean,
   platform: NodeJS.Platform,
@@ -196,6 +212,8 @@ function bindFirstRevealTrigger(
 
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
+  const desktopState = yield* DesktopState.DesktopState;
   const assets = yield* DesktopAssets.DesktopAssets;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   const electronShell = yield* ElectronShell.ElectronShell;
@@ -214,6 +232,22 @@ export const make = Effect.gen(function* () {
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
+
+  const closeMainWindow = Effect.fn("desktop.window.closeMainWindow")(function* (
+    window: Electron.BrowserWindow,
+  ) {
+    const settings = yield* clientSettings.get;
+    const shouldRetain = shouldRetainMainWindowOnClose({
+      platform: environment.platform,
+      notificationsEnabled: Option.exists(settings, (value) => value.desktopNotificationsEnabled),
+      isQuitting: yield* Ref.get(desktopState.quitting),
+    });
+    if (shouldRetain) {
+      window.hide();
+      return;
+    }
+    window.destroy();
+  });
 
   const dismissConnectingSplash = Effect.gen(function* () {
     const splash = yield* Ref.getAndSet(splashWindowRef, Option.none());
@@ -273,6 +307,15 @@ export const make = Effect.gen(function* () {
 
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
+      let isClosePending = false;
+      window.on("close", (event) => {
+        event.preventDefault();
+        if (isClosePending) return;
+        isClosePending = true;
+        void runPromise(closeMainWindow(window)).finally(() => {
+          isClosePending = false;
+        });
+      });
     }
 
     yield* previewManager.setMainWindow(window);
@@ -554,6 +597,25 @@ export const make = Effect.gen(function* () {
     Effect.withSpan("desktop.window.showConnectingSplash"),
   );
 
+  const dispatchRendererEvent = Effect.fn("desktop.window.dispatchRendererEvent")(function* (
+    channel: string,
+    ...args: readonly unknown[]
+  ) {
+    const existingWindow = yield* focusedMainWindow;
+    if (Option.isNone(existingWindow) && !(yield* Ref.get(backendReadyRef))) return;
+    const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
+    const send = () => {
+      if (targetWindow.isDestroyed()) return;
+      targetWindow.webContents.send(channel, ...args);
+      void runPromise(electronWindow.reveal(targetWindow));
+    };
+    if (targetWindow.webContents.isLoadingMainFrame()) {
+      targetWindow.webContents.once("did-finish-load", send);
+      return;
+    }
+    send();
+  });
+
   return DesktopWindow.of({
     createMain,
     ensureMain,
@@ -589,27 +651,8 @@ export const make = Effect.gen(function* () {
     handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
       Effect.withSpan("desktop.window.handleBackendNotReady"),
     ),
-    dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
-      yield* Effect.annotateCurrentSpan({ action });
-      const existingWindow = yield* focusedMainWindow;
-      if (Option.isNone(existingWindow) && !(yield* Ref.get(backendReadyRef))) {
-        return;
-      }
-      const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
-
-      const send = () => {
-        if (targetWindow.isDestroyed()) return;
-        targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
-        void runPromise(electronWindow.reveal(targetWindow));
-      };
-
-      if (targetWindow.webContents.isLoadingMainFrame()) {
-        targetWindow.webContents.once("did-finish-load", send);
-        return;
-      }
-
-      send();
-    }),
+    dispatchMenuAction: (action) => dispatchRendererEvent(MENU_ACTION_CHANNEL, action),
+    dispatchRendererEvent,
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
       yield* electronWindow.syncAllAppearance((window) =>

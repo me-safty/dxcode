@@ -4,10 +4,18 @@ import * as Schema from "effect/Schema";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
+  DEFAULT_CLIENT_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
   ServerSettings,
   ServerSettingsPatch,
 } from "./settings.ts";
+
+describe("ClientSettings desktop notifications", () => {
+  it("decode_legacySettings_defaultsDisabled", () => {
+    expect(decodeClientSettings({}).desktopNotificationsEnabled).toBe(false);
+    expect(DEFAULT_CLIENT_SETTINGS.desktopNotificationsEnabled).toBe(false);
+  });
+});
 
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);

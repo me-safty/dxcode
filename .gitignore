@@ -32,3 +32,8 @@ node_modules/
 *.log
 .env*
 !.env.example
+
+# dotcontext transient state
+.context/cache/
+.context/runtime/sessions/
+.context/**/archive/

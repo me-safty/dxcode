@@ -1,13 +1,13 @@
 {
   "version": 2,
   "workflowType": "prevc",
-  "updatedAt": "2026-07-15T01:52:05.324Z",
+  "updatedAt": "2026-07-15T11:37:46.763Z",
   "status": {
     "project": {
       "name": "issue-780-native-desktop-notifications",
       "scale": 2,
       "started": "2026-07-15T00:34:34.817Z",
-      "current_phase": "E",
+      "current_phase": "V",
       "settings": {
         "autonomous_mode": false,
         "require_plan": true,
@@ -59,11 +59,43 @@
         ]
       },
       "E": {
-        "status": "in_progress",
-        "started_at": "2026-07-15T00:50:14.951Z"
+        "status": "completed",
+        "started_at": "2026-07-15T00:50:14.951Z",
+        "completed_at": "2026-07-15T01:55:27.439Z",
+        "outputs": [
+          {
+            "path": "apps/web/src/desktopNotifications.logic.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/web/src/desktopNotifications.logic.test.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/web/src/components/desktop/DesktopNotificationBootstrap.tsx",
+            "status": "filled"
+          },
+          {
+            "path": "apps/desktop/src/notifications/DesktopNotifications.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/desktop/src/notifications/DesktopNotifications.test.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/desktop/src/electron/ElectronNotification.ts",
+            "status": "filled"
+          },
+          {
+            "path": ".context/evidence/issue-780-native-desktop-notifications-validation.md",
+            "status": "filled"
+          }
+        ]
       },
       "V": {
-        "status": "pending"
+        "status": "in_progress",
+        "started_at": "2026-07-15T01:55:27.439Z"
       },
       "C": {
         "status": "skipped",
@@ -271,17 +303,47 @@
           "output": "IPC and renderer integration",
           "notes": "Validated preload IPC, opted-in macOS close retention, pending target consumption, reveal/focus, and exact environment/thread navigation implemented and tested.",
           "timestamp": "2026-07-15T01:52:05.324Z"
+        },
+        {
+          "phase": "E",
+          "action": "plan_phase_updated",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Plan phase execution updated to in_progress",
+          "timestamp": "2026-07-15T01:52:19.394Z"
+        },
+        {
+          "phase": "E",
+          "action": "plan_linked",
+          "plan": "issue-780-native-desktop-notifications",
+          "timestamp": "2026-07-15T01:52:25.457Z"
+        },
+        {
+          "phase": "E",
+          "action": "plan_phase_updated",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Plan phase execution updated to completed",
+          "timestamp": "2026-07-15T01:55:22.363Z"
+        },
+        {
+          "phase": "E",
+          "action": "completed",
+          "timestamp": "2026-07-15T01:55:27.439Z"
+        },
+        {
+          "phase": "V",
+          "action": "started",
+          "timestamp": "2026-07-15T01:55:27.439Z"
         }
       ],
-      "last_activity": "2026-07-15T01:52:05.324Z",
-      "resume_context": "Concluído: Add click restore, focus, and pending deep-link navigation"
+      "last_activity": "2026-07-15T01:55:27.439Z",
+      "resume_context": "Fase V (Validação) em progresso"
     }
   },
   "binding": {
     "workflowName": "issue-780-native-desktop-notifications",
     "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
-    "activeTaskId": "455d2c94-8875-40ee-a6ab-5408c4b55bfc",
+    "activeTaskId": "39372cc9-ff18-49b2-8014-118b35c9350e",
     "createdAt": "2026-07-15T00:34:34.820Z",
-    "updatedAt": "2026-07-15T00:50:14.952Z"
+    "updatedAt": "2026-07-15T11:37:46.757Z"
   }
 }
