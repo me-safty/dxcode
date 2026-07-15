@@ -387,7 +387,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange, hasMoreOlder, loadingOlder, onLoadOlder]);
+  }, [
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onIsAtEndChange,
+    hasMoreOlder,
+    loadingOlder,
+    onLoadOlder,
+  ]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -491,7 +499,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
-  if (rows.length === 0 && !isWorking) {
+  // Only short-circuit to the empty state when there is genuinely nothing to
+  // fetch: the window can derive zero VISIBLE rows (e.g. only tool-neutral work
+  // entries) while older history still exists — the list must render then so
+  // its "Load older history" header stays reachable.
+  if (rows.length === 0 && !isWorking && !hasMoreOlder && !loadingOlder) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-muted-foreground/30">
