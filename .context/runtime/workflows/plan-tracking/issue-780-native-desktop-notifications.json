@@ -1,7 +1,7 @@
 {
   "planSlug": "issue-780-native-desktop-notifications",
   "linkedAt": "2026-07-15T00:43:17.078Z",
-  "progress": 55,
+  "progress": 64,
   "phases": {
     "planning": {
       "phaseId": "planning",
@@ -81,12 +81,21 @@
           "completedAt": "2026-07-15T01:52:03.210Z",
           "output": "Tracker and tests",
           "notes": "Pure shell transition tracker baselines hydration/reconnect/reseed, emits settled/rising-edge events once, and suppresses archived/removed/partial states."
+        },
+        {
+          "stepIndex": 3,
+          "description": "Add native Electron delivery and focus policy",
+          "status": "completed",
+          "deliverables": ["Desktop service and tests"],
+          "completedAt": "2026-07-15T01:52:04.298Z",
+          "output": "Desktop service and tests",
+          "notes": "Electron main service rechecks opt-in, focus, support, dedupe, fixed private copy, silent delivery, and non-fatal failure handling."
         }
       ],
-      "completedAt": "2026-07-15T01:52:03.210Z",
-      "commitHash": "2141f915821b5c03d8472ea9800212a76f2e4103",
-      "commitShortHash": "2141f9158",
-      "committedAt": "2026-07-15T01:52:03.197Z",
+      "completedAt": "2026-07-15T01:52:04.298Z",
+      "commitHash": "c4947d9f851289316ce1e51e7d6229e96bd1783e",
+      "commitShortHash": "c4947d9f8",
+      "committedAt": "2026-07-15T01:52:04.286Z",
       "committedBy": "AI Context Agent"
     }
   },
@@ -144,5 +153,5 @@
       "decidedAt": "2026-07-15T00:50:08.650Z"
     }
   ],
-  "lastUpdated": "2026-07-15T01:52:03.210Z"
+  "lastUpdated": "2026-07-15T01:52:04.298Z"
 }

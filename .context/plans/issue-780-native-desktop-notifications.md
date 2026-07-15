@@ -95,9 +95,9 @@ phases:
         deliverables: [Draft PR URL and handoff]
 generated: "2026-07-15"
 status: filled
-progress: 55
+progress: 64
 scaffoldVersion: "2.0.0"
-lastUpdated: "2026-07-15T01:52:03.210Z"
+lastUpdated: "2026-07-15T01:52:04.298Z"
 ---
 
 # Issue #780 native desktop notifications
@@ -183,12 +183,12 @@ None.
 
 ## Execution History
 
-> Last updated: 2026-07-15T01:52:03.210Z | Progress: 55%
+> Last updated: 2026-07-15T01:52:04.298Z | Progress: 64%
 
 ### execution [DONE]
 
 - Started: 2026-07-15T01:52:01.284Z
-- Completed: 2026-07-15T01:52:03.210Z
+- Completed: 2026-07-15T01:52:04.298Z
 
 - [x] Step 1: Add default-off persisted desktop preference _(2026-07-15T01:52:01.284Z)_
   - Output: Settings schema and UI
@@ -196,6 +196,9 @@ None.
 - [x] Step 2: Add pure settled transition derivation and replay-safe observation _(2026-07-15T01:52:03.210Z)_
   - Output: Tracker and tests
   - Notes: Pure shell transition tracker baselines hydration/reconnect/reseed, emits settled/rising-edge events once, and suppresses archived/removed/partial states.
+- [x] Step 3: Add native Electron delivery and focus policy _(2026-07-15T01:52:04.298Z)_
+  - Output: Desktop service and tests
+  - Notes: Electron main service rechecks opt-in, focus, support, dedupe, fixed private copy, silent delivery, and non-fatal failure handling.
 
 ### planning [DONE]
 

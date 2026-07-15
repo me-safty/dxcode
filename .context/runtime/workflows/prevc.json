@@ -1,7 +1,7 @@
 {
   "version": 2,
   "workflowType": "prevc",
-  "updatedAt": "2026-07-15T01:52:03.213Z",
+  "updatedAt": "2026-07-15T01:52:04.301Z",
   "status": {
     "project": {
       "name": "issue-780-native-desktop-notifications",
@@ -249,10 +249,21 @@
           "output": "Tracker and tests",
           "notes": "Pure shell transition tracker baselines hydration/reconnect/reseed, emits settled/rising-edge events once, and suppresses archived/removed/partial states.",
           "timestamp": "2026-07-15T01:52:03.213Z"
+        },
+        {
+          "phase": "E",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "execution",
+          "stepIndex": 3,
+          "stepDescription": "Add native Electron delivery and focus policy",
+          "output": "Desktop service and tests",
+          "notes": "Electron main service rechecks opt-in, focus, support, dedupe, fixed private copy, silent delivery, and non-fatal failure handling.",
+          "timestamp": "2026-07-15T01:52:04.300Z"
         }
       ],
-      "last_activity": "2026-07-15T01:52:03.213Z",
-      "resume_context": "Concluído: Add pure settled transition derivation and replay-safe observation"
+      "last_activity": "2026-07-15T01:52:04.300Z",
+      "resume_context": "Concluído: Add native Electron delivery and focus policy"
     }
   },
   "binding": {
