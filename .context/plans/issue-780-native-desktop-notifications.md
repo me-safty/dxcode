@@ -95,9 +95,9 @@ phases:
         deliverables: [Draft PR URL and handoff]
 generated: "2026-07-15"
 status: filled
-progress: 36
+progress: 45
 scaffoldVersion: "2.0.0"
-lastUpdated: "2026-07-15T00:50:08.662Z"
+lastUpdated: "2026-07-15T01:52:01.284Z"
 ---
 
 # Issue #780 native desktop notifications
@@ -164,14 +164,14 @@ No dynamic title, response, prompt, diff, command, project name, or thread title
 
 ## Review findings
 
-| Concern | Resolution |
-| --- | --- |
-| Intermediate assistant messages looked complete in older attempts | Require same-turn `running` to settled `completed`/`error` plus inactive session. |
-| Reconnect/reseed can replay stale attention state | Key tracker baselines by connection generation and shell snapshot revision. |
-| A closed macOS window destroys the observer | Hide the opted-in window while keeping standard Quit semantics. |
-| Renderer payload could expose content | Contract accepts only kind and opaque IDs; main owns fixed copy. |
-| Click can precede renderer listener registration | Store and consume a pending target exactly once. |
-| Permission denial can surface asynchronously | Handle unsupported, synchronous throw, and native `failed` events without failing IPC or app state. |
+| Concern                                                           | Resolution                                                                                          |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Intermediate assistant messages looked complete in older attempts | Require same-turn `running` to settled `completed`/`error` plus inactive session.                   |
+| Reconnect/reseed can replay stale attention state                 | Key tracker baselines by connection generation and shell snapshot revision.                         |
+| A closed macOS window destroys the observer                       | Hide the opted-in window while keeping standard Quit semantics.                                     |
+| Renderer payload could expose content                             | Contract accepts only kind and opaque IDs; main owns fixed copy.                                    |
+| Click can precede renderer listener registration                  | Store and consume a pending target exactly once.                                                    |
+| Permission denial can surface asynchronously                      | Handle unsupported, synchronous throw, and native `failed` events without failing IPC or app state. |
 
 ## Out of scope
 
@@ -183,22 +183,33 @@ None.
 
 ## Execution History
 
-> Last updated: 2026-07-15T00:50:08.662Z | Progress: 36%
+> Last updated: 2026-07-15T01:52:01.284Z | Progress: 45%
+
+### execution [DONE]
+
+- Started: 2026-07-15T01:52:01.284Z
+- Completed: 2026-07-15T01:52:01.284Z
+
+- [x] Step 1: Add default-off persisted desktop preference _(2026-07-15T01:52:01.284Z)_
+  - Output: Settings schema and UI
+  - Notes: Persisted default-off setting, legacy decode, desktop-only UI, and restore-default behavior implemented and tested.
 
 ### planning [DONE]
+
 - Started: 2026-07-15T00:45:28.430Z
 - Completed: 2026-07-15T00:45:28.814Z
 
-- [x] Step 1: Review issue *(2026-07-15T00:45:28.430Z)*
+- [x] Step 1: Review issue _(2026-07-15T00:45:28.430Z)_
   - Notes: Issue and prior PR state reviewed; no new maintainer stop or direction change.
-- [x] Step 2: Map shell, settings, IPC, window, and routing sources *(2026-07-15T00:45:28.583Z)*
+- [x] Step 2: Map shell, settings, IPC, window, and routing sources _(2026-07-15T00:45:28.583Z)_
   - Notes: Mapped shell/projector, settings persistence, Electron window/IPC, and environment-thread routing.
-- [x] Step 3: Define implementation and validation gates *(2026-07-15T00:45:28.704Z)*
+- [x] Step 3: Define implementation and validation gates _(2026-07-15T00:45:28.704Z)_
   - Notes: Canonical design, acceptance matrix, sensors, evidence, and PR boundaries recorded.
 
 ### review [DONE]
-- Started: 2026-07-15T00:50:08.662Z
-- Completed: 2026-07-15T00:50:08.662Z
 
-- [x] Step 1: Review design against acceptance criteria and prior PR failures *(2026-07-15T00:50:08.662Z)*
+- Started: 2026-07-15T00:50:08.662Z
+- Completed: 2026-07-15T00:50:08.795Z
+
+- [x] Step 1: Review design against acceptance criteria and prior PR failures _(2026-07-15T00:50:08.662Z)_
   - Notes: Reviewed prior failure modes, canonical settled state, replay generations, privacy boundary, native failure handling, close retention, and click startup race. No unresolved blocker.

@@ -1,0 +1,44 @@
+{
+  "id": "455d2c94-8875-40ee-a6ab-5408c4b55bfc",
+  "title": "Issue #780 native desktop notifications: Execution",
+  "description": "Derived from linked plan \"issue-780-native-desktop-notifications\" for PREVC phase E (Execution). Plan phases: Execution. Phase objectives: Implement settings, pure derivation, Electron delivery, navigation, and focused tests.. Key steps: Add default-off persisted desktop preference; Add pure settled transition derivation and replay-safe observation; Add native Electron delivery and focus policy; Add click restore, focus, and pending deep-link navigation. Expected outputs: Production code, Focused automated tests, Settings schema and UI, Tracker and tests, Desktop service and tests, IPC and renderer integration.",
+  "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
+  "owner": "solo-dev",
+  "status": "ready",
+  "inputs": [
+    "docs/architecture.md",
+    "docs/data-flow.md",
+    "docs/development-workflow.md",
+    "docs/testing-strategy.md"
+  ],
+  "expectedOutputs": [
+    "Production code",
+    "Focused automated tests",
+    "Settings schema and UI",
+    "Tracker and tests",
+    "Desktop service and tests",
+    "IPC and renderer integration"
+  ],
+  "acceptanceCriteria": [
+    "Add default-off persisted desktop preference",
+    "Add pure settled transition derivation and replay-safe observation",
+    "Add native Electron delivery and focus policy",
+    "Add click restore, focus, and pending deep-link navigation"
+  ],
+  "requiredSensors": ["test", "check", "typecheck", "diff-check"],
+  "requiredArtifacts": [".context/evidence/issue-780-native-desktop-notifications-validation.md"],
+  "createdAt": "2026-07-15T00:50:14.950Z",
+  "updatedAt": "2026-07-15T00:50:14.950Z",
+  "metadata": {
+    "requirementsSource": "plan-frontmatter",
+    "source": "workflow.plan",
+    "planSlug": "issue-780-native-desktop-notifications",
+    "prevcPhase": "E",
+    "planPhaseIds": ["execution"],
+    "planPhaseNames": ["Execution"],
+    "planPhaseSummaries": [
+      "Implement settings, pure derivation, Electron delivery, navigation, and focused tests."
+    ],
+    "derivedFrom": "linked-plan"
+  }
+}

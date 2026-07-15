@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Understand the context and purpose of the code
@@ -21,6 +22,7 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Code quality feedback:**
+
 ```
 // Before: Nested callbacks
 fetchUser(id, (user) => {
@@ -36,6 +38,7 @@ render(posts);
 ```
 
 **Security feedback:**
+
 ```
 // Issue: SQL injection vulnerability
 const query = `SELECT * FROM users WHERE id = ${userId}`;

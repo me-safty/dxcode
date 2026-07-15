@@ -1,13 +1,13 @@
 {
   "version": 2,
   "workflowType": "prevc",
-  "updatedAt": "2026-07-15T00:50:08.666Z",
+  "updatedAt": "2026-07-15T01:52:01.288Z",
   "status": {
     "project": {
       "name": "issue-780-native-desktop-notifications",
       "scale": 2,
       "started": "2026-07-15T00:34:34.817Z",
-      "current_phase": "R",
+      "current_phase": "E",
       "settings": {
         "autonomous_mode": false,
         "require_plan": true,
@@ -44,11 +44,23 @@
         ]
       },
       "R": {
-        "status": "in_progress",
-        "started_at": "2026-07-15T00:45:35.225Z"
+        "status": "completed",
+        "started_at": "2026-07-15T00:45:35.225Z",
+        "completed_at": "2026-07-15T00:50:14.951Z",
+        "outputs": [
+          {
+            "path": ".context/plans/issue-780-native-desktop-notifications.md",
+            "status": "filled"
+          },
+          {
+            "path": ".context/docs/architecture.md",
+            "status": "filled"
+          }
+        ]
       },
       "E": {
-        "status": "pending"
+        "status": "in_progress",
+        "started_at": "2026-07-15T00:50:14.951Z"
       },
       "V": {
         "status": "pending"
@@ -78,7 +90,10 @@
     },
     "approval": {
       "plan_created": true,
-      "plan_approved": false
+      "plan_approved": true,
+      "approved_by": "solo-dev",
+      "approved_at": "2026-07-15T00:50:14.917Z",
+      "approval_notes": "Review gate complete. Design covers canonical settled transitions, reconnect/reseed baselines, opt-in persistence, native focus/permission policy, privacy, macOS close retention, deduplication, and exact click navigation."
     },
     "execution": {
       "history": [
@@ -189,17 +204,51 @@
           "stepDescription": "Review design against acceptance criteria and prior PR failures",
           "notes": "Reviewed prior failure modes, canonical settled state, replay generations, privacy boundary, native failure handling, close retention, and click startup race. No unresolved blocker.",
           "timestamp": "2026-07-15T00:50:08.666Z"
+        },
+        {
+          "phase": "R",
+          "action": "plan_phase_updated",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Plan phase review updated to completed",
+          "timestamp": "2026-07-15T00:50:08.797Z"
+        },
+        {
+          "phase": "R",
+          "action": "plan_approved",
+          "approved_by": "solo-dev",
+          "timestamp": "2026-07-15T00:50:14.917Z"
+        },
+        {
+          "phase": "R",
+          "action": "completed",
+          "timestamp": "2026-07-15T00:50:14.951Z"
+        },
+        {
+          "phase": "E",
+          "action": "started",
+          "timestamp": "2026-07-15T00:50:14.951Z"
+        },
+        {
+          "phase": "E",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "execution",
+          "stepIndex": 1,
+          "stepDescription": "Add default-off persisted desktop preference",
+          "output": "Settings schema and UI",
+          "notes": "Persisted default-off setting, legacy decode, desktop-only UI, and restore-default behavior implemented and tested.",
+          "timestamp": "2026-07-15T01:52:01.288Z"
         }
       ],
-      "last_activity": "2026-07-15T00:50:08.666Z",
-      "resume_context": "Concluído: Review design against acceptance criteria and prior PR failures"
+      "last_activity": "2026-07-15T01:52:01.288Z",
+      "resume_context": "Concluído: Add default-off persisted desktop preference"
     }
   },
   "binding": {
     "workflowName": "issue-780-native-desktop-notifications",
     "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
-    "activeTaskId": "78924b83-0dc3-4fa0-a3ff-dc39f0c6f0de",
+    "activeTaskId": "455d2c94-8875-40ee-a6ab-5408c4b55bfc",
     "createdAt": "2026-07-15T00:34:34.820Z",
-    "updatedAt": "2026-07-15T00:45:35.227Z"
+    "updatedAt": "2026-07-15T00:50:14.952Z"
   }
 }

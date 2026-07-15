@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Ensure adequate test coverage exists
@@ -20,15 +21,16 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Extract function:**
+
 ```typescript
 // Before: Inline validation logic
-if (email && email.includes('@') && email.length > 5) {
+if (email && email.includes("@") && email.length > 5) {
   // process email
 }
 
 // After: Extracted to function
 function isValidEmail(email: string): boolean {
-  return email && email.includes('@') && email.length > 5;
+  return email && email.includes("@") && email.length > 5;
 }
 
 if (isValidEmail(email)) {

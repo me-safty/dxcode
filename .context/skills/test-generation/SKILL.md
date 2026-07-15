@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Identify the function/component to test
@@ -21,18 +22,19 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Unit test example:**
+
 ```typescript
-describe('calculateTotal', () => {
-  it('should sum item prices correctly', () => {
+describe("calculateTotal", () => {
+  it("should sum item prices correctly", () => {
     const items = [{ price: 10 }, { price: 20 }];
     expect(calculateTotal(items)).toBe(30);
   });
 
-  it('should return 0 for empty array', () => {
+  it("should return 0 for empty array", () => {
     expect(calculateTotal([])).toBe(0);
   });
 
-  it('should handle negative prices', () => {
+  it("should handle negative prices", () => {
     const items = [{ price: 10 }, { price: -5 }];
     expect(calculateTotal(items)).toBe(5);
   });

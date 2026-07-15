@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Identify the target audience
@@ -21,6 +22,7 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Function documentation:**
+
 ```typescript
 /**
  * Calculates the total price of items in a cart.
@@ -33,7 +35,7 @@ scaffoldVersion: "2.0.0"
  * const total = calculateTotal([{ price: 10 }, { price: 20 }]);
  * // Returns: 30
  */
-function calculateTotal(items: CartItem[]): number
+function calculateTotal(items: CartItem[]): number;
 ```
 
 ## Quality Bar

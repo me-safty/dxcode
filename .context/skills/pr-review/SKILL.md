@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Read the PR description to understand the goal
@@ -21,6 +22,7 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Approval comment:**
+
 ```
 Looks good! Clean implementation with comprehensive tests.
 
@@ -31,6 +33,7 @@ Approved ✅
 ```
 
 **Request changes:**
+
 ```
 Good progress, but a few items need attention:
 

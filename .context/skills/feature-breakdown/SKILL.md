@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Understand the full feature requirements
@@ -21,6 +22,7 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Feature breakdown example:**
+
 ```
 ## Feature: User Authentication
 

@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Reproduce the bug consistently
@@ -21,6 +22,7 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Bug investigation notes:**
+
 ```
 ## Bug: User profile fails to load
 

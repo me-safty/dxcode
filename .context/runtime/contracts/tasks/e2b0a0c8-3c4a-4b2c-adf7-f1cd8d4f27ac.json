@@ -31,12 +31,8 @@
     "source": "workflow.plan",
     "planSlug": "issue-780-native-desktop-notifications",
     "prevcPhase": "P",
-    "planPhaseIds": [
-      "planning"
-    ],
-    "planPhaseNames": [
-      "Planning"
-    ],
+    "planPhaseIds": ["planning"],
+    "planPhaseNames": ["Planning"],
     "planPhaseSummaries": [
       "Verify upstream direction, map canonical state, and define a bounded design."
     ],

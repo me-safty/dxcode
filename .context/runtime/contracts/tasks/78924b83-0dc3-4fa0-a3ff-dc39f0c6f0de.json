@@ -4,38 +4,30 @@
   "description": "Derived from linked plan \"issue-780-native-desktop-notifications\" for PREVC phase R (Review). Plan phases: Review. Phase objectives: Challenge correctness, privacy, replay, focus, and click-navigation behavior before edits.. Key steps: Review design against acceptance criteria and prior PR failures. Expected outputs: Reviewed and approved plan, Review notes.",
   "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
   "owner": "solo-dev",
-  "status": "ready",
+  "status": "completed",
   "inputs": [
     "docs/architecture.md",
     "docs/data-flow.md",
     "docs/development-workflow.md",
     "docs/testing-strategy.md"
   ],
-  "expectedOutputs": [
-    "Reviewed and approved plan",
-    "Review notes"
-  ],
-  "acceptanceCriteria": [
-    "Review design against acceptance criteria and prior PR failures"
-  ],
+  "expectedOutputs": ["Reviewed and approved plan", "Review notes"],
+  "acceptanceCriteria": ["Review design against acceptance criteria and prior PR failures"],
   "requiredSensors": [],
   "requiredArtifacts": [],
   "createdAt": "2026-07-15T00:45:35.224Z",
-  "updatedAt": "2026-07-15T00:45:35.224Z",
+  "updatedAt": "2026-07-15T00:50:14.953Z",
   "metadata": {
     "requirementsSource": "none",
     "source": "workflow.plan",
     "planSlug": "issue-780-native-desktop-notifications",
     "prevcPhase": "R",
-    "planPhaseIds": [
-      "review"
-    ],
-    "planPhaseNames": [
-      "Review"
-    ],
+    "planPhaseIds": ["review"],
+    "planPhaseNames": ["Review"],
     "planPhaseSummaries": [
       "Challenge correctness, privacy, replay, focus, and click-navigation behavior before edits."
     ],
-    "derivedFrom": "linked-plan"
+    "derivedFrom": "linked-plan",
+    "completionReason": "Workflow advanced from R to E"
   }
 }

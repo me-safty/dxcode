@@ -6,10 +6,7 @@
       "id": "protect-repository-core",
       "effect": "require_approval",
       "when": {
-        "paths": [
-          "apps/**",
-          "packages/**"
-        ],
+        "paths": ["apps/**", "packages/**"],
         "risk": "high"
       },
       "reason": "High-risk changes to core monorepo typescript react-native paths require approval."
@@ -34,12 +31,7 @@
       "id": "block-secrets",
       "effect": "deny",
       "when": {
-        "paths": [
-          "**/.env*",
-          "**/*.pem",
-          "**/*.key",
-          "**/*secret*"
-        ]
+        "paths": ["**/.env*", "**/*.pem", "**/*.key", "**/*secret*"]
       },
       "reason": "Secret-like files are blocked by policy."
     }

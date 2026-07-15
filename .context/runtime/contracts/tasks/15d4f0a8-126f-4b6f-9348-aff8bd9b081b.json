@@ -31,12 +31,7 @@
     "Notification contains no sensitive dynamic content",
     "No sounds pets overlays tray mobile push or daemon changes"
   ],
-  "requiredSensors": [
-    "test",
-    "check",
-    "typecheck",
-    "diff-check"
-  ],
+  "requiredSensors": ["test", "check", "typecheck", "diff-check"],
   "requiredArtifacts": [
     {
       "kind": "path",

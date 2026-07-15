@@ -8,6 +8,7 @@ generated: 2026-07-15
 status: unfilled
 scaffoldVersion: "2.0.0"
 ---
+
 ## Workflow
 
 1. Review the staged changes using `git diff --staged`
@@ -20,6 +21,7 @@ scaffoldVersion: "2.0.0"
 ## Examples
 
 **Feature commit:**
+
 ```
 feat(auth): add password reset functionality
 
@@ -30,6 +32,7 @@ Closes #123
 ```
 
 **Bug fix commit:**
+
 ```
 fix(api): handle null response in user lookup
 
