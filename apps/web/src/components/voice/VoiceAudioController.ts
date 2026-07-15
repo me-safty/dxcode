@@ -1,5 +1,6 @@
+import voiceAudioWorkletUrl from "./VoiceAudioProcessor.worklet?worker&url";
+
 const VOICE_SAMPLE_RATE = 24_000;
-const AUDIO_CHUNK_DURATION_MS = 100;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -33,34 +34,44 @@ function base64Pcm16ToFloat32(encoded: string): Float32Array {
   return samples;
 }
 
+export interface VoiceAudioDiagnostics {
+  readonly inputDevice: string;
+  readonly inputSampleRate: number | null;
+  readonly inputChannels: number | null;
+  readonly contextSampleRate: number;
+  readonly baseLatencyMs: number;
+  readonly outputLatencyMs: number | null;
+}
+
 export class VoiceAudioController {
   readonly sampleRate = VOICE_SAMPLE_RATE;
 
   private audioContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
-  private processorNode: ScriptProcessorNode | null = null;
-  private silentGainNode: GainNode | null = null;
-  private playbackSources = new Set<AudioBufferSourceNode>();
-  private nextPlaybackAt = 0;
+  private workletNode: AudioWorkletNode | null = null;
   private muted = false;
 
   private getAudioContext(): AudioContext {
     if (this.audioContext === null) {
-      this.audioContext = new AudioContext({ sampleRate: VOICE_SAMPLE_RATE });
+      this.audioContext = new AudioContext({
+        sampleRate: VOICE_SAMPLE_RATE,
+        latencyHint: "interactive",
+      });
     }
     return this.audioContext;
   }
 
-  async start(onAudioData: (audio: string) => void): Promise<void> {
+  async start(onAudioData: (audio: string) => void): Promise<VoiceAudioDiagnostics> {
     const audioContext = this.getAudioContext();
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
-    }
+    if (audioContext.state === "suspended") await audioContext.resume();
+    await audioContext.audioWorklet.addModule(voiceAudioWorkletUrl);
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        sampleRate: VOICE_SAMPLE_RATE,
-        channelCount: 1,
+        sampleRate: { ideal: VOICE_SAMPLE_RATE },
+        sampleSize: { ideal: 16 },
+        channelCount: { ideal: 1 },
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
@@ -70,102 +81,73 @@ export class VoiceAudioController {
     this.setMuted(this.muted);
 
     const source = audioContext.createMediaStreamSource(stream);
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    const silentGain = audioContext.createGain();
-    silentGain.gain.value = 0;
-    this.sourceNode = source;
-    this.processorNode = processor;
-    this.silentGainNode = silentGain;
-
-    let buffers: Float32Array[] = [];
-    let bufferedSamples = 0;
-    const chunkSamples = Math.round((VOICE_SAMPLE_RATE * AUDIO_CHUNK_DURATION_MS) / 1000);
-
-    processor.onaudioprocess = (event) => {
-      if (this.muted) return;
-      const input = new Float32Array(event.inputBuffer.getChannelData(0));
-      buffers.push(input);
-      bufferedSamples += input.length;
-      while (bufferedSamples >= chunkSamples) {
-        const chunk = new Float32Array(chunkSamples);
-        let written = 0;
-        while (written < chunkSamples) {
-          const buffer = buffers[0];
-          if (!buffer) break;
-          const remaining = chunkSamples - written;
-          if (buffer.length <= remaining) {
-            chunk.set(buffer, written);
-            written += buffer.length;
-            bufferedSamples -= buffer.length;
-            buffers.shift();
-          } else {
-            chunk.set(buffer.subarray(0, remaining), written);
-            buffers[0] = buffer.subarray(remaining);
-            bufferedSamples -= remaining;
-            written += remaining;
-          }
-        }
-        onAudioData(float32ToPcm16Base64(chunk));
+    const worklet = new AudioWorkletNode(audioContext, "t3-voice-audio-processor", {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+      channelCount: 1,
+      channelCountMode: "explicit",
+      channelInterpretation: "speakers",
+    });
+    worklet.port.addEventListener("message", (event: MessageEvent<unknown>) => {
+      if (!event.data || typeof event.data !== "object" || !("type" in event.data)) return;
+      const message = event.data as { readonly type: string; readonly samples?: ArrayBuffer };
+      if (message.type === "input" && message.samples) {
+        onAudioData(float32ToPcm16Base64(new Float32Array(message.samples)));
       }
-    };
+    });
+    worklet.port.start();
+    source.connect(worklet);
+    worklet.connect(audioContext.destination);
+    this.sourceNode = source;
+    this.workletNode = worklet;
 
-    source.connect(processor);
-    processor.connect(silentGain);
-    silentGain.connect(audioContext.destination);
+    const track = stream.getAudioTracks()[0];
+    const settings = track?.getSettings();
+    return {
+      inputDevice: track?.label || "Default microphone",
+      inputSampleRate: settings?.sampleRate ?? null,
+      inputChannels: settings?.channelCount ?? null,
+      contextSampleRate: audioContext.sampleRate,
+      baseLatencyMs: Math.round(audioContext.baseLatency * 1_000),
+      outputLatencyMs:
+        "outputLatency" in audioContext
+          ? Math.round(
+              (audioContext as AudioContext & { outputLatency: number }).outputLatency * 1_000,
+            )
+          : null,
+    };
   }
 
   setMuted(muted: boolean): void {
     this.muted = muted;
-    for (const track of this.mediaStream?.getAudioTracks() ?? []) {
-      track.enabled = !muted;
-    }
+    for (const track of this.mediaStream?.getAudioTracks() ?? []) track.enabled = !muted;
+    this.workletNode?.port.postMessage({ type: muted ? "muted" : "unmuted" }, []);
   }
 
   play(encodedAudio: string): void {
-    const audioContext = this.getAudioContext();
     const samples = base64Pcm16ToFloat32(encodedAudio);
-    const buffer = audioContext.createBuffer(1, samples.length, VOICE_SAMPLE_RATE);
-    buffer.getChannelData(0).set(samples);
-    const source = audioContext.createBufferSource();
-    source.buffer = buffer;
-    source.connect(audioContext.destination);
-    const startsAt = Math.max(audioContext.currentTime + 0.02, this.nextPlaybackAt);
-    this.nextPlaybackAt = startsAt + buffer.duration;
-    this.playbackSources.add(source);
-    source.addEventListener("ended", () => {
-      this.playbackSources.delete(source);
-      source.disconnect();
-    });
-    source.start(startsAt);
+    this.workletNode?.port.postMessage({ type: "playback", samples: samples.buffer }, [
+      samples.buffer,
+    ]);
+  }
+
+  flushPlayback(): void {
+    this.workletNode?.port.postMessage({ type: "flush-playback" }, []);
   }
 
   stopPlayback(): void {
-    for (const source of this.playbackSources) {
-      try {
-        source.stop();
-      } catch {
-        // A source can already be stopped by Chromium while its ended callback is queued.
-      }
-      source.disconnect();
-    }
-    this.playbackSources.clear();
-    this.nextPlaybackAt = 0;
+    this.workletNode?.port.postMessage({ type: "clear-playback" }, []);
   }
 
   async stop(): Promise<void> {
     this.stopPlayback();
-    if (this.processorNode) {
-      this.processorNode.onaudioprocess = null;
-      this.processorNode.disconnect();
-    }
+    this.workletNode?.port.close();
+    this.workletNode?.disconnect();
     this.sourceNode?.disconnect();
-    this.silentGainNode?.disconnect();
-    for (const track of this.mediaStream?.getTracks() ?? []) {
-      track.stop();
-    }
-    this.processorNode = null;
+    for (const track of this.mediaStream?.getTracks() ?? []) track.stop();
+    this.workletNode = null;
     this.sourceNode = null;
-    this.silentGainNode = null;
     this.mediaStream = null;
     if (this.audioContext) {
       await this.audioContext.close();

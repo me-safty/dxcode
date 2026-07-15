@@ -1,7 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { CheckCircle2Icon, KeyRoundIcon, LoaderIcon, Mic2Icon, Trash2Icon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  HistoryIcon,
+  KeyRoundIcon,
+  LoaderIcon,
+  Mic2Icon,
+  Trash2Icon,
+} from "lucide-react";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useState } from "react";
@@ -11,6 +18,8 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { VoiceTraceTimeline } from "../voice/VoiceTraceTimeline";
+import { useVoiceTraceStore } from "../voice/voiceTraceStore";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 function messageFromError(error: unknown): string {
@@ -39,6 +48,8 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   const [configured, setConfigured] = useState(false);
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const traceSessions = useVoiceTraceStore((state) => state.sessions);
+  const clearTraceHistory = useVoiceTraceStore((state) => state.clearHistory);
 
   useEffect(() => {
     if (queriedStatus) setConfigured(queriedStatus.configured);
@@ -175,8 +186,58 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
         />
         <SettingsRow
           title="Context and composer access"
-          description="The latest AI message is shared initially. Grok can page older task context, search the web, and edit unsent composer text, but it cannot send prompts."
+          description="The latest AI message is shared initially. Grok can page older messages from that task, search the web, and edit unsent composer text, but it cannot send prompts."
         />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Conversation history"
+        icon={<HistoryIcon className="size-3.5" />}
+        headerAction={
+          traceSessions.length > 0 ? (
+            <Button size="xs" variant="ghost" onClick={clearTraceHistory}>
+              Clear history
+            </Button>
+          ) : null
+        }
+      >
+        {traceSessions.length === 0 ? (
+          <div className="px-5 py-8 text-center text-xs text-muted-foreground">
+            Completed conversations and tool traces will appear here.
+          </div>
+        ) : (
+          traceSessions.map((session, index) => (
+            <details
+              key={session.id}
+              className="group border-t border-border/60 first:border-t-0"
+              open={index === 0}
+            >
+              <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3.5 marker:hidden sm:px-5">
+                <span
+                  className={
+                    session.status === "error"
+                      ? "size-2 rounded-full bg-destructive"
+                      : session.status === "active"
+                        ? "size-2 rounded-full bg-emerald-500"
+                        : "size-2 rounded-full bg-muted-foreground/45"
+                  }
+                />
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+                  {session.title}
+                </span>
+                <time className="shrink-0 text-[11px] text-muted-foreground">
+                  {new Date(session.startedAt).toLocaleString()}
+                </time>
+              </summary>
+              <div className="border-t border-border/50 bg-muted/15 p-3">
+                <VoiceTraceTimeline
+                  entries={session.entries}
+                  className="max-h-80 rounded-xl border border-border/60 bg-background/50"
+                />
+              </div>
+            </details>
+          ))
+        )}
       </SettingsSection>
     </SettingsPageContainer>
   );
