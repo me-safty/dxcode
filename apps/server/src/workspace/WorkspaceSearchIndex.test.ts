@@ -66,6 +66,22 @@ it.effect("falls back when the native module cannot load", () =>
   }),
 );
 
+it.effect("keeps fallback search results within the requested limit", () =>
+  Effect.gen(function* () {
+    const cwd = yield* Effect.promise(makeFallbackWorkspace);
+    const searchIndex = yield* Effect.scoped(
+      WorkspaceSearchIndex.make(cwd, () =>
+        Promise.reject(new Error("ERR_DLOPEN_FAILED: GLIBC_2.27 not found")),
+      ),
+    );
+
+    const result = yield* searchIndex.search("composer", 1);
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.truncated).toBe(false);
+  }),
+);
+
 it.effect("falls back when FileFinder returns creation diagnostics", () =>
   Effect.gen(function* () {
     const cwd = yield* Effect.promise(makeFallbackWorkspace);

@@ -313,7 +313,7 @@ const makeFallbackIndex = Effect.fn("WorkspaceSearchIndex.makeFallbackIndex")(fu
         );
       const entries = withDirectoryAncestors(
         scoredEntries.slice(0, limit).map((item) => item.entry),
-      );
+      ).slice(0, limit);
       return {
         entries,
         truncated: fallbackIndex.truncated || scoredEntries.length > limit,

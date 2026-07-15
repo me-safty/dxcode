@@ -148,6 +148,7 @@ export const make = Effect.fn("NodePtyAdapter.make")(function* (
             new PtyAdapter.PtySpawnError({
               adapter: "node-pty",
               shell: input.shell,
+              retryWithFallbackShell: false,
               cause,
             }),
         ),

@@ -289,7 +289,7 @@ jobs:
             -w /workspace \
             amazonlinux:2 \
             bash -euo pipefail <<'EOF'
-          yum install -y binutils curl gcc gcc-c++ make python3 tar xz
+          yum install -y binutils curl file gcc gcc-c++ make python3 tar xz
 
           node_version="v20.19.6"
           node_dir="/opt/node-${node_version}-linux-x64-glibc-217"

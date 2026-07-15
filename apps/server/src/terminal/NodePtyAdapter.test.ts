@@ -82,6 +82,7 @@ it.effect("reports native module load failures as structured spawn failures", ()
         _tag: "PtySpawnError",
         adapter: "node-pty",
         shell: "powershell.exe",
+        retryWithFallbackShell: false,
       });
       assert.instanceOf(error.cause, NodePtyAdapter.NodePtyModuleLoadError);
       assert.deepInclude(error.cause, {
