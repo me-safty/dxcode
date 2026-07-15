@@ -150,7 +150,7 @@ it.effect("lists GitLab MRs against the requested remote repository context", ()
     assert.deepStrictEqual(listInput, {
       cwd: "/repo",
       headSelector: "feature/provider",
-      repository: "gitlab.example.test/group/subgroup/repo",
+      repository: "https://gitlab.example.test/group/subgroup/repo",
       state: "all",
       limit: 10,
     });

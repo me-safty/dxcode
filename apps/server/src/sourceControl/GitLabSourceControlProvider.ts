@@ -94,8 +94,12 @@ function repositoryFromContext(
   const repository = SourceControlProvider.repositoryPathFromRemoteUrl(context.remoteUrl);
   if (!repository) return undefined;
   try {
-    const host = new URL(context.provider.baseUrl).host;
-    return host && host !== "gitlab.com" ? `${host}/${repository}` : repository;
+    const baseUrl = new URL(context.provider.baseUrl);
+    if (baseUrl.hostname.toLowerCase() === "gitlab.com") return repository;
+    baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/u, "")}/${repository}`;
+    baseUrl.search = "";
+    baseUrl.hash = "";
+    return baseUrl.toString();
   } catch {
     return repository;
   }
