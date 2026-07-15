@@ -110,14 +110,6 @@ const sections = [
               notification preferences.
             </li>
             <li>
-              <strong>User content.</strong> T3 Code allows you to submit prompts, source files,
-              images, other attachments, review comments, and instructions, and to receive agent
-              responses, command and terminal output, file names and paths, source code, and diffs.
-              You bring and configure your own coding-agent harness and provider. We do not track or
-              retain this content as part of operating T3 Code. It is processed in the environment
-              you control by the harness and provider you choose, not T3 Tools.
-            </li>
-            <li>
               <strong>Agent activity and notifications.</strong> If you enable notifications or Live
               Activities, we process push tokens and limited activity information needed to provide
               those features, such as project and thread titles, model name, status, and activity
@@ -128,19 +120,6 @@ const sections = [
               to provide when you request support, send feedback, or otherwise communicate with us.
             </li>
           </ul>
-
-          <div class="architecture-note">
-            <p class="architecture-label">How T3 Code's local-first architecture affects collection</p>
-            <p>
-              You can use T3 Code without creating a T3 account. In direct-connection mode, coding
-              sessions run in an environment you control. Session content travels between your T3
-              Code clients, that environment, and the coding-agent providers you configure, and does
-              not need to pass through T3 Connect. If you choose to enable T3 Connect, we process the
-              account, environment, device, notification, and operational information needed to
-              provide those features. Depending on your connection method, encrypted session traffic
-              may also pass through infrastructure used to connect your devices.
-            </p>
-          </div>
 
           <h3>Personal Information From Users of Our Site Generally</h3>
           <p>
@@ -190,8 +169,8 @@ const sections = [
               Live Activities.
             </li>
             <li>
-              <strong>Local network.</strong> Used to discover or connect to T3 Code environments on
-              your local network or private tailnet.
+              <strong>Local network.</strong> Used to discover or connect to T3 Code environments
+              accessible from your machine over the network.
             </li>
           </ul>
         </section>
@@ -204,7 +183,6 @@ const sections = [
             services, we may use personal information for the following purposes:
           </p>
           <ul>
-            <li>To provide, maintain, synchronize, and troubleshoot the Services;</li>
             <li>To establish and verify your identity and authenticate your account;</li>
             <li>To link and protect devices and environments and deliver optional notifications;</li>
             <li>To process and fulfill requests you make through the Services;</li>
@@ -597,8 +575,7 @@ const sections = [
 
   .policy-dates dt,
   .policy-nav-label,
-  .section-number,
-  .architecture-label {
+  .section-number {
     color: var(--fg-dim);
     font-family: var(--font-mono);
     font-size: 0.68rem;
@@ -763,37 +740,6 @@ const sections = [
     text-decoration-color: var(--accent);
   }
 
-  .architecture-note {
-    position: relative;
-    margin: 30px 0;
-    padding: 26px 28px 27px;
-    border: 1px solid var(--border-strong);
-    border-radius: 14px;
-    background:
-      linear-gradient(135deg, var(--accent-dim), transparent 55%),
-      rgba(255, 255, 255, 0.015);
-    overflow: hidden;
-  }
-
-  .architecture-note::before {
-    content: "";
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 2px;
-    background: var(--accent);
-  }
-
-  .architecture-note .architecture-label {
-    margin: 0 0 10px;
-    color: var(--accent);
-  }
-
-  .architecture-note p:last-child {
-    color: var(--fg);
-    font-size: 0.93rem;
-    line-height: 1.7;
-  }
-
   address {
     margin-top: 20px;
   }
@@ -847,10 +793,6 @@ const sections = [
 
     .policy-dates {
       gap: 24px;
-    }
-
-    .architecture-note {
-      padding: 22px 20px;
     }
 
     .policy-copy p,
