@@ -34,6 +34,7 @@ import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 
 const environmentInput = {
+  appName: "T3 Code (Alpha)",
   dirname: "/repo/apps/desktop/dist-electron",
   homeDirectory: "/Users/alice",
   platform: "darwin",
@@ -47,6 +48,8 @@ const environmentInput = {
 
 function makeFakeBrowserWindow() {
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
+  const setPermissionCheckHandler = vi.fn();
+  const setPermissionRequestHandler = vi.fn();
   const webContents = {
     copyImageAt: vi.fn(),
     getURL: vi.fn(() => "t3code-dev://app/"),
@@ -59,6 +62,10 @@ function makeFakeBrowserWindow() {
     reload: vi.fn(),
     replaceMisspelling: vi.fn(),
     send: vi.fn(),
+    session: {
+      setPermissionCheckHandler,
+      setPermissionRequestHandler,
+    },
     setWindowOpenHandler: vi.fn(),
   };
 
@@ -87,9 +94,43 @@ function makeFakeBrowserWindow() {
     reload: webContents.reload,
     send: webContents.send,
     setAutoHideCursor: window.setAutoHideCursor,
+    setPermissionCheckHandler,
+    setPermissionRequestHandler,
     webContentsListeners,
   };
 }
+
+describe("isTrustedAudioPermissionRequest", () => {
+  it("allows audio from the T3 renderer origin", () => {
+    assert.isTrue(
+      DesktopWindow.isTrustedAudioPermissionRequest({
+        applicationUrl: "t3code-dev://app/",
+        requestingUrl: "t3code-dev://app/task/123",
+        permission: "media",
+        mediaTypes: ["audio"],
+      }),
+    );
+  });
+
+  it("rejects video and untrusted origins", () => {
+    assert.isFalse(
+      DesktopWindow.isTrustedAudioPermissionRequest({
+        applicationUrl: "t3code://app/",
+        requestingUrl: "https://example.com/",
+        permission: "media",
+        mediaTypes: ["audio"],
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isTrustedAudioPermissionRequest({
+        applicationUrl: "t3code://app/",
+        requestingUrl: "t3code://app/",
+        permission: "media",
+        mediaTypes: ["audio", "video"],
+      }),
+    );
+  });
+});
 
 const desktopAssetsLayer = Layer.succeed(DesktopAssets.DesktopAssets, {
   iconPaths: Effect.succeed({
