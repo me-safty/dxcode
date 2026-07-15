@@ -61,6 +61,13 @@ describe("shouldHandleLiveTerminalExit", () => {
   it("ignores initial or already-handled exited snapshots", () => {
     expect(
       shouldHandleLiveTerminalExit({
+        previousStatus: "closed",
+        currentStatus: "exited",
+        hasHandledExit: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldHandleLiveTerminalExit({
         previousStatus: "exited",
         currentStatus: "exited",
         hasHandledExit: false,

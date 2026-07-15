@@ -223,8 +223,8 @@ export function shouldHandleLiveTerminalExit(options: {
   hasHandledExit: boolean;
 }): boolean {
   return (
+    options.previousStatus === "running" &&
     (options.currentStatus === "closed" || options.currentStatus === "exited") &&
-    options.currentStatus !== options.previousStatus &&
     !options.hasHandledExit
   );
 }
