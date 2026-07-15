@@ -51,6 +51,17 @@ function useDebouncedValue<A>(value: A, delayMs: number): A {
   return debounced;
 }
 
+export function areProjectPathSearchTargetsEqual(
+  left: ComposerPathSearchTarget,
+  right: ComposerPathSearchTarget,
+): boolean {
+  return (
+    left.environmentId === right.environmentId &&
+    left.cwd === right.cwd &&
+    left.query === right.query
+  );
+}
+
 export function useThreadDetail(
   environmentId: EnvironmentId | null,
   threadId: ThreadId | null,
@@ -209,7 +220,8 @@ export function useProjectPathSearch(target: ComposerPathSearchTarget, limit: nu
   return {
     entries: result.data?.entries ?? [],
     error: result.error,
-    isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
+    isPending:
+      !areProjectPathSearchTargetsEqual(normalizedTarget, debouncedTarget) || result.isPending,
     searchedQuery: debouncedTarget.query,
     refresh: result.refresh,
   };
