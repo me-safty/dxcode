@@ -52,6 +52,19 @@ describe("browser target resolver", () => {
     ).toBe("http://user:p%40ss@100.65.180.100:5173/dashboard");
   });
 
+  it("maps credentialed localhost URLs onto private IPv6 hosts", async () => {
+    readPreparedConnection.mockReturnValue({
+      httpBaseUrl: "http://[fd7a:115c:a1e0::53]:3773",
+    });
+    const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
+    expect(
+      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
+        kind: "url",
+        url: "http://user:p%40ss@localhost:5173/dashboard?mode=test#results",
+      }).resolvedUrl,
+    ).toBe("http://user:p%40ss@[fd7a:115c:a1e0::53]:5173/dashboard?mode=test#results");
+  });
+
   it("maps schemeless localhost navigation onto a remote environment host", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.25:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
