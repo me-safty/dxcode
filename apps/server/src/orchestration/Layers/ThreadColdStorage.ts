@@ -8,8 +8,11 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -154,6 +157,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
+  const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
 
   yield* sql.unsafe(`ATTACH DATABASE ? AS ${ARCHIVE_SCHEMA}`, [config.archiveDbPath]);
   yield* sql.unsafe(`PRAGMA ${ARCHIVE_SCHEMA}.auto_vacuum = INCREMENTAL`);
@@ -190,7 +194,11 @@ const make = Effect.gen(function* () {
     if (!segment) return [] as string[];
     const entries = yield* fs
       .readDirectory(config.attachmentsDir, { recursive: false })
-      .pipe(Effect.orElseSucceed(() => [] as string[]));
+      .pipe(
+        Effect.catch((error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed([] as string[]) : Effect.fail(error),
+        ),
+      );
     return entries.filter((entry) => {
       const attachmentId = parseAttachmentIdFromRelativePath(entry);
       return attachmentId !== null && parseThreadSegmentFromAttachmentId(attachmentId) === segment;
@@ -212,7 +220,11 @@ const make = Effect.gen(function* () {
     const baseName = `${segment}.log`;
     const entries = yield* fs
       .readDirectory(config.providerLogsDir, { recursive: false })
-      .pipe(Effect.orElseSucceed(() => [] as string[]));
+      .pipe(
+        Effect.catch((error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed([] as string[]) : Effect.fail(error),
+        ),
+      );
     yield* Effect.forEach(
       entries.filter((entry) => {
         if (entry === baseName) return true;
@@ -262,7 +274,31 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const archiveImpl = Effect.fn("archiveThreadImpl")(function* (threadId: ThreadId) {
+  const discardIncompleteArchive = Effect.fn("discardIncompleteThreadArchive")(function* (
+    threadId: ThreadId,
+  ) {
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* sql.unsafe(
+          `DELETE FROM ${ARCHIVE_SCHEMA}.archive_thread_chunks WHERE thread_id = ?`,
+          [threadId],
+        );
+        yield* sql.unsafe(`DELETE FROM ${ARCHIVE_SCHEMA}.archive_threads WHERE thread_id = ?`, [
+          threadId,
+        ]);
+        yield* sql.unsafe(
+          `DELETE FROM thread_archive_manifests
+           WHERE thread_id = ? AND status IN ('pending', 'archiving')`,
+          [threadId],
+        );
+      }),
+    );
+  });
+
+  const archiveImpl = Effect.fn("archiveThreadImpl")(function* (
+    threadId: ThreadId,
+    allowRestored: boolean,
+  ) {
     const manifestRows = (yield* sql.unsafe(
       `SELECT root_thread_id, archived_at, status
        FROM thread_archive_manifests
@@ -275,13 +311,21 @@ const make = Effect.gen(function* () {
        WHERE thread_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL`,
       [threadId],
     )) as ReadonlyArray<SqlRow>;
-    const source = manifestRows[0] ?? threadRows[0];
+    const manifest = manifestRows[0];
+    const source = manifest ?? threadRows[0];
     if (!source) return;
+    if (threadRows.length === 0) {
+      if (source.status === "pending" || source.status === "archiving") {
+        yield* discardIncompleteArchive(threadId);
+      }
+      return;
+    }
     if (source.status === "cold") return;
     if (source.status === "cleanup_pending") {
       yield* completeArchiveCleanup(threadId);
       return;
     }
+    if (source.status === "restored" && !allowRestored) return;
     const rootThreadId = String(source.root_thread_id ?? threadId);
     const archivedAt = String(source.archived_at ?? DateTime.formatIso(yield* DateTime.now));
 
@@ -358,8 +402,30 @@ const make = Effect.gen(function* () {
 
     // Chunk creation stays retryable outside the hot-row deletion transaction.
     // A retry replaces every partial chunk before deleting source data.
-    yield* sql.withTransaction(
+    const archivedAtDestructiveBoundary = yield* sql.withTransaction(
       Effect.gen(function* () {
+        const archivedShell = (yield* sql.unsafe(
+          `SELECT 1 AS present
+           FROM projection_threads
+           WHERE thread_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL
+           LIMIT 1`,
+          [threadId],
+        )) as ReadonlyArray<SqlRow>;
+        if (archivedShell.length === 0) {
+          yield* sql.unsafe(
+            `DELETE FROM ${ARCHIVE_SCHEMA}.archive_thread_chunks WHERE thread_id = ?`,
+            [threadId],
+          );
+          yield* sql.unsafe(`DELETE FROM ${ARCHIVE_SCHEMA}.archive_threads WHERE thread_id = ?`, [
+            threadId,
+          ]);
+          yield* sql.unsafe(
+            `DELETE FROM thread_archive_manifests
+             WHERE thread_id = ? AND status = 'archiving'`,
+            [threadId],
+          );
+          return false;
+        }
         yield* sql.unsafe(
           `INSERT INTO ${ARCHIVE_SCHEMA}.archive_threads
             (thread_id, root_thread_id, archive_version, archived_at, original_bytes,
@@ -377,8 +443,11 @@ const make = Effect.gen(function* () {
            WHERE thread_id = ?`,
           [originalBytes, compressedBytes, threadId],
         );
+        return true;
       }),
     );
+
+    if (!archivedAtDestructiveBoundary) return;
 
     yield* completeArchiveCleanup(threadId);
   });
@@ -513,7 +582,7 @@ const make = Effect.gen(function* () {
     const rows = (yield* sql.unsafe(
       `SELECT thread_id
        FROM thread_archive_manifests
-       WHERE root_thread_id = ? AND status IN ('cold', 'restored')
+       WHERE root_thread_id = ? AND status IN ('cleanup_pending', 'cold', 'restored')
        ORDER BY CASE WHEN thread_id = ? THEN 1 ELSE 0 END, thread_id ASC`,
       [rootThreadId, rootThreadId],
     )) as ReadonlyArray<SqlRow>;
@@ -536,7 +605,7 @@ const make = Effect.gen(function* () {
       [rootThreadId, rootThreadId],
     )) as ReadonlyArray<SqlRow>;
     for (const row of rows) {
-      yield* archiveImpl(ThreadId.make(String(row.thread_id)));
+      yield* archiveImpl(ThreadId.make(String(row.thread_id)), true);
     }
   });
 
@@ -631,8 +700,28 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const getTreeSemaphore = (threadId: ThreadId) =>
+    Effect.flatMap(resolveTreeRoot(threadId), (rootThreadId) =>
+      SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
+        const existing = Option.fromNullishOr(current.get(rootThreadId));
+        return Option.match(existing, {
+          onNone: () =>
+            Semaphore.make(1).pipe(
+              Effect.map((semaphore) => {
+                const next = new Map(current);
+                next.set(rootThreadId, semaphore);
+                return [semaphore, next] as const;
+              }),
+            ),
+          onSome: (semaphore) => Effect.succeed([semaphore, current] as const),
+        });
+      }),
+    );
+
   const wrap = <A, E>(operation: string, threadId: ThreadId, effect: Effect.Effect<A, E>) =>
-    effect.pipe(Effect.mapError((cause) => storageError(operation, threadId, cause)));
+    Effect.flatMap(getTreeSemaphore(threadId), (semaphore) => semaphore.withPermit(effect)).pipe(
+      Effect.mapError((cause) => storageError(operation, threadId, cause)),
+    );
 
   const listIds = (query: string, operation: string) =>
     sql.unsafe(query).pipe(
@@ -643,7 +732,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    archiveThread: (threadId) => wrap("archive", threadId, archiveImpl(threadId)),
+    archiveThread: (threadId) => wrap("archive", threadId, archiveImpl(threadId, false)),
     restoreTree: (threadId) => wrap("restore", threadId, restoreTreeImpl(threadId)),
     rollbackRestoreTree: (threadId) =>
       wrap("rollback-restore", threadId, rollbackRestoreTreeImpl(threadId)),
@@ -656,7 +745,22 @@ const make = Effect.gen(function* () {
       Effect.mapError((cause) => storageError("compact-legacy-storage", "startup", cause)),
     ),
     listPendingArchiveThreadIds: listIds(
-      `SELECT thread_id FROM thread_archive_manifests WHERE status IN ('pending', 'archiving', 'cleanup_pending') ORDER BY archived_at ASC, thread_id ASC`,
+      `SELECT thread_id
+       FROM (
+         SELECT thread_id, archived_at
+         FROM thread_archive_manifests
+         WHERE status IN ('pending', 'archiving', 'cleanup_pending')
+         UNION ALL
+         SELECT projection_threads.thread_id, projection_threads.archived_at
+         FROM projection_threads
+         WHERE projection_threads.archived_at IS NOT NULL
+           AND projection_threads.deleted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM thread_archive_manifests
+             WHERE thread_archive_manifests.thread_id = projection_threads.thread_id
+           )
+       )
+       ORDER BY archived_at ASC, thread_id ASC`,
       "list-pending-archives",
     ),
     listPendingDeleteThreadIds: listIds(

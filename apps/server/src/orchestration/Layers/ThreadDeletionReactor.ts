@@ -64,14 +64,17 @@ const make = Effect.gen(function* () {
       threadId,
     });
 
+  const closeProviderLogWritersRequired = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+    Effect.all(
+      [providerEventLoggers.native, providerEventLoggers.canonical].flatMap((logger) =>
+        logger?.closeThread ? [logger.closeThread(threadId)] : [],
+      ),
+      { discard: true },
+    );
+
   const closeProviderLogWriters = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
-      effect: Effect.all(
-        [providerEventLoggers.native, providerEventLoggers.canonical].flatMap((logger) =>
-          logger?.closeThread ? [logger.closeThread(threadId)] : [],
-        ),
-        { discard: true },
-      ),
+      effect: closeProviderLogWritersRequired(threadId),
       message: "thread lifecycle cleanup skipped provider log writer close",
       threadId,
     });
@@ -84,14 +87,20 @@ const make = Effect.gen(function* () {
       return;
     }
     const { threadId } = job;
+    if (job.type === "archive") {
+      // Archiving must not snapshot or delete hot rows while any active writer
+      // can still mutate them. A failure leaves the durable archived shell or
+      // manifest discoverable so startup recovery can retry the boundary.
+      yield* providerService.stopSession({ threadId });
+      yield* terminalManager.close({ threadId, deleteHistory: true });
+      yield* closeProviderLogWritersRequired(threadId);
+      yield* threadColdStorage.archiveThread(threadId);
+      return;
+    }
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
     yield* closeProviderLogWriters(threadId);
-    if (job.type === "archive") {
-      yield* threadColdStorage.archiveThread(threadId);
-    } else {
-      yield* threadColdStorage.deleteThread(threadId);
-    }
+    yield* threadColdStorage.deleteThread(threadId);
   });
 
   const processLifecycleJobSafely = (job: ThreadLifecycleJob) =>

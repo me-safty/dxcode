@@ -108,6 +108,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     let processingStartedAtMs = 0;
     let restoredUnarchiveThreadId: ThreadId | null = null;
+    let restoredUnarchiveCommitted = false;
     const aggregateRef = commandToAggregateRef(envelope.command);
     const baseMetricAttributes = {
       commandType: envelope.command.type,
@@ -234,7 +235,18 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             ),
           );
 
+        restoredUnarchiveCommitted = restoredUnarchiveThreadId !== null;
         commandReadModel = committedCommand.nextCommandReadModel;
+        if (restoredUnarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
+          yield* threadColdStorage.value.finishRestoreTree(restoredUnarchiveThreadId).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to finalize restored archive bundle", {
+                threadId: restoredUnarchiveThreadId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        }
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {
@@ -249,16 +261,6 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               Duration.millis(Math.max(0, (yield* Clock.currentTimeMillis) - envelope.startedAtMs)),
             );
           }
-        }
-        if (restoredUnarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
-          yield* threadColdStorage.value.finishRestoreTree(restoredUnarchiveThreadId).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("failed to finalize restored archive bundle", {
-                threadId: restoredUnarchiveThreadId,
-                cause: Cause.pretty(cause),
-              }),
-            ),
-          );
         }
         return { sequence: committedCommand.lastSequence };
       }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
@@ -293,7 +295,11 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             return;
           }
 
-          if (restoredUnarchiveThreadId !== null && Option.isSome(threadColdStorage)) {
+          if (
+            restoredUnarchiveThreadId !== null &&
+            !restoredUnarchiveCommitted &&
+            Option.isSome(threadColdStorage)
+          ) {
             const rolledBack = yield* threadColdStorage.value
               .rollbackRestoreTree(restoredUnarchiveThreadId)
               .pipe(

@@ -39,6 +39,17 @@ const layer = it.layer(
 );
 
 layer("ThreadColdStorage", (it) => {
+  it.effect("discovers archived shells before a lifecycle manifest exists", () =>
+    Effect.gen(function* () {
+      const storage = yield* ThreadColdStorage;
+      const threadId = ThreadId.make("thread-archive-queue-fallback");
+
+      yield* insertArchivedThread(threadId, "Archive queue fallback thread");
+
+      assert.deepInclude(yield* storage.listPendingArchiveThreadIds, threadId);
+    }),
+  );
+
   it.effect("compresses conversation data, destroys logs, restores content, and hard-deletes", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -120,6 +131,18 @@ layer("ThreadColdStorage", (it) => {
       assert.deepStrictEqual(restoredMessages, [{ text: "keep this conversation" }]);
       assert.strictEqual(yield* fs.readFileString(attachmentPath), "image bytes");
       assert.isFalse(yield* fs.exists(providerLogPath));
+
+      // A queued archive job can run after restore but before the unarchive
+      // command commits. It must not undo a restore owned by that command.
+      yield* storage.archiveThread(threadId);
+      const stillRestoredMessages = yield* sql<{ readonly text: string }>`
+        SELECT text FROM projection_thread_messages WHERE thread_id = ${threadId}
+      `;
+      const stillRestoredManifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(stillRestoredMessages, [{ text: "keep this conversation" }]);
+      assert.deepStrictEqual(stillRestoredManifest, [{ status: "restored" }]);
 
       yield* storage.rollbackRestoreTree(threadId);
       const rolledBackMessages = yield* sql<{ readonly count: number }>`
@@ -307,6 +330,123 @@ layer("ThreadColdStorage", (it) => {
         SELECT text FROM projection_thread_messages WHERE thread_id = ${threadId}
       `;
       assert.deepStrictEqual(restoredMessages, [{ text: "preserve across cleanup retry" }]);
+    }),
+  );
+
+  it.effect("restores cleanup-pending bundles before unarchiving", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const threadId = ThreadId.make("thread-cleanup-pending-restore");
+
+      yield* insertArchivedThread(threadId, "Cleanup-pending restore thread");
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (
+          'message-cleanup-pending-restore', ${threadId}, NULL, 'user',
+          'restore while cleanup is pending', '[]', 0,
+          '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z'
+        )
+      `;
+
+      yield* storage.archiveThread(threadId);
+      yield* sql`
+        UPDATE thread_archive_manifests
+        SET status = 'cleanup_pending'
+        WHERE thread_id = ${threadId}
+      `;
+
+      assert.isTrue(yield* storage.restoreTree(threadId));
+      const restoredMessages = yield* sql<{ readonly text: string }>`
+        SELECT text FROM projection_thread_messages WHERE thread_id = ${threadId}
+      `;
+      const manifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(restoredMessages, [{ text: "restore while cleanup is pending" }]);
+      assert.deepStrictEqual(manifest, [{ status: "restored" }]);
+    }),
+  );
+
+  it.effect("abandons an incomplete archive after the shell is unarchived", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const threadId = ThreadId.make("thread-unarchived-before-archive");
+
+      yield* insertArchivedThread(threadId, "Unarchived before archive thread");
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (
+          'message-unarchived-before-archive', ${threadId}, NULL, 'user',
+          'keep active data hot', '[]', 0,
+          '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z'
+        )
+      `;
+      yield* sql`
+        INSERT INTO thread_archive_manifests (
+          thread_id, root_thread_id, status, archive_version, archived_at, updated_at
+        ) VALUES (
+          ${threadId}, ${threadId}, 'pending', 1,
+          '2026-07-02T00:00:00.000Z', CURRENT_TIMESTAMP
+        )
+      `;
+      yield* sql`
+        UPDATE projection_threads SET archived_at = NULL WHERE thread_id = ${threadId}
+      `;
+
+      yield* storage.archiveThread(threadId);
+      const messages = yield* sql<{ readonly text: string }>`
+        SELECT text FROM projection_thread_messages WHERE thread_id = ${threadId}
+      `;
+      const manifests = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      const chunks = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count
+        FROM cold_archive.archive_thread_chunks
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(messages, [{ text: "keep active data hot" }]);
+      assert.deepStrictEqual(manifests, [{ count: 0 }]);
+      assert.deepStrictEqual(chunks, [{ count: 0 }]);
+    }),
+  );
+
+  it.effect("retries attachment cleanup after directory I/O errors", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const storage = yield* ThreadColdStorage;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const threadId = ThreadId.make("thread-attachment-directory-error");
+
+      yield* insertArchivedThread(threadId, "Attachment directory error thread");
+      yield* fs.remove(config.attachmentsDir, { recursive: true });
+      yield* fs.writeFileString(config.attachmentsDir, "not a directory");
+
+      const archiveFailure = yield* Effect.flip(storage.archiveThread(threadId));
+      assert.strictEqual(archiveFailure.operation, "archive");
+      const shell = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM projection_threads WHERE thread_id = ${threadId}
+      `;
+      const manifests = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(shell, [{ count: 1 }]);
+      assert.deepStrictEqual(manifests, [{ status: "archiving" }]);
+
+      yield* fs.remove(config.attachmentsDir);
+      yield* fs.makeDirectory(config.attachmentsDir);
+      yield* storage.archiveThread(threadId);
+      const completedManifest = yield* sql<{ readonly status: string }>`
+        SELECT status FROM thread_archive_manifests WHERE thread_id = ${threadId}
+      `;
+      assert.deepStrictEqual(completedManifest, [{ status: "cold" }]);
     }),
   );
 
