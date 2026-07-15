@@ -8,7 +8,6 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -38,6 +37,14 @@ const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJso
 const decodeUnknownJsonString = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString);
 
 type SqlRow = Record<string, unknown>;
+type ThreadLockEntry = {
+  readonly semaphore: Semaphore.Semaphore;
+  readonly users: number;
+};
+type AcquiredThreadLock = {
+  readonly rootThreadId: ThreadId;
+  readonly semaphore: Semaphore.Semaphore;
+};
 
 class ArchiveCodecError extends Data.TaggedError("ArchiveCodecError")<{
   readonly cause: unknown;
@@ -157,7 +164,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
-  const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+  const threadLocksRef = yield* SynchronizedRef.make(new Map<string, ThreadLockEntry>());
 
   yield* sql.unsafe(`ATTACH DATABASE ? AS ${ARCHIVE_SCHEMA}`, [config.archiveDbPath]);
   yield* sql.unsafe(`PRAGMA ${ARCHIVE_SCHEMA}.auto_vacuum = INCREMENTAL`);
@@ -703,25 +710,44 @@ const make = Effect.gen(function* () {
   const getTreeSemaphore = (threadId: ThreadId) =>
     Effect.flatMap(resolveTreeRoot(threadId), (rootThreadId) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
-        const existing = Option.fromNullishOr(current.get(rootThreadId));
-        return Option.match(existing, {
-          onNone: () =>
-            Semaphore.make(1).pipe(
-              Effect.map((semaphore) => {
-                const next = new Map(current);
-                next.set(rootThreadId, semaphore);
-                return [semaphore, next] as const;
-              }),
-            ),
-          onSome: (semaphore) => Effect.succeed([semaphore, current] as const),
-        });
+        const existing = current.get(rootThreadId);
+        if (existing) {
+          const next = new Map(current);
+          next.set(rootThreadId, { ...existing, users: existing.users + 1 });
+          return Effect.succeed([
+            { rootThreadId, semaphore: existing.semaphore } satisfies AcquiredThreadLock,
+            next,
+          ] as const);
+        }
+        return Semaphore.make(1).pipe(
+          Effect.map((semaphore) => {
+            const next = new Map(current);
+            next.set(rootThreadId, { semaphore, users: 1 });
+            return [{ rootThreadId, semaphore } satisfies AcquiredThreadLock, next] as const;
+          }),
+        );
       }),
     );
 
+  const releaseTreeSemaphore = (acquired: AcquiredThreadLock) =>
+    SynchronizedRef.update(threadLocksRef, (current) => {
+      const existing = current.get(acquired.rootThreadId);
+      if (!existing || existing.semaphore !== acquired.semaphore) return current;
+      const next = new Map(current);
+      if (existing.users === 1) {
+        next.delete(acquired.rootThreadId);
+      } else {
+        next.set(acquired.rootThreadId, { ...existing, users: existing.users - 1 });
+      }
+      return next;
+    });
+
   const wrap = <A, E>(operation: string, threadId: ThreadId, effect: Effect.Effect<A, E>) =>
-    Effect.flatMap(getTreeSemaphore(threadId), (semaphore) => semaphore.withPermit(effect)).pipe(
-      Effect.mapError((cause) => storageError(operation, threadId, cause)),
-    );
+    Effect.acquireUseRelease(
+      getTreeSemaphore(threadId),
+      ({ semaphore }) => semaphore.withPermit(effect),
+      releaseTreeSemaphore,
+    ).pipe(Effect.mapError((cause) => storageError(operation, threadId, cause)));
 
   const listIds = (query: string, operation: string) =>
     sql.unsafe(query).pipe(
