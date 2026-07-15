@@ -95,7 +95,6 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 const MAX_PATCH_SEARCH_DEPTH = 4;
 const MAX_PATCH_STRINGS = 4;
 const MAX_INLINE_PATCH_CHARS = 200_000;
-const PATCH_TOO_LARGE_MESSAGE = `[patch omitted: exceeds ${MAX_INLINE_PATCH_CHARS} characters]`;
 
 export interface PendingApproval {
   requestId: ApprovalRequestId;
@@ -221,6 +220,9 @@ export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean {
   if (!workLogEntryIsToolLike(entry)) {
     return false;
   }
+  if (entry.exitCode != null && entry.exitCode !== 0) {
+    return true;
+  }
   const parts: string[] = [];
   if (entry.detail) {
     parts.push(entry.detail);
@@ -275,6 +277,7 @@ export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolea
 
 export function formatDuration(durationMs: number): string {
   if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
+  if (durationMs === 0) return "0ms";
   if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
   if (durationMs < 10_000) {
     const tenths = Math.round(durationMs / 100) / 10;
@@ -898,6 +901,14 @@ function mergePatchText(
     return next;
   }
   if (!next || next === previous) {
+    return previous;
+  }
+  const previousSnapshot = previous.trim();
+  const nextSnapshot = next.trim();
+  if (nextSnapshot.startsWith(previousSnapshot)) {
+    return next;
+  }
+  if (previousSnapshot.startsWith(nextSnapshot)) {
     return previous;
   }
   return `${previous.trimEnd()}\n\n${next.trimStart()}`;
@@ -1568,7 +1579,6 @@ function collectPatchStrings(
     }
     if (candidate.length > MAX_INLINE_PATCH_CHARS) {
       seen.add(candidate);
-      patches.push(PATCH_TOO_LARGE_MESSAGE);
       continue;
     }
     if (!looksLikeUnifiedDiff(candidate)) {

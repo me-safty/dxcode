@@ -600,6 +600,19 @@ describe("activity detail expansion", () => {
     expect(details?.command?.durationLabel).toBe("unknown");
   });
 
+  it("keeps exact zero millisecond command durations", () => {
+    const details = deriveExpandableWorkEntryDetails(
+      buildWorkLogEntry({
+        itemType: "command_execution",
+        command: "true",
+        durationMs: 0,
+      }),
+      undefined,
+    );
+
+    expect(details?.command?.durationLabel).toBe("0ms");
+  });
+
   it("keeps collab-agent rows out of generic command and file detail derivation", () => {
     const details = deriveExpandableWorkEntryDetails(
       buildWorkLogEntry({

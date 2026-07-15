@@ -631,6 +631,25 @@ describe("workEntryIndicatesToolFailure", () => {
     ).toBe(true);
   });
 
+  it("is true when a tool reports a non-zero exit code", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        exitCode: 7,
+      }),
+    ).toBe(true);
+    expect(
+      workEntryIndicatesToolSuccess({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        exitCode: 7,
+      }),
+    ).toBe(false);
+  });
+
   it("detects file-not-found style tool output with completed lifecycle", () => {
     expect(
       workEntryIndicatesToolFailure({
@@ -2045,6 +2064,76 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.changedFiles).toEqual(["first.ts", "second.ts"]);
     expect(entry?.patch).toContain("diff --git a/first.ts b/first.ts");
     expect(entry?.patch).toContain("diff --git a/second.ts b/second.ts");
+  });
+
+  it("uses cumulative file-change patch snapshots without duplicating hunks", () => {
+    const firstPatch =
+      "diff --git a/first.ts b/first.ts\n--- a/first.ts\n+++ b/first.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    const secondPatch =
+      "diff --git a/second.ts b/second.ts\n--- a/second.ts\n+++ b/second.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    const cumulativePatch = `${firstPatch.trimEnd()}\n\n${secondPatch}`;
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "file-tool-patch-update",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          data: {
+            toolCallId: "file-tool-1",
+            patch: firstPatch,
+          },
+        },
+      }),
+      makeActivity({
+        id: "file-tool-patch-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          data: {
+            toolCallId: "file-tool-1",
+            patch: cumulativePatch,
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.patch).toBe(cumulativePatch);
+    expect(entry?.patch?.match(/diff --git a\/first\.ts b\/first\.ts/gu)).toHaveLength(1);
+  });
+
+  it("keeps renderable sibling diffs when another patch exceeds the size budget", () => {
+    const oversizedPatch =
+      "diff --git a/large.ts b/large.ts\n--- a/large.ts\n+++ b/large.ts\n@@ -1 +1 @@\n-old\n+" +
+      "x".repeat(200_000);
+    const smallPatch =
+      "diff --git a/small.ts b/small.ts\n--- a/small.ts\n+++ b/small.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "file-tool-mixed-patch-sizes",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          data: {
+            item: {
+              changes: [
+                { path: "large.ts", patch: oversizedPatch },
+                { path: "small.ts", patch: smallPatch },
+              ],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.changedFiles).toEqual(["large.ts", "small.ts"]);
+    expect(entry?.patch).toBe(smallPatch);
   });
 
   it("normalizes Codex file-change content diffs into unified patches", () => {
