@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { assert, it } from "@effect/vitest";
 
@@ -30,9 +31,27 @@ it("isolates Claude capability probes from user MCP servers", () => {
   assert.equal(options.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
 });
 
-it("places the Claude capability probe cwd under ~/.t3", () => {
+it("places the Claude capability probe cwd under an absolute home", () => {
   assert.equal(
     resolveClaudeCapabilitiesProbeCwd("/Users/example"),
-    join("/Users/example", ".t3", "claude-capability-probe"),
+    join(resolve("/Users/example"), ".t3", "claude-capability-probe"),
+  );
+});
+
+it("expands a bare ~ home before joining the probe cwd", () => {
+  assert.equal(
+    resolveClaudeCapabilitiesProbeCwd("~"),
+    join(homedir(), ".t3", "claude-capability-probe"),
+  );
+});
+
+it("expands ~/… and resolves relative homes to absolute probe cwds", () => {
+  assert.equal(
+    resolveClaudeCapabilitiesProbeCwd("~/.claude-work"),
+    join(homedir(), ".claude-work", ".t3", "claude-capability-probe"),
+  );
+  assert.equal(
+    resolveClaudeCapabilitiesProbeCwd("relative-home"),
+    join(resolve("relative-home"), ".t3", "claude-capability-probe"),
   );
 });

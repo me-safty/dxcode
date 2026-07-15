@@ -42,6 +42,7 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
@@ -501,7 +502,10 @@ export const CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES = [
 
 /** Stable empty cwd under ~/.t3 so probes never inherit $HOME / server cwd. */
 export function resolveClaudeCapabilitiesProbeCwd(homeDir = NodeOS.homedir()): string {
-  return NodePath.join(homeDir, ".t3", "claude-capability-probe");
+  const trimmed = homeDir.trim();
+  const resolvedHome =
+    trimmed.length > 0 ? NodePath.resolve(expandHomePath(trimmed)) : NodeOS.homedir();
+  return NodePath.join(resolvedHome, ".t3", "claude-capability-probe");
 }
 
 /**
