@@ -45,7 +45,9 @@ import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsCl
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
 import { SettingsPrivacyPolicyRouteScreen } from "./features/settings/SettingsPrivacyPolicyRouteScreen";
+import { SettingsSecurityPolicyRouteScreen } from "./features/settings/SettingsSecurityPolicyRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
+import { SettingsTermsOfServiceRouteScreen } from "./features/settings/SettingsTermsOfServiceRouteScreen";
 import { SettingsWaitlistRouteScreen } from "./features/settings/SettingsWaitlistRouteScreen";
 import { useAppShortcuts } from "./features/shortcuts/useAppShortcuts";
 import { nativeHeaderScrollEdgeEffects } from "./native/StackHeader";
@@ -163,6 +165,22 @@ const SettingsSheetStack = createNativeStackNavigator({
       options: {
         ...SHEET_SOLID_HEADER_OPTIONS,
         title: "Privacy Policy",
+      },
+    }),
+    SettingsSecurityPolicy: createNativeStackScreen({
+      screen: SettingsSecurityPolicyRouteScreen,
+      linking: "security-policy",
+      options: {
+        ...SHEET_SOLID_HEADER_OPTIONS,
+        title: "Security Policy",
+      },
+    }),
+    SettingsTermsOfService: createNativeStackScreen({
+      screen: SettingsTermsOfServiceRouteScreen,
+      linking: "terms-of-service",
+      options: {
+        ...SHEET_SOLID_HEADER_OPTIONS,
+        title: "Terms of Service",
       },
     }),
     SettingsAuth: createNativeStackScreen({

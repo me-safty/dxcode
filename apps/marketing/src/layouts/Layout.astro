@@ -67,7 +67,9 @@ const {
             <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://discord.gg/jn4EGJjrvv" target="_blank" rel="noopener noreferrer">Discord</a>
             <a href="/download">Download</a>
+            <a href="/terms-of-service">Terms</a>
             <a href="/privacy-policy">Privacy</a>
+            <a href="/security-policy">Security</a>
           </div>
         </div>
       </footer>
@@ -403,6 +405,8 @@ const {
 
   .footer-links {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 20px;
   }
 

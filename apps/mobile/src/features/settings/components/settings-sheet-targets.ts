@@ -3,4 +3,6 @@ export type SettingsSheetTarget =
   | "SettingsArchive"
   | "SettingsAppearance"
   | "SettingsClientStorage"
-  | "SettingsPrivacyPolicy";
+  | "SettingsPrivacyPolicy"
+  | "SettingsSecurityPolicy"
+  | "SettingsTermsOfService";
