@@ -1,7 +1,7 @@
 {
   "planSlug": "issue-780-native-desktop-notifications",
   "linkedAt": "2026-07-15T00:43:17.078Z",
-  "progress": 45,
+  "progress": 55,
   "phases": {
     "planning": {
       "phaseId": "planning",
@@ -72,9 +72,22 @@
           "completedAt": "2026-07-15T01:52:01.284Z",
           "output": "Settings schema and UI",
           "notes": "Persisted default-off setting, legacy decode, desktop-only UI, and restore-default behavior implemented and tested."
+        },
+        {
+          "stepIndex": 2,
+          "description": "Add pure settled transition derivation and replay-safe observation",
+          "status": "completed",
+          "deliverables": ["Tracker and tests"],
+          "completedAt": "2026-07-15T01:52:03.210Z",
+          "output": "Tracker and tests",
+          "notes": "Pure shell transition tracker baselines hydration/reconnect/reseed, emits settled/rising-edge events once, and suppresses archived/removed/partial states."
         }
       ],
-      "completedAt": "2026-07-15T01:52:01.284Z"
+      "completedAt": "2026-07-15T01:52:03.210Z",
+      "commitHash": "2141f915821b5c03d8472ea9800212a76f2e4103",
+      "commitShortHash": "2141f9158",
+      "committedAt": "2026-07-15T01:52:03.197Z",
+      "committedBy": "AI Context Agent"
     }
   },
   "approvalStatus": "approved",
@@ -131,5 +144,5 @@
       "decidedAt": "2026-07-15T00:50:08.650Z"
     }
   ],
-  "lastUpdated": "2026-07-15T01:52:01.284Z"
+  "lastUpdated": "2026-07-15T01:52:03.210Z"
 }

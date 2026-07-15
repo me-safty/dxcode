@@ -1,7 +1,7 @@
 {
   "version": 2,
   "workflowType": "prevc",
-  "updatedAt": "2026-07-15T01:52:01.288Z",
+  "updatedAt": "2026-07-15T01:52:03.213Z",
   "status": {
     "project": {
       "name": "issue-780-native-desktop-notifications",
@@ -238,10 +238,21 @@
           "output": "Settings schema and UI",
           "notes": "Persisted default-off setting, legacy decode, desktop-only UI, and restore-default behavior implemented and tested.",
           "timestamp": "2026-07-15T01:52:01.288Z"
+        },
+        {
+          "phase": "E",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "execution",
+          "stepIndex": 2,
+          "stepDescription": "Add pure settled transition derivation and replay-safe observation",
+          "output": "Tracker and tests",
+          "notes": "Pure shell transition tracker baselines hydration/reconnect/reseed, emits settled/rising-edge events once, and suppresses archived/removed/partial states.",
+          "timestamp": "2026-07-15T01:52:03.213Z"
         }
       ],
-      "last_activity": "2026-07-15T01:52:01.288Z",
-      "resume_context": "Concluído: Add default-off persisted desktop preference"
+      "last_activity": "2026-07-15T01:52:03.213Z",
+      "resume_context": "Concluído: Add pure settled transition derivation and replay-safe observation"
     }
   },
   "binding": {
