@@ -93,12 +93,6 @@ const documents = [
     transition: background-color 0.18s ease, padding 0.18s ease;
   }
 
-  .document-card:hover {
-    padding-left: 16px;
-    padding-right: 16px;
-    background: rgba(255, 255, 255, 0.025);
-  }
-
   .document-number {
     color: var(--accent);
     font-family: var(--font-mono);
@@ -130,9 +124,17 @@ const documents = [
     transition: color 0.18s ease, transform 0.18s ease;
   }
 
-  .document-card:hover .document-arrow {
-    color: var(--fg);
-    transform: translate(2px, -2px);
+  @media (hover: hover) and (pointer: fine) {
+    .document-card:hover {
+      padding-left: 16px;
+      padding-right: 16px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .document-card:hover .document-arrow {
+      color: var(--fg);
+      transform: translate(2px, -2px);
+    }
   }
 
   @media (max-width: 820px) {
