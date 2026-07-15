@@ -7,6 +7,7 @@ import {
   buildClaudeCapabilitiesProbeQueryOptions,
   CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES,
   resolveClaudeCapabilitiesProbeCwd,
+  resolveClaudeCapabilitiesProbeHome,
 } from "./ClaudeProvider.ts";
 
 it("isolates Claude capability probes from user MCP servers", () => {
@@ -54,4 +55,20 @@ it("expands ~/… and resolves relative homes to absolute probe cwds", () => {
     resolveClaudeCapabilitiesProbeCwd("relative-home"),
     join(resolve("relative-home"), ".t3", "claude-capability-probe"),
   );
+});
+
+it("aligns probe env HOME with the resolved probe cwd parent", () => {
+  const probeHome = resolveClaudeCapabilitiesProbeHome("~");
+  const probeCwd = resolveClaudeCapabilitiesProbeCwd(probeHome);
+  const abort = new AbortController();
+  const options = buildClaudeCapabilitiesProbeQueryOptions({
+    binaryPath: "/usr/bin/claude",
+    abortController: abort,
+    env: { HOME: probeHome, PATH: "/usr/bin" },
+    cwd: probeCwd,
+  });
+
+  assert.equal(options.env?.HOME, probeHome);
+  assert.equal(options.cwd, probeCwd);
+  assert.equal(probeCwd, join(probeHome, ".t3", "claude-capability-probe"));
 });

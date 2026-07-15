@@ -500,12 +500,19 @@ export const CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES = [
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
+/** Absolute Claude HOME for capability-probe cwd + env alignment. */
+export function resolveClaudeCapabilitiesProbeHome(homeDir = NodeOS.homedir()): string {
+  const trimmed = homeDir.trim();
+  return trimmed.length > 0 ? NodePath.resolve(expandHomePath(trimmed)) : NodeOS.homedir();
+}
+
 /** Stable empty cwd under ~/.t3 so probes never inherit $HOME / server cwd. */
 export function resolveClaudeCapabilitiesProbeCwd(homeDir = NodeOS.homedir()): string {
-  const trimmed = homeDir.trim();
-  const resolvedHome =
-    trimmed.length > 0 ? NodePath.resolve(expandHomePath(trimmed)) : NodeOS.homedir();
-  return NodePath.join(resolvedHome, ".t3", "claude-capability-probe");
+  return NodePath.join(
+    resolveClaudeCapabilitiesProbeHome(homeDir),
+    ".t3",
+    "claude-capability-probe",
+  );
 }
 
 /**
@@ -647,7 +654,13 @@ const probeClaudeCapabilities = (
   const abort = new AbortController();
   return Effect.gen(function* () {
     const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
-    const probeCwd = resolveClaudeCapabilitiesProbeCwd(claudeEnvironment.HOME || undefined);
+    // Normalize once so SDK cwd and env.HOME agree (raw HOME may be `~` / relative).
+    const probeHome = resolveClaudeCapabilitiesProbeHome(claudeEnvironment.HOME || undefined);
+    const probeCwd = resolveClaudeCapabilitiesProbeCwd(probeHome);
+    const probeEnvironment = {
+      ...claudeEnvironment,
+      HOME: probeHome,
+    };
     yield* Effect.tryPromise({
       try: () => NodeFS.promises.mkdir(probeCwd, { recursive: true }),
       catch: (cause) => cause,
@@ -663,7 +676,7 @@ const probeClaudeCapabilities = (
         options: buildClaudeCapabilitiesProbeQueryOptions({
           binaryPath: claudeSettings.binaryPath,
           abortController: abort,
-          env: claudeEnvironment,
+          env: probeEnvironment,
           cwd: probeCwd,
         }),
       });
