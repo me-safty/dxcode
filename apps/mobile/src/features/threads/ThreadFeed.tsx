@@ -1410,7 +1410,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const contentUnderflowsViewport =
     contentHeight > 0 &&
     viewportHeight > 0 &&
-    contentHeight + props.contentInsetEndEstimate < viewportHeight - CONTENT_FIT_EPSILON;
+    contentHeight +
+      props.contentInsetEndEstimate +
+      (usesNativeAutomaticInsets ? anchorTopInset : 0) <
+      viewportHeight - CONTENT_FIT_EPSILON;
 
   useEffect(() => {
     if (underflowCorrectionFrameRef.current !== null) {
