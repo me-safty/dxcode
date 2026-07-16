@@ -336,6 +336,7 @@ interface SidebarThreadRowProps {
   jumpLabel: string | null;
   isPinned: boolean;
   isThreadDragActive: boolean;
+  suppressClickAfterDragRef: React.RefObject<boolean>;
   togglePinned: (threadKey: string, pinned: boolean) => void;
   appSettingsConfirmThreadArchive: boolean;
   renamingThreadKey: string | null;
@@ -376,6 +377,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     jumpLabel,
     isPinned,
     isThreadDragActive,
+    suppressClickAfterDragRef,
     togglePinned,
     appSettingsConfirmThreadArchive,
     renamingThreadKey,
@@ -528,9 +530,15 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   );
   const handleRowClick = useCallback(
     (event: React.MouseEvent) => {
+      if (suppressClickAfterDragRef.current) {
+        suppressClickAfterDragRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       handleThreadClick(event, threadRef, orderedProjectThreadKeys);
     },
-    [handleThreadClick, orderedProjectThreadKeys, threadRef],
+    [handleThreadClick, orderedProjectThreadKeys, suppressClickAfterDragRef, threadRef],
   );
   const handleRowDoubleClick = useCallback(
     (event: React.MouseEvent) => {
@@ -711,12 +719,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   );
   const handleThreadDragPointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
+      suppressClickAfterDragRef.current = false;
       if (shouldBlockThreadDragActivation(event.target as HTMLElement)) {
         return;
       }
       threadDrag.listeners?.onPointerDown?.(event);
     },
-    [threadDrag.listeners],
+    [suppressClickAfterDragRef, threadDrag.listeners],
   );
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
@@ -1058,14 +1067,17 @@ function SidebarPinnedDivider({
 function SidebarThreadSection({
   children,
   attachAutoAnimateRef,
+  trailingOverlay = null,
 }: {
   children: React.ReactNode;
   attachAutoAnimateRef: (node: HTMLElement | null) => void;
+  trailingOverlay?: React.ReactNode;
 }) {
   return (
     <SidebarMenuSubItem className="w-full">
-      <ul ref={attachAutoAnimateRef} className="flex w-full flex-col gap-0.5">
+      <ul ref={attachAutoAnimateRef} className="relative flex w-full flex-col gap-0.5">
         {children}
+        {trailingOverlay}
       </ul>
     </SidebarMenuSubItem>
   );
@@ -1118,6 +1130,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const threadDragSensors = useSensors(threadDragSensor);
   const [dragFlow, setDragFlow] = useState<ThreadPinDropAction | null>(null);
   const [isThreadDragActive, setIsThreadDragActive] = useState(false);
+  const suppressThreadClickAfterDragRef = useRef(false);
   const dragFlowRef = useRef<ThreadPinDropAction | null>(null);
   const dividerElementRef = useRef<HTMLLIElement | null>(null);
   const setDividerElement = useCallback((node: HTMLLIElement | null) => {
@@ -1167,12 +1180,11 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     (thread) =>
       !pinnedThreadKeys.includes(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
   );
-  const pinnedDividerOverlayEdge =
-    renderedPinnedThreads.length === 0
-      ? "start"
-      : renderedRegularThreads.length === 0
-        ? "end"
-        : null;
+  const showPinnedThreadDivider = shouldShowPinnedThreadDivider({
+    isDragging: isThreadDragActive,
+    pinnedCount: renderedPinnedThreads.length,
+    regularCount: renderedRegularThreads.length,
+  });
   const renderThreadRow = (thread: SidebarThreadSummary) => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
     return (
@@ -1185,6 +1197,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
         isPinned={pinnedThreadKeys.includes(threadKey)}
         isThreadDragActive={isThreadDragActive}
+        suppressClickAfterDragRef={suppressThreadClickAfterDragRef}
         togglePinned={toggleThreadPinned}
         appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
         renamingThreadKey={renamingThreadKey}
@@ -1212,7 +1225,10 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   return (
     <DndContext
       sensors={threadDragSensors}
-      onDragStart={() => setIsThreadDragActive(true)}
+      onDragStart={() => {
+        suppressThreadClickAfterDragRef.current = true;
+        setIsThreadDragActive(true);
+      }}
       onDragMove={handleThreadDragMove}
       onDragCancel={() => {
         setIsThreadDragActive(false);
@@ -1235,22 +1251,28 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </SidebarMenuSubItem>
         ) : null}
         {shouldShowThreadPanel && renderedPinnedThreads.length > 0 && (
-          <SidebarThreadSection attachAutoAnimateRef={attachThreadListAutoAnimateRef}>
+          <SidebarThreadSection
+            attachAutoAnimateRef={attachThreadListAutoAnimateRef}
+            trailingOverlay={
+              showPinnedThreadDivider && renderedRegularThreads.length === 0 ? (
+                <SidebarPinnedDivider
+                  nodeRef={setDividerElement}
+                  flow={dragFlow}
+                  overlayEdge="end"
+                />
+              ) : null
+            }
+          >
             {renderedPinnedThreads.map(renderThreadRow)}
           </SidebarThreadSection>
         )}
-        {shouldShowThreadPanel &&
-          shouldShowPinnedThreadDivider({
-            isDragging: isThreadDragActive,
-            pinnedCount: renderedPinnedThreads.length,
-            regularCount: renderedRegularThreads.length,
-          }) && (
-            <SidebarPinnedDivider
-              nodeRef={setDividerElement}
-              flow={dragFlow}
-              overlayEdge={pinnedDividerOverlayEdge}
-            />
-          )}
+        {shouldShowThreadPanel && showPinnedThreadDivider && renderedRegularThreads.length > 0 && (
+          <SidebarPinnedDivider
+            nodeRef={setDividerElement}
+            flow={dragFlow}
+            overlayEdge={renderedPinnedThreads.length === 0 ? "start" : null}
+          />
+        )}
         {shouldShowThreadPanel && renderedRegularThreads.length > 0 && (
           <SidebarThreadSection attachAutoAnimateRef={attachThreadListAutoAnimateRef}>
             {renderedRegularThreads.map(renderThreadRow)}
