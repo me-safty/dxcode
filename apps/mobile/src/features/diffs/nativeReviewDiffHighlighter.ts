@@ -56,6 +56,11 @@ interface NativeReviewDiffLineRow extends NativeReviewDiffRow {
   readonly content: string;
 }
 
+interface IndexedNativeReviewDiffLineRow {
+  readonly row: NativeReviewDiffLineRow;
+  readonly rowIndex: number;
+}
+
 export interface NativeReviewDiffTokenChunk {
   readonly chunkIndex: number;
   readonly fileId: string;
@@ -308,6 +313,41 @@ function isHighlightableLineRow(row: NativeReviewDiffRow): row is NativeReviewDi
   return row.kind === "line" && typeof row.fileId === "string" && typeof row.content === "string";
 }
 
+function hasConsecutiveLineNumbers(
+  previous: number | null | undefined,
+  next: number | null | undefined,
+): boolean {
+  return typeof previous === "number" && typeof next === "number" && next === previous + 1;
+}
+
+function canShareGrammarContext(
+  previous: IndexedNativeReviewDiffLineRow,
+  next: IndexedNativeReviewDiffLineRow,
+): boolean {
+  if (next.rowIndex !== previous.rowIndex + 1 || next.row.fileId !== previous.row.fileId) {
+    return false;
+  }
+
+  if (previous.row.change === "delete" || next.row.change === "delete") {
+    return (
+      previous.row.change !== "add" &&
+      next.row.change !== "add" &&
+      hasConsecutiveLineNumbers(previous.row.oldLineNumber, next.row.oldLineNumber)
+    );
+  }
+
+  if (previous.row.change === "add" || next.row.change === "add") {
+    return hasConsecutiveLineNumbers(previous.row.newLineNumber, next.row.newLineNumber);
+  }
+
+  return (
+    previous.row.change === "context" &&
+    next.row.change === "context" &&
+    hasConsecutiveLineNumbers(previous.row.oldLineNumber, next.row.oldLineNumber) &&
+    hasConsecutiveLineNumbers(previous.row.newLineNumber, next.row.newLineNumber)
+  );
+}
+
 function groupLineRowsByFileId(rows: ReadonlyArray<NativeReviewDiffRow>) {
   const rowsByFileId = new Map<string, NativeReviewDiffLineRow[]>();
   for (const row of rows) {
@@ -360,7 +400,7 @@ export async function highlightNativeReviewDiffVisibleRows(
   const maxRows = input.maxRows ?? NATIVE_REVIEW_DIFF_VISIBLE_MAX_ROWS;
   const startIndex = clampRowIndex(input.firstRowIndex - overscanRows, input.rows);
   const endIndex = clampRowIndex(input.lastRowIndex + overscanRows, input.rows);
-  const selectedRows: NativeReviewDiffLineRow[] = [];
+  const selectedRows: IndexedNativeReviewDiffLineRow[] = [];
 
   for (
     let rowIndex = startIndex;
@@ -374,12 +414,12 @@ export async function highlightNativeReviewDiffVisibleRows(
       !input.alreadyHighlightedRowIds?.has(row.id) &&
       fileMap.has(row.fileId)
     ) {
-      selectedRows.push(row);
+      selectedRows.push({ row, rowIndex });
     }
   }
 
   const tokensByRowId: Record<string, ReadonlyArray<NativeReviewDiffToken>> = {};
-  let segmentRows: NativeReviewDiffLineRow[] = [];
+  let segmentRows: IndexedNativeReviewDiffLineRow[] = [];
   let segmentFile: NativeReviewDiffFile | undefined;
 
   const flushSegment = () => {
@@ -389,27 +429,33 @@ export async function highlightNativeReviewDiffVisibleRows(
       return;
     }
 
-    const code = segmentRows.map((row) => row.content).join("\n");
+    const code = segmentRows.map(({ row }) => row.content).join("\n");
     const tokenLines = highlighter.tokenize(code, { lang: segmentFile.language, theme });
-    segmentRows.forEach((row, rowIndex) => {
+    segmentRows.forEach(({ row }, rowIndex) => {
       tokensByRowId[row.id] = tokenLines[rowIndex] ?? makePlainTokenFallback(row);
     });
     segmentRows = [];
     segmentFile = undefined;
   };
 
-  for (const row of selectedRows) {
+  for (const selectedRow of selectedRows) {
+    const { row } = selectedRow;
     const file = fileMap.get(row.fileId);
     if (!file) {
       continue;
     }
 
-    if (segmentFile && segmentFile.id !== file.id) {
+    const previousRow = segmentRows.at(-1);
+    if (
+      segmentFile &&
+      (segmentFile.id !== file.id ||
+        (previousRow !== undefined && !canShareGrammarContext(previousRow, selectedRow)))
+    ) {
       flushSegment();
     }
 
     segmentFile = file;
-    segmentRows.push(row);
+    segmentRows.push(selectedRow);
   }
   flushSegment();
 
