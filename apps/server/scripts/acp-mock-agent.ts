@@ -17,8 +17,17 @@ const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
+const emitSparsePermissionToolCall = process.env.T3_ACP_EMIT_SPARSE_PERMISSION_TOOL_CALL === "1";
+const emitAgentThought = process.env.T3_ACP_EMIT_AGENT_THOUGHT === "1";
+const emitDevinPlanExitPermission = process.env.T3_ACP_EMIT_DEVIN_PLAN_EXIT_PERMISSION === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION === "1";
+const emitDevinAskQuestion = process.env.T3_ACP_EMIT_DEVIN_ASK_QUESTION === "1";
+const emitDevinCreatePlan = process.env.T3_ACP_EMIT_DEVIN_CREATE_PLAN === "1";
+const emitDevinUpdateTodos = process.env.T3_ACP_EMIT_DEVIN_UPDATE_TODOS === "1";
+const emitDevinPrivateElicitation = process.env.T3_ACP_EMIT_DEVIN_PRIVATE_ELICITATION === "1";
+const emitElicitation = process.env.T3_ACP_EMIT_ELICITATION === "1";
+const emitUrlElicitationComplete = process.env.T3_ACP_EMIT_URL_ELICITATION_COMPLETE === "1";
 const emitXAiPromptCompleteThenHang = process.env.T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG === "1";
 const emitForeignSessionUpdates = process.env.T3_ACP_EMIT_FOREIGN_SESSION_UPDATES === "1";
 const hangPromptForever = process.env.T3_ACP_HANG_PROMPT_FOREVER === "1";
@@ -37,6 +46,7 @@ const emitOverlappingXAiPromptCompleteOutOfOrder =
   process.env.T3_ACP_EMIT_OVERLAPPING_XAI_PROMPT_COMPLETE_OUT_OF_ORDER === "1";
 const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
+const failModelConfigOption = process.env.T3_ACP_FAIL_MODEL_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
@@ -255,19 +265,24 @@ function availableModels(): ReadonlyArray<{
 
 const availableModes: ReadonlyArray<AcpSchema.SessionMode> = [
   {
+    id: "accept-edits",
+    name: "Code",
+    description: "Write and edit code",
+  },
+  {
     id: "ask",
     name: "Ask",
-    description: "Request permission before making any changes",
+    description: "Answer questions without code changes",
   },
   {
-    id: "architect",
-    name: "Architect",
-    description: "Design and plan software systems without implementation",
+    id: "plan",
+    name: "Plan",
+    description: "Plan changes before implementing",
   },
   {
-    id: "code",
-    name: "Code",
-    description: "Write and modify code with full tool access",
+    id: "bypass",
+    name: "Bypass Permissions",
+    description: "Auto-approve all tool calls",
   },
 ];
 
@@ -406,6 +421,15 @@ const program = Effect.gen(function* () {
       if (failSetConfigOption) {
         return yield* AcpError.AcpRequestError.invalidParams(
           "Mock invalid params for session/set_config_option",
+          {
+            method: "session/set_config_option",
+            params: request,
+          },
+        );
+      }
+      if (failModelConfigOption && request.configId === "model") {
+        return yield* AcpError.AcpRequestError.invalidParams(
+          "Mock invalid model params for session/set_config_option",
           {
             method: "session/set_config_option",
             params: request,
@@ -658,21 +682,25 @@ const program = Effect.gen(function* () {
 
         const permission = yield* agent.client.requestPermission({
           sessionId: requestedSessionId,
-          toolCall: {
-            toolCallId,
-            title: "`cat server/package.json`",
-            kind: "execute",
-            status: "pending",
-            content: [
-              {
-                type: "content",
-                content: {
-                  type: "text",
-                  text: "Not in allowlist: cat server/package.json",
-                },
+          toolCall: emitSparsePermissionToolCall
+            ? {
+                toolCallId,
+              }
+            : {
+                toolCallId,
+                title: "`cat server/package.json`",
+                kind: "execute",
+                status: "pending",
+                content: [
+                  {
+                    type: "content",
+                    content: {
+                      type: "text",
+                      text: "Not in allowlist: cat server/package.json",
+                    },
+                  },
+                ],
               },
-            ],
-          },
           options: [
             { optionId: permissionOptionIds.allowOnce, name: "Allow once", kind: "allow_once" },
             {
@@ -713,6 +741,91 @@ const program = Effect.gen(function* () {
         });
 
         return { stopReason: cancelled ? "cancelled" : "end_turn" };
+      }
+
+      if (emitDevinPlanExitPermission) {
+        const toolCallId = "devin-exit-plan-tool-call-1";
+        const plan =
+          "1. Create `probe-output.txt` with the content `hello`.\n2. Read the file back to verify it contains exactly `hello`.";
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: `## Plan\n\n${plan}`,
+            },
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: "Exit plan mode",
+            kind: "switch_mode",
+            rawInput: { plan },
+          },
+        });
+
+        const permission = yield* agent.client.requestPermission({
+          sessionId: requestedSessionId,
+          toolCall: { toolCallId },
+          options: [
+            {
+              optionId: "plan_accept_edits",
+              name: "Yes, implement plan and accept edits",
+              kind: "allow_once",
+            },
+            {
+              optionId: "plan_bypass",
+              name: "Yes, implement plan and bypass permissions",
+              kind: "allow_once",
+            },
+            { optionId: "reject_once", name: "No, plan needs changes", kind: "reject_once" },
+          ],
+        });
+
+        const rejected =
+          permission.outcome.outcome === "cancelled" ||
+          ("optionId" in permission.outcome && permission.outcome.optionId === "reject_once");
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            status: rejected ? "failed" : "completed",
+            ...(rejected
+              ? {
+                  content: [
+                    {
+                      type: "content",
+                      content: {
+                        type: "text",
+                        text: "Tool execution was rejected: User rejected this tool call",
+                      },
+                    },
+                  ],
+                }
+              : {}),
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: "The plan is ready for your review.",
+            },
+          },
+        });
+
+        return { stopReason: "end_turn" };
       }
 
       if (emitGenericToolPlaceholders) {
@@ -810,6 +923,214 @@ const program = Effect.gen(function* () {
         return { stopReason: "end_turn" };
       }
 
+      if (emitDevinAskQuestion) {
+        const result = yield* agent.client.extRequest("devin/ask_question", {
+          toolCallId: "devin-ask-question-tool-call-1",
+          title: "Question",
+          questions: [
+            {
+              id: "scope",
+              prompt: "Which scope should Devin use?",
+              options: [
+                {
+                  id: "workspace",
+                  label: "Workspace",
+                  description: "Use the current workspace",
+                },
+                {
+                  id: "session",
+                  label: "Session",
+                  description: "Only use this session",
+                },
+              ],
+            },
+          ],
+        });
+        if (typeof result !== "object" || result === null || !("outcome" in result)) {
+          throw new Error("Expected Devin ask-question response outcome.");
+        }
+        if (result.outcome === "cancelled") {
+          return { stopReason: "end_turn" };
+        }
+        if (
+          result.outcome !== "accepted" ||
+          !("answers" in result) ||
+          typeof result.answers !== "object" ||
+          result.answers === null ||
+          !("scope" in result.answers) ||
+          result.answers.scope !== "workspace"
+        ) {
+          throw new Error("Unexpected Devin ask-question response answers.");
+        }
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitDevinCreatePlan) {
+        const result = yield* agent.client.extRequest("devin/create_plan", {
+          toolCallId: "devin-create-plan-tool-call-1",
+          title: "Devin plan",
+          overview: "Implement the requested Devin callback",
+          todos: [
+            { content: "Inspect Devin ACP callbacks", status: "completed" },
+            { content: "Implement the missing callback", status: "in_progress" },
+          ],
+        });
+        if (
+          typeof result !== "object" ||
+          result === null ||
+          !("accepted" in result) ||
+          result.accepted !== true
+        ) {
+          throw new Error("Expected accepted Devin create-plan response.");
+        }
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitDevinUpdateTodos) {
+        yield* agent.client.extNotification("devin/update_todos", {
+          toolCallId: "devin-update-todos-tool-call-1",
+          overview: "Devin progress",
+          todos: [
+            { content: "Inspect Devin ACP callbacks", status: "completed" },
+            { content: "Implement the missing callback", status: "in_progress" },
+            { content: "Verify behavior", status: "pending" },
+          ],
+        });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitDevinPrivateElicitation) {
+        const result = yield* agent.client.extRequest("_session/elicitation", {
+          mode: "form",
+          sessionId: requestedSessionId,
+          message: "What would you like Devin to do?",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              q0: {
+                type: "string",
+                title: "Task",
+                description: "What would you like Devin to do?",
+                oneOf: [
+                  {
+                    const: "Build a new feature",
+                    title: "Add new functionality to the project.",
+                  },
+                  {
+                    const: "Research or plan only",
+                    title: "Explore options without changing files.",
+                  },
+                ],
+              },
+            },
+            required: ["q0"],
+          },
+          _meta: {
+            "cognition.ai/allowOther": true,
+          },
+        });
+        if (
+          typeof result !== "object" ||
+          result === null ||
+          !("action" in result) ||
+          typeof result.action !== "object" ||
+          result.action === null ||
+          !("action" in result.action) ||
+          result.action.action !== "accept" ||
+          !("content" in result.action) ||
+          typeof result.action.content !== "object" ||
+          result.action.content === null ||
+          !("q0" in result.action.content) ||
+          result.action.content.q0 !== "Research or plan only"
+        ) {
+          throw new Error("Unexpected private Devin elicitation response.");
+        }
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: "Devin received the answer and continued.",
+            },
+          },
+        });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitElicitation) {
+        const result = yield* agent.client.elicit({
+          sessionId: requestedSessionId,
+          mode: "form",
+          message: "Choose Devin options",
+          requestedSchema: {
+            type: "object",
+            title: "Devin options",
+            required: ["scope", "fast", "notes"],
+            properties: {
+              scope: {
+                type: "string",
+                title: "Scope",
+                description: "Which scope should Devin use?",
+                oneOf: [
+                  { const: "workspace", title: "Workspace" },
+                  { const: "session", title: "Session" },
+                ],
+              },
+              fast: {
+                type: "boolean",
+                title: "Fast mode",
+                description: "Use fast mode?",
+              },
+              notes: {
+                type: "string",
+                title: "Notes",
+                description: "Any extra notes?",
+              },
+            },
+          },
+        });
+        if (result.action.action !== "accept" || !result.action.content) {
+          throw new Error("Expected accepted session/elicitation response.");
+        }
+        if (
+          result.action.content.scope !== "workspace" ||
+          result.action.content.fast !== true ||
+          result.action.content.notes !== "Keep it focused"
+        ) {
+          throw new Error("Unexpected session/elicitation response content.");
+        }
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitUrlElicitationComplete) {
+        const elicitationId = "mock-url-elicitation-1";
+        yield* Effect.gen(function* () {
+          yield* Effect.sleep("25 millis");
+          yield* agent.client.elicitationComplete({
+            elicitationId,
+          });
+        }).pipe(Effect.forkChild);
+        const result = yield* agent.client.elicit({
+          sessionId: requestedSessionId,
+          mode: "url",
+          elicitationId,
+          message: "Complete setup in Devin",
+          url: "https://example.com/devin/setup",
+        });
+        if (result.action.action !== "accept") {
+          throw new Error("Expected accepted URL session/elicitation response.");
+        }
+
+        return { stopReason: "end_turn" };
+      }
+
       if (emitForeignSessionUpdates) {
         yield* agent.client.sessionUpdate({
           sessionId: requestedSessionId,
@@ -864,6 +1185,16 @@ const program = Effect.gen(function* () {
           ],
         },
       });
+
+      if (emitAgentThought) {
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "thinking from mock" },
+          },
+        });
+      }
 
       yield* agent.client.sessionUpdate({
         sessionId: requestedSessionId,

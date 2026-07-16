@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import type * as EffectAcpSchema from "effect-acp/schema";
+import type { RuntimeContentStreamKind } from "@t3tools/contracts";
 import { deriveToolActivityPresentation } from "@t3tools/shared/toolActivity";
 import type { ToolLifecycleItemType } from "@t3tools/contracts";
 
@@ -56,6 +57,68 @@ export interface AcpSessionModeState {
   readonly availableModes: ReadonlyArray<AcpSessionMode>;
 }
 
+function normalizeModeAliasText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeModeSearchText(mode: AcpSessionMode): string {
+  return [mode.id, mode.name, mode.description]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map(normalizeModeAliasText)
+    .filter((value) => value.length > 0)
+    .join(" ");
+}
+
+export function findSessionModeByAliases(
+  modes: ReadonlyArray<AcpSessionMode>,
+  aliases: ReadonlyArray<string>,
+): AcpSessionMode | undefined {
+  const normalizedAliases = aliases
+    .map((alias) => ({
+      raw: alias.trim().toLowerCase(),
+      search: normalizeModeAliasText(alias),
+    }))
+    .filter((alias) => alias.raw.length > 0 && alias.search.length > 0);
+
+  for (const alias of normalizedAliases) {
+    const exact = modes.find((mode) => {
+      const id = mode.id.trim().toLowerCase();
+      const name = mode.name.trim().toLowerCase();
+      return (
+        id === alias.raw ||
+        name === alias.raw ||
+        normalizeModeAliasText(mode.id) === alias.search ||
+        normalizeModeAliasText(mode.name) === alias.search
+      );
+    });
+    if (exact) {
+      return exact;
+    }
+  }
+
+  for (const alias of normalizedAliases) {
+    const partial = modes.find((mode) => normalizeModeSearchText(mode).includes(alias.search));
+    if (partial) {
+      return partial;
+    }
+  }
+  return undefined;
+}
+
+export interface AcpSessionConfigSelectOptionValue {
+  readonly value: string;
+  readonly name: string;
+}
+
+export type AcpSessionSelectConfigOption = Extract<
+  EffectAcpSchema.SessionConfigOption,
+  { readonly type: "select" }
+>;
+
 export interface AcpToolCallState {
   readonly toolCallId: string;
   readonly kind?: string;
@@ -106,6 +169,7 @@ export type AcpParsedSessionEvent =
   | {
       readonly _tag: "ContentDelta";
       readonly itemId?: string;
+      readonly streamKind: RuntimeContentStreamKind;
       readonly text: string;
       readonly rawPayload: unknown;
     };
@@ -120,15 +184,26 @@ type AcpToolCallUpdate = Extract<
   { readonly sessionUpdate: "tool_call" | "tool_call_update" }
 >;
 
+function configOptionToken(value: string | null | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+export function findSessionModelConfigOption(
+  configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | null | undefined,
+): AcpSessionSelectConfigOption | undefined {
+  const selectOptions = configOptions?.filter((option) => option.type === "select") ?? [];
+  return (
+    selectOptions.find((option) => configOptionToken(option.category) === "model") ??
+    selectOptions.find((option) => {
+      const id = configOptionToken(option.id);
+      const name = configOptionToken(option.name);
+      return id === "model" || name === "model";
+    })
+  );
+}
+
 export function extractModelConfigId(sessionResponse: AcpSessionSetupResponse): string | undefined {
-  const configOptions = sessionResponse.configOptions;
-  if (!configOptions) return undefined;
-  for (const opt of configOptions) {
-    if (opt.category === "model" && opt.id.trim().length > 0) {
-      return opt.id.trim();
-    }
-  }
-  return undefined;
+  return findSessionModelConfigOption(sessionResponse.configOptions)?.id.trim() || undefined;
 }
 
 export function findSessionConfigOption(
@@ -148,11 +223,30 @@ export function findSessionConfigOption(
 export function collectSessionConfigOptionValues(
   configOption: EffectAcpSchema.SessionConfigOption,
 ): ReadonlyArray<string> {
-  if (configOption.type !== "select") {
+  return flattenSessionConfigSelectOptions(configOption).map((option) => option.value);
+}
+
+export function flattenSessionConfigSelectOptions(
+  configOption: EffectAcpSchema.SessionConfigOption | undefined,
+): ReadonlyArray<AcpSessionConfigSelectOptionValue> {
+  if (!configOption || configOption.type !== "select") {
     return [];
   }
   return configOption.options.flatMap((entry) =>
-    "value" in entry ? [entry.value] : entry.options.map((option) => option.value),
+    "value" in entry
+      ? [
+          {
+            value: entry.value.trim(),
+            name: entry.name.trim(),
+          } satisfies AcpSessionConfigSelectOptionValue,
+        ]
+      : entry.options.map(
+          (option) =>
+            ({
+              value: option.value.trim(),
+              name: option.name.trim(),
+            }) satisfies AcpSessionConfigSelectOptionValue,
+        ),
   );
 }
 
@@ -426,8 +520,9 @@ export function mergeToolCallState(
 
 export function parsePermissionRequest(
   params: EffectAcpSchema.RequestPermissionRequest,
+  previousToolCall?: AcpToolCallState,
 ): AcpPermissionRequest {
-  const toolCall = makeToolCallState(
+  const currentToolCall = makeToolCallState(
     {
       toolCallId: params.toolCall.toolCallId,
       title: params.toolCall.title,
@@ -440,7 +535,11 @@ export function parsePermissionRequest(
     },
     { fallbackStatus: "pending" },
   );
-  const kind = normalizeToolKind(params.toolCall.kind) ?? "unknown";
+  const toolCall =
+    previousToolCall && currentToolCall?.toolCallId === previousToolCall.toolCallId
+      ? mergeToolCallState(previousToolCall, currentToolCall)
+      : (currentToolCall ?? previousToolCall);
+  const kind = toolCall?.kind ?? normalizeToolKind(params.toolCall.kind) ?? "unknown";
   const detail =
     toolCall?.command ??
     toolCall?.title ??
@@ -451,6 +550,33 @@ export function parsePermissionRequest(
     ...(detail ? { detail } : {}),
     ...(toolCall ? { toolCall } : {}),
   };
+}
+
+function trimmedString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+export function extractAcpSwitchModePlanMarkdown(toolCall: AcpToolCallState): string | undefined {
+  if (toolCall.kind !== "switch_mode") {
+    return undefined;
+  }
+  const rawInput = toolCall.data.rawInput;
+  if (typeof rawInput === "string") {
+    return trimmedString(rawInput);
+  }
+  if (!isRecord(rawInput)) {
+    return undefined;
+  }
+  return (
+    trimmedString(rawInput.plan) ??
+    trimmedString(rawInput.planMarkdown) ??
+    trimmedString(rawInput.markdown) ??
+    trimmedString(rawInput.content)
+  );
 }
 
 export function sessionUpdateIsReplay(params: EffectAcpSchema.SessionNotification): boolean {
@@ -568,6 +694,18 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
       if (upd.content.type === "text" && upd.content.text.length > 0) {
         events.push({
           _tag: "ContentDelta",
+          streamKind: "assistant_text",
+          text: upd.content.text,
+          rawPayload: params,
+        });
+      }
+      break;
+    }
+    case "agent_thought_chunk": {
+      if (upd.content.type === "text" && upd.content.text.length > 0) {
+        events.push({
+          _tag: "ContentDelta",
+          streamKind: "reasoning_text",
           text: upd.content.text,
           rawPayload: params,
         });

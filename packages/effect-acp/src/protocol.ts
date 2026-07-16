@@ -17,6 +17,8 @@ import * as AcpSchema from "./_generated/schema.gen.ts";
 import { CLIENT_METHODS } from "./_generated/meta.gen.ts";
 import * as AcpError from "./errors.ts";
 const isAcpError = Schema.is(AcpError.AcpError);
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
 export interface AcpProtocolLogEvent {
   readonly direction: "incoming" | "outgoing";
@@ -121,7 +123,22 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           : undefined;
     const requestId = encodedRequestId === "" ? undefined : encodedRequestId;
     const encoded = yield* Effect.try({
-      try: () => parser.encode(message),
+      try: () => {
+        const encoded = parser.encode(message);
+        if (!encoded || message._tag !== "Exit" || !Number.isNaN(Number(message.requestId))) {
+          return encoded;
+        }
+
+        // Effect's JSON-RPC serializer coerces response ids to numbers.
+        const response = decodeUnknownJsonString(
+          typeof encoded === "string" ? encoded : new TextDecoder().decode(encoded),
+        );
+        if (response === null || typeof response !== "object" || Array.isArray(response)) {
+          throw new TypeError("Expected a JSON-RPC response object");
+        }
+        const restored = `${encodeUnknownJsonString({ ...response, id: message.requestId })}\n`;
+        return typeof encoded === "string" ? restored : new TextEncoder().encode(restored);
+      },
       catch: (cause) => AcpError.AcpProtocolParseError.fromEncodingError(method, requestId, cause),
     });
 

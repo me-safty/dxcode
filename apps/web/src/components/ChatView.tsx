@@ -4389,24 +4389,28 @@ function ChatViewContent(props: ChatViewProps) {
     [activePendingUserInput, composerRef],
   );
 
-  const onAdvanceActivePendingUserInput = useCallback(() => {
-    if (!activePendingUserInput || !activePendingProgress) {
-      return;
-    }
-    if (activePendingProgress.isLastQuestion) {
-      if (activePendingResolvedAnswers) {
-        void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
+  const onAdvanceActivePendingUserInput = useCallback(
+    (answersOverride?: Record<string, unknown>) => {
+      if (!activePendingUserInput || !activePendingProgress) {
+        return;
       }
-      return;
-    }
-    setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
-  }, [
-    activePendingProgress,
-    activePendingResolvedAnswers,
-    activePendingUserInput,
-    onRespondToUserInput,
-    setActivePendingUserInputQuestionIndex,
-  ]);
+      if (activePendingProgress.isLastQuestion) {
+        const resolvedAnswers = answersOverride ?? activePendingResolvedAnswers;
+        if (resolvedAnswers) {
+          void onRespondToUserInput(activePendingUserInput.requestId, resolvedAnswers);
+        }
+        return;
+      }
+      setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
+    },
+    [
+      activePendingProgress,
+      activePendingResolvedAnswers,
+      activePendingUserInput,
+      onRespondToUserInput,
+      setActivePendingUserInputQuestionIndex,
+    ],
+  );
 
   const onPreviousActivePendingUserInputQuestion = useCallback(() => {
     if (!activePendingProgress) {

@@ -49,6 +49,7 @@ const decodeRequestPermissionResponse = Schema.decodeEffect(
   Schema.fromJsonString(RequestPermissionResponse),
 );
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
 const encoder = new TextEncoder();
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
@@ -378,6 +379,36 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
         method: "x/private",
         requestId: "1",
         operation: "receive-response",
+      });
+    }),
+  );
+
+  it.effect("preserves string ids when responding to extension requests", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        serverRequestMethods: new Set(),
+        onExtRequest: () => Effect.succeed({ accepted: true }),
+      });
+
+      const requestId = "1c0ddcb9-8322-41fd-9bd5-a0ddf8901b1f";
+      yield* Queue.offer(
+        input,
+        encoder.encode(
+          `${encodeUnknownJsonString({
+            jsonrpc: "2.0",
+            id: requestId,
+            method: "_session/elicitation",
+            params: {},
+          })}\n`,
+        ),
+      );
+
+      assert.deepEqual(decodeUnknownJsonString(yield* Queue.take(output)), {
+        jsonrpc: "2.0",
+        id: requestId,
+        result: { accepted: true },
       });
     }),
   );

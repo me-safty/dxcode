@@ -51,6 +51,12 @@ export const PROVIDER_OPTIONS: Array<{
     available: true,
     pickerSidebarBadge: "new",
   },
+  {
+    value: ProviderDriverKind.make("devin"),
+    label: "Devin",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
 ];
 
 export type WorkLogToolLifecycleStatus =
@@ -427,7 +433,8 @@ function parseUserInputQuestions(
       ) {
         return null;
       }
-      const options = question.options
+      const rawOptions = question.options;
+      const options = rawOptions
         .map<UserInputQuestion["options"][number] | null>((option) => {
           if (!option || typeof option !== "object") return null;
           const optionRecord = option as Record<string, unknown>;
@@ -443,7 +450,7 @@ function parseUserInputQuestions(
           };
         })
         .filter((option): option is UserInputQuestion["options"][number] => option !== null);
-      if (options.length === 0) {
+      if (rawOptions.length > 0 && options.length === 0) {
         return null;
       }
       return {
@@ -451,6 +458,7 @@ function parseUserInputQuestions(
         header: question.header,
         question: question.question,
         options,
+        required: question.required !== false,
         multiSelect: question.multiSelect === true,
       };
     })

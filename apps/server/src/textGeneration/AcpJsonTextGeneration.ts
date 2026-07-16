@@ -1,0 +1,281 @@
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import type * as Scope from "effect/Scope";
+import type * as EffectAcpErrors from "effect-acp/errors";
+import type * as EffectAcpSchema from "effect-acp/schema";
+
+import { type ModelSelection, TextGenerationError } from "@t3tools/contracts";
+import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { extractJsonObject } from "@t3tools/shared/schemaJson";
+
+import type * as AcpSessionRuntime from "../provider/acp/AcpSessionRuntime.ts";
+import * as TextGeneration from "./TextGeneration.ts";
+import {
+  buildBranchNamePrompt,
+  buildCommitMessagePrompt,
+  buildPrContentPrompt,
+  buildThreadTitlePrompt,
+} from "./TextGenerationPrompts.ts";
+import {
+  sanitizeCommitSubject,
+  sanitizePrTitle,
+  sanitizeThreadTitle,
+} from "./TextGenerationUtils.ts";
+
+const ACP_TEXT_GENERATION_TIMEOUT_MS = 180_000;
+
+const isTextGenerationError = Schema.is(TextGenerationError);
+
+export type AcpJsonTextGenerationOperation =
+  | "generateCommitMessage"
+  | "generatePrContent"
+  | "generateBranchName"
+  | "generateThreadTitle";
+
+export interface AcpJsonTextGenerationOptions {
+  /** Prefix for `Effect.fn` trace names, e.g. `DevinTextGeneration`. */
+  readonly traceName: string;
+  /** Label for request-level errors, e.g. `Devin ACP`. */
+  readonly requestLabel: string;
+  /** Label for output-level errors, e.g. `Devin` or `Grok Agent`. */
+  readonly outputLabel: string;
+  readonly makeRuntime: (
+    cwd: string,
+  ) => Effect.Effect<
+    AcpSessionRuntime.AcpSessionRuntime["Service"],
+    EffectAcpErrors.AcpError,
+    Scope.Scope
+  >;
+  /** Provider-specific session setup (mode, model selection) after start. */
+  readonly configureSession: (input: {
+    readonly runtime: AcpSessionRuntime.AcpSessionRuntime["Service"];
+    readonly started: AcpSessionRuntime.AcpSessionRuntimeStartResult;
+    readonly modelSelection: ModelSelection;
+    readonly operation: AcpJsonTextGenerationOperation;
+  }) => Effect.Effect<void, TextGenerationError | EffectAcpErrors.AcpError>;
+}
+
+/**
+ * Builds a headless ACP text-generation service: spawn the agent, send one
+ * prompt, collect assistant text, and decode it as JSON. Shared by every
+ * provider whose CLI speaks ACP (Cursor, Grok, Devin).
+ */
+export function makeAcpJsonTextGeneration(
+  options: AcpJsonTextGenerationOptions,
+): TextGeneration.TextGeneration["Service"] {
+  const runAcpJson = <S extends Schema.Top>({
+    operation,
+    cwd,
+    prompt,
+    outputSchemaJson,
+    modelSelection,
+  }: {
+    operation: AcpJsonTextGenerationOperation;
+    cwd: string;
+    prompt: string;
+    outputSchemaJson: S;
+    modelSelection: ModelSelection;
+  }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
+    Effect.gen(function* () {
+      const outputRef = yield* Ref.make("");
+      const runtime = yield* options.makeRuntime(cwd);
+
+      yield* Stream.runForEach(runtime.getEvents(), (event) => {
+        if (event._tag === "EventStreamBarrier") {
+          return Deferred.succeed(event.acknowledge, undefined).pipe(Effect.asVoid);
+        }
+        if (event._tag !== "ContentDelta") {
+          return Effect.void;
+        }
+        return Ref.update(outputRef, (current) => current + event.text);
+      }).pipe(Effect.forkScoped);
+
+      // Headless runs cannot answer interactive requests; cancel them so the
+      // agent terminates deterministically instead of waiting forever.
+      yield* runtime.handleElicitation(() =>
+        Effect.succeed({
+          action: { action: "cancel" },
+        } satisfies EffectAcpSchema.ElicitationResponse),
+      );
+      yield* runtime.handleRequestPermission(() =>
+        Effect.succeed({
+          outcome: { outcome: "cancelled" },
+        } satisfies EffectAcpSchema.RequestPermissionResponse),
+      );
+
+      const promptResult = yield* Effect.gen(function* () {
+        const started = yield* runtime.start();
+        yield* options.configureSession({ runtime, started, modelSelection, operation });
+        return yield* runtime.prompt({
+          prompt: [{ type: "text", text: prompt }],
+        });
+      }).pipe(
+        Effect.timeoutOption(ACP_TEXT_GENERATION_TIMEOUT_MS),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(
+                new TextGenerationError({
+                  operation,
+                  detail: `${options.requestLabel} request timed out.`,
+                }),
+              ),
+            onSome: (value) => Effect.succeed(value),
+          }),
+        ),
+        Effect.mapError((cause: EffectAcpErrors.AcpError | TextGenerationError) =>
+          isTextGenerationError(cause)
+            ? cause
+            : new TextGenerationError({
+                operation,
+                detail: `${options.requestLabel} request failed.`,
+                cause,
+              }),
+        ),
+      );
+
+      yield* runtime.drainEvents;
+
+      if (promptResult.stopReason !== "end_turn") {
+        return yield* new TextGenerationError({
+          operation,
+          detail:
+            promptResult.stopReason === "cancelled"
+              ? `${options.requestLabel} request was cancelled.`
+              : `${options.requestLabel} request stopped before completing: ${promptResult.stopReason}.`,
+        });
+      }
+
+      const trimmed = (yield* Ref.get(outputRef)).trim();
+      if (!trimmed) {
+        return yield* new TextGenerationError({
+          operation,
+          detail: `${options.outputLabel} returned empty output.`,
+        });
+      }
+
+      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
+      return yield* decodeOutput(extractJsonObject(trimmed)).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation,
+              detail: `${options.outputLabel} returned invalid structured output.`,
+              cause,
+            }),
+        ),
+      );
+    }).pipe(
+      Effect.mapError((cause) =>
+        isTextGenerationError(cause)
+          ? cause
+          : new TextGenerationError({
+              operation,
+              detail: `${options.requestLabel} text generation failed.`,
+              cause,
+            }),
+      ),
+      Effect.scoped,
+    );
+
+  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
+    Effect.fn(`${options.traceName}.generateCommitMessage`)(function* (input) {
+      const { prompt, outputSchema } = buildCommitMessagePrompt({
+        branch: input.branch,
+        stagedSummary: input.stagedSummary,
+        stagedPatch: input.stagedPatch,
+        includeBranch: input.includeBranch === true,
+      });
+
+      const generated = yield* runAcpJson({
+        operation: "generateCommitMessage",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return {
+        subject: sanitizeCommitSubject(generated.subject),
+        body: generated.body.trim(),
+        ...("branch" in generated && typeof generated.branch === "string"
+          ? { branch: sanitizeFeatureBranchName(generated.branch) }
+          : {}),
+      };
+    });
+
+  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
+    Effect.fn(`${options.traceName}.generatePrContent`)(function* (input) {
+      const { prompt, outputSchema } = buildPrContentPrompt({
+        baseBranch: input.baseBranch,
+        headBranch: input.headBranch,
+        commitSummary: input.commitSummary,
+        diffSummary: input.diffSummary,
+        diffPatch: input.diffPatch,
+      });
+
+      const generated = yield* runAcpJson({
+        operation: "generatePrContent",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return {
+        title: sanitizePrTitle(generated.title),
+        body: generated.body.trim(),
+      };
+    });
+
+  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
+    Effect.fn(`${options.traceName}.generateBranchName`)(function* (input) {
+      const { prompt, outputSchema } = buildBranchNamePrompt({
+        message: input.message,
+        attachments: input.attachments,
+      });
+
+      const generated = yield* runAcpJson({
+        operation: "generateBranchName",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return {
+        branch: sanitizeBranchFragment(generated.branch),
+      };
+    });
+
+  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
+    Effect.fn(`${options.traceName}.generateThreadTitle`)(function* (input) {
+      const { prompt, outputSchema } = buildThreadTitlePrompt({
+        message: input.message,
+        attachments: input.attachments,
+      });
+
+      const generated = yield* runAcpJson({
+        operation: "generateThreadTitle",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return {
+        title: sanitizeThreadTitle(generated.title),
+      } satisfies TextGeneration.ThreadTitleGenerationResult;
+    });
+
+  return {
+    generateCommitMessage,
+    generatePrContent,
+    generateBranchName,
+    generateThreadTitle,
+  } satisfies TextGeneration.TextGeneration["Service"];
+}

@@ -4,6 +4,10 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import {
   extractModelConfigId,
+  extractAcpSwitchModePlanMarkdown,
+  findSessionModeByAliases,
+  findSessionModelConfigOption,
+  flattenSessionConfigSelectOptions,
   mergeToolCallState,
   parsePermissionRequest,
   parseSessionModeState,
@@ -13,6 +17,40 @@ import {
 } from "./AcpRuntimeModel.ts";
 
 describe("AcpRuntimeModel", () => {
+  it("finds session modes by exact and normalized aliases", () => {
+    expect(
+      findSessionModeByAliases(
+        [
+          { id: "ask", name: "Ask" },
+          { id: "architect-mode", name: "Architect Mode" },
+        ],
+        ["architect mode"],
+      )?.id,
+    ).toBe("architect-mode");
+
+    expect(
+      findSessionModeByAliases(
+        [
+          { id: "ask", name: "Ask" },
+          { id: "bypass-permissions", name: "Bypass Permissions" },
+        ],
+        ["bypass permissions"],
+      )?.id,
+    ).toBe("bypass-permissions");
+  });
+
+  it("finds session modes by description text when ids and names differ", () => {
+    expect(
+      findSessionModeByAliases(
+        [
+          { id: "ask", name: "Ask" },
+          { id: "design", name: "Design", description: "Architect software changes" },
+        ],
+        ["architect"],
+      )?.id,
+    ).toBe("design");
+  });
+
   it("parses session mode state from typed ACP session setup responses", () => {
     const modeState = parseSessionModeState({
       sessionId: "session-1",
@@ -59,6 +97,69 @@ describe("AcpRuntimeModel", () => {
     } satisfies EffectAcpSchema.NewSessionResponse);
 
     expect(modelConfigId).toBe("model");
+  });
+
+  it("finds model config options by category first and then id or name", () => {
+    const categoryMatch = findSessionModelConfigOption([
+      {
+        id: "display-model",
+        name: "Display Model",
+        category: "model",
+        type: "select",
+        currentValue: "adaptive",
+        options: [{ value: "adaptive", name: "Adaptive" }],
+      },
+      {
+        id: "model",
+        name: "Model",
+        type: "select",
+        currentValue: "fallback",
+        options: [{ value: "fallback", name: "Fallback" }],
+      },
+    ]);
+    expect(categoryMatch?.id).toBe("display-model");
+
+    const nameFallback = findSessionModelConfigOption([
+      {
+        id: "agent-model",
+        name: "Model",
+        type: "select",
+        currentValue: "adaptive",
+        options: [{ value: "adaptive", name: "Adaptive" }],
+      },
+    ]);
+    expect(nameFallback?.id).toBe("agent-model");
+  });
+
+  it("flattens grouped ACP select config options", () => {
+    const options = flattenSessionConfigSelectOptions({
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: "adaptive",
+      options: [
+        {
+          group: "recommended",
+          name: "Recommended",
+          options: [
+            { value: " adaptive ", name: " Adaptive " },
+            { value: "swe-1-6", name: "SWE-1.6" },
+          ],
+        },
+        {
+          group: "private",
+          name: "Private",
+          options: [{ value: "MODEL_PRIVATE_11", name: "Private Model" }],
+        },
+      ],
+    });
+
+    expect(options).toEqual([
+      { value: "adaptive", name: "Adaptive" },
+      { value: "swe-1-6", name: "SWE-1.6" },
+      { value: "MODEL_PRIVATE_11", name: "Private Model" },
+    ]);
   });
 
   it("detects Grok session replay updates from _meta.isReplay", () => {
@@ -321,6 +422,7 @@ describe("AcpRuntimeModel", () => {
     expect(contentResult.events).toEqual([
       {
         _tag: "ContentDelta",
+        streamKind: "assistant_text",
         text: "hello from acp",
         rawPayload: {
           sessionId: "session-1",
@@ -329,6 +431,35 @@ describe("AcpRuntimeModel", () => {
             content: {
               type: "text",
               text: "hello from acp",
+            },
+          },
+        },
+      },
+    ]);
+
+    const thoughtResult = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: {
+          type: "text",
+          text: "thinking through the plan",
+        },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(thoughtResult.events).toEqual([
+      {
+        _tag: "ContentDelta",
+        streamKind: "reasoning_text",
+        text: "thinking through the plan",
+        rawPayload: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "thinking through the plan",
             },
           },
         },
@@ -373,5 +504,87 @@ describe("AcpRuntimeModel", () => {
         command: "cat package.json",
       },
     });
+  });
+
+  it("enriches sparse permission requests from prior tool-call state", () => {
+    const request = parsePermissionRequest(
+      {
+        sessionId: "session-1",
+        options: [
+          {
+            optionId: "plan_accept_edits",
+            name: "Yes, implement plan and accept edits",
+            kind: "allow_once",
+          },
+          {
+            optionId: "reject_once",
+            name: "No, plan needs changes",
+            kind: "reject_once",
+          },
+        ],
+        toolCall: {
+          toolCallId: "exit-plan-1",
+        },
+      } satisfies EffectAcpSchema.RequestPermissionRequest,
+      {
+        toolCallId: "exit-plan-1",
+        kind: "switch_mode",
+        title: "Exit plan mode",
+        status: "pending",
+        data: {
+          toolCallId: "exit-plan-1",
+          kind: "switch_mode",
+          rawInput: { plan: "## Plan\n\n1. Inspect\n2. Implement" },
+        },
+      },
+    );
+
+    expect(request).toMatchObject({
+      kind: "switch_mode",
+      detail: "Exit plan mode",
+      toolCall: {
+        toolCallId: "exit-plan-1",
+        kind: "switch_mode",
+        title: "Exit plan mode",
+        status: "pending",
+        data: {
+          rawInput: { plan: "## Plan\n\n1. Inspect\n2. Implement" },
+        },
+      },
+    });
+  });
+
+  it("extracts proposed plan markdown from ACP switch-mode tool calls", () => {
+    expect(
+      extractAcpSwitchModePlanMarkdown({
+        toolCallId: "exit-plan-1",
+        kind: "switch_mode",
+        title: "Exit plan mode",
+        status: "pending",
+        data: {
+          toolCallId: "exit-plan-1",
+          kind: "switch_mode",
+          rawInput: {
+            plan: "  1. Inspect\n2. Implement  ",
+          },
+        },
+      }),
+    ).toBe("1. Inspect\n2. Implement");
+
+    expect(
+      extractAcpSwitchModePlanMarkdown({
+        toolCallId: "terminal-1",
+        kind: "execute",
+        title: "Terminal",
+        status: "pending",
+        data: {
+          toolCallId: "terminal-1",
+          kind: "execute",
+          rawInput: {
+            plan: "1. Not a plan exit",
+          },
+        },
+      }),
+    ).toBeUndefined();
   });
 });
