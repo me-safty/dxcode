@@ -21,10 +21,10 @@ env:
 
 jobs:
   ios:
-    name: iPhone and iPad
+    name: iPhone 6.9, iPhone 6.5, and iPad 13
     if: inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: blacksmith-12vcpu-macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -46,20 +46,23 @@ jobs:
       - name: Capture iOS showcase
         run: pnpm screenshots:mobile --platform ios
 
+      - name: Validate App Store Connect assets
+        run: pnpm screenshots:mobile --platform ios --validate-only
+
       - name: Upload iOS screenshots
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app-store-screenshots-ios
-          path: artifacts/app-store/screenshots/*.png
+          name: app-store-connect-screenshots
+          path: artifacts/app-store/screenshots/apple/
           if-no-files-found: warn
           retention-days: 14
 
   android:
-    name: Pixel phone and tablet
+    name: Android phone, 7-inch tablet, and 10-inch tablet
     if: inputs.platform == 'all' || inputs.platform == 'android'
     runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       T3_SHOWCASE_ANDROID_ABI: x86_64
     steps:
@@ -109,11 +112,14 @@ jobs:
           disable-animations: false
           script: pnpm screenshots:mobile --platform android
 
+      - name: Validate Google Play assets
+        run: pnpm screenshots:mobile --platform android --validate-only
+
       - name: Upload Android screenshots
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app-store-screenshots-android
-          path: artifacts/app-store/screenshots/*.png
+          name: google-play-screenshots
+          path: artifacts/app-store/screenshots/google-play/
           if-no-files-found: warn
           retention-days: 14

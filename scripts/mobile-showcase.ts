@@ -9,11 +9,14 @@ import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
 import * as NodeURL from "node:url";
 
+import { PNG } from "pngjs";
+
 import showcaseConfig, {
   type ShowcaseAndroidDevice,
   type ShowcaseConfig,
   type ShowcaseDevice,
   type ShowcaseIosDevice,
+  type ShowcaseStoreAssetSpec,
   SHOWCASE_SCENES,
   type ShowcaseScene,
 } from "./mobile-showcase.config.ts";
@@ -40,10 +43,18 @@ const ANDROID_APK_PATH = NodePath.join(
   MOBILE_ROOT,
   "android/app/build/outputs/apk/debug/app-debug.apk",
 );
+const DEFAULT_ANDROID_HOME = NodePath.join(NodeProcess.env.HOME ?? "", "Library/Android/sdk");
 const MOBILE_BUILD_ENV = {
   ...NodeProcess.env,
+  ANDROID_HOME: NodeProcess.env.ANDROID_HOME ?? DEFAULT_ANDROID_HOME,
   APP_VARIANT: "development",
   EXPO_NO_GIT_STATUS: "1",
+  JAVA_HOME:
+    NodeProcess.env.JAVA_HOME ??
+    (NodeProcess.platform === "darwin"
+      ? "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+      : undefined),
+  NODE_ENV: "development",
 };
 
 interface CliOptions {
@@ -53,6 +64,7 @@ interface CliOptions {
   readonly skipBuild: boolean;
   readonly skipMetro: boolean;
   readonly keepRunning: boolean;
+  readonly validateOnly: boolean;
   readonly list: boolean;
 }
 
@@ -86,22 +98,137 @@ function lanIpv4Address(): string {
   return address;
 }
 
+export interface PngMetadata {
+  readonly width: number;
+  readonly height: number;
+  readonly bitDepth: number;
+  readonly colorType: number;
+  readonly hasAlpha: boolean;
+}
+
+export function readPngMetadata(bytes: Uint8Array): PngMetadata {
+  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.byteLength < 26 || !pngSignature.every((value, index) => bytes[index] === value)) {
+    throw new Error("Captured file is not a valid PNG.");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const colorType = view.getUint8(25);
+  return {
+    width: view.getUint32(16),
+    height: view.getUint32(20),
+    bitDepth: view.getUint8(24),
+    colorType,
+    hasAlpha: colorType === 4 || colorType === 6,
+  };
+}
+
 export function readPngDimensions(bytes: Uint8Array): {
   readonly width: number;
   readonly height: number;
 } {
-  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
-  if (bytes.byteLength < 24 || !pngSignature.every((value, index) => bytes[index] === value)) {
-    throw new Error("Captured file is not a valid PNG.");
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return { width: view.getUint32(16), height: view.getUint32(20) };
+  const { width, height } = readPngMetadata(bytes);
+  return { width, height };
 }
 
-async function reportCapture(destination: string): Promise<void> {
-  const dimensions = readPngDimensions(await NodeFSP.readFile(destination));
+export function normalizeStorePng(bytes: Uint8Array): Buffer {
+  const png = PNG.sync.read(Buffer.from(bytes));
+  return PNG.sync.write(png, {
+    bitDepth: 8,
+    colorType: 2,
+    inputColorType: 6,
+    inputHasAlpha: true,
+  });
+}
+
+export function validateStoreAsset(
+  spec: ShowcaseStoreAssetSpec,
+  bytes: Uint8Array,
+  label = "Screenshot",
+): PngMetadata {
+  const metadata = readPngMetadata(bytes);
+  if (metadata.width !== spec.width || metadata.height !== spec.height) {
+    throw new Error(
+      `${label} is ${metadata.width}×${metadata.height}; ${spec.store} requires ${spec.width}×${spec.height}.`,
+    );
+  }
+  if (metadata.bitDepth !== 8 || metadata.colorType !== 2 || metadata.hasAlpha) {
+    throw new Error(
+      `${label} must be an 8-bit, 24-bit RGB PNG without alpha (found bit depth ${metadata.bitDepth}, color type ${metadata.colorType}).`,
+    );
+  }
+  if (spec.maximumFileSizeBytes && bytes.byteLength > spec.maximumFileSizeBytes) {
+    throw new Error(
+      `${label} is ${bytes.byteLength} bytes; ${spec.store} allows at most ${spec.maximumFileSizeBytes} bytes.`,
+    );
+  }
+  if (spec.store === "google-play") {
+    const shortestSide = Math.min(metadata.width, metadata.height);
+    const longestSide = Math.max(metadata.width, metadata.height);
+    if (shortestSide < 320 || longestSide > 3_840 || longestSide > shortestSide * 2) {
+      throw new Error(
+        `${label} does not meet Google Play's 320–3,840 px bounds and 2:1 maximum aspect ratio.`,
+      );
+    }
+    if (metadata.width * 16 !== metadata.height * 9) {
+      throw new Error(`${label} must use Google Play's recommended portrait 9:16 aspect ratio.`);
+    }
+  }
+  return metadata;
+}
+
+export function validateStoreAssetCount(
+  spec: ShowcaseStoreAssetSpec,
+  count: number,
+  requireMinimum: boolean,
+): void {
+  if (count > spec.maximumUploadCount) {
+    throw new Error(
+      `${spec.directory} contains ${count} screenshots; ${spec.store} allows at most ${spec.maximumUploadCount}.`,
+    );
+  }
+  if (requireMinimum && count < spec.minimumUploadCount) {
+    throw new Error(
+      `${spec.directory} contains ${count} screenshots; ${spec.store} requires at least ${spec.minimumUploadCount}.`,
+    );
+  }
+}
+
+function storeAssetDirectory(outputDirectory: string, device: ShowcaseDevice): string {
+  return NodePath.join(outputDirectory, device.storeAsset.directory);
+}
+
+async function finalizeCapture(destination: string, device: ShowcaseDevice): Promise<void> {
+  const normalized = normalizeStorePng(await NodeFSP.readFile(destination));
+  await NodeFSP.writeFile(destination, normalized);
+  const metadata = validateStoreAsset(
+    device.storeAsset,
+    normalized,
+    NodePath.basename(destination),
+  );
   NodeProcess.stdout.write(
-    `Captured ${NodePath.relative(REPO_ROOT, destination)} (${dimensions.width}×${dimensions.height})\n`,
+    `Captured ${NodePath.relative(REPO_ROOT, destination)} (${metadata.width}×${metadata.height}, 24-bit RGB, validated for ${device.storeAsset.store})\n`,
+  );
+}
+
+async function validateCaptureSet(
+  capture: ShowcaseCapture,
+  outputDirectory: string,
+  requireMinimum: boolean,
+): Promise<void> {
+  const directory = storeAssetDirectory(outputDirectory, capture.device);
+  const files = (await NodeFSP.readdir(directory)).filter((file) => file.endsWith(".png")).sort();
+  const expectedFiles = capture.scenes.map((scene) => `${scene}.png`).sort();
+  const missingFiles = expectedFiles.filter((file) => !files.includes(file));
+  if (missingFiles.length > 0) {
+    throw new Error(`${capture.device.id} is missing ${missingFiles.join(", ")} in ${directory}.`);
+  }
+  validateStoreAssetCount(capture.device.storeAsset, files.length, requireMinimum);
+  for (const file of files) {
+    const bytes = await NodeFSP.readFile(NodePath.join(directory, file));
+    validateStoreAsset(capture.device.storeAsset, bytes, `${capture.device.id}/${file}`);
+  }
+  NodeProcess.stdout.write(
+    `Validated ${files.length} upload-ready ${capture.device.storeAsset.store} screenshots in ${NodePath.relative(REPO_ROOT, directory)}/\n`,
   );
 }
 
@@ -120,6 +247,7 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
   let skipBuild = false;
   let skipMetro = false;
   let keepRunning = false;
+  let validateOnly = false;
   let list = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -152,6 +280,8 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
       skipMetro = true;
     } else if (argument === "--keep-running") {
       keepRunning = true;
+    } else if (argument === "--validate-only") {
+      validateOnly = true;
     } else if (argument === "--list") {
       list = true;
     } else if (argument === "--help" || argument === "-h") {
@@ -168,6 +298,7 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
     skipBuild,
     skipMetro,
     keepRunning,
+    validateOnly,
     list,
   };
 }
@@ -213,6 +344,7 @@ Options:
   --skip-build               Reuse the existing simulator app / debug APK
   --skip-metro               Reuse an already running showcase Metro server
   --keep-running             Leave devices and Metro running after capture
+  --validate-only            Validate existing upload assets without capturing
   --list                     Print this help and the configured matrix
 
 Scenes: ${SHOWCASE_SCENES.join(", ")}
@@ -221,7 +353,7 @@ Configured devices:
 ${config.devices
   .map((device) => {
     const target = device.platform === "ios" ? device.simulator : device.avd;
-    return `  ${device.id.padEnd(14)} ${device.platform.padEnd(8)} ${target} [${device.scenes.join(", ")}]`;
+    return `  ${device.id.padEnd(18)} ${device.platform.padEnd(8)} ${target} -> ${device.storeAsset.directory} (${device.storeAsset.width}×${device.storeAsset.height}) [${device.scenes.join(", ")}]`;
   })
   .join("\n")}
 `);
@@ -497,7 +629,7 @@ async function buildIos(): Promise<string> {
       "ONLY_ACTIVE_ARCH=YES",
       "build",
     ],
-    { cwd: MOBILE_ROOT },
+    { cwd: MOBILE_ROOT, env: MOBILE_BUILD_ENV },
   );
   return IOS_APP_PATH;
 }
@@ -515,6 +647,7 @@ async function buildAndroid(abis: ReadonlyArray<string>): Promise<string> {
     ],
     {
       cwd: NodePath.join(MOBILE_ROOT, "android"),
+      env: MOBILE_BUILD_ENV,
     },
   );
   return ANDROID_APK_PATH;
@@ -534,7 +667,7 @@ interface SimctlDevice {
   readonly isAvailable: boolean;
 }
 
-async function findIosSimulator(name: string): Promise<SimctlDevice> {
+async function findIosSimulator(name: string): Promise<SimctlDevice | null> {
   const parsed = JSON.parse(
     await commandOutput("xcrun", ["simctl", "list", "devices", "available", "-j"]),
   ) as {
@@ -544,13 +677,33 @@ async function findIosSimulator(name: string): Promise<SimctlDevice> {
     .filter(([runtime]) => runtime.includes("iOS"))
     .flatMap(([, devices]) => devices)
     .filter((device) => device.isAvailable && device.name === name);
-  const simulator = candidates.at(-1);
-  if (!simulator) {
+  return candidates.at(-1) ?? null;
+}
+
+async function ensureIosSimulator(device: ShowcaseIosDevice): Promise<{
+  readonly simulator: SimctlDevice;
+  readonly createdByRunner: boolean;
+}> {
+  const existing = await findIosSimulator(device.simulator);
+  if (existing) return { simulator: existing, createdByRunner: false };
+  if (!device.simulatorDeviceType) {
     throw new Error(
-      `iOS simulator '${name}' is not installed. Run xcrun simctl list devices available.`,
+      `iOS simulator '${device.simulator}' is not installed and has no simulatorDeviceType configured.`,
     );
   }
-  return simulator;
+  const udid = (
+    await commandOutput("xcrun", ["simctl", "create", device.simulator, device.simulatorDeviceType])
+  ).trim();
+  if (!udid) throw new Error(`Could not create iOS simulator '${device.simulator}'.`);
+  return {
+    simulator: {
+      name: device.simulator,
+      udid,
+      state: "Shutdown",
+      isAvailable: true,
+    },
+    createdByRunner: true,
+  };
 }
 
 async function normalizeIosSimulator(device: ShowcaseIosDevice, udid: string): Promise<void> {
@@ -605,8 +758,12 @@ async function captureIos(
   config: ShowcaseConfig,
   metroHost: string,
   pairingUrls: ReadonlyArray<string>,
-): Promise<boolean> {
-  const simulator = await findIosSimulator(capture.device.simulator);
+): Promise<{
+  readonly udid: string;
+  readonly startedByRunner: boolean;
+  readonly createdByRunner: boolean;
+}> {
+  const { simulator, createdByRunner } = await ensureIosSimulator(capture.device);
   const startedByRunner = simulator.state !== "Booted";
   if (!startedByRunner) {
     // Clear transient SpringBoard state (permission prompts, stale URL-open
@@ -691,17 +848,18 @@ async function captureIos(
       await waitForIosShowcaseScene(simulator.udid, scene);
     }
     await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
-    const destination = NodePath.join(outputDirectory, `${capture.device.id}-${scene}.png`);
+    const destination = NodePath.join(
+      storeAssetDirectory(outputDirectory, capture.device),
+      `${scene}.png`,
+    );
     await runCommand("xcrun", ["simctl", "io", simulator.udid, "screenshot", destination]);
-    await reportCapture(destination);
+    await finalizeCapture(destination, capture.device);
   }
-  return startedByRunner;
+  return { udid: simulator.udid, startedByRunner, createdByRunner };
 }
 
 function androidSdkTool(relativePath: string): string {
-  const sdkRoot =
-    NodeProcess.env.ANDROID_HOME ??
-    NodePath.join(NodeProcess.env.HOME ?? "", "Library/Android/sdk");
+  const sdkRoot = NodeProcess.env.ANDROID_HOME ?? DEFAULT_ANDROID_HOME;
   return NodePath.join(sdkRoot, relativePath);
 }
 
@@ -914,7 +1072,10 @@ async function captureAndroid(
     await writeAndroidShowcaseScene(serial, scene);
     await waitForAndroidShowcaseScene(serial, scene);
     await delay(Math.max(config.settleDelayMs, scene === "review" ? 8_000 : 5_000));
-    const destination = NodePath.join(outputDirectory, `${capture.device.id}-${scene}.png`);
+    const destination = NodePath.join(
+      storeAssetDirectory(outputDirectory, capture.device),
+      `${scene}.png`,
+    );
     const png = await new Promise<Buffer>((resolve, reject) => {
       NodeChildProcess.execFile(
         androidSdkTool("platform-tools/adb"),
@@ -927,7 +1088,7 @@ async function captureAndroid(
       );
     });
     await NodeFSP.writeFile(destination, png);
-    await reportCapture(destination);
+    await finalizeCapture(destination, capture.device);
   }
   return { startedByRunner, serial };
 }
@@ -960,11 +1121,26 @@ async function main(): Promise<void> {
     return;
   }
   const captures = planShowcaseCaptures(showcaseConfig, options);
+  const outputDirectory = NodePath.resolve(REPO_ROOT, showcaseConfig.outputDirectory);
+  if (options.validateOnly) {
+    for (const capture of captures) {
+      await validateCaptureSet(
+        capture,
+        outputDirectory,
+        capture.scenes.length === capture.device.scenes.length,
+      );
+    }
+    return;
+  }
   const hasIos = captures.some((capture) => capture.device.platform === "ios");
   const hasAndroid = captures.some((capture) => capture.device.platform === "android");
   const metroHost = hasIos ? lanIpv4Address() : "127.0.0.1";
-  const outputDirectory = NodePath.resolve(REPO_ROOT, showcaseConfig.outputDirectory);
   await NodeFSP.mkdir(outputDirectory, { recursive: true });
+  for (const capture of captures) {
+    const directory = storeAssetDirectory(outputDirectory, capture.device);
+    await NodeFSP.rm(directory, { recursive: true, force: true });
+    await NodeFSP.mkdir(directory, { recursive: true });
+  }
 
   const showcaseRootDir = await NodeFSP.mkdtemp(
     NodePath.join(NodeOS.tmpdir(), "t3-mobile-showcase-"),
@@ -977,7 +1153,11 @@ async function main(): Promise<void> {
     readonly port: number;
   }> = [];
   let metro: NodeChildProcess.ChildProcess | null = null;
-  const startedIosUdids: string[] = [];
+  const iosCleanups: Array<{
+    readonly udid: string;
+    readonly startedByRunner: boolean;
+    readonly createdByRunner: boolean;
+  }> = [];
   const androidCleanups: Array<{
     readonly device: ShowcaseAndroidDevice;
     readonly serial: string;
@@ -1047,8 +1227,7 @@ async function main(): Promise<void> {
         }),
       );
       if (capture.device.platform === "ios") {
-        const simulator = await findIosSimulator(capture.device.simulator);
-        const started = await captureIos(
+        const cleanup = await captureIos(
           capture as ShowcaseCapture & { readonly device: ShowcaseIosDevice },
           iosAppPath,
           outputDirectory,
@@ -1056,7 +1235,7 @@ async function main(): Promise<void> {
           metroHost,
           pairingUrls,
         );
-        if (started) startedIosUdids.push(simulator.udid);
+        iosCleanups.push(cleanup);
       } else {
         const result = await captureAndroid(
           capture as ShowcaseCapture & { readonly device: ShowcaseAndroidDevice },
@@ -1067,10 +1246,15 @@ async function main(): Promise<void> {
         );
         androidCleanups.push({ device: capture.device, ...result });
       }
+      await validateCaptureSet(
+        capture,
+        outputDirectory,
+        capture.scenes.length === capture.device.scenes.length,
+      );
     }
 
     NodeProcess.stdout.write(
-      `\nDone. Screenshots are in ${NodePath.relative(REPO_ROOT, outputDirectory)}/\n`,
+      `\nDone. Upload-ready screenshots are in ${NodePath.relative(REPO_ROOT, outputDirectory)}/apple/ and ${NodePath.relative(REPO_ROOT, outputDirectory)}/google-play/.\n`,
     );
     if (options.keepRunning) {
       metro?.unref();
@@ -1090,8 +1274,13 @@ async function main(): Promise<void> {
           await runAdb(cleanup.serial, ["emu", "kill"]).catch(() => undefined);
         }
       }
-      for (const udid of startedIosUdids) {
-        await runCommand("xcrun", ["simctl", "shutdown", udid]).catch(() => undefined);
+      for (const cleanup of iosCleanups) {
+        if (cleanup.startedByRunner || cleanup.createdByRunner) {
+          await runCommand("xcrun", ["simctl", "shutdown", cleanup.udid]).catch(() => undefined);
+        }
+        if (cleanup.createdByRunner) {
+          await runCommand("xcrun", ["simctl", "delete", cleanup.udid]).catch(() => undefined);
+        }
       }
       await Promise.all([
         ...(metro ? [stopProcess(metro)] : []),

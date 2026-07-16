@@ -1,6 +1,11 @@
 import { assert, it } from "@effect/vitest";
+import { PNG } from "pngjs";
 
-import { resolveShowcaseAndroidAbi, type ShowcaseConfig } from "./mobile-showcase.config.ts";
+import showcaseConfig, {
+  resolveShowcaseAndroidAbi,
+  type ShowcaseConfig,
+  type ShowcaseStoreAssetSpec,
+} from "./mobile-showcase.config.ts";
 import {
   SHOWCASE_ENVIRONMENTS,
   SHOWCASE_PROJECTS,
@@ -8,13 +13,36 @@ import {
 } from "./mobile-showcase-environment.ts";
 import {
   encodeAndroidPairingUrls,
+  normalizeStorePng,
   parseShowcaseCliArgs,
   parsePairingCredentialOutput,
   planShowcaseCaptures,
   readPngDimensions,
+  readPngMetadata,
   selectLanIpv4Address,
   showcaseSceneUrl,
+  validateStoreAsset,
+  validateStoreAssetCount,
 } from "./mobile-showcase.ts";
+
+const appleSpec: ShowcaseStoreAssetSpec = {
+  store: "apple",
+  directory: "apple/iphone-test",
+  width: 1284,
+  height: 2778,
+  minimumUploadCount: 1,
+  maximumUploadCount: 10,
+};
+
+const googleSpec: ShowcaseStoreAssetSpec = {
+  store: "google-play",
+  directory: "google-play/phone",
+  width: 1080,
+  height: 1920,
+  minimumUploadCount: 2,
+  maximumUploadCount: 8,
+  maximumFileSizeBytes: 8 * 1024 * 1024,
+};
 
 const config: ShowcaseConfig = {
   outputDirectory: "artifacts",
@@ -27,6 +55,7 @@ const config: ShowcaseConfig = {
       simulator: "iPhone Test",
       appearance: "dark",
       scenes: ["thread", "review"],
+      storeAsset: appleSpec,
     },
     {
       id: "pixel",
@@ -34,6 +63,7 @@ const config: ShowcaseConfig = {
       avd: "Pixel_Test",
       appearance: "light",
       scenes: ["thread", "terminal"],
+      storeAsset: googleSpec,
     },
   ],
 };
@@ -52,6 +82,10 @@ it("parses repeatable capture filters", () => {
   assert.deepStrictEqual([...options.deviceIds], ["phone"]);
   assert.deepStrictEqual([...options.scenes], ["review"]);
   assert.equal(options.skipBuild, true);
+});
+
+it("parses validation-only mode", () => {
+  assert.equal(parseShowcaseCliArgs(["--validate-only"]).validateOnly, true);
 });
 
 it("selects an explicit CI Android ABI without changing the local default", () => {
@@ -75,12 +109,76 @@ it("rejects unknown devices instead of silently capturing another target", () =>
 });
 
 it("reads captured PNG dimensions from the IHDR header", () => {
-  const bytes = new Uint8Array(24);
+  const bytes = new Uint8Array(26);
   bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
   const view = new DataView(bytes.buffer);
   view.setUint32(16, 1320);
   view.setUint32(20, 2868);
+  view.setUint8(24, 8);
+  view.setUint8(25, 2);
   assert.deepStrictEqual(readPngDimensions(bytes), { width: 1320, height: 2868 });
+  assert.deepStrictEqual(readPngMetadata(bytes), {
+    width: 1320,
+    height: 2868,
+    bitDepth: 8,
+    colorType: 2,
+    hasAlpha: false,
+  });
+});
+
+function rgbaPng(width: number, height: number): Buffer {
+  const png = new PNG({ width, height });
+  png.data.fill(255);
+  return PNG.sync.write(png);
+}
+
+it("converts simulator RGBA captures to upload-safe 24-bit RGB PNGs", () => {
+  const normalized = normalizeStorePng(rgbaPng(2, 3));
+  assert.deepStrictEqual(readPngMetadata(normalized), {
+    width: 2,
+    height: 3,
+    bitDepth: 8,
+    colorType: 2,
+    hasAlpha: false,
+  });
+});
+
+it("validates exact Apple and Google Play upload assets", () => {
+  const apple = normalizeStorePng(rgbaPng(appleSpec.width, appleSpec.height));
+  const google = normalizeStorePng(rgbaPng(googleSpec.width, googleSpec.height));
+  assert.equal(validateStoreAsset(appleSpec, apple).width, 1284);
+  assert.equal(validateStoreAsset(googleSpec, google).height, 1920);
+});
+
+it("rejects wrong dimensions and alpha-bearing PNGs", () => {
+  const wrongSize = normalizeStorePng(rgbaPng(1242, 2688));
+  assert.throws(() => validateStoreAsset(appleSpec, wrongSize), /requires 1284×2778/u);
+  assert.throws(() => validateStoreAsset(appleSpec, rgbaPng(1284, 2778)), /without alpha/u);
+});
+
+it("enforces store screenshot count limits", () => {
+  assert.doesNotThrow(() => validateStoreAssetCount(googleSpec, 5, true));
+  assert.throws(() => validateStoreAssetCount(googleSpec, 1, true), /requires at least 2/u);
+  assert.throws(() => validateStoreAssetCount(googleSpec, 9, false), /allows at most 8/u);
+});
+
+it("configures every default device with an exact upload-ready store target", () => {
+  assert.deepStrictEqual(
+    showcaseConfig.devices.map((device) => [
+      device.id,
+      device.storeAsset.directory,
+      device.storeAsset.width,
+      device.storeAsset.height,
+    ]),
+    [
+      ["iphone-6.9", "apple/iphone-6.9", 1320, 2868],
+      ["iphone-6.5", "apple/iphone-6.5", 1284, 2778],
+      ["ipad-13", "apple/ipad-13", 2064, 2752],
+      ["pixel", "google-play/phone", 1080, 1920],
+      ["android-tablet-7", "google-play/tablet-7", 1080, 1920],
+      ["android-tablet-10", "google-play/tablet-10", 1440, 2560],
+    ],
+  );
 });
 
 it("selects a reachable LAN IPv4 address", () => {
