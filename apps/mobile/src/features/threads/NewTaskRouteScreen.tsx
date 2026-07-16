@@ -92,6 +92,14 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
     ? route.params.incomingShareId[0]
     : route.params?.incomingShareId;
   const incomingShare = routeShareId ? getShare(routeShareId) : null;
+  const incomingShareSubtitle = incomingShare
+    ? incomingShare.attachments.length === 0
+      ? "Choose a project for what you shared"
+      : incomingShare.attachments.length === 1
+        ? "Choose a project for the image you shared"
+        : `Choose a project for the ${incomingShare.attachments.length} images you shared`
+    : null;
+  const screenTitle = incomingShare ? "Start a task" : "Choose project";
   const repositoryGroups = useMemo(
     () => groupProjectsByRepository({ projects, threads }),
     [projects, threads],
@@ -192,7 +200,8 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           {/* Android renders its own in-screen header instead of the native bar. */}
           <NativeStackScreenOptions options={{ headerShown: false }} />
           <AndroidScreenHeader
-            title="Choose project"
+            title={screenTitle}
+            subtitle={incomingShareSubtitle}
             onBack={layout.usesSplitView ? () => navigation.goBack() : undefined}
             actions={[
               {
@@ -204,21 +213,29 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           />
         </>
       ) : (
-        <NativeHeaderToolbar placement="right">
-          {layout.usesSplitView ? (
+        <>
+          <NativeStackScreenOptions
+            options={{
+              title: screenTitle,
+              unstable_headerSubtitle: incomingShareSubtitle ?? undefined,
+            }}
+          />
+          <NativeHeaderToolbar placement="right">
+            {layout.usesSplitView ? (
+              <NativeHeaderToolbar.Button
+                accessibilityLabel="Close new task"
+                icon="xmark"
+                onPress={() => navigation.goBack()}
+                separateBackground
+              />
+            ) : null}
             <NativeHeaderToolbar.Button
-              accessibilityLabel="Close new task"
-              icon="xmark"
-              onPress={() => navigation.goBack()}
+              icon="plus"
+              onPress={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
               separateBackground
             />
-          ) : null}
-          <NativeHeaderToolbar.Button
-            icon="plus"
-            onPress={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
-            separateBackground
-          />
-        </NativeHeaderToolbar>
+          </NativeHeaderToolbar>
+        </>
       )}
 
       <ScrollView
@@ -232,17 +249,6 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           paddingTop: 8,
         }}
       >
-        {incomingShare ? (
-          <View className="gap-1 rounded-[24px] bg-primary/10 px-5 py-4">
-            <Text className="text-base font-t3-bold text-foreground">Shared content ready</Text>
-            <Text className="text-sm leading-normal text-foreground-muted">
-              Choose a project to start a task with this shared content.
-              {incomingShare.attachments.length > 0
-                ? ` ${incomingShare.attachments.length} shared image${incomingShare.attachments.length === 1 ? "" : "s"} will be attached.`
-                : ""}
-            </Text>
-          </View>
-        ) : null}
         {items.length === 0 ? (
           <View collapsable={false} className="items-center gap-3 rounded-[24px] bg-card px-6 py-8">
             {projectEmptyState.loading ? <ActivityIndicator color={accentColor} /> : null}
