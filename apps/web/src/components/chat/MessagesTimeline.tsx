@@ -183,6 +183,8 @@ interface MessagesTimelineProps {
   /** Older history beyond the live activity window can be lazy-loaded. */
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
+  /** Increments after the older-history cursor advances or is reset. */
+  olderHistoryCursorVersion?: number;
   onLoadOlder?: () => void;
 }
 
@@ -219,6 +221,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onManualNavigation,
   hasMoreOlder = false,
   loadingOlder = false,
+  olderHistoryCursorVersion = 0,
   onLoadOlder,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -331,6 +334,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const olderHistoryAutoLoadArmedRef = useRef(true);
+  const olderHistoryObservedProgressVersionRef = useRef(olderHistoryCursorVersion);
   const requestOlderHistory = useCallback(() => {
     // Disarm before both automatic and explicit requests. If a request fails,
     // prop changes while the viewport remains at the start must not trigger an
@@ -340,7 +344,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, [onLoadOlder]);
   useEffect(() => {
     olderHistoryAutoLoadArmedRef.current = true;
-  }, [routeThreadKey]);
+    olderHistoryObservedProgressVersionRef.current = olderHistoryCursorVersion;
+  }, [routeThreadKey, olderHistoryCursorVersion]);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -379,8 +384,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       hasMore: hasMoreOlder,
       isAtStart: state?.isAtStart ?? false,
       loading: loadingOlder,
+      observedProgressVersion: olderHistoryObservedProgressVersionRef.current,
+      progressVersion: olderHistoryCursorVersion,
     });
     olderHistoryAutoLoadArmedRef.current = olderHistoryDecision.armed;
+    olderHistoryObservedProgressVersionRef.current = olderHistoryDecision.observedProgressVersion;
     if (olderHistoryDecision.shouldLoad) {
       requestOlderHistory();
     }
@@ -413,6 +421,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onIsAtEndChange,
     hasMoreOlder,
     loadingOlder,
+    olderHistoryCursorVersion,
     requestOlderHistory,
   ]);
 

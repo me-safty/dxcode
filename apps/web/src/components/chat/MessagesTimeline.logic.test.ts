@@ -15,24 +15,42 @@ describe("resolveOlderHistoryAutoLoad", () => {
       hasMore: true,
       isAtStart: true,
       loading: false,
+      observedProgressVersion: 0,
+      progressVersion: 0,
     });
-    expect(first).toEqual({ armed: false, shouldLoad: true });
+    expect(first).toEqual({
+      armed: false,
+      observedProgressVersion: 0,
+      shouldLoad: true,
+    });
 
     const afterFailure = resolveOlderHistoryAutoLoad({
       armed: first.armed,
       hasMore: true,
       isAtStart: true,
       loading: false,
+      observedProgressVersion: first.observedProgressVersion,
+      progressVersion: 0,
     });
-    expect(afterFailure).toEqual({ armed: false, shouldLoad: false });
+    expect(afterFailure).toEqual({
+      armed: false,
+      observedProgressVersion: 0,
+      shouldLoad: false,
+    });
 
     const afterLeavingStart = resolveOlderHistoryAutoLoad({
       armed: afterFailure.armed,
       hasMore: true,
       isAtStart: false,
       loading: false,
+      observedProgressVersion: afterFailure.observedProgressVersion,
+      progressVersion: 0,
     });
-    expect(afterLeavingStart).toEqual({ armed: true, shouldLoad: false });
+    expect(afterLeavingStart).toEqual({
+      armed: true,
+      observedProgressVersion: 0,
+      shouldLoad: false,
+    });
 
     expect(
       resolveOlderHistoryAutoLoad({
@@ -40,8 +58,40 @@ describe("resolveOlderHistoryAutoLoad", () => {
         hasMore: true,
         isAtStart: true,
         loading: false,
+        observedProgressVersion: afterLeavingStart.observedProgressVersion,
+        progressVersion: 0,
       }),
-    ).toEqual({ armed: false, shouldLoad: true });
+    ).toEqual({
+      armed: false,
+      observedProgressVersion: 0,
+      shouldLoad: true,
+    });
+  });
+
+  it("rearms at the start only after a page successfully advances the cursor", () => {
+    const afterFirstAttempt = resolveOlderHistoryAutoLoad({
+      armed: true,
+      hasMore: true,
+      isAtStart: true,
+      loading: false,
+      observedProgressVersion: 0,
+      progressVersion: 0,
+    });
+
+    expect(
+      resolveOlderHistoryAutoLoad({
+        armed: afterFirstAttempt.armed,
+        hasMore: true,
+        isAtStart: true,
+        loading: false,
+        observedProgressVersion: afterFirstAttempt.observedProgressVersion,
+        progressVersion: 1,
+      }),
+    ).toEqual({
+      armed: false,
+      observedProgressVersion: 1,
+      shouldLoad: true,
+    });
   });
 });
 
