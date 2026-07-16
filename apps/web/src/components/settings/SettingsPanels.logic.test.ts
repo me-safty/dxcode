@@ -6,9 +6,16 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  buildGeneralSettingsRestorePatch,
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
 } from "./SettingsPanels.logic";
+
+describe("buildGeneralSettingsRestorePatch", () => {
+  it("restore_desktopNotifications_returnsDisabled", () => {
+    expect(buildGeneralSettingsRestorePatch().desktopNotificationsEnabled).toBe(false);
+  });
+});
 
 describe("formatDiagnosticsDescription", () => {
   it("collapses trace and metric URLs that share the same OTEL base path", () => {

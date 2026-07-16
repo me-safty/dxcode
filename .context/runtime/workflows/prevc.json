@@ -1,0 +1,349 @@
+{
+  "version": 2,
+  "workflowType": "prevc",
+  "updatedAt": "2026-07-15T11:39:58.686Z",
+  "status": {
+    "project": {
+      "name": "issue-780-native-desktop-notifications",
+      "scale": 2,
+      "started": "2026-07-15T00:34:34.817Z",
+      "current_phase": "V",
+      "settings": {
+        "autonomous_mode": false,
+        "require_plan": true,
+        "require_approval": true
+      },
+      "plan": "issue-780-native-desktop-notifications"
+    },
+    "phases": {
+      "P": {
+        "status": "completed",
+        "started_at": "2026-07-15T00:34:34.817Z",
+        "completed_at": "2026-07-15T00:45:35.225Z",
+        "outputs": [
+          {
+            "path": ".context/plans/issue-780-native-desktop-notifications.md",
+            "status": "filled"
+          },
+          {
+            "path": ".context/docs/architecture.md",
+            "status": "filled"
+          },
+          {
+            "path": ".context/docs/data-flow.md",
+            "status": "filled"
+          },
+          {
+            "path": ".context/docs/development-workflow.md",
+            "status": "filled"
+          },
+          {
+            "path": ".context/docs/testing-strategy.md",
+            "status": "filled"
+          }
+        ]
+      },
+      "R": {
+        "status": "completed",
+        "started_at": "2026-07-15T00:45:35.225Z",
+        "completed_at": "2026-07-15T00:50:14.951Z",
+        "outputs": [
+          {
+            "path": ".context/plans/issue-780-native-desktop-notifications.md",
+            "status": "filled"
+          },
+          {
+            "path": ".context/docs/architecture.md",
+            "status": "filled"
+          }
+        ]
+      },
+      "E": {
+        "status": "completed",
+        "started_at": "2026-07-15T00:50:14.951Z",
+        "completed_at": "2026-07-15T01:55:27.439Z",
+        "outputs": [
+          {
+            "path": "apps/web/src/desktopNotifications.logic.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/web/src/desktopNotifications.logic.test.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/web/src/components/desktop/DesktopNotificationBootstrap.tsx",
+            "status": "filled"
+          },
+          {
+            "path": "apps/desktop/src/notifications/DesktopNotifications.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/desktop/src/notifications/DesktopNotifications.test.ts",
+            "status": "filled"
+          },
+          {
+            "path": "apps/desktop/src/electron/ElectronNotification.ts",
+            "status": "filled"
+          },
+          {
+            "path": ".context/evidence/issue-780-native-desktop-notifications-validation.md",
+            "status": "filled"
+          }
+        ]
+      },
+      "V": {
+        "status": "in_progress",
+        "started_at": "2026-07-15T01:55:27.439Z"
+      },
+      "C": {
+        "status": "skipped",
+        "reason": "Not required for scale MEDIUM"
+      }
+    },
+    "agents": {},
+    "roles": {
+      "planner": {
+        "status": "pending"
+      },
+      "architect": {
+        "status": "pending"
+      },
+      "developer": {
+        "status": "pending"
+      },
+      "qa": {
+        "status": "pending"
+      },
+      "reviewer": {
+        "status": "pending"
+      }
+    },
+    "approval": {
+      "plan_created": true,
+      "plan_approved": true,
+      "approved_by": "solo-dev",
+      "approved_at": "2026-07-15T00:50:14.917Z",
+      "approval_notes": "Review gate complete. Design covers canonical settled transitions, reconnect/reseed baselines, opt-in persistence, native focus/permission policy, privacy, macOS close retention, deduplication, and exact click navigation."
+    },
+    "execution": {
+      "history": [
+        {
+          "phase": "P",
+          "action": "started",
+          "timestamp": "2026-07-15T00:34:34.817Z"
+        },
+        {
+          "phase": "C",
+          "action": "phase_skipped",
+          "timestamp": "2026-07-15T00:34:34.817Z"
+        },
+        {
+          "phase": "P",
+          "action": "plan_linked",
+          "plan": "issue-780-native-desktop-notifications",
+          "timestamp": "2026-07-15T00:45:16.351Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Use canonical thread shell state",
+          "timestamp": "2026-07-15T00:45:28.368Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Deliver from Electron main",
+          "timestamp": "2026-07-15T00:45:28.379Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Keep notification payload generic",
+          "timestamp": "2026-07-15T00:45:28.396Z"
+        },
+        {
+          "phase": "P",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Use pending navigation consumption",
+          "timestamp": "2026-07-15T00:45:28.414Z"
+        },
+        {
+          "phase": "P",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "planning",
+          "stepIndex": 1,
+          "stepDescription": "Review issue",
+          "notes": "Issue and prior PR state reviewed; no new maintainer stop or direction change.",
+          "timestamp": "2026-07-15T00:45:28.434Z"
+        },
+        {
+          "phase": "P",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "planning",
+          "stepIndex": 2,
+          "stepDescription": "Map shell, settings, IPC, window, and routing sources",
+          "notes": "Mapped shell/projector, settings persistence, Electron window/IPC, and environment-thread routing.",
+          "timestamp": "2026-07-15T00:45:28.587Z"
+        },
+        {
+          "phase": "P",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "planning",
+          "stepIndex": 3,
+          "stepDescription": "Define implementation and validation gates",
+          "notes": "Canonical design, acceptance matrix, sensors, evidence, and PR boundaries recorded.",
+          "timestamp": "2026-07-15T00:45:28.706Z"
+        },
+        {
+          "phase": "P",
+          "action": "plan_phase_updated",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Plan phase planning updated to completed",
+          "timestamp": "2026-07-15T00:45:28.817Z"
+        },
+        {
+          "phase": "P",
+          "action": "completed",
+          "timestamp": "2026-07-15T00:45:35.225Z"
+        },
+        {
+          "phase": "R",
+          "action": "started",
+          "timestamp": "2026-07-15T00:45:35.225Z"
+        },
+        {
+          "phase": "R",
+          "action": "decision_recorded",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Decision recorded: Retain opted-in macOS renderer on close",
+          "timestamp": "2026-07-15T00:50:08.652Z"
+        },
+        {
+          "phase": "R",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "review",
+          "stepIndex": 1,
+          "stepDescription": "Review design against acceptance criteria and prior PR failures",
+          "notes": "Reviewed prior failure modes, canonical settled state, replay generations, privacy boundary, native failure handling, close retention, and click startup race. No unresolved blocker.",
+          "timestamp": "2026-07-15T00:50:08.666Z"
+        },
+        {
+          "phase": "R",
+          "action": "plan_phase_updated",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Plan phase review updated to completed",
+          "timestamp": "2026-07-15T00:50:08.797Z"
+        },
+        {
+          "phase": "R",
+          "action": "plan_approved",
+          "approved_by": "solo-dev",
+          "timestamp": "2026-07-15T00:50:14.917Z"
+        },
+        {
+          "phase": "R",
+          "action": "completed",
+          "timestamp": "2026-07-15T00:50:14.951Z"
+        },
+        {
+          "phase": "E",
+          "action": "started",
+          "timestamp": "2026-07-15T00:50:14.951Z"
+        },
+        {
+          "phase": "E",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "execution",
+          "stepIndex": 1,
+          "stepDescription": "Add default-off persisted desktop preference",
+          "output": "Settings schema and UI",
+          "notes": "Persisted default-off setting, legacy decode, desktop-only UI, and restore-default behavior implemented and tested.",
+          "timestamp": "2026-07-15T01:52:01.288Z"
+        },
+        {
+          "phase": "E",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "execution",
+          "stepIndex": 2,
+          "stepDescription": "Add pure settled transition derivation and replay-safe observation",
+          "output": "Tracker and tests",
+          "notes": "Pure shell transition tracker baselines hydration/reconnect/reseed, emits settled/rising-edge events once, and suppresses archived/removed/partial states.",
+          "timestamp": "2026-07-15T01:52:03.213Z"
+        },
+        {
+          "phase": "E",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "execution",
+          "stepIndex": 3,
+          "stepDescription": "Add native Electron delivery and focus policy",
+          "output": "Desktop service and tests",
+          "notes": "Electron main service rechecks opt-in, focus, support, dedupe, fixed private copy, silent delivery, and non-fatal failure handling.",
+          "timestamp": "2026-07-15T01:52:04.300Z"
+        },
+        {
+          "phase": "E",
+          "action": "step_completed",
+          "plan": "issue-780-native-desktop-notifications",
+          "planPhase": "execution",
+          "stepIndex": 4,
+          "stepDescription": "Add click restore, focus, and pending deep-link navigation",
+          "output": "IPC and renderer integration",
+          "notes": "Validated preload IPC, opted-in macOS close retention, pending target consumption, reveal/focus, and exact environment/thread navigation implemented and tested.",
+          "timestamp": "2026-07-15T01:52:05.324Z"
+        },
+        {
+          "phase": "E",
+          "action": "plan_phase_updated",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Plan phase execution updated to in_progress",
+          "timestamp": "2026-07-15T01:52:19.394Z"
+        },
+        {
+          "phase": "E",
+          "action": "plan_linked",
+          "plan": "issue-780-native-desktop-notifications",
+          "timestamp": "2026-07-15T01:52:25.457Z"
+        },
+        {
+          "phase": "E",
+          "action": "plan_phase_updated",
+          "plan": "issue-780-native-desktop-notifications",
+          "description": "Plan phase execution updated to completed",
+          "timestamp": "2026-07-15T01:55:22.363Z"
+        },
+        {
+          "phase": "E",
+          "action": "completed",
+          "timestamp": "2026-07-15T01:55:27.439Z"
+        },
+        {
+          "phase": "V",
+          "action": "started",
+          "timestamp": "2026-07-15T01:55:27.439Z"
+        }
+      ],
+      "last_activity": "2026-07-15T01:55:27.439Z",
+      "resume_context": "Fase V (Validação) em progresso"
+    }
+  },
+  "binding": {
+    "workflowName": "issue-780-native-desktop-notifications",
+    "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
+    "activeTaskId": "39372cc9-ff18-49b2-8014-118b35c9350e",
+    "createdAt": "2026-07-15T00:34:34.820Z",
+    "updatedAt": "2026-07-15T11:39:58.685Z"
+  }
+}

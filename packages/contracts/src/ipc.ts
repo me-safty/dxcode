@@ -97,7 +97,7 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
-import { EnvironmentId } from "./baseSchemas.ts";
+import { EnvironmentId, ThreadId } from "./baseSchemas.ts";
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
@@ -944,6 +944,38 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+export const DesktopNotificationKindSchema = Schema.Literals([
+  "turn-completed",
+  "turn-failed",
+  "approval-required",
+  "user-input-required",
+]);
+export type DesktopNotificationKind = typeof DesktopNotificationKindSchema.Type;
+
+export const DesktopNotificationEventSchema = Schema.Struct({
+  eventId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+  kind: DesktopNotificationKindSchema,
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+});
+export type DesktopNotificationEvent = typeof DesktopNotificationEventSchema.Type;
+
+export const DesktopNotificationTargetSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+});
+export type DesktopNotificationTarget = typeof DesktopNotificationTargetSchema.Type;
+
+export const DesktopNotificationDeliveryStatusSchema = Schema.Literals([
+  "shown",
+  "disabled",
+  "focused",
+  "unsupported",
+  "duplicate",
+  "failed",
+]);
+export type DesktopNotificationDeliveryStatus = typeof DesktopNotificationDeliveryStatusSchema.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   // One bootstrap per pool instance currently registered with bootstrap
@@ -953,6 +985,11 @@ export interface DesktopBridge {
   getLocalEnvironmentBearerToken: () => Promise<string>;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
+  showDesktopNotification: (
+    event: DesktopNotificationEvent,
+  ) => Promise<DesktopNotificationDeliveryStatus>;
+  consumePendingDesktopNotificationTarget: () => Promise<DesktopNotificationTarget | null>;
+  onDesktopNotificationTargetAvailable: (listener: () => void) => () => void;
   getConnectionCatalog?: () => Promise<string | null>;
   setConnectionCatalog?: (catalog: string) => Promise<boolean>;
   clearConnectionCatalog?: () => Promise<void>;

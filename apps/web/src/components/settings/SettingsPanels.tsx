@@ -76,6 +76,7 @@ import {
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import {
+  buildGeneralSettingsRestorePatch,
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
 } from "./SettingsPanels.logic";
@@ -398,6 +399,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open task panel"]
         : []),
+      ...(settings.desktopNotificationsEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled
+        ? ["Desktop notifications"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -432,6 +437,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
+      settings.desktopNotificationsEnabled,
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
       settings.sidebarThreadPreviewCount,
@@ -452,21 +458,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     setTheme("system");
-    updateSettings({
-      timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
-      wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
-      diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
-      sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
-      autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
-      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
-      automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
-      defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-      newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-      addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-      confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
-      confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-      textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-    });
+    updateSettings(buildGeneralSettingsRestorePatch());
     onRestored?.();
   }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
 
@@ -548,6 +540,30 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        {isElectron ? (
+          <SettingsRow
+            title="Desktop notifications"
+            description="Show a private system notification when a background thread needs attention."
+            resetAction={
+              settings.desktopNotificationsEnabled ? (
+                <SettingResetButton
+                  label="desktop notifications"
+                  onClick={() => updateSettings({ desktopNotificationsEnabled: false })}
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.desktopNotificationsEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ desktopNotificationsEnabled: Boolean(checked) })
+                }
+                aria-label="Enable desktop notifications"
+              />
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Time format"

@@ -1,0 +1,46 @@
+{
+  "id": "39372cc9-ff18-49b2-8014-118b35c9350e",
+  "title": "Issue #780 native desktop notifications: Validation",
+  "description": "Derived from linked plan \"issue-780-native-desktop-notifications\" for PREVC phase V (Validation). Plan phases: Validation. Phase objectives: Run repository gates, real macOS smoke tests, evidence capture, and draft PR handoff.. Key steps: Run focused tests and required repository gates; Run real macOS desktop smoke matrix; Commit, push origin, open draft PR, and record handoff. Expected outputs: Validation evidence, Screenshots or video, Draft pull request, Command evidence, Smoke evidence, Draft PR URL and handoff.",
+  "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
+  "owner": "solo-dev",
+  "status": "ready",
+  "inputs": [
+    "docs/architecture.md",
+    "docs/data-flow.md",
+    "docs/development-workflow.md",
+    "docs/testing-strategy.md"
+  ],
+  "expectedOutputs": [
+    "Validation evidence",
+    "Screenshots or video",
+    "Draft pull request",
+    "Command evidence",
+    "Smoke evidence",
+    "Draft PR URL and handoff"
+  ],
+  "acceptanceCriteria": [
+    "Run focused tests and required repository gates",
+    "Run real macOS desktop smoke matrix",
+    "Commit, push origin, open draft PR, and record handoff"
+  ],
+  "requiredSensors": ["test", "check", "typecheck", "diff-check"],
+  "requiredArtifacts": [
+    ".context/evidence/issue-780-native-desktop-notifications-validation.md",
+    ".context/handoffs/issue-780-native-desktop-notifications-pr.md"
+  ],
+  "createdAt": "2026-07-15T01:55:27.437Z",
+  "updatedAt": "2026-07-15T01:55:27.437Z",
+  "metadata": {
+    "requirementsSource": "plan-frontmatter",
+    "source": "workflow.plan",
+    "planSlug": "issue-780-native-desktop-notifications",
+    "prevcPhase": "V",
+    "planPhaseIds": ["validation"],
+    "planPhaseNames": ["Validation"],
+    "planPhaseSummaries": [
+      "Run repository gates, real macOS smoke tests, evidence capture, and draft PR handoff."
+    ],
+    "derivedFrom": "linked-plan"
+  }
+}

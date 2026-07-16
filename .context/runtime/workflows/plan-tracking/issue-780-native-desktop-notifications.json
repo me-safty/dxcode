@@ -1,0 +1,166 @@
+{
+  "planSlug": "issue-780-native-desktop-notifications",
+  "linkedAt": "2026-07-15T00:43:17.078Z",
+  "progress": 73,
+  "phases": {
+    "planning": {
+      "phaseId": "planning",
+      "status": "completed",
+      "startedAt": "2026-07-15T00:45:28.430Z",
+      "steps": [
+        {
+          "stepIndex": 1,
+          "description": "Review issue",
+          "status": "completed",
+          "deliverables": ["Upstream research"],
+          "completedAt": "2026-07-15T00:45:28.430Z",
+          "notes": "Issue and prior PR state reviewed; no new maintainer stop or direction change."
+        },
+        {
+          "stepIndex": 2,
+          "description": "Map shell, settings, IPC, window, and routing sources",
+          "status": "completed",
+          "deliverables": ["Architecture map"],
+          "completedAt": "2026-07-15T00:45:28.583Z",
+          "notes": "Mapped shell/projector, settings persistence, Electron window/IPC, and environment-thread routing."
+        },
+        {
+          "stepIndex": 3,
+          "description": "Define implementation and validation gates",
+          "status": "completed",
+          "deliverables": ["Approved plan"],
+          "completedAt": "2026-07-15T00:45:28.704Z",
+          "notes": "Canonical design, acceptance matrix, sensors, evidence, and PR boundaries recorded."
+        }
+      ],
+      "completedAt": "2026-07-15T00:45:28.814Z",
+      "commitHash": "806efc7dc8b79f5b860cda65c4fb27d95b618ac9",
+      "commitShortHash": "806efc7dc",
+      "committedAt": "2026-07-15T00:45:28.805Z",
+      "committedBy": "AI Context Agent"
+    },
+    "review": {
+      "phaseId": "review",
+      "status": "completed",
+      "startedAt": "2026-07-15T00:50:08.662Z",
+      "steps": [
+        {
+          "stepIndex": 1,
+          "description": "Review design against acceptance criteria and prior PR failures",
+          "status": "completed",
+          "deliverables": ["Review notes"],
+          "completedAt": "2026-07-15T00:50:08.662Z",
+          "notes": "Reviewed prior failure modes, canonical settled state, replay generations, privacy boundary, native failure handling, close retention, and click startup race. No unresolved blocker."
+        }
+      ],
+      "completedAt": "2026-07-15T00:50:08.795Z",
+      "commitHash": "3ad444e9c5d9091ee6b4062d5914002ed8fd3c5b",
+      "commitShortHash": "3ad444e9c",
+      "committedAt": "2026-07-15T00:50:08.784Z",
+      "committedBy": "AI Context Agent"
+    },
+    "execution": {
+      "phaseId": "execution",
+      "status": "completed",
+      "startedAt": "2026-07-15T01:52:01.284Z",
+      "steps": [
+        {
+          "stepIndex": 1,
+          "description": "Add default-off persisted desktop preference",
+          "status": "completed",
+          "deliverables": ["Settings schema and UI"],
+          "completedAt": "2026-07-15T01:52:01.284Z",
+          "output": "Settings schema and UI",
+          "notes": "Persisted default-off setting, legacy decode, desktop-only UI, and restore-default behavior implemented and tested."
+        },
+        {
+          "stepIndex": 2,
+          "description": "Add pure settled transition derivation and replay-safe observation",
+          "status": "completed",
+          "deliverables": ["Tracker and tests"],
+          "completedAt": "2026-07-15T01:52:03.210Z",
+          "output": "Tracker and tests",
+          "notes": "Pure shell transition tracker baselines hydration/reconnect/reseed, emits settled/rising-edge events once, and suppresses archived/removed/partial states."
+        },
+        {
+          "stepIndex": 3,
+          "description": "Add native Electron delivery and focus policy",
+          "status": "completed",
+          "deliverables": ["Desktop service and tests"],
+          "completedAt": "2026-07-15T01:52:04.298Z",
+          "output": "Desktop service and tests",
+          "notes": "Electron main service rechecks opt-in, focus, support, dedupe, fixed private copy, silent delivery, and non-fatal failure handling."
+        },
+        {
+          "stepIndex": 4,
+          "description": "Add click restore, focus, and pending deep-link navigation",
+          "status": "completed",
+          "deliverables": ["IPC and renderer integration"],
+          "completedAt": "2026-07-15T01:52:05.322Z",
+          "output": "IPC and renderer integration",
+          "notes": "Validated preload IPC, opted-in macOS close retention, pending target consumption, reveal/focus, and exact environment/thread navigation implemented and tested."
+        }
+      ],
+      "completedAt": "2026-07-15T01:55:22.359Z",
+      "commitHash": "c621b0fd53d8f5a39ed6c3302b87480a28fa22a9",
+      "commitShortHash": "c621b0fd5",
+      "committedAt": "2026-07-15T01:52:06.267Z",
+      "committedBy": "AI Context Agent"
+    }
+  },
+  "approvalStatus": "approved",
+  "approvedAt": "2026-07-15T00:50:14.917Z",
+  "approvedBy": "solo-dev",
+  "decisions": [
+    {
+      "title": "Use canonical thread shell state",
+      "description": "Derive alerts from settled latestTurn and rising pending flags in OrchestrationThreadShell, gated by environment synchronization. Provider-specific events remain outside the feature.",
+      "phase": "P",
+      "alternatives": ["Intermediate assistant or diff events", "Provider-specific stream parsing"],
+      "status": "accepted",
+      "id": "dec-1784076328367",
+      "decidedAt": "2026-07-15T00:45:28.367Z"
+    },
+    {
+      "title": "Deliver from Electron main",
+      "description": "Use Electron Notification in the main process so native delivery, real BrowserWindow focus, process-lifetime deduplication, and click restoration share one policy boundary.",
+      "phase": "P",
+      "alternatives": ["Browser Notification API in renderer", "Remote push service"],
+      "status": "accepted",
+      "id": "dec-1784076328377",
+      "decidedAt": "2026-07-15T00:45:28.377Z"
+    },
+    {
+      "title": "Keep notification payload generic",
+      "description": "Renderer sends only event kind, stable ID, environment ID, and thread ID. Desktop owns fixed copy and silent delivery, preventing agent output, prompts, diffs, commands, titles, or project names from appearing.",
+      "phase": "P",
+      "alternatives": ["Thread titles in copy", "Agent response previews"],
+      "status": "accepted",
+      "id": "dec-1784076328394",
+      "decidedAt": "2026-07-15T00:45:28.394Z"
+    },
+    {
+      "title": "Use pending navigation consumption",
+      "description": "On click, Electron stores one pending target, restores or creates and focuses the main window, signals the renderer, and lets the renderer consume the target once. This closes the startup-listener race.",
+      "phase": "P",
+      "alternatives": ["Immediate webContents navigation only", "Custom protocol deep link"],
+      "status": "accepted",
+      "id": "dec-1784076328412",
+      "decidedAt": "2026-07-15T00:45:28.412Z"
+    },
+    {
+      "title": "Retain opted-in macOS renderer on close",
+      "description": "When desktop notifications are enabled on macOS and the app is not quitting, prevent main-window destruction and hide it. This preserves live shell observation while the standard macOS process remains active. Disabled settings and Quit keep existing destruction semantics.",
+      "phase": "R",
+      "alternatives": [
+        "Duplicate environment subscriptions in Electron main",
+        "Create a separate hidden observer window",
+        "Drop notifications after window close"
+      ],
+      "status": "accepted",
+      "id": "dec-1784076608650",
+      "decidedAt": "2026-07-15T00:50:08.650Z"
+    }
+  ],
+  "lastUpdated": "2026-07-15T01:55:22.359Z"
+}

@@ -47,6 +47,20 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getClientSettings: () => ipcRenderer.invoke(IpcChannels.GET_CLIENT_SETTINGS_CHANNEL),
   setClientSettings: (settings) =>
     ipcRenderer.invoke(IpcChannels.SET_CLIENT_SETTINGS_CHANNEL, settings),
+  showDesktopNotification: (event) =>
+    ipcRenderer.invoke(IpcChannels.SHOW_DESKTOP_NOTIFICATION_CHANNEL, event),
+  consumePendingDesktopNotificationTarget: () =>
+    ipcRenderer.invoke(IpcChannels.CONSUME_DESKTOP_NOTIFICATION_TARGET_CHANNEL),
+  onDesktopNotificationTargetAvailable: (listener) => {
+    const wrappedListener = () => listener();
+    ipcRenderer.on(IpcChannels.DESKTOP_NOTIFICATION_TARGET_AVAILABLE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(
+        IpcChannels.DESKTOP_NOTIFICATION_TARGET_AVAILABLE_CHANNEL,
+        wrappedListener,
+      );
+    };
+  },
   getConnectionCatalog: () => ipcRenderer.invoke(IpcChannels.GET_CONNECTION_CATALOG_CHANNEL),
   setConnectionCatalog: (catalog) =>
     ipcRenderer.invoke(IpcChannels.SET_CONNECTION_CATALOG_CHANNEL, catalog),

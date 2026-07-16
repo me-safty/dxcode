@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-15T00:33:57.793Z",
+  "source": "repository",
+  "sensors": [
+    {
+      "id": "test",
+      "name": "Test",
+      "description": "Run the built-in Vite+ test suite",
+      "severity": "critical",
+      "command": "vp test"
+    },
+    {
+      "id": "check",
+      "name": "Check",
+      "description": "Run repository lint and formatting checks",
+      "severity": "critical",
+      "command": "vp check"
+    },
+    {
+      "id": "typecheck",
+      "name": "Typecheck",
+      "description": "Run repository type checking",
+      "severity": "critical",
+      "command": "vp run typecheck"
+    },
+    {
+      "id": "diff-check",
+      "name": "Diff check",
+      "description": "Reject whitespace errors in the patch",
+      "severity": "warning",
+      "command": "git diff --check"
+    }
+  ]
+}

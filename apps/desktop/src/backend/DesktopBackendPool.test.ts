@@ -77,6 +77,7 @@ function makePoolLayer(
           handleBackendReady: () => Effect.void,
           handleBackendNotReady: Effect.void,
           dispatchMenuAction: () => Effect.die("unexpected menu action"),
+          dispatchRendererEvent: () => Effect.die("unexpected renderer event"),
           syncAppearance: Effect.void,
         } satisfies DesktopWindow.DesktopWindow["Service"]),
       ),

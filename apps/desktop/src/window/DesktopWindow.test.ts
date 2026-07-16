@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -30,6 +31,7 @@ import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { MENU_ACTION_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
+import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 
@@ -47,6 +49,7 @@ const environmentInput = {
 
 function makeFakeBrowserWindow() {
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
+  const windowListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContents = {
     copyImageAt: vi.fn(),
     getURL: vi.fn(() => "t3code-dev://app/"),
@@ -64,12 +67,17 @@ function makeFakeBrowserWindow() {
 
   const window = {
     close: vi.fn(),
+    destroy: vi.fn(),
     focus: vi.fn(),
+    hide: vi.fn(),
     isDestroyed: vi.fn(() => false),
+    isFocused: vi.fn(() => false),
     isMinimized: vi.fn(() => false),
     isVisible: vi.fn(() => true),
     loadURL: vi.fn(() => Promise.resolve()),
-    on: vi.fn(),
+    on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
+      windowListeners.set(eventName, listener);
+    }),
     once: vi.fn(),
     restore: vi.fn(),
     setBackgroundColor: vi.fn(),
@@ -83,10 +91,13 @@ function makeFakeBrowserWindow() {
   return {
     window: window as unknown as Electron.BrowserWindow,
     loadURL: window.loadURL,
+    destroy: window.destroy,
+    hide: window.hide,
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
     send: webContents.send,
     setAutoHideCursor: window.setAutoHideCursor,
+    windowListeners,
     webContentsListeners,
   };
 }
@@ -145,6 +156,7 @@ function makeTestLayer(input: {
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
   readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
   readonly openedExternalUrls?: unknown[];
+  readonly notificationsEnabled?: boolean;
 }) {
   const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
     create: (options) =>
@@ -172,6 +184,12 @@ function makeTestLayer(input: {
         desktopEnvironmentLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
+        DesktopClientSettings.layerTest(
+          Option.some({
+            ...DEFAULT_CLIENT_SETTINGS,
+            desktopNotificationsEnabled: input.notificationsEnabled ?? false,
+          }),
+        ),
         electronMenuLayer,
         Layer.succeed(ElectronShell.ElectronShell, {
           openExternal: (url) =>
@@ -268,6 +286,8 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           desktopAssetsLayer,
           desktopEnvironmentLayer,
           desktopServerExposureLayer,
+          DesktopClientSettings.layerTest(Option.some(DEFAULT_CLIENT_SETTINGS)),
+          DesktopState.layer,
           electronMenuLayer,
           Layer.succeed(ElectronShell.ElectronShell, {
             openExternal: () => Effect.succeed(true),
@@ -289,6 +309,57 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
   });
 
 describe("DesktopWindow", () => {
+  it("retainClose_darwinOptInNotQuitting_returnsTrue", () => {
+    assert.isTrue(
+      DesktopWindow.shouldRetainMainWindowOnClose({
+        platform: "darwin",
+        notificationsEnabled: true,
+        isQuitting: false,
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.shouldRetainMainWindowOnClose({
+        platform: "darwin",
+        notificationsEnabled: true,
+        isQuitting: true,
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.shouldRetainMainWindowOnClose({
+        platform: "darwin",
+        notificationsEnabled: false,
+        isQuitting: false,
+      }),
+    );
+  });
+
+  it.effect("close_optedInDarwin_hidesWindowAndKeepsRenderer", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        notificationsEnabled: true,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) return yield* Effect.die("close listener not registered");
+        const preventDefault = vi.fn();
+        close({ preventDefault });
+        for (let index = 0; index < 3; index += 1) yield* Effect.yieldNow;
+        assert.equal(preventDefault.mock.calls.length, 1);
+        assert.equal(fakeWindow.hide.mock.calls.length, 1);
+        assert.equal(fakeWindow.destroy.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it("recognizes only same-origin renderer navigations", () => {
     assert.isTrue(
       DesktopWindow.isSameOriginRendererNavigation({

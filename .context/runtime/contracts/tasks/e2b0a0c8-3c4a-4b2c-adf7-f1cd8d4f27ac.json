@@ -1,0 +1,42 @@
+{
+  "id": "e2b0a0c8-3c4a-4b2c-adf7-f1cd8d4f27ac",
+  "title": "Issue #780 native desktop notifications: Planning",
+  "description": "Derived from linked plan \"issue-780-native-desktop-notifications\" for PREVC phase P (Planning). Plan phases: Planning. Phase objectives: Verify upstream direction, map canonical state, and define a bounded design.. Key steps: Review issue; Map shell, settings, IPC, window, and routing sources; Define implementation and validation gates. Expected outputs: Canonical plan and decision record, Upstream research, Architecture map, Approved plan.",
+  "sessionId": "7030dee3-b498-4d7b-bb9e-28bd862e4903",
+  "owner": "solo-dev",
+  "status": "completed",
+  "inputs": [
+    "docs/architecture.md",
+    "docs/data-flow.md",
+    "docs/development-workflow.md",
+    "docs/testing-strategy.md"
+  ],
+  "expectedOutputs": [
+    "Canonical plan and decision record",
+    "Upstream research",
+    "Architecture map",
+    "Approved plan"
+  ],
+  "acceptanceCriteria": [
+    "Review issue",
+    "Map shell, settings, IPC, window, and routing sources",
+    "Define implementation and validation gates"
+  ],
+  "requiredSensors": [],
+  "requiredArtifacts": [],
+  "createdAt": "2026-07-15T00:45:16.348Z",
+  "updatedAt": "2026-07-15T00:45:35.229Z",
+  "metadata": {
+    "requirementsSource": "none",
+    "source": "workflow.plan",
+    "planSlug": "issue-780-native-desktop-notifications",
+    "prevcPhase": "P",
+    "planPhaseIds": ["planning"],
+    "planPhaseNames": ["Planning"],
+    "planPhaseSummaries": [
+      "Verify upstream direction, map canonical state, and define a bounded design."
+    ],
+    "derivedFrom": "linked-plan",
+    "completionReason": "Workflow advanced from P to R"
+  }
+}
