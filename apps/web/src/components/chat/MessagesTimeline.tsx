@@ -387,7 +387,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange, hasMoreOlder, loadingOlder, onLoadOlder]);
+  }, [
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onIsAtEndChange,
+    hasMoreOlder,
+    loadingOlder,
+    onLoadOlder,
+  ]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
