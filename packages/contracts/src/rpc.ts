@@ -148,6 +148,10 @@ import {
   VoiceCredentialInput,
   VoiceCredentialStatus,
   VoiceSessionAccess,
+  VoiceWebExtractInput,
+  VoiceWebExtractResult,
+  VoiceWebSearchInput,
+  VoiceWebSearchResult,
 } from "./voice.ts";
 
 export const WS_METHODS = {
@@ -225,6 +229,11 @@ export const WS_METHODS = {
   voiceSetCredential: "voice.setCredential",
   voiceRemoveCredential: "voice.removeCredential",
   voiceCreateSession: "voice.createSession",
+  voiceGetParallelCredentialStatus: "voice.getParallelCredentialStatus",
+  voiceSetParallelCredential: "voice.setParallelCredential",
+  voiceRemoveParallelCredential: "voice.removeParallelCredential",
+  voiceSearchWeb: "voice.searchWeb",
+  voiceExtractWeb: "voice.extractWeb",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -350,6 +359,42 @@ export const WsVoiceRemoveCredentialRpc = Rpc.make(WS_METHODS.voiceRemoveCredent
 export const WsVoiceCreateSessionRpc = Rpc.make(WS_METHODS.voiceCreateSession, {
   payload: Schema.Struct({}),
   success: VoiceSessionAccess,
+  error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
+});
+
+export const WsVoiceGetParallelCredentialStatusRpc = Rpc.make(
+  WS_METHODS.voiceGetParallelCredentialStatus,
+  {
+    payload: Schema.Struct({}),
+    success: VoiceCredentialStatus,
+    error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsVoiceSetParallelCredentialRpc = Rpc.make(WS_METHODS.voiceSetParallelCredential, {
+  payload: VoiceCredentialInput,
+  success: VoiceCredentialStatus,
+  error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
+});
+
+export const WsVoiceRemoveParallelCredentialRpc = Rpc.make(
+  WS_METHODS.voiceRemoveParallelCredential,
+  {
+    payload: Schema.Struct({}),
+    success: VoiceCredentialStatus,
+    error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsVoiceSearchWebRpc = Rpc.make(WS_METHODS.voiceSearchWeb, {
+  payload: VoiceWebSearchInput,
+  success: VoiceWebSearchResult,
+  error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
+});
+
+export const WsVoiceExtractWebRpc = Rpc.make(WS_METHODS.voiceExtractWeb, {
+  payload: VoiceWebExtractInput,
+  success: VoiceWebExtractResult,
   error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
 });
 
@@ -734,6 +779,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsVoiceSetCredentialRpc,
   WsVoiceRemoveCredentialRpc,
   WsVoiceCreateSessionRpc,
+  WsVoiceGetParallelCredentialStatusRpc,
+  WsVoiceSetParallelCredentialRpc,
+  WsVoiceRemoveParallelCredentialRpc,
+  WsVoiceSearchWebRpc,
+  WsVoiceExtractWebRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsSourceControlLookupRepositoryRpc,

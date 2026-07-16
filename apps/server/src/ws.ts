@@ -301,6 +301,11 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.voiceSetCredential, AuthOrchestrationOperateScope],
   [WS_METHODS.voiceRemoveCredential, AuthOrchestrationOperateScope],
   [WS_METHODS.voiceCreateSession, AuthOrchestrationOperateScope],
+  [WS_METHODS.voiceGetParallelCredentialStatus, AuthOrchestrationReadScope],
+  [WS_METHODS.voiceSetParallelCredential, AuthOrchestrationOperateScope],
+  [WS_METHODS.voiceRemoveParallelCredential, AuthOrchestrationOperateScope],
+  [WS_METHODS.voiceSearchWeb, AuthOrchestrationOperateScope],
+  [WS_METHODS.voiceExtractWeb, AuthOrchestrationOperateScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
   [WS_METHODS.cloudInstallRelayClient, AuthRelayWriteScope],
   [WS_METHODS.sourceControlLookupRepository, AuthOrchestrationReadScope],
@@ -1321,6 +1326,32 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.voiceCreateSession]: (_input) =>
           observeRpcEffect(WS_METHODS.voiceCreateSession, voiceSessionService.createSession, {
+            "rpc.aggregate": "voice",
+          }),
+        [WS_METHODS.voiceGetParallelCredentialStatus]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.voiceGetParallelCredentialStatus,
+            voiceSessionService.getParallelCredentialStatus,
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceSetParallelCredential]: ({ apiKey }) =>
+          observeRpcEffect(
+            WS_METHODS.voiceSetParallelCredential,
+            voiceSessionService.setParallelCredential(apiKey),
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceRemoveParallelCredential]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.voiceRemoveParallelCredential,
+            voiceSessionService.removeParallelCredential,
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceSearchWeb]: (input) =>
+          observeRpcEffect(WS_METHODS.voiceSearchWeb, voiceSessionService.searchWeb(input), {
+            "rpc.aggregate": "voice",
+          }),
+        [WS_METHODS.voiceExtractWeb]: (input) =>
+          observeRpcEffect(WS_METHODS.voiceExtractWeb, voiceSessionService.extractWeb(input), {
             "rpc.aggregate": "voice",
           }),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>

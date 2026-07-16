@@ -4,6 +4,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import {
   CheckCircle2Icon,
   GaugeIcon,
+  Globe2Icon,
   HistoryIcon,
   KeyRoundIcon,
   LoaderIcon,
@@ -47,6 +48,10 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
     serverEnvironment.voiceCredentialStatus({ environmentId, input: {} }),
   );
   const queriedStatus = Option.getOrNull(AsyncResult.value(statusResult));
+  const parallelStatusResult = useAtomValue(
+    serverEnvironment.parallelCredentialStatus({ environmentId, input: {} }),
+  );
+  const queriedParallelStatus = Option.getOrNull(AsyncResult.value(parallelStatusResult));
   const setCredential = useAtomCommand(serverEnvironment.setVoiceCredential, {
     reportFailure: false,
   });
@@ -56,10 +61,23 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   const createVoiceSession = useAtomCommand(serverEnvironment.createVoiceSession, {
     reportFailure: false,
   });
+  const setParallelCredential = useAtomCommand(serverEnvironment.setParallelCredential, {
+    reportFailure: false,
+  });
+  const removeParallelCredential = useAtomCommand(serverEnvironment.removeParallelCredential, {
+    reportFailure: false,
+  });
+  const searchVoiceWeb = useAtomCommand(serverEnvironment.searchVoiceWeb, {
+    reportFailure: false,
+  });
   const [apiKey, setApiKey] = useState("");
   const [configured, setConfigured] = useState(false);
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [parallelApiKey, setParallelApiKey] = useState("");
+  const [parallelConfigured, setParallelConfigured] = useState(false);
+  const [parallelBusy, setParallelBusy] = useState<"save" | "test" | "remove" | null>(null);
+  const [parallelFeedback, setParallelFeedback] = useState<string | null>(null);
   const traceSessions = useVoiceTraceStore((state) => state.sessions);
   const clearTraceHistory = useVoiceTraceStore((state) => state.clearHistory);
   const voiceSpeed = useVoiceSettingsStore((state) => state.speed);
@@ -70,6 +88,10 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   useEffect(() => {
     if (queriedStatus) setConfigured(queriedStatus.configured);
   }, [queriedStatus]);
+
+  useEffect(() => {
+    if (queriedParallelStatus) setParallelConfigured(queriedParallelStatus.configured);
+  }, [queriedParallelStatus]);
 
   const save = async () => {
     if (!environmentId || apiKey.trim().length === 0 || busy) return;
@@ -110,6 +132,57 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
       setFeedback("Saved xAI API key removed.");
     } else {
       setFeedback(messageFromError(squashAtomCommandFailure(result)));
+    }
+  };
+
+  const saveParallel = async () => {
+    if (!environmentId || parallelApiKey.trim().length === 0 || parallelBusy) return;
+    setParallelBusy("save");
+    setParallelFeedback(null);
+    const result = await setParallelCredential({
+      environmentId,
+      input: { apiKey: parallelApiKey },
+    });
+    setParallelBusy(null);
+    if (result._tag === "Success") {
+      setParallelConfigured(true);
+      setParallelApiKey("");
+      setParallelFeedback("Parallel API key saved securely on this T3 Code environment.");
+    } else {
+      setParallelFeedback(messageFromError(squashAtomCommandFailure(result)));
+    }
+  };
+
+  const testParallel = async () => {
+    if (!environmentId || !parallelConfigured || parallelBusy) return;
+    setParallelBusy("test");
+    setParallelFeedback(null);
+    const result = await searchVoiceWeb({
+      environmentId,
+      input: {
+        objective: "Verify that Parallel Search is available.",
+        searchQueries: ["Parallel AI official website"],
+      },
+    });
+    setParallelBusy(null);
+    setParallelFeedback(
+      result._tag === "Success"
+        ? "Connection successful. Parallel Search is ready."
+        : messageFromError(squashAtomCommandFailure(result)),
+    );
+  };
+
+  const removeParallel = async () => {
+    if (!environmentId || !parallelConfigured || parallelBusy) return;
+    setParallelBusy("remove");
+    setParallelFeedback(null);
+    const result = await removeParallelCredential({ environmentId, input: {} });
+    setParallelBusy(null);
+    if (result._tag === "Success") {
+      setParallelConfigured(false);
+      setParallelFeedback("Saved Parallel API key removed.");
+    } else {
+      setParallelFeedback(messageFromError(squashAtomCommandFailure(result)));
     }
   };
 
@@ -195,6 +268,85 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
         />
       </SettingsSection>
 
+      <SettingsSection title="Parallel Web" icon={<Globe2Icon className="size-3.5" />}>
+        <SettingsRow
+          title="API key"
+          description="Stored only by the selected T3 Code server. Grok uses Parallel Search and Extract through server-side tools."
+          status={
+            <span
+              className={parallelConfigured ? "text-emerald-600 dark:text-emerald-400" : undefined}
+            >
+              {parallelConfigured ? "Configured" : "Not configured"}
+            </span>
+          }
+        >
+          <div className="mt-3 flex flex-col gap-2 pb-4 sm:flex-row">
+            <Input
+              nativeInput
+              type="password"
+              autoComplete="off"
+              value={parallelApiKey}
+              onChange={(event) => setParallelApiKey(event.currentTarget.value)}
+              placeholder={
+                parallelConfigured ? "Enter a replacement Parallel API key" : "Parallel API key"
+              }
+              aria-label="Parallel API key"
+            />
+            <Button
+              className="shrink-0"
+              size="sm"
+              onClick={() => void saveParallel()}
+              disabled={
+                !environmentId || parallelApiKey.trim().length === 0 || parallelBusy !== null
+              }
+            >
+              {parallelBusy === "save" ? (
+                <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+              ) : (
+                <KeyRoundIcon className="size-3.5" />
+              )}
+              Save key
+            </Button>
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title="Search and Extract"
+          description="Validate the saved key with a small live Search request. Extract is used only when ranked search excerpts are insufficient."
+          status={parallelFeedback}
+          control={
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void testParallel()}
+                disabled={!environmentId || !parallelConfigured || parallelBusy !== null}
+              >
+                {parallelBusy === "test" ? (
+                  <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                ) : (
+                  <CheckCircle2Icon className="size-3.5" />
+                )}
+                Test
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-destructive hover:text-destructive"
+                onClick={() => void removeParallel()}
+                disabled={!environmentId || !parallelConfigured || parallelBusy !== null}
+              >
+                {parallelBusy === "remove" ? (
+                  <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                ) : (
+                  <Trash2Icon className="size-3.5" />
+                )}
+                Remove
+              </Button>
+            </div>
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection title="Voice preferences" icon={<GaugeIcon className="size-3.5" />}>
         <SettingsRow
           title="Speech pace"
@@ -255,7 +407,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
         />
         <SettingsRow
           title="Context and composer access"
-          description="The latest AI message is shared initially. Grok can page older messages from that task, search the web, and edit unsent composer text, but it cannot send prompts."
+          description="The latest AI message is shared initially. Grok can page older messages from that task, search and extract web sources through Parallel, and edit unsent composer text, but it cannot send prompts."
         />
       </SettingsSection>
 

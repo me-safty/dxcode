@@ -75,3 +75,115 @@ it.effect("maps xAI authentication failures without exposing the saved key", () 
     assert.notInclude(error.message, "xai-sensitive-key");
   }).pipe(Effect.provide(layer));
 });
+
+it.effect("keeps the Parallel key server-side and maps Search and Extract responses", () => {
+  const { execute, layer } = makeTestLayer((request) => {
+    if (request.url.endsWith("/v1/search")) {
+      return Response.json({
+        search_id: "search-1",
+        session_id: "session-1",
+        results: [
+          {
+            url: "https://example.com/news",
+            title: "Current news",
+            publish_date: "2026-07-16",
+            excerpts: ["A relevant search excerpt."],
+          },
+        ],
+      });
+    }
+    return Response.json({
+      extract_id: "extract-1",
+      session_id: "session-1",
+      results: [
+        {
+          url: "https://example.com/news",
+          title: "Current news",
+          excerpts: ["The extracted evidence."],
+        },
+      ],
+      errors: [],
+    });
+  });
+
+  return Effect.gen(function* () {
+    const voice = yield* VoiceSessionService.VoiceSessionService;
+    assert.deepStrictEqual(yield* voice.getParallelCredentialStatus, { configured: false });
+    assert.deepStrictEqual(yield* voice.setParallelCredential("  parallel-secret  "), {
+      configured: true,
+    });
+
+    const search = yield* voice.searchWeb({
+      objective: "Find the latest relevant news.",
+      searchQueries: ["latest relevant news"],
+    });
+    assert.deepStrictEqual(search, {
+      searchId: "search-1",
+      sessionId: "session-1",
+      results: [
+        {
+          url: "https://example.com/news",
+          title: "Current news",
+          publishDate: "2026-07-16",
+          excerpts: ["A relevant search excerpt."],
+        },
+      ],
+    });
+
+    const extracted = yield* voice.extractWeb({
+      urls: ["https://example.com/news"],
+      objective: "Read the evidence needed to answer.",
+      sessionId: search.sessionId,
+    });
+    assert.deepStrictEqual(extracted, {
+      extractId: "extract-1",
+      sessionId: "session-1",
+      results: [
+        {
+          url: "https://example.com/news",
+          title: "Current news",
+          excerpts: ["The extracted evidence."],
+        },
+      ],
+      errors: [],
+    });
+
+    assert.equal(execute.mock.calls.length, 2);
+    for (const [request] of execute.mock.calls) {
+      assert.equal(request.headers["x-api-key"], "parallel-secret");
+      assert.notInclude(request.url, "parallel-secret");
+    }
+    const searchRequest = execute.mock.calls[0]?.[0];
+    assert.isDefined(searchRequest);
+    const searchBody = (searchRequest.body as { readonly body?: Uint8Array }).body;
+    assert.isDefined(searchBody);
+    // @effect-diagnostics-next-line preferSchemaOverJson:off
+    assert.deepStrictEqual(JSON.parse(new TextDecoder().decode(searchBody)), {
+      objective: "Find the latest relevant news.",
+      search_queries: ["latest relevant news"],
+      mode: "basic",
+      max_chars_total: 12_000,
+      client_model: "grok-voice-latest",
+    });
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("rejects invalid Parallel requests before making a network call", () => {
+  const { execute, layer } = makeTestLayer();
+
+  return Effect.gen(function* () {
+    const voice = yield* VoiceSessionService.VoiceSessionService;
+    yield* voice.setParallelCredential("parallel-secret");
+
+    const searchError = yield* Effect.flip(
+      voice.searchWeb({ objective: "Search", searchQueries: [] }),
+    );
+    assert.equal(searchError.reason, "invalid_web_tool_request");
+
+    const extractError = yield* Effect.flip(
+      voice.extractWeb({ urls: ["file:///private/data"], objective: "Read this" }),
+    );
+    assert.equal(extractError.reason, "invalid_web_tool_request");
+    assert.equal(execute.mock.calls.length, 0);
+  }).pipe(Effect.provide(layer));
+});

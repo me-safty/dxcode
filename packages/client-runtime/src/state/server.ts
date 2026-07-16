@@ -302,6 +302,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:voice:credential-status",
       tag: WS_METHODS.voiceGetCredentialStatus,
     }),
+    parallelCredentialStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:voice:parallel-credential-status",
+      tag: WS_METHODS.voiceGetParallelCredentialStatus,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",
@@ -360,6 +364,24 @@ export function createServerEnvironmentAtoms<R, E>(
         mode: "singleFlight",
         key: ({ environmentId }) => environmentId,
       },
+    }),
+    setParallelCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:voice:set-parallel-credential",
+      tag: WS_METHODS.voiceSetParallelCredential,
+      concurrency: configConcurrency,
+    }),
+    removeParallelCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:voice:remove-parallel-credential",
+      tag: WS_METHODS.voiceRemoveParallelCredential,
+      concurrency: configConcurrency,
+    }),
+    searchVoiceWeb: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:voice:search-web",
+      tag: WS_METHODS.voiceSearchWeb,
+    }),
+    extractVoiceWeb: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:voice:extract-web",
+      tag: WS_METHODS.voiceExtractWeb,
     }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
