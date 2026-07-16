@@ -394,6 +394,20 @@ export function clearComposerDraftContentState(
   };
 }
 
+export function restoreComposerDraftSnapshotState(
+  current: Record<string, ComposerDraft>,
+  draftKey: string,
+  snapshot: ComposerDraft,
+): Record<string, ComposerDraft> {
+  const next = { ...current };
+  if (isEmptyDraft(snapshot)) {
+    delete next[draftKey];
+  } else {
+    next[draftKey] = snapshot;
+  }
+  return next;
+}
+
 function mergeComposerDraftText(existing: string, incoming: string): string {
   if (incoming.length === 0) {
     return existing;
@@ -488,6 +502,28 @@ export async function mergeComposerDraftContent(
   }
   await persistenceQueue.run(() => writePersistedComposerDrafts(next));
   return { skippedAttachmentCount };
+}
+
+/** Restores the exact content/settings captured before an interrupted import. */
+export async function restoreComposerDraftSnapshot(
+  draftKey: string,
+  snapshot: ComposerDraft,
+): Promise<void> {
+  ensureComposerDraftsLoaded();
+  if (loadPromise !== null) {
+    await loadPromise;
+  }
+  if (persistTimer !== null) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  const next = restoreComposerDraftSnapshotState(
+    appAtomRegistry.get(composerDraftsAtom),
+    draftKey,
+    snapshot,
+  );
+  appAtomRegistry.set(composerDraftsAtom, next);
+  await persistenceQueue.run(() => writePersistedComposerDrafts(next));
 }
 
 export function clearComposerDraftContent(draftKey: string): void {

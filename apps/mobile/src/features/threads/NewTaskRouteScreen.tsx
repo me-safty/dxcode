@@ -161,6 +161,9 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       return;
     }
     if (!isFocused) {
+      // Returning from the reserved draft is a fresh resume attempt. Keeping
+      // this latch set would leave every project row disabled with no route.
+      resumedDestinationKeyRef.current = null;
       return;
     }
     const destinationKey = `${incomingShare.id}:${destination.environmentId}:${destination.projectId}`;

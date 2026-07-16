@@ -10,6 +10,7 @@ import {
   getComposerDraftSnapshot,
   mergeComposerDraftContentState,
   removeComposerDraftsForEnvironment,
+  restoreComposerDraftSnapshotState,
 } from "./use-composer-drafts";
 
 const DRAFT: ComposerDraft = {
@@ -192,6 +193,30 @@ describe("mobile composer drafts", () => {
     expect(merged[draftKey]?.attachments).toHaveLength(8);
     expect(merged[draftKey]?.attachments[0]).toEqual(existingImage);
     expect(merged[draftKey]?.attachments.at(-1)?.id).toBe("shared-6");
+  });
+
+  it("restores the exact draft captured before an interrupted share import", () => {
+    const draftKey = "new-task:environment-1:project-1";
+    const beforeImport: ComposerDraft = {
+      text: "Existing context",
+      attachments: [],
+      runtimeMode: "approval-required",
+    };
+    const imported: ComposerDraft = {
+      ...beforeImport,
+      text: "Existing context\n\nShared note",
+      importedShareIds: ["share-1"],
+    };
+
+    expect(
+      restoreComposerDraftSnapshotState({ [draftKey]: imported }, draftKey, beforeImport),
+    ).toEqual({ [draftKey]: beforeImport });
+    expect(
+      restoreComposerDraftSnapshotState({ [draftKey]: imported }, draftKey, {
+        text: "",
+        attachments: [],
+      }),
+    ).toEqual({});
   });
 
   it("removes only drafts owned by the selected environment", () => {

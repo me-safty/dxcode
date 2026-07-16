@@ -39,6 +39,8 @@ import {
   clearComposerDraftContent,
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
+  restoreComposerDraftSnapshot,
+  type ComposerDraft,
 } from "../../state/use-composer-drafts";
 import { useProjects } from "../../state/entities";
 import { deriveThreadTitleFromPrompt } from "../../lib/projectThreadStartTurn";
@@ -79,6 +81,7 @@ export function NewTaskDraftScreen(props: {
     consumeShare,
     getShare,
     isLoading: isIncomingShareInboxLoading,
+    releaseShareReservation,
     reserveShare,
   } = useIncomingShare();
   const insets = useSafeAreaInsets();
@@ -96,8 +99,11 @@ export function NewTaskDraftScreen(props: {
   const loadedBranchesProjectKeyRef = useRef<string | null>(null);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [importingShareKey, setImportingShareKey] = useState<string | null>(null);
+  const [isCancellingShareImport, setIsCancellingShareImport] = useState(false);
+  const [cancelledIncomingShareId, setCancelledIncomingShareId] = useState<string | null>(null);
   const [shareImportAttempt, setShareImportAttempt] = useState(0);
   const startedShareImportKeyRef = useRef<string | null>(null);
+  const shareImportDraftBackupRef = useRef(new Map<string, ComposerDraft>());
   const activeShareImportTokenRef = useRef<symbol | null>(null);
   const shareImportMountedRef = useRef(true);
   const latestDraftKeyRef = useRef(flow.draftKey);
@@ -107,8 +113,10 @@ export function NewTaskDraftScreen(props: {
   const isImportingShare = importingShareKey !== null;
   const alertedUnavailableIncomingShareIdRef = useRef<string | null>(null);
   const incomingShare = props.incomingShareId ? getShare(props.incomingShareId) : null;
-  const isIncomingShareTransferPending = incomingShare !== null;
-  usePreventRemove(isIncomingShareTransferPending, () => undefined);
+  const isIncomingShareTransferPending = Boolean(
+    incomingShare && cancelledIncomingShareId !== props.incomingShareId,
+  );
+  usePreventRemove(isIncomingShareTransferPending || isCancellingShareImport, () => undefined);
   const hasImportedIncomingShare = Boolean(
     props.incomingShareId &&
     flow.draftKey &&
@@ -125,6 +133,11 @@ export function NewTaskDraftScreen(props: {
     (hasImportedIncomingShare && !incomingShare) ||
     isIncomingShareUnavailable;
   const appliedInitialProjectKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (cancelledIncomingShareId === props.incomingShareId) {
+      navigation.goBack();
+    }
+  }, [cancelledIncomingShareId, navigation, props.incomingShareId]);
   useEffect(() => {
     if (!shareImportMountedRef.current) {
       startedShareImportKeyRef.current = null;
@@ -211,6 +224,16 @@ export function NewTaskDraftScreen(props: {
         setProject(directProject);
         return;
       }
+
+      if (projects.length > 0) {
+        // Never fall through to the flow provider's temporary first-project
+        // default. Return to the picker with the share id intact so the user
+        // can choose an available destination.
+        navigation.dispatch(
+          StackActions.replace("NewTask", { incomingShareId: props.incomingShareId }),
+        );
+      }
+      return;
     }
 
     if (selectedProject) {
@@ -227,6 +250,7 @@ export function NewTaskDraftScreen(props: {
     logicalProjects,
     projects,
     props.initialProjectRef,
+    props.incomingShareId,
     props.pendingTaskId,
     navigation,
     selectedProject,
@@ -250,7 +274,20 @@ export function NewTaskDraftScreen(props: {
     const shareId = props.incomingShareId;
     const draftKey = flow.draftKey;
     const destinationProject = selectedProject;
-    if (!shareId || !draftKey || !destinationProject) {
+    const initialEnvironmentId = props.initialProjectRef?.environmentId;
+    const initialProjectId = props.initialProjectRef?.projectId;
+    const selectedProjectMatchesRoute =
+      !initialEnvironmentId ||
+      !initialProjectId ||
+      (destinationProject?.environmentId === initialEnvironmentId &&
+        destinationProject.id === initialProjectId);
+    if (
+      !shareId ||
+      !draftKey ||
+      !destinationProject ||
+      !selectedProjectMatchesRoute ||
+      cancelledIncomingShareId === shareId
+    ) {
       return;
     }
     const importKey = `${shareId}:${draftKey}`;
@@ -273,6 +310,9 @@ export function NewTaskDraftScreen(props: {
       alertedUnavailableIncomingShareIdRef.current = null;
     }
     startedShareImportKeyRef.current = importKey;
+    const draftBackup =
+      shareImportDraftBackupRef.current.get(importKey) ?? getComposerDraftSnapshot(draftKey);
+    shareImportDraftBackupRef.current.set(importKey, draftBackup);
     const importToken = Symbol(importKey);
     activeShareImportTokenRef.current = importToken;
     setImportingShareKey(importKey);
@@ -317,6 +357,7 @@ export function NewTaskDraftScreen(props: {
       if (warnings.length > 0) {
         Alert.alert("Some shared content was skipped", warnings.join("\n"));
       }
+      shareImportDraftBackupRef.current.delete(importKey);
     })()
       .catch((error) => {
         if (!shareImportMountedRef.current || activeShareImportTokenRef.current !== importToken) {
@@ -326,6 +367,55 @@ export function NewTaskDraftScreen(props: {
           "Could not import shared content",
           error instanceof Error ? error.message : "The shared content could not be saved.",
           [
+            {
+              text: "Cancel import",
+              style: "cancel",
+              onPress: () => {
+                const cancelImport = async (): Promise<void> => {
+                  if (!shareImportMountedRef.current) {
+                    return;
+                  }
+                  setIsCancellingShareImport(true);
+                  try {
+                    const currentDraft = getComposerDraftSnapshot(draftKey);
+                    if (currentDraft.importedShareIds?.includes(shareId)) {
+                      await restoreComposerDraftSnapshot(draftKey, draftBackup);
+                    }
+                    await releaseShareReservation(shareId, {
+                      environmentId: String(destinationProject.environmentId),
+                      projectId: String(destinationProject.id),
+                    });
+                    shareImportDraftBackupRef.current.delete(importKey);
+                    if (shareImportMountedRef.current) {
+                      setIsCancellingShareImport(false);
+                      setCancelledIncomingShareId(shareId);
+                    }
+                  } catch (cancelError) {
+                    if (!shareImportMountedRef.current) {
+                      return;
+                    }
+                    setIsCancellingShareImport(false);
+                    Alert.alert(
+                      "Could not cancel import",
+                      cancelError instanceof Error
+                        ? cancelError.message
+                        : "The shared content could not be restored safely.",
+                      [
+                        {
+                          text: "Retry import",
+                          onPress: () => setShareImportAttempt((attempt) => attempt + 1),
+                        },
+                        {
+                          text: "Retry cancel",
+                          onPress: () => void cancelImport(),
+                        },
+                      ],
+                    );
+                  }
+                };
+                void cancelImport();
+              },
+            },
             {
               text: "Retry",
               onPress: () => setShareImportAttempt((attempt) => attempt + 1),
@@ -346,12 +436,16 @@ export function NewTaskDraftScreen(props: {
       });
   }, [
     consumeShare,
+    cancelledIncomingShareId,
     flow.draftKey,
     hasImportedIncomingShare,
     incomingShare,
     isIncomingShareInboxLoading,
     isIncomingShareUnavailable,
     props.incomingShareId,
+    props.initialProjectRef?.environmentId,
+    props.initialProjectRef?.projectId,
+    releaseShareReservation,
     reserveShare,
     selectedProject,
     shareImportAttempt,
@@ -551,7 +645,7 @@ export function NewTaskDraftScreen(props: {
     [currentBranchName, flow.selectedBranchName, flow.workspaceMode],
   );
   function handleModelMenuAction(event: string) {
-    if (!event.startsWith("model:")) {
+    if (isIncomingShareTransferPending || !event.startsWith("model:")) {
       return;
     }
     flow.setSelectedModelKey(event.slice("model:".length));
@@ -565,6 +659,9 @@ export function NewTaskDraftScreen(props: {
   }
 
   function handleOptionsMenuAction(event: string) {
+    if (isIncomingShareTransferPending) {
+      return;
+    }
     const providerOptions = applyProviderOptionMenuEvent(providerOptionDescriptors, event);
     if (providerOptions) {
       flow.setSelectedModelOptions(providerOptions);
@@ -584,6 +681,9 @@ export function NewTaskDraftScreen(props: {
   }
 
   function handleWorkspaceMenuAction(event: string) {
+    if (isIncomingShareTransferPending) {
+      return;
+    }
     if (event.startsWith("workspace:mode:")) {
       flow.setWorkspaceMode(
         event.slice("workspace:mode:".length) as Parameters<typeof flow.setWorkspaceMode>[0],
@@ -604,6 +704,9 @@ export function NewTaskDraftScreen(props: {
   }
 
   async function handlePickImages(): Promise<void> {
+    if (isIncomingShareTransferPending) {
+      return;
+    }
     const result = await pickComposerImages({ existingCount: flow.attachments.length });
     if (result.images.length > 0) {
       flow.appendAttachments(result.images);
@@ -829,6 +932,7 @@ export function NewTaskDraftScreen(props: {
       >
         <ComposerToolbarTrigger
           accessibilityLabel="Model"
+          disabled={isIncomingShareTransferPending}
           iconNode={<ProviderIcon provider={flow.selectedModelOption?.providerDriver} size={16} />}
           label={flow.selectedModelOption?.label ?? "Model"}
         />
@@ -839,6 +943,7 @@ export function NewTaskDraftScreen(props: {
       >
         <ComposerToolbarTrigger
           accessibilityLabel="Configuration"
+          disabled={isIncomingShareTransferPending}
           icon="slider.horizontal.3"
           label={configurationLabel}
         />
@@ -860,6 +965,7 @@ export function NewTaskDraftScreen(props: {
       >
         <ComposerToolbarTrigger
           accessibilityLabel="Workspace"
+          disabled={isIncomingShareTransferPending}
           icon="point.topleft.down.curvedto.point.bottomright.up"
           label={workspaceLabel}
         />
