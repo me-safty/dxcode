@@ -16,6 +16,7 @@ import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import {
+  applyShowcaseLocalEnvironmentDisplayUrls,
   SHOWCASE_AVAILABLE_CLOUD_ENVIRONMENTS,
   SHOWCASE_CONNECTED_CLOUD_ENVIRONMENTS,
 } from "../showcase/showcaseEnvironmentRows";
@@ -36,7 +37,9 @@ export function SettingsEnvironmentsRouteScreen() {
     connectedEnvironments,
     cloudEnvironments: null,
   });
-  const { localEnvironments } = environmentSections;
+  const localEnvironments = SHOWCASE_ENABLED
+    ? applyShowcaseLocalEnvironmentDisplayUrls(environmentSections.localEnvironments)
+    : environmentSections.localEnvironments;
   const connectedCloudEnvironments = SHOWCASE_ENABLED
     ? SHOWCASE_CONNECTED_CLOUD_ENVIRONMENTS
     : environmentSections.connectedCloudEnvironments;

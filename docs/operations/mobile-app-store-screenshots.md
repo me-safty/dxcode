@@ -112,6 +112,10 @@ projects. Showcase coordination holds those two entries in the outbox for captur
 currently open for editing, so reconnecting the seeded environments cannot deliver and remove them
 before the screenshot is taken.
 
+The Environments capture presents the three local fixture transports as a Tailscale HTTPS hostname,
+a Helsinki VPS hostname, and a Tailnet IPv4 address. This display-only substitution keeps the cards
+remote-first while the harness retains reliable loopback connections to its ephemeral servers.
+
 ## Local prerequisites
 
 - iOS: Xcode command-line tools, the configured simulator runtimes, and installed CocoaPods.
