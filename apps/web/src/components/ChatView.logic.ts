@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   isProviderDriverKind,
+  type MessageId,
   ProjectId,
   type ModelSelection,
   type ProviderDriverKind,
@@ -387,6 +388,7 @@ export async function waitForStartedServerThread(
 export interface LocalDispatchSnapshot {
   startedAt: string;
   preparingWorktree: boolean;
+  expectedUserMessageId: MessageId | null;
   latestTurnTurnId: TurnId | null;
   latestTurnRequestedAt: string | null;
   latestTurnStartedAt: string | null;
@@ -395,15 +397,28 @@ export interface LocalDispatchSnapshot {
   sessionUpdatedAt: string | null;
 }
 
+export function getLatestUserMessageId(
+  messages: ReadonlyArray<Pick<ChatMessage, "id" | "role">>,
+): MessageId | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") {
+      return message.id;
+    }
+  }
+  return null;
+}
+
 export function createLocalDispatchSnapshot(
   activeThread: Thread | undefined,
-  options?: { preparingWorktree?: boolean },
+  options?: { preparingWorktree?: boolean; expectedUserMessageId?: MessageId },
 ): LocalDispatchSnapshot {
   const latestTurn = activeThread?.latestTurn ?? null;
   const session = activeThread?.session ?? null;
   return {
     startedAt: new Date().toISOString(),
     preparingWorktree: Boolean(options?.preparingWorktree),
+    expectedUserMessageId: options?.expectedUserMessageId ?? null,
     latestTurnTurnId: latestTurn?.turnId ?? null,
     latestTurnRequestedAt: latestTurn?.requestedAt ?? null,
     latestTurnStartedAt: latestTurn?.startedAt ?? null,
@@ -418,6 +433,7 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   phase: SessionPhase;
   latestTurn: Thread["latestTurn"] | null;
   session: Thread["session"] | null;
+  latestUserMessageId: MessageId | null;
   hasPendingApproval: boolean;
   hasPendingUserInput: boolean;
   threadError: string | null | undefined;
@@ -426,6 +442,18 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     return false;
   }
   if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
+    return true;
+  }
+
+  // A prompt sent while a turn is already running is a steer. Providers can
+  // apply that prompt to the existing turn without opening a new one, so the
+  // latest turn/session fields may remain unchanged until the agent finishes.
+  // The projected user message is the server acknowledgement in that case.
+  if (
+    input.localDispatch.sessionStatus === "running" &&
+    input.localDispatch.expectedUserMessageId !== null &&
+    input.localDispatch.expectedUserMessageId === input.latestUserMessageId
+  ) {
     return true;
   }
 
