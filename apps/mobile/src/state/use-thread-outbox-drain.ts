@@ -15,7 +15,6 @@ import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { toUploadChatImageAttachments } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
 import { randomHex } from "../lib/uuid";
@@ -222,7 +221,7 @@ export function useThreadOutboxDrain(): void {
             messageId: queuedMessage.messageId,
             role: "user",
             text: queuedMessage.text,
-            attachments: toUploadChatImageAttachments(queuedMessage.attachments),
+            attachments: queuedMessage.attachments,
           },
           modelSelection: settings.modelSelection,
           runtimeMode: settings.runtimeMode,
