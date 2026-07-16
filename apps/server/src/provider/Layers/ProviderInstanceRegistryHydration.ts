@@ -118,6 +118,9 @@ const SettingsWatcherLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const mutator = yield* ProviderInstanceRegistryMutator;
     const serverSettings = yield* ServerSettingsService;
+    // `ServerSettingsService` replays its latest full snapshot, so a change
+    // published between initial hydration and this lazy stream subscription
+    // is still reconciled when the watcher starts.
     yield* serverSettings.streamChanges.pipe(
       Stream.runForEach((next) =>
         mutator
