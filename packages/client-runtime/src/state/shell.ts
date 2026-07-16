@@ -10,6 +10,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
@@ -21,7 +22,7 @@ import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { EnvironmentCacheStore } from "../platform/persistence.ts";
 import { subscribe } from "../rpc/client.ts";
 import { ShellSnapshotLoader } from "./shellSnapshotHttp.ts";
-import { applyShellStreamEvent } from "./shellReducer.ts";
+import { applyShellStreamEvent, mergeShellSnapshotProjects } from "./shellReducer.ts";
 import type { EnvironmentCatalogState } from "./connections.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 
@@ -68,21 +69,36 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     status: shellStatusForSnapshot(cachedSnapshot),
     error: Option.none(),
   });
+  const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
+    Option.none(),
+  );
   const persistence = yield* Queue.sliding<OrchestrationV2ShellSnapshot>(1);
 
   const persist = Effect.fn("EnvironmentShellState.persist")(function* (
     snapshot: OrchestrationV2ShellSnapshot,
   ) {
-    yield* cache.saveShell(environmentId, snapshot).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("Could not persist environment shell cache.").pipe(
-          Effect.annotateLogs({
-            environmentId,
-            ...safeErrorLogAttributes(error),
-          }),
+    let nextSnapshot = snapshot;
+    while (true) {
+      yield* cache.saveShell(environmentId, nextSnapshot).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not persist environment shell cache.").pipe(
+            Effect.annotateLogs({
+              environmentId,
+              ...safeErrorLogAttributes(error),
+            }),
+          ),
         ),
-      ),
-    );
+      );
+
+      const latestSnapshot = yield* Ref.get(latestLiveSnapshot);
+      if (
+        Option.isNone(latestSnapshot) ||
+        latestSnapshot.value.snapshotSequence <= nextSnapshot.snapshotSequence
+      ) {
+        return;
+      }
+      nextSnapshot = latestSnapshot.value;
+    }
   });
 
   yield* Stream.fromQueue(persistence).pipe(
@@ -91,10 +107,22 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     Effect.forkScoped,
   );
 
-  const setDisconnected = SubscriptionRef.update(state, (current) => ({
-    ...current,
-    status: shellStatusForSnapshot(current.snapshot),
-  }));
+  const flushLiveShellSnapshot = Effect.gen(function* () {
+    const snapshot = yield* Ref.get(latestLiveSnapshot);
+    if (Option.isNone(snapshot)) {
+      return;
+    }
+    yield* persist(snapshot.value);
+  });
+
+  const setDisconnected = flushLiveShellSnapshot.pipe(
+    Effect.andThen(
+      SubscriptionRef.update(state, (current) => ({
+        ...current,
+        status: shellStatusForSnapshot(current.snapshot),
+      })),
+    ),
+  );
   const setSynchronizing = SubscriptionRef.update(state, (current) => ({
     ...current,
     status: "synchronizing" as const,
@@ -130,7 +158,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     const current = yield* SubscriptionRef.get(state);
     const nextSnapshot =
       item.kind === "snapshot"
-        ? item.snapshot
+        ? mergeShellSnapshotProjects(Option.getOrNull(current.snapshot), item.snapshot)
         : Option.match(current.snapshot, {
             onNone: () => null,
             onSome: (snapshot) =>
@@ -142,6 +170,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       return;
     }
 
+    yield* Ref.set(latestLiveSnapshot, Option.some(nextSnapshot));
     yield* SubscriptionRef.set(state, {
       snapshot: Option.some(nextSnapshot),
       status: "live",
@@ -202,6 +231,8 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     }),
     Effect.forkScoped,
   );
+
+  yield* Effect.addFinalizer(() => flushLiveShellSnapshot);
 
   return state;
 });

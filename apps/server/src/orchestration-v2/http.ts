@@ -48,7 +48,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.forEach(
           projects,
           (project) =>
-            projectEnrichment.getAvailable(project.workspaceRoot).pipe(
+            projectEnrichment.get(project.workspaceRoot).pipe(
               Effect.map((enrichment) => ({
                 ...project,
                 repositoryIdentity: enrichment.repositoryIdentity,

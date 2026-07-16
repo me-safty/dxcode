@@ -2,7 +2,7 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { v2Project, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
-import { applyShellStreamEvent } from "./shellReducer.ts";
+import { applyShellStreamEvent, mergeShellSnapshotProjects } from "./shellReducer.ts";
 
 describe("applyShellStreamEvent", () => {
   it("ignores stale project updates without mutating the snapshot", () => {
@@ -40,6 +40,81 @@ describe("applyShellStreamEvent", () => {
       projectId: ProjectId.make(v2Project.id),
     });
     expect(removed.projects).toEqual([]);
+  });
+
+  it("keeps prior repositoryIdentity when a delta arrives with null identity", () => {
+    const repositoryIdentity = {
+      canonicalKey: "github.com/example/repo",
+      locator: {
+        source: "git-remote" as const,
+        remoteName: "origin",
+        remoteUrl: "https://github.com/example/repo.git",
+      },
+    };
+    const withIdentity = applyShellStreamEvent(v2ShellSnapshot, {
+      kind: "project.updated",
+      sequence: 1,
+      project: { ...v2Project, repositoryIdentity },
+    });
+    expect(withIdentity.projects[0]?.repositoryIdentity).toEqual(repositoryIdentity);
+
+    const withoutIdentity = applyShellStreamEvent(withIdentity, {
+      kind: "project.updated",
+      sequence: 2,
+      project: { ...v2Project, title: "Still same root", repositoryIdentity: null },
+    });
+    expect(withoutIdentity.projects[0]?.title).toBe("Still same root");
+    expect(withoutIdentity.projects[0]?.repositoryIdentity).toEqual(repositoryIdentity);
+  });
+
+  it("does not keep prior repositoryIdentity after a workspace root move", () => {
+    const repositoryIdentity = {
+      canonicalKey: "github.com/example/repo",
+      locator: {
+        source: "git-remote" as const,
+        remoteName: "origin",
+        remoteUrl: "https://github.com/example/repo.git",
+      },
+    };
+    const withIdentity = applyShellStreamEvent(v2ShellSnapshot, {
+      kind: "project.updated",
+      sequence: 1,
+      project: { ...v2Project, repositoryIdentity },
+    });
+
+    const moved = applyShellStreamEvent(withIdentity, {
+      kind: "project.updated",
+      sequence: 2,
+      project: {
+        ...v2Project,
+        workspaceRoot: "/tmp/other-root",
+        repositoryIdentity: null,
+      },
+    });
+    expect(moved.projects[0]?.workspaceRoot).toBe("/tmp/other-root");
+    expect(moved.projects[0]?.repositoryIdentity).toBeNull();
+  });
+
+  it("merges full snapshot projects without dropping known repositoryIdentity", () => {
+    const repositoryIdentity = {
+      canonicalKey: "github.com/example/repo",
+      locator: {
+        source: "git-remote" as const,
+        remoteName: "origin",
+        remoteUrl: "https://github.com/example/repo.git",
+      },
+    };
+    const previous = {
+      ...v2ShellSnapshot,
+      projects: [{ ...v2Project, repositoryIdentity }],
+    };
+    const next = mergeShellSnapshotProjects(previous, {
+      ...v2ShellSnapshot,
+      snapshotSequence: 2,
+      projects: [{ ...v2Project, title: "Refreshed", repositoryIdentity: null }],
+    });
+    expect(next.projects[0]?.title).toBe("Refreshed");
+    expect(next.projects[0]?.repositoryIdentity).toEqual(repositoryIdentity);
   });
 
   it("moves a thread between active and archive without duplicating it", () => {

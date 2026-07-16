@@ -443,7 +443,9 @@ const makeWsRpcLayer = (
           Effect.forEach(
             projects,
             (project) =>
-              projectEnrichment.getAvailable(project.workspaceRoot).pipe(
+              // Await identity so subscribeShell/HTTP rehydrate does not emit a
+              // null-key shell that splits multi-env groups until later refreshes.
+              projectEnrichment.get(project.workspaceRoot).pipe(
                 Effect.map((enrichment) => ({
                   ...project,
                   repositoryIdentity: enrichment.repositoryIdentity,
@@ -731,33 +733,35 @@ const makeWsRpcLayer = (
             Stream.map((snapshot) => ({ kind: "snapshot" as const, snapshot })),
           );
 
+          // Always attach the enrichment subscription before the first load so
+          // completions that race HTTP snapshot fetch still push a refresh.
           // When the client already holds a shell snapshot (cached, or loaded
-          // over HTTP) it passes that snapshot's sequence, and we resume by
-          // replaying application events after it instead of re-sending the
-          // whole projects/threads list over the socket. The event store
-          // subscribes to live events before reading the persisted tail, so no
-          // event published during the replay window is lost; overlapping events
-          // are deduped by sequence on the client.
-          const base =
-            input.afterSequence !== undefined
-              ? liveFrom(input.afterSequence)
-              : Stream.unwrap(
-                  loadSnapshot().pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new OrchestrationV2GetShellSnapshotError({
-                          message: "Failed to load the application shell snapshot",
-                          cause,
-                        }),
-                    ),
-                    Effect.map((snapshot) =>
-                      Stream.concat(
-                        Stream.make({ kind: "snapshot" as const, snapshot }),
-                        liveFrom(snapshot.snapshotSequence),
-                      ),
-                    ),
-                  ),
+          // over HTTP) it passes that snapshot's sequence. We still emit one
+          // enriched snapshot up front: getAvailable may have been cold on the
+          // HTTP path (null identity), and enrichment PubSub events published
+          // before this subscribe attached are dropped. Rehydrating here fills
+          // repositoryIdentity for cross-environment project grouping even on
+          // afterSequence resumes. Application events after the sequence still
+          // stream as deltas; overlapping events are deduped by sequence on the
+          // client.
+          const base = Stream.unwrap(
+            loadSnapshot().pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationV2GetShellSnapshotError({
+                    message: "Failed to load the application shell snapshot",
+                    cause,
+                  }),
+              ),
+              Effect.map((snapshot) => {
+                const afterSequence = input.afterSequence ?? snapshot.snapshotSequence;
+                return Stream.concat(
+                  Stream.make({ kind: "snapshot" as const, snapshot }),
+                  liveFrom(afterSequence),
                 );
+              }),
+            ),
+          );
 
           return Stream.merge(base, enrichmentRefreshes).pipe(
             Stream.mapError(
