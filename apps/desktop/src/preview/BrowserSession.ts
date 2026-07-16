@@ -11,6 +11,19 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
 
+const ALLOWED_PERMISSIONS = [
+  "clipboard-read",
+  "clipboard-sanitized-write",
+  "notifications",
+  "geolocation",
+] as const;
+const PERMISSION_CHECK_ALLOWLIST: ReadonlySet<string> = new Set(ALLOWED_PERMISSIONS);
+// The request handler can also receive the legacy "clipboard-write" permission name.
+const PERMISSION_REQUEST_ALLOWLIST: ReadonlySet<string> = new Set([
+  ...ALLOWED_PERMISSIONS,
+  "clipboard-write",
+]);
+
 export class BrowserSessionPartitionDerivationError extends Schema.TaggedErrorClass<BrowserSessionPartitionDerivationError>()(
   "BrowserSessionPartitionDerivationError",
   {
@@ -120,9 +133,11 @@ export const make = Effect.gen(function* BrowserSessionMake() {
             .replace(/\s*t3code\/[\d.]+/, "");
           browserSession.setUserAgent(userAgent);
           browserSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-            const allowed = ["clipboard-read", "clipboard-write", "notifications", "geolocation"];
-            callback(allowed.includes(permission));
+            callback(PERMISSION_REQUEST_ALLOWLIST.has(permission));
           });
+          browserSession.setPermissionCheckHandler((_webContents, permission) =>
+            PERMISSION_CHECK_ALLOWLIST.has(permission),
+          );
           const next = new Map(sessions);
           next.set(partition, browserSession);
           return [browserSession, next] as const;

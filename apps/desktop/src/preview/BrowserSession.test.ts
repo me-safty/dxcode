@@ -14,6 +14,7 @@ const { fromPartition, sessions } = vi.hoisted(() => ({
       readonly clearCache: ReturnType<typeof vi.fn>;
       readonly clearStorageData: ReturnType<typeof vi.fn>;
       readonly getUserAgent: ReturnType<typeof vi.fn>;
+      readonly setPermissionCheckHandler: ReturnType<typeof vi.fn>;
       readonly setPermissionRequestHandler: ReturnType<typeof vi.fn>;
       readonly setUserAgent: ReturnType<typeof vi.fn>;
     }
@@ -28,6 +29,13 @@ vi.mock("electron", () => ({
 
 import * as BrowserSession from "./BrowserSession.ts";
 
+type PermissionRequestHandler = (
+  webContents: unknown,
+  permission: string,
+  callback: (granted: boolean) => void,
+) => void;
+type PermissionCheckHandler = (webContents: unknown, permission: string) => boolean;
+
 const layer = BrowserSession.layer.pipe(Layer.provide(NodeServices.layer));
 
 describe("BrowserSession", () => {
@@ -39,6 +47,7 @@ describe("BrowserSession", () => {
         clearCache: vi.fn(() => Promise.resolve()),
         clearStorageData: vi.fn(() => Promise.resolve()),
         getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/0.0.27"),
+        setPermissionCheckHandler: vi.fn(),
         setPermissionRequestHandler: vi.fn(),
         setUserAgent: vi.fn(),
       };
@@ -58,6 +67,35 @@ describe("BrowserSession", () => {
       assert.strictEqual(partition, "persist:t3code-preview-f051bb2c68cb7b2fe969");
       assert.strictEqual(first, second);
       assert.strictEqual(fromPartition.mock.calls.length, 1);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("grants clipboard permissions for previewed pages", () =>
+    Effect.gen(function* () {
+      const browserSessions = yield* BrowserSession.BrowserSession;
+
+      const partition = yield* browserSessions.getPartition("scope-a");
+      yield* browserSessions.getSession("scope-a");
+      const mockSession = sessions.get(partition);
+      assert.isDefined(mockSession);
+
+      assert.strictEqual(mockSession.setPermissionRequestHandler.mock.calls.length, 1);
+      const requestHandler = mockSession.setPermissionRequestHandler.mock
+        .calls[0]?.[0] as PermissionRequestHandler;
+      const requested = new Map<string, boolean>();
+      for (const permission of ["clipboard-read", "clipboard-sanitized-write", "midi"]) {
+        requestHandler(undefined, permission, (granted) => requested.set(permission, granted));
+      }
+      assert.strictEqual(requested.get("clipboard-read"), true);
+      assert.strictEqual(requested.get("clipboard-sanitized-write"), true);
+      assert.strictEqual(requested.get("midi"), false);
+
+      assert.strictEqual(mockSession.setPermissionCheckHandler.mock.calls.length, 1);
+      const checkHandler = mockSession.setPermissionCheckHandler.mock
+        .calls[0]?.[0] as PermissionCheckHandler;
+      assert.strictEqual(checkHandler(undefined, "clipboard-read"), true);
+      assert.strictEqual(checkHandler(undefined, "clipboard-sanitized-write"), true);
+      assert.strictEqual(checkHandler(undefined, "midi"), false);
     }).pipe(Effect.provide(layer)),
   );
 
