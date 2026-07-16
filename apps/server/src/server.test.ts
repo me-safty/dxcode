@@ -702,6 +702,7 @@ const buildAppUnderTest = (options?: {
           getProjectShellById: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
+          getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
@@ -1699,7 +1700,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("rejects managed cloud link proofs for manual endpoint providers", () =>
+  it.effect("rejects cloud link proofs for unsupported endpoint providers", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
@@ -1720,7 +1721,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             wsBaseUrl: linkProofUrl
               .replace("http://", "ws://")
               .replace("/api/connect/link-proof", "/ws"),
-            providerKind: "manual",
+            // "manual" and "cloudflare_tunnel" are supported; "t3_relay" is not.
+            providerKind: "t3_relay",
           },
           origin: {
             localHttpHost: "127.0.0.1",
@@ -3680,18 +3682,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("rejects reusing the same bootstrap credential after it has been exchanged", () =>
+  it.effect("allows reusing the desktop bootstrap credential", () =>
     Effect.gen(function* () {
+      // The desktop-bootstrap grant is delivered over trusted IPC at
+      // backend launch and needs to stay claimable after a renderer
+      // refresh, so it's intentionally reusable (unlike user-facing
+      // one-time pairing credentials).
       yield* buildAppUnderTest();
 
       const first = yield* bootstrapBrowserSession();
       const second = yield* bootstrapBrowserSession();
 
       assert.equal(first.response.status, 200);
-      assert.equal(second.response.status, 401);
-      assert.equal((second.body as { readonly _tag?: string })._tag, "EnvironmentAuthInvalidError");
-      assert.equal((second.body as { readonly code?: string }).code, "auth_invalid");
-      assert.equal((second.body as { readonly reason?: string }).reason, "invalid_credential");
+      assert.equal(second.response.status, 200);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
