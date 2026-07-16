@@ -17,7 +17,10 @@ import {
   updatePreviewServerSnapshot,
   useThreadPreviewState,
 } from "~/previewStateStore";
-import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
+import {
+  resolveBrowserNavigationTarget,
+  resolveDiscoveredServerUrl,
+} from "~/browser/browserTargetResolver";
 import { useEnvironment, useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -115,7 +118,10 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
   const handleSubmitUrl = useCallback(
     async (next: string) => {
       try {
-        const resolvedUrl = resolveDiscoveredServerUrl(threadRef.environmentId, next);
+        const resolvedUrl = resolveBrowserNavigationTarget(threadRef.environmentId, {
+          kind: "url",
+          url: next,
+        }).resolvedUrl;
         if (tabId && previewBridge) {
           // Drive the webview imperatively; `usePreviewBridge` mirrors the
           // resolved URL back to the server so other clients stay in sync.
@@ -133,6 +139,11 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
       }
     },
     [open, tabId, threadRef],
+  );
+
+  const handleOpenServerUrl = useCallback(
+    (next: string) => handleSubmitUrl(resolveDiscoveredServerUrl(threadRef.environmentId, next)),
+    [handleSubmitUrl, threadRef.environmentId],
   );
 
   const handleRefresh = useCallback(() => {
@@ -613,7 +624,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
             environmentId={threadRef.environmentId}
             configuredUrls={configuredUrls}
             recentlySeenUrls={previewState.recentlySeenUrls}
-            onOpenUrl={(next) => void handleSubmitUrl(next)}
+            onOpenUrl={(next) => void handleOpenServerUrl(next)}
           />
         ) : null}
         {snapshot && desktopOverlay ? (

@@ -36,6 +36,30 @@ describe("browser target resolver", () => {
     ).toThrow(/authenticated preview gateway/);
   });
 
+  it("normalizes schemeless direct URLs without remapping loopback hosts", async () => {
+    const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
+    const environmentId = EnvironmentId.make("environment-1");
+
+    expect(
+      resolveBrowserNavigationTarget(environmentId, {
+        kind: "url",
+        url: "localhost:5173/app",
+      }),
+    ).toEqual({
+      requestedUrl: "localhost:5173/app",
+      resolvedUrl: "http://localhost:5173/app",
+      resolutionKind: "direct",
+      environmentId,
+    });
+    expect(
+      resolveBrowserNavigationTarget(environmentId, {
+        kind: "url",
+        url: "example.com/app",
+      }).resolvedUrl,
+    ).toBe("https://example.com/app");
+    expect(readPreparedConnection).not.toHaveBeenCalled();
+  });
+
   it("normalizes schemeless localhost server-picker values", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://localhost:3773" });
     const { resolveDiscoveredServerUrl } = await import("./browserTargetResolver");
