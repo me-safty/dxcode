@@ -6,6 +6,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as Effect from "effect/Effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -77,10 +78,11 @@ export function requireActiveProjectWorkspaceRootAbsent(input: {
   readonly workspaceRoot: string;
   readonly exceptProjectId?: ProjectId;
 }): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const normalizedWorkspaceRoot = normalizeProjectPathForComparison(input.workspaceRoot);
   const existingProject = input.readModel.projects.find(
     (project) =>
       project.deletedAt === null &&
-      project.workspaceRoot === input.workspaceRoot &&
+      normalizeProjectPathForComparison(project.workspaceRoot) === normalizedWorkspaceRoot &&
       project.id !== input.exceptProjectId,
   );
   if (existingProject === undefined) {
@@ -89,7 +91,7 @@ export function requireActiveProjectWorkspaceRootAbsent(input: {
   return Effect.fail(
     invariantError(
       input.command.type,
-      `Active project '${existingProject.id}' already exists for workspace root '${input.workspaceRoot}'.`,
+      `Active project '${existingProject.id}' already exists for workspace root '${normalizedWorkspaceRoot}'.`,
     ),
   );
 }

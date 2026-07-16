@@ -127,7 +127,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
             commandId: CommandId.make("cmd-project-create-duplicate-root"),
             projectId: asProjectId("project-duplicate-root"),
             title: "Duplicate Project",
-            workspaceRoot: "/tmp/project",
+            workspaceRoot: "/tmp/project/",
             createdAt: now,
           },
           readModel,

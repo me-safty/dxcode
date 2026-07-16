@@ -31,6 +31,37 @@ export interface SidebarProjectSnapshot extends Project {
   remoteEnvironmentLabels: readonly string[];
 }
 
+function getProjectFreshnessTime(project: Project): number {
+  const updatedAtTime = Date.parse(project.updatedAt);
+  if (Number.isFinite(updatedAtTime)) {
+    return updatedAtTime;
+  }
+  const createdAtTime = Date.parse(project.createdAt);
+  return Number.isFinite(createdAtTime) ? createdAtTime : 0;
+}
+
+function shouldReplaceDuplicateMember(input: {
+  existingMember: SidebarProjectGroupMember;
+  candidateMember: SidebarProjectGroupMember;
+  primaryEnvironmentId: EnvironmentId | null;
+}): boolean {
+  if (
+    input.primaryEnvironmentId !== null &&
+    input.existingMember.environmentId !== input.primaryEnvironmentId &&
+    input.candidateMember.environmentId === input.primaryEnvironmentId
+  ) {
+    return true;
+  }
+
+  const existingFreshness = getProjectFreshnessTime(input.existingMember);
+  const candidateFreshness = getProjectFreshnessTime(input.candidateMember);
+  if (candidateFreshness !== existingFreshness) {
+    return candidateFreshness > existingFreshness;
+  }
+
+  return input.candidateMember.id > input.existingMember.id;
+}
+
 export function buildPhysicalToLogicalProjectKeyMap(input: {
   projects: ReadonlyArray<Project>;
   settings: ProjectGroupingSettings;
@@ -67,9 +98,21 @@ export function buildSidebarProjectSnapshots(input: {
     };
     const existing = groupedMembers.get(logicalKey);
     if (existing) {
-      if (
-        existing.some((existingMember) => existingMember.physicalProjectKey === physicalProjectKey)
-      ) {
+      const duplicateIndex = existing.findIndex(
+        (existingMember) => existingMember.physicalProjectKey === physicalProjectKey,
+      );
+      if (duplicateIndex !== -1) {
+        const existingMember = existing[duplicateIndex];
+        if (
+          existingMember &&
+          shouldReplaceDuplicateMember({
+            existingMember,
+            candidateMember: member,
+            primaryEnvironmentId: input.primaryEnvironmentId,
+          })
+        ) {
+          existing[duplicateIndex] = member;
+        }
         continue;
       }
       existing.push(member);

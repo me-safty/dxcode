@@ -126,9 +126,12 @@ describe("environment grouping", () => {
       id: ProjectId.make("project-duplicate"),
       workspaceRoot: "/tmp/shared-repo/",
       repositoryIdentity,
+      updatedAt: "2026-01-01T00:00:00.000Z",
     });
     const primary = makeProject({
+      id: ProjectId.make("project-primary"),
       repositoryIdentity,
+      updatedAt: "2026-01-02T00:00:00.000Z",
     });
     const remote = makeProject({
       id: ProjectId.make("project-remote"),
@@ -151,5 +154,31 @@ describe("environment grouping", () => {
       primary.id,
       remote.id,
     ]);
+  });
+
+  it("prefers the fresher project row when duplicate stale rows are ordered first", () => {
+    const staleDuplicate = makeProject({
+      id: ProjectId.make("project-stale"),
+      workspaceRoot: "/tmp/shared-repo/",
+      repositoryIdentity,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const canonical = makeProject({
+      id: ProjectId.make("project-canonical"),
+      workspaceRoot: "/tmp/shared-repo",
+      repositoryIdentity,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    const snapshots = buildSidebarProjectSnapshots({
+      projects: [staleDuplicate, canonical],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => "primary",
+    });
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]?.memberProjects.map((project) => project.id)).toEqual([canonical.id]);
+    expect(snapshots[0]?.id).toBe(canonical.id);
   });
 });
