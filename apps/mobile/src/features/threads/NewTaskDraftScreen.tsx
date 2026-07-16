@@ -422,6 +422,7 @@ export function NewTaskDraftScreen(props: {
                           onPress: () => void cancelImport(),
                         },
                       ],
+                      { cancelable: false },
                     );
                   }
                 };
@@ -433,6 +434,7 @@ export function NewTaskDraftScreen(props: {
               onPress: () => setShareImportAttempt((attempt) => attempt + 1),
             },
           ],
+          { cancelable: false },
         );
       })
       .finally(() => {
