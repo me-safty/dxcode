@@ -102,6 +102,39 @@ function optionsSignature(value: unknown, seen = new WeakSet<object>()): string 
   return String(value);
 }
 
+function stabilizeOptionFunctions(
+  value: unknown,
+  path: string,
+  latestFunctions: Map<string, (...args: unknown[]) => unknown>,
+  wrappers: Map<string, (...args: unknown[]) => unknown>,
+): unknown {
+  if (typeof value === "function") {
+    latestFunctions.set(path, value as (...args: unknown[]) => unknown);
+    let wrapper = wrappers.get(path);
+    if (!wrapper) {
+      wrapper = (...args: unknown[]) => {
+        return latestFunctions.get(path)?.(...args);
+      };
+      wrappers.set(path, wrapper);
+    }
+    return wrapper;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      stabilizeOptionFunctions(entry, `${path}[${index}]`, latestFunctions, wrappers),
+    );
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        stabilizeOptionFunctions(entry, `${path}.${key}`, latestFunctions, wrappers),
+      ]),
+    );
+  }
+  return value;
+}
+
 export function NativeStackScreenOptions(props: {
   readonly options?: AppNativeStackNavigationOptions;
   readonly listeners?: Record<string, (event: never) => void>;
@@ -109,21 +142,31 @@ export function NativeStackScreenOptions(props: {
 }) {
   const navigation = useNativeStackNavigation();
   const lastAppliedOptionsSignatureRef = useRef<string | undefined>(undefined);
+  const latestOptionFunctionsRef = useRef(new Map<string, (...args: unknown[]) => unknown>());
+  const optionFunctionWrappersRef = useRef(new Map<string, (...args: unknown[]) => unknown>());
   const normalizedOptions = useMemo(() => normalizeScreenOptions(props.options), [props.options]);
+  const stableOptions = normalizedOptions
+    ? (stabilizeOptionFunctions(
+        normalizedOptions,
+        "options",
+        latestOptionFunctionsRef.current,
+        optionFunctionWrappersRef.current,
+      ) as NativeStackNavigationOptions)
+    : undefined;
 
   useLayoutEffect(() => {
-    if (!navigation || !normalizedOptions) {
+    if (!navigation || !stableOptions) {
       return;
     }
-    const signature = optionsSignature(normalizedOptions);
+    const signature = optionsSignature(stableOptions);
     // Avoid re-entering navigation state when semantically equal options are
     // reapplied every layout (common when callers pass unstable object literals).
     if (lastAppliedOptionsSignatureRef.current === signature) {
       return;
     }
     lastAppliedOptionsSignatureRef.current = signature;
-    navigation.setOptions(normalizedOptions);
-  }, [navigation, normalizedOptions]);
+    navigation.setOptions(stableOptions);
+  }, [navigation, stableOptions]);
 
   useEffect(() => {
     if (!navigation || !props.listeners) {
