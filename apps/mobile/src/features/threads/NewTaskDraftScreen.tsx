@@ -320,6 +320,7 @@ export function NewTaskDraftScreen(props: {
     shareImportDraftBackupRef.current.set(importKey, draftBackup);
     const importToken = Symbol(importKey);
     let didReserveShare = false;
+    let needsDraftRestore = false;
     activeShareImportTokenRef.current = importToken;
     setImportingShareKey(importKey);
     void (async () => {
@@ -336,6 +337,7 @@ export function NewTaskDraftScreen(props: {
       ) {
         return;
       }
+      needsDraftRestore = true;
       const { skippedAttachmentCount } = await mergeComposerDraftContent(draftKey, {
         text: incomingShare.text,
         attachments: incomingShare.attachments,
@@ -388,9 +390,9 @@ export function NewTaskDraftScreen(props: {
                   cancellingShareImportKeyRef.current = importKey;
                   setIsCancellingShareImport(true);
                   try {
-                    const currentDraft = getComposerDraftSnapshot(draftKey);
-                    if (currentDraft.importedShareIds?.includes(shareId)) {
+                    if (needsDraftRestore) {
                       await restoreComposerDraftSnapshot(draftKey, draftBackup);
+                      needsDraftRestore = false;
                     }
                     if (didReserveShare) {
                       await releaseShareReservation(shareId, {

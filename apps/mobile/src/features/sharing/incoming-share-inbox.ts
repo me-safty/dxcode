@@ -169,7 +169,9 @@ export class IncomingShareInbox {
       const persisted = await this.dependencies.loadDrafts();
       const target = persisted.find((draft) => draft.id === shareId);
       if (!target) {
-        throw new Error("The shared content is no longer available.");
+        // Conditional release is idempotent: if another operation already
+        // consumed the share, no reservation remains to clean up.
+        return sortAndDedupeIncomingShares(persisted);
       }
       if (!target.destination) {
         return sortAndDedupeIncomingShares(persisted);

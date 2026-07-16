@@ -220,4 +220,17 @@ describe("IncomingShareInbox", () => {
     ).rejects.toThrow("reservation changed");
     expect(persisted.get("share-stable")?.destination?.projectId).toBe("project-2");
   });
+
+  it("treats an already-removed share as an already-released reservation", async () => {
+    const { inbox, persisted } = createHarness();
+    persisted.set("share-other", draft("share-other"));
+
+    await expect(
+      inbox.releaseReservation("share-stable", {
+        environmentId: "environment-1",
+        projectId: "project-1",
+      }),
+    ).resolves.toEqual([draft("share-other")]);
+    expect([...persisted.values()]).toEqual([draft("share-other")]);
+  });
 });
