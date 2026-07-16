@@ -22,7 +22,7 @@ export function CompactBrandTitle() {
       <Text
         style={{
           color: mutedColor,
-          fontFamily: "DMSans_500Medium",
+          fontFamily: "DMSans-Medium",
           fontSize: 14,
           letterSpacing: -0.35,
         }}
@@ -40,7 +40,7 @@ export function CompactBrandTitle() {
         <Text
           style={{
             color: mutedColor,
-            fontFamily: "DMSans_700Bold",
+            fontFamily: "DMSans-Bold",
             fontSize: 9,
             letterSpacing: 0.9,
             textTransform: "uppercase",
