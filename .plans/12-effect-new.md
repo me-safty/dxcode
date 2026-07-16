@@ -1,67 +1,34 @@
-# Effect Migration Plan (From Current State)
+# Effect Runtime Cutover
 
-Current status summary:
+Status: **Completed; supersedes the staged checklist in `11-effect.md`**
+Last reviewed: 2026-07-13
 
-- Service contracts, typed errors, and most checkpoint/persistence services exist.
-- `ProviderServiceLive` is already native orchestration (not a thin adapter).
-- Production server path still uses legacy `ProviderManager`/`FilesystemCheckpointStore`.
-- Checkpoint flow now avoids snapshot re-sync and is write-time driven.
+## Outcome
 
-## PR 1: Wire Provider/Checkpoint Effect Stack Into `wsServer`
+The old provider/checkpoint stack is no longer the production path. The server composes Effect services for provider sessions, orchestration, persistence, checkpointing, terminals, VCS, source control, auth, and transport.
 
-- Build one runtime layer graph for provider + checkpoint + persistence + orchestration.
-- Resolve `ProviderService` from runtime in `wsServer`.
-- Replace `ProviderManager` method calls in WS handlers with `ProviderService` calls.
-- Forward provider events by subscribing to `ProviderService.subscribeToEvents`.
-- Keep WS method/push payloads identical.
+Current anchors:
 
-## PR 2: Runtime Composition + Startup Ownership
+- `apps/server/src/serverRuntimeStartup.ts` and domain `runtimeLayer.ts` modules compose startup ownership.
+- `apps/server/src/provider/Layers/ProviderService.ts` coordinates registered provider adapters.
+- `apps/server/src/orchestration/Services` and `Layers` separate contracts from implementations.
+- `apps/server/src/orchestration/Services/RuntimeReceiptBus.ts` exposes provider-neutral completion signals.
+- `apps/server/src/ws.ts` maps the typed RPC group to server services.
 
-- Create/centralize `AppLive` composition for server startup.
-- Ensure outer runtime provides Node/platform services once.
-- Ensure migrations run at startup via scoped/layer startup path.
-- Remove ad-hoc service initialization in request-time paths.
+## Replaced assumptions
 
-## PR 3: Session Lifecycle Hygiene + Checkpoint Invariants
+- There is no legacy `ProviderManager` cutover left to schedule.
+- Checkpoint correctness is expressed through reactors, persisted projections, and receipts rather than after-the-fact synchronization.
+- Provider event fanout is provider-neutral and backpressure-aware.
+- Codex protocol lifecycle is isolated in a dedicated package and adapter.
+- New migrations must preserve upgrade history; the database is no longer assumed disposable.
 
-- Add explicit checkpoint session cleanup on `stopSession` / `stopAll`.
-- Remove per-session lock/cwd map leaks.
-- Keep strict invariant model:
-  - root checkpoint created at session initialization before agent modifications
-  - each completed turn captures filesystem checkpoint and persists metadata
-  - no after-the-fact metadata rebuild/sync
-- Add tests for lifecycle cleanup and invariant-failure surfaces.
+## Maintenance rules
 
-## PR 4: Provider Event Stream Hardening (Without Extra Service Fragmentation)
+- Extend the existing layer graph instead of creating request-local runtimes.
+- Keep transport payloads stable and schema-decoded at the edge.
+- Make shutdown, cancellation, and worker failure testable without timing sleeps.
 
-- Keep `ProviderService` as the public event surface.
-- Internally move callback fanout to Effect concurrency primitives (`Queue`/`PubSub`) for ordering/backpressure control.
-- Keep API as `subscribeToEvents` unless we explicitly choose stream API later.
-- Add tests for ordering and subscriber isolation under load.
+## Validation
 
-## PR 5: Codex Runtime Split (Scoped Effect Core)
-
-- Extract `CodexAppServerManager` responsibilities into Effect-native layers:
-  - scoped process lifecycle
-  - RPC request/response + pending map via `Deferred`
-  - session registry/state
-- Keep `CodexAdapter` contract stable while swapping internals.
-- Preserve protocol behavior and timeout semantics.
-
-## PR 6: Codex Protocol Decode Hardening
-
-- Replace ad-hoc unknown parsing with runtime schema decode.
-- Map decode failures to typed tagged errors with `cause` retained.
-- Add regression tests for malformed/partial protocol frames.
-
-## PR 7: Remove Legacy Provider Stack
-
-- Remove `ProviderManager` + legacy checkpoint integration from runtime path.
-- Remove `FilesystemCheckpointStore` from active server flow (keep only if explicitly needed for compatibility tooling).
-- Update tests to assert only Effect service path is used.
-
-## PR 8: Final Cleanup + Docs
-
-- Update architecture docs with final layer graph and service boundaries.
-- Document error model and recovery semantics.
-- Trim dead compatibility code and stale plan references.
+Use `vp test` for affected services, `vp run test` for cross-runtime changes, then run the repository baseline.

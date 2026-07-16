@@ -1,41 +1,29 @@
-# Plan: Move Renderer Persisted-State Validation to Zod
+# Persisted Client-State Validation and Migration
 
-## Summary
+Status: **Superseded**
+Last reviewed: 2026-07-13
 
-Use explicit Zod schemas for localStorage state parsing and migration.
+## Original intent
 
-## Motivation
+Replace manual renderer `localStorage` sanitizers with versioned Zod schemas.
 
-- `apps/renderer/src/store.ts` has large manual sanitize functions.
-- Manual type guards are verbose and easier to get wrong during schema evolution.
+## Current state
 
-## Scope
+The renderer and Zod assumptions are obsolete:
 
-- Renderer state hydration/persistence path.
-- No backend/protocol changes.
+- Durable project/thread state is server-authoritative and projected from `apps/server/src/orchestration` and `apps/server/src/persistence`.
+- Shared wire and persistence shapes use Effect Schema in `packages/contracts`.
+- Cross-client reactive state lives in `packages/client-runtime/src/state`.
+- Web-only preferences and drafts use focused Zustand stores such as `apps/web/src/composerDraftStore.ts`, with explicit migrations for browser-owned state.
 
-## Proposed Changes
+## Current policy
 
-1. Add schema module: `apps/renderer/src/persistenceSchema.ts`
-   - Persisted payload versions (`v1`, `v2`)
-   - Thread/message/project schemas
-2. Replace `sanitizeProjects/sanitizeThreads/sanitizeMessages` with schema parsing + transforms.
-3. Keep migration logic explicit (legacy model migration and key migration).
-4. Add tests for:
-   - Invalid payload fallback to initial state
-   - Legacy payload migration
-   - Unknown thread/project references filtered
-
-## Risks
-
-- Overly strict schemas could drop valid historical data unexpectedly.
+- Do not persist a second authoritative copy of orchestration state in the browser.
+- Decode network, disk, and IPC input at the owning boundary with Effect Schema.
+- Version browser-owned persisted state and make migrations deterministic, idempotent, and tolerant of older optional fields.
+- Keep URL/blob lifecycle and other browser runtime work out of schema-only contracts.
+- Test corrupt payload fallback and at least one real previous-version migration.
 
 ## Validation
 
-- Unit tests for migration/hydration.
-- Manual reload test with existing localStorage data.
-
-## Done Criteria
-
-- Store hydration logic is schema-driven.
-- Migration behavior is tested and documented.
+Run the affected store migration tests with `vp test`, then the repository baseline.

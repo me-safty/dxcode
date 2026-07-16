@@ -1,42 +1,29 @@
-# Plan: Expand Event/State Transition Test Coverage
+# Event and Client-State Regression Coverage
 
-## Summary
+Status: **Completed as a foundation; ongoing as a testing rule**
+Last reviewed: 2026-07-13
 
-Add focused tests for renderer event handling and session evolution logic.
+## Current state
 
-## Motivation
+The old renderer reducer is no longer the event boundary. Coverage is distributed with ownership:
 
-- Core behavior is event-driven and stateful.
-- Existing renderer tests cover only a subset of timeline/model behavior.
+- `apps/server/src/orchestration` tests command invariants, deciders, projectors, reactors, projections, and receipts.
+- `packages/client-runtime/src/state` tests cross-web/mobile snapshots, reducers, atoms, and command scheduling.
+- `apps/web/src/orchestrationRecovery.test.ts` and component logic tests cover reconnect and presentation behavior.
+- Provider adapters test provider-native to canonical runtime event mapping.
 
-## Scope
+## Required scenarios for new event work
 
-- `apps/renderer/src/session-logic.test.ts`
-- Optional reducer tests for `apps/renderer/src/store.ts`.
+- duplicate, delayed, and out-of-order delivery
+- reconnect snapshot plus incremental replay
+- partial stream and interruption
+- worker failure without permanent ingestion shutdown
+- session restart and stale runtime events
+- checkpoint/diff completion before user-visible quiescence
+- isolation between environments and threads
 
-## Proposed Changes
-
-1. Add tests for `evolveSession`:
-   - `thread/started`
-   - `turn/started`
-   - `turn/completed` success/failure
-   - error/session closed events
-2. Add tests for `applyEventToMessages`:
-   - start/delta/completed flow
-   - out-of-order event cases
-   - turn completion clearing streaming flags
-3. Add reducer integration tests for `APPLY_EVENT`.
-
-## Risks
-
-- Tests may be brittle if event payload fixtures are too coupled to implementation details.
+Use canonical provider-neutral fixtures outside adapter tests. Prefer runtime receipts and semantic state assertions over polling and sleeps.
 
 ## Validation
 
-- `bun run test`
-- Ensure new tests remain deterministic and fast.
-
-## Done Criteria
-
-- High-risk event transitions are covered by unit tests.
-- Regressions in stream assembly/session status are caught quickly.
+Run focused tests with `vp test`, use `vp run test` when a cross-package event contract changes, then run the repository baseline.
