@@ -254,9 +254,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const estimatedOverlayHeight = composerOverlapHeight + activeWorkIndicatorHeight;
   const [composerOverlayHeight, setComposerOverlayHeight] = useState(estimatedOverlayHeight);
   useEffect(() => {
-    setComposerOverlayHeight((current) =>
-      Math.abs(current - estimatedOverlayHeight) > 1 ? estimatedOverlayHeight : current,
-    );
+    // A measured overlay can include approval or input cards that are not part
+    // of this baseline estimate. Keep that larger measurement until layout
+    // reports a new height, while ensuring chrome changes never under-estimate
+    // the composer inset.
+    setComposerOverlayHeight((current) => Math.max(current, estimatedOverlayHeight));
   }, [estimatedOverlayHeight]);
   // The overlay's measured height includes the home-indicator inset (the
   // composer pads it), but contentInsetAdjustmentBehavior="automatic" makes
