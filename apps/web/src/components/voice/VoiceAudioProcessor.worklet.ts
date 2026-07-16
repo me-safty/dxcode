@@ -27,6 +27,7 @@ class VoiceAudioProcessor extends AudioWorkletProcessor {
   private playbackQueuedSamples = 0;
   private playbackOffset = 0;
   private playbackStarted = false;
+  private playbackDrainReported = true;
   private muted = false;
 
   constructor() {
@@ -40,6 +41,7 @@ class VoiceAudioProcessor extends AudioWorkletProcessor {
           const samples = new Float32Array(message.samples);
           this.playbackQueue.push(samples);
           this.playbackQueuedSamples += samples.length;
+          this.playbackDrainReported = false;
           if (this.playbackQueuedSamples >= this.playbackPrebufferSamples) {
             this.playbackStarted = true;
           }
@@ -53,6 +55,7 @@ class VoiceAudioProcessor extends AudioWorkletProcessor {
           this.playbackQueuedSamples = 0;
           this.playbackOffset = 0;
           this.playbackStarted = false;
+          this.playbackDrainReported = true;
           break;
         case "muted":
           this.muted = true;
@@ -99,6 +102,10 @@ class VoiceAudioProcessor extends AudioWorkletProcessor {
       const next = this.playbackQueue[0];
       if (!next) {
         this.playbackStarted = false;
+        if (!this.playbackDrainReported) {
+          this.playbackDrainReported = true;
+          this.port.postMessage({ type: "playback-drained" }, []);
+        }
         break;
       }
       const available = next.length - this.playbackOffset;

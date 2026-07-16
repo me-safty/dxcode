@@ -50,7 +50,15 @@ export class VoiceAudioController {
   private mediaStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
+  private playbackDrained = true;
+  private readonly playbackDrainWaiters = new Set<() => void>();
   private muted = false;
+
+  private markPlaybackDrained(): void {
+    this.playbackDrained = true;
+    for (const resolve of this.playbackDrainWaiters) resolve();
+    this.playbackDrainWaiters.clear();
+  }
 
   private getAudioContext(): AudioContext {
     if (this.audioContext === null) {
@@ -94,6 +102,8 @@ export class VoiceAudioController {
       const message = event.data as { readonly type: string; readonly samples?: ArrayBuffer };
       if (message.type === "input" && message.samples) {
         onAudioData(float32ToPcm16Base64(new Float32Array(message.samples)));
+      } else if (message.type === "playback-drained") {
+        this.markPlaybackDrained();
       }
     });
     worklet.port.start();
@@ -127,9 +137,15 @@ export class VoiceAudioController {
 
   play(encodedAudio: string): void {
     const samples = base64Pcm16ToFloat32(encodedAudio);
+    this.playbackDrained = false;
     this.workletNode?.port.postMessage({ type: "playback", samples: samples.buffer }, [
       samples.buffer,
     ]);
+  }
+
+  waitForPlaybackComplete(): Promise<void> {
+    if (this.playbackDrained) return Promise.resolve();
+    return new Promise((resolve) => this.playbackDrainWaiters.add(resolve));
   }
 
   flushPlayback(): void {
@@ -138,6 +154,7 @@ export class VoiceAudioController {
 
   stopPlayback(): void {
     this.workletNode?.port.postMessage({ type: "clear-playback" }, []);
+    this.markPlaybackDrained();
   }
 
   async stop(): Promise<void> {
