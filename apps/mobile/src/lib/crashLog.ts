@@ -7,6 +7,14 @@ const REPORTED_ON_LAUNCH_COUNT = 3;
 
 let crashSequence = 0;
 
+function safeErrorMessage(error: unknown): string {
+  try {
+    return String(error);
+  } catch {
+    return "[Uncoercible error]";
+  }
+}
+
 export function installCrashLogger(): void {
   const errorUtils = (globalThis as { ErrorUtils?: ErrorUtilsInterface }).ErrorUtils;
   if (errorUtils === undefined) {
@@ -37,7 +45,7 @@ function persistCrashRecord(error: unknown): void {
   const record = {
     capturedAt: new Date().toISOString(),
     isFatal: true,
-    message: cause?.message ?? String(error),
+    message: cause?.message ?? safeErrorMessage(error),
     name: cause?.name ?? null,
     stack: cause?.stack ?? null,
   };
