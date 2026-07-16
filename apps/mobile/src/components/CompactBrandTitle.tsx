@@ -14,8 +14,10 @@ export function CompactBrandTitle() {
 
   return (
     <View
+      aria-level={1}
       accessibilityLabel="T3 Code"
       accessible
+      role="heading"
       style={{ alignItems: "center", flexDirection: "row", gap: 6 }}
     >
       <T3Wordmark color={iconColor} height={11} />

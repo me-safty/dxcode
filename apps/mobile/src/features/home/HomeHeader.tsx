@@ -11,7 +11,6 @@ import type { SearchBarCommands } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ControlPillMenu } from "../../components/ControlPill";
-import { renderCompactBrandTitle } from "../../components/CompactBrandTitle";
 import { SymbolView } from "../../components/AppSymbol";
 import { T3Wordmark } from "../../components/T3Wordmark";
 import { useThemeColor } from "../../lib/useThemeColor";
@@ -270,9 +269,7 @@ function IosHomeHeader(props: HomeHeaderProps) {
         options={{
           // Static header config (glass, title, fonts) lives in Stack.tsx
           // (GLASS_HEADER_OPTIONS). Only dynamic values are set here.
-          headerTitle: renderCompactBrandTitle,
           headerTintColor: iconColor,
-          title: "T3 Code",
           unstable_headerRightItems:
             Platform.OS === "ios"
               ? () => [
