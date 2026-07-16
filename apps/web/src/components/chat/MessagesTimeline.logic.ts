@@ -64,6 +64,32 @@ export function resolveTimelineMinimapHasPersistentGutter(viewportWidth: number)
   return sideGutter >= TIMELINE_MINIMAP_PERSISTENT_GUTTER;
 }
 
+export const TIMELINE_MINIMAP_HIT_STRIP_LEFT = 12;
+export const TIMELINE_MINIMAP_HIT_STRIP_MAX_WIDTH = 40;
+
+/**
+ * The minimap overlays the viewport's left edge while the content column is
+ * centered, so the side gutter between them shrinks under browser zoom or a
+ * narrow pane. A fixed-width hover strip would then sit on top of the message
+ * text and swallow its pointer events. Cap the strip's width so it never
+ * extends past the gutter into the content column; 0 disables the strip.
+ */
+export function resolveTimelineMinimapHitStripWidth(viewportWidth: number): number {
+  if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) {
+    return 0;
+  }
+
+  const contentWidth = Math.min(viewportWidth, TIMELINE_CONTENT_MAX_WIDTH);
+  const sideGutter = Math.max(0, (viewportWidth - contentWidth) / 2);
+  return Math.max(
+    0,
+    Math.min(
+      TIMELINE_MINIMAP_HIT_STRIP_MAX_WIDTH,
+      Math.floor(sideGutter) - TIMELINE_MINIMAP_HIT_STRIP_LEFT,
+    ),
+  );
+}
+
 function computeElapsedMs(startIso: string, endIso: string): number | null {
   const start = Date.parse(startIso);
   const end = Date.parse(endIso);
