@@ -357,6 +357,41 @@ export function resolveThreadRowClassName(input: {
   return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
 }
 
+// ── Sidebar v2 status model ─────────────────────────────────────────
+// Four visual states, three colors: color is reserved for "act now"
+// (approval), "in motion" (working), and "broken" (failed). Ready is the
+// unlabeled resting state — the agent stopped and is waiting on the user,
+// whether it finished, asked a question, or proposed a plan.
+export type SidebarV2Status = "approval" | "working" | "failed" | "ready";
+
+type SidebarV2StatusInput = Pick<SidebarThreadSummary, "hasPendingApprovals" | "session">;
+
+export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2Status {
+  if (thread.hasPendingApprovals) {
+    return "approval";
+  }
+  if (thread.session?.status === "running" || thread.session?.status === "starting") {
+    return "working";
+  }
+  if (thread.session?.status === "error") {
+    return "failed";
+  }
+  return "ready";
+}
+
+// v2 sort: static creation order, newest thread on top. Activity NEVER
+// reorders the list — a row holds its position from open until settled, so
+// the screen only moves at lifecycle transitions. Status (including pending
+// approval) is carried by each card's edge strip, not by position.
+export function sortThreadsForSidebarV2<
+  T extends { readonly id: string; readonly createdAt: string },
+>(threads: readonly T[]): T[] {
+  return [...threads].toSorted(
+    (left, right) =>
+      Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.id.localeCompare(right.id),
+  );
+}
+
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {

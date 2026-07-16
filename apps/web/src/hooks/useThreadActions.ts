@@ -50,6 +50,14 @@ export function useThreadActions() {
   const deleteThreadMutation = useAtomCommand(threadEnvironment.delete, {
     reportFailure: false,
   });
+  // Client-only settled model: settle/unsettle ride the pre-existing archive
+  // lifecycle so no server upgrade is required. See threadSettled.ts.
+  const settleThreadMutation = useAtomCommand(threadEnvironment.archive, {
+    reportFailure: false,
+  });
+  const unsettleThreadMutation = useAtomCommand(threadEnvironment.unarchive, {
+    reportFailure: false,
+  });
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession);
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
@@ -345,6 +353,54 @@ export function useThreadActions() {
     ],
   );
 
+  const settleThread = useCallback(
+    async (target: ScopedThreadRef) => {
+      const resolved = resolveThreadTarget(target);
+      // Settle rides archive, so it inherits archive's guard: never
+      // interrupt a thread mid-turn.
+      if (
+        resolved &&
+        resolved.thread.session?.status === "running" &&
+        resolved.thread.session.activeTurnId != null
+      ) {
+        return AsyncResult.failure(
+          Cause.fail(
+            new ThreadArchiveBlockedError({
+              environmentId: resolved.threadRef.environmentId,
+              threadId: resolved.threadRef.threadId,
+            }),
+          ),
+        );
+      }
+      // Settle is a high-frequency lifecycle action and stays silent — no
+      // toast. (The old "Thread settled" toast offering worktree removal was
+      // noise; disk cleanup belongs in an explicit surface, not a
+      // notification.)
+      return settleThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId },
+      });
+    },
+    [resolveThreadTarget, settleThreadMutation],
+  );
+
+  const unsettleThread = useCallback(
+    async (target: ScopedThreadRef) => {
+      // Auto-settled rows (inactivity / merged PR) are not archived; sending
+      // unarchive for them would be rejected by the server. There is nothing
+      // to undo client-side, so succeed as a no-op.
+      const resolved = resolveThreadTarget(target);
+      if (resolved && resolved.thread.archivedAt === null) {
+        return AsyncResult.success(undefined);
+      }
+      return unsettleThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId },
+      });
+    },
+    [resolveThreadTarget, unsettleThreadMutation],
+  );
+
   const confirmAndDeleteThread = useCallback(
     async (target: ScopedThreadRef) => {
       const localApi = readLocalApi();
@@ -379,7 +435,16 @@ export function useThreadActions() {
       unarchiveThread,
       deleteThread,
       confirmAndDeleteThread,
+      settleThread,
+      unsettleThread,
     }),
-    [archiveThread, confirmAndDeleteThread, deleteThread, unarchiveThread],
+    [
+      archiveThread,
+      confirmAndDeleteThread,
+      deleteThread,
+      settleThread,
+      unarchiveThread,
+      unsettleThread,
+    ],
   );
 }

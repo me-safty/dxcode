@@ -14,7 +14,7 @@ import type {
 } from "@t3tools/contracts";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,7 +23,8 @@ import { useThemeColor } from "../../lib/useThemeColor";
 import { EmptyState } from "../../components/EmptyState";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import type { SavedRemoteConnection } from "../../lib/connection";
-import { scopedProjectKey } from "../../lib/scopedEntities";
+import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
+import { useArchivedThreadSnapshots } from "../archive/useArchivedThreadSnapshots";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
@@ -32,6 +33,8 @@ import {
   ThreadListRow,
   ThreadListShowMoreRow,
 } from "../threads/thread-list-items";
+import { ThreadListV2Row } from "../threads/thread-list-v2-items";
+import { buildThreadListV2Items, type ThreadListV2Item } from "../threads/threadListV2";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeListLayout,
@@ -73,6 +76,9 @@ interface HomeScreenProps {
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
+  /** Resolves true iff the settle was dispatched and succeeded. */
+  readonly onSettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void;
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
@@ -162,6 +168,9 @@ export function HomeScreen(props: HomeScreenProps) {
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const threadListV2Enabled =
+    AsyncResult.isSuccess(preferencesResult) &&
+    preferencesResult.value.threadListV2Enabled === true;
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
@@ -267,6 +276,189 @@ export function HomeScreen(props: HomeScreenProps) {
     return map;
   }, [props.projects]);
 
+  const projectByKey = useMemo(() => {
+    const map = new Map<string, EnvironmentProject>();
+    for (const project of props.projects) {
+      map.set(scopedProjectKey(project.environmentId, project.id), project);
+    }
+    return map;
+  }, [props.projects]);
+
+  // Thread List v2 (beta): one flat list in creation order, no grouping.
+  // Settled threads collapse into a recency tail below the card block.
+  // Settle = archive in the client-only model, and the live shell stream
+  // drops archived threads — merge them back from the archived snapshot so
+  // they render as the settled tail. Live shells win on overlap.
+  const archivedEnvironmentIds = useMemo(
+    () =>
+      threadListV2Enabled ? props.environments.map((environment) => environment.environmentId) : [],
+    [props.environments, threadListV2Enabled],
+  );
+  const { snapshots: archivedSnapshots } = useArchivedThreadSnapshots(archivedEnvironmentIds);
+  // PR states stream in per-row (rows own the VCS subscriptions); a merged or
+  // closed PR auto-settles its thread on the next partition (mirrors web).
+  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
+    ReadonlyMap<string, "open" | "closed" | "merged">
+  >(() => new Map());
+  const handleChangeRequestState = useCallback(
+    (threadKey: string, state: "open" | "closed" | "merged" | null) => {
+      setChangeRequestStateByKey((current) => {
+        if ((current.get(threadKey) ?? null) === state) return current;
+        const next = new Map(current);
+        if (state === null) {
+          next.delete(threadKey);
+        } else {
+          next.set(threadKey, state);
+        }
+        return next;
+      });
+    },
+    [],
+  );
+  // Bridge the gap between the live stream dropping a just-settled thread
+  // and the archived snapshot returning it: hold the shell we settled,
+  // marked archived, until the snapshot carries it. Held explicitly at
+  // settle time so deleted threads are never resurrected.
+  const [settledHolds, setSettledHolds] = useState<ReadonlyMap<string, EnvironmentThreadShell>>(
+    () => new Map(),
+  );
+  const handleSettleThread = useCallback(
+    (thread: EnvironmentThreadShell) => {
+      const threadKey = scopedThreadKey(thread.environmentId, thread.id);
+      setSettledHolds((current) =>
+        new Map(current).set(threadKey, {
+          ...thread,
+          archivedAt: thread.archivedAt ?? new Date().toISOString(),
+        }),
+      );
+      void (async () => {
+        // Roll the optimistic hold back if the settle was blocked or failed —
+        // otherwise a never-archived thread would render settled forever.
+        const succeeded = await props.onSettleThread(thread);
+        if (!succeeded) {
+          setSettledHolds((current) => {
+            const next = new Map(current);
+            next.delete(threadKey);
+            return next;
+          });
+        }
+      })();
+    },
+    [props.onSettleThread],
+  );
+  // Delete and un-settle both invalidate any hold for the thread.
+  const dropSettledHold = useCallback((thread: EnvironmentThreadShell) => {
+    setSettledHolds((current) => {
+      const threadKey = scopedThreadKey(thread.environmentId, thread.id);
+      if (!current.has(threadKey)) return current;
+      const next = new Map(current);
+      next.delete(threadKey);
+      return next;
+    });
+  }, []);
+  const handleDeleteThread = useCallback(
+    (thread: EnvironmentThreadShell) => {
+      dropSettledHold(thread);
+      props.onDeleteThread(thread);
+    },
+    [dropSettledHold, props.onDeleteThread],
+  );
+  const handleUnsettleThread = useCallback(
+    (thread: EnvironmentThreadShell) => {
+      dropSettledHold(thread);
+      props.onUnsettleThread(thread);
+    },
+    [dropSettledHold, props.onUnsettleThread],
+  );
+  useEffect(() => {
+    if (settledHolds.size === 0) return;
+    const covered = new Set<string>();
+    for (const { environmentId, snapshot } of archivedSnapshots) {
+      for (const thread of snapshot.threads) {
+        covered.add(scopedThreadKey(environmentId, thread.id));
+      }
+    }
+    if ([...settledHolds.keys()].some((threadKey) => covered.has(threadKey))) {
+      setSettledHolds((current) => {
+        const next = new Map(current);
+        for (const threadKey of covered) next.delete(threadKey);
+        return next;
+      });
+    }
+  }, [archivedSnapshots, settledHolds]);
+  const threadListV2Items = useMemo(() => {
+    if (!threadListV2Enabled) return [];
+    const merged = new Map<string, EnvironmentThreadShell>();
+    for (const { environmentId, snapshot } of archivedSnapshots) {
+      for (const thread of snapshot.threads) {
+        merged.set(scopedThreadKey(environmentId, thread.id), { ...thread, environmentId });
+      }
+    }
+    for (const thread of props.threads) {
+      merged.set(scopedThreadKey(thread.environmentId, thread.id), thread);
+    }
+    for (const [threadKey, shell] of settledHolds) {
+      if (merged.has(threadKey)) continue;
+      merged.set(threadKey, shell);
+    }
+    return buildThreadListV2Items({
+      threads: [...merged.values()],
+      environmentId: props.selectedEnvironmentId,
+      searchQuery: props.searchQuery,
+      changeRequestStateByKey,
+    });
+  }, [
+    changeRequestStateByKey,
+    settledHolds,
+    archivedSnapshots,
+    props.searchQuery,
+    props.selectedEnvironmentId,
+    props.threads,
+    threadListV2Enabled,
+  ]);
+
+  const renderV2Item = useCallback(
+    ({ item }: LegendListRenderItemProps<ThreadListV2Item>) => (
+      <ThreadListV2Row
+        thread={item.thread}
+        variant={item.variant}
+        showSettledDivider={item.showSettledDivider}
+        project={
+          projectByKey.get(scopedProjectKey(item.thread.environmentId, item.thread.projectId)) ??
+          null
+        }
+        onSelectThread={props.onSelectThread}
+        onArchiveThread={props.onArchiveThread}
+        onDeleteThread={handleDeleteThread}
+        onSettleThread={handleSettleThread}
+        onUnsettleThread={handleUnsettleThread}
+        onChangeRequestState={handleChangeRequestState}
+        projectCwd={
+          projectCwdByKey.get(scopedProjectKey(item.thread.environmentId, item.thread.projectId)) ??
+          null
+        }
+        onSwipeableClose={handleSwipeableClose}
+        onSwipeableWillOpen={handleSwipeableWillOpen}
+      />
+    ),
+    [
+      handleChangeRequestState,
+      handleDeleteThread,
+      handleSettleThread,
+      handleSwipeableClose,
+      handleSwipeableWillOpen,
+      handleUnsettleThread,
+      projectByKey,
+      projectCwdByKey,
+      props.onArchiveThread,
+      props.onSelectThread,
+    ],
+  );
+  const v2KeyExtractor = useCallback(
+    (item: ThreadListV2Item) => `${item.thread.environmentId}:${item.thread.id}`,
+    [],
+  );
+
   const extraData = useMemo(
     () => ({ savedConnectionsById: props.savedConnectionsById, projectCwdByKey }),
     [props.savedConnectionsById, projectCwdByKey],
@@ -360,8 +552,12 @@ export function HomeScreen(props: HomeScreenProps) {
   const keyExtractor = useCallback((item: HomeListItem) => item.key, []);
 
   /* Empty states */
+  // v2 shows archived threads as its settled tail, so an archived-only
+  // workspace still has a list to render there.
   const hasAnyThreads =
-    props.threads.some((thread) => thread.archivedAt === null) || props.pendingTasks.length > 0;
+    props.threads.some((thread) => thread.archivedAt === null) ||
+    props.pendingTasks.length > 0 ||
+    (threadListV2Enabled && threadListV2Items.length > 0);
   const hasResults = projectGroups.length > 0;
   const selectedEnvironmentLabel =
     props.selectedEnvironmentId === null
@@ -427,6 +623,28 @@ export function HomeScreen(props: HomeScreenProps) {
     </>
   );
 
+  // v2 renders queued offline tasks above the thread cards — they are not
+  // thread shells, so the v2 item builder never sees them, but they must
+  // stay visible and deletable while their environment is offline.
+  const v2ListHeader = (
+    <>
+      {listHeader}
+      {props.pendingTasks.map((pendingTask, index) => (
+        <PendingTaskListRow
+          key={pendingTask.message.messageId}
+          variant="compact"
+          pendingTask={pendingTask}
+          environmentLabel={
+            props.savedConnectionsById[pendingTask.message.environmentId]?.environmentLabel ?? null
+          }
+          isLast={index === props.pendingTasks.length - 1}
+          onSelectPendingTask={props.onSelectPendingTask}
+          onDeletePendingTask={props.onDeletePendingTask}
+        />
+      ))}
+    </>
+  );
+
   const listEmpty = !hasResults ? (
     hasSearchQuery ? (
       <EmptyState title="No results" detail={`No threads matching "${props.searchQuery}".`} />
@@ -439,6 +657,41 @@ export function HomeScreen(props: HomeScreenProps) {
       <EmptyState title="No threads yet" detail="Create a task to start a new coding session." />
     )
   ) : null;
+
+  if (threadListV2Enabled) {
+    return (
+      <View className="flex-1 bg-screen">
+        <SwipeableScrollGateProvider enabled={swipeEnabled}>
+          <LegendList
+            data={threadListV2Items}
+            renderItem={renderV2Item}
+            keyExtractor={v2KeyExtractor}
+            drawDistance={500}
+            estimatedItemSize={ESTIMATED_THREAD_ROW_HEIGHT}
+            extraData={projectByKey}
+            ListHeaderComponent={v2ListHeader}
+            ListEmptyComponent={listEmpty}
+            style={{ flex: 1 }}
+            automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
+            contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+            showsVerticalScrollIndicator={false}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+            {...scrollGateHandlers}
+            recycleItems
+            scrollEventThrottle={16}
+            contentContainerStyle={{
+              paddingBottom:
+                Platform.OS === "ios"
+                  ? Math.max(insets.bottom, 24) + 24
+                  : Math.max(insets.bottom, 16) + 88,
+            }}
+          />
+        </SwipeableScrollGateProvider>
+        {connectionStatus}
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 bg-screen">
