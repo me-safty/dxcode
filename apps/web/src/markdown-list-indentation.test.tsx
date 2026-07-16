@@ -50,6 +50,15 @@ describe("remarkNormalizeListItemIndentation", () => {
     expect(html).toContain('<a href="https://example.com">second block</a>');
   });
 
+  it("recursively normalizes lists in recovered tail blocks", () => {
+    const html = renderMarkdown(`-       first block
+
+        -       nested block`);
+
+    expect(html).not.toContain("<pre>");
+    expect(html).toContain("<li>nested block</li>");
+  });
+
   it("preserves fenced code blocks within list items", () => {
     const html = renderMarkdown(`- \`\`\`ts
   const value = 1;

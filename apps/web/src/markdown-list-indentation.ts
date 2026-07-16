@@ -20,6 +20,11 @@ interface MarkdownParser {
   parse(markdown: string): unknown;
 }
 
+interface RecoveredMarkdown {
+  readonly blocks: MarkdownAstNode[];
+  readonly source: string;
+}
+
 const INLINE_PARSE_PREFIX = "t3-markdown-inline-prefix:";
 
 function isSameLineOverIndentedCode(
@@ -51,12 +56,13 @@ function isSameLineOverIndentedCode(
   return sourceCharacter !== "`" && sourceCharacter !== "~";
 }
 
-function parseRecoveredMarkdown(value: string, parser: MarkdownParser): MarkdownAstNode[] {
+function parseRecoveredMarkdown(value: string, parser: MarkdownParser): RecoveredMarkdown {
   // A text prefix forces block-looking input into a paragraph while preserving
   // the processor's configured inline extensions (for example, GFM syntax).
   // Later root children are kept as blocks so blank-line-separated content is
   // never discarded.
-  const document = parser.parse(`${INLINE_PARSE_PREFIX}${value}`) as MarkdownAstNode;
+  const source = `${INLINE_PARSE_PREFIX}${value}`;
+  const document = parser.parse(source) as MarkdownAstNode;
   const blocks = document.children;
   const paragraph = blocks?.[0];
   const children = paragraph?.type === "paragraph" ? paragraph.children : undefined;
@@ -68,27 +74,34 @@ function parseRecoveredMarkdown(value: string, parser: MarkdownParser): Markdown
     typeof first.value !== "string" ||
     !first.value.startsWith(INLINE_PARSE_PREFIX)
   ) {
-    return [{ type: "text", value }];
+    return { blocks: [{ type: "text", value }], source };
   }
 
   const firstValue = first.value.slice(INLINE_PARSE_PREFIX.length);
-  return [
-    {
-      ...paragraph,
-      type: "paragraph",
-      children: [...(firstValue ? [{ ...first, value: firstValue }] : []), ...children.slice(1)],
-    },
-    ...blocks.slice(1),
-  ];
+  return {
+    blocks: [
+      {
+        ...paragraph,
+        type: "paragraph",
+        children: [...(firstValue ? [{ ...first, value: firstValue }] : []), ...children.slice(1)],
+      },
+      ...blocks.slice(1),
+    ],
+    source,
+  };
 }
 
-function blocksFromIndentedCode(node: MarkdownAstNode, parser: MarkdownParser): MarkdownAstNode[] {
+function blocksFromIndentedCode(node: MarkdownAstNode, parser: MarkdownParser): RecoveredMarkdown {
   const value = typeof node.value === "string" ? node.value.trim() : "";
-  const blocks = parseRecoveredMarkdown(value, parser);
-  const first = blocks[0];
-  return first && node.position
-    ? [{ ...first, position: node.position }, ...blocks.slice(1)]
-    : blocks;
+  const recovered = parseRecoveredMarkdown(value, parser);
+  const first = recovered.blocks[0];
+  return {
+    ...recovered,
+    blocks:
+      first && node.position
+        ? [{ ...first, position: node.position }, ...recovered.blocks.slice(1)]
+        : recovered.blocks,
+  };
 }
 
 /**
@@ -106,20 +119,24 @@ function attachListItemIndentationNormalizer(this: MarkdownParser) {
     }
     const markdown = file.value;
 
-    const visit = (node: MarkdownAstNode) => {
+    const visit = (node: MarkdownAstNode, source: string) => {
       if (!node.children) {
         return;
       }
       node.children = node.children.flatMap((child) => {
-        if (isSameLineOverIndentedCode(child, node, markdown)) {
-          return blocksFromIndentedCode(child, this);
+        if (isSameLineOverIndentedCode(child, node, source)) {
+          const recovered = blocksFromIndentedCode(child, this);
+          for (const block of recovered.blocks) {
+            visit(block, recovered.source);
+          }
+          return recovered.blocks;
         }
-        visit(child);
+        visit(child, source);
         return [child];
       });
     };
 
-    visit(tree);
+    visit(tree, markdown);
   };
 }
 
