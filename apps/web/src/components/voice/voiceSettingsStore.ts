@@ -139,6 +139,7 @@ export function createOpenAIRealtimeSessionConfig(
   >,
 ) {
   return {
+    type: "realtime",
     reasoning: { effort: settings.reasoningEffort },
     audio: {
       input: {

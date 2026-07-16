@@ -66,9 +66,16 @@ interface VoiceEvent {
 const VOICE_TOOLS = [
   {
     type: "function",
+    name: "stay_silent",
+    description:
+      "Use when the latest audio does not require a response: silence, background speech, a side conversation, abandoned or incomplete speech, or speech not addressed to the assistant. Emit no audio or text before this call. After it succeeds, remain silent.",
+    parameters: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    type: "function",
     name: "search_web",
     description:
-      "Search the live web with Parallel and return ranked sources with relevant excerpts. Call this before answering any question that needs current or external information.",
+      "Search the live web with Parallel and return ranked sources with relevant excerpts. Call this before answering any question that needs current or external information. The function call must be the first response item: emit no spoken or written preamble before it.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -252,7 +259,7 @@ function sendJson(connection: OpenAIRealtimeConnection, value: unknown): void {
   connection.send(value);
 }
 
-function voiceInstructions(latestAssistantMessage: string | null): string {
+export function voiceInstructions(latestAssistantMessage: string | null): string {
   const initialContext = latestAssistantMessage
     ? `\n\n<latest_task_message>\n${latestAssistantMessage}\n</latest_task_message>`
     : "\n\nThere is no completed AI message in the origin task yet.";
@@ -260,7 +267,7 @@ function voiceInstructions(latestAssistantMessage: string | null): string {
 You are T3 Code's conversational voice copilot inside a desktop interface for coding-agent harnesses. Start silently and wait for the user. Help the user understand the ongoing task, unfamiliar terms, and project context, or help draft an unsent prompt.
 
 # Personality and Tone
-Speak naturally, directly, and calmly. Lead with the answer. Explain unfamiliar terms in plain language without talking down to the user.
+The user is a software developer. Assume technical fluency. Use standard engineering terminology without defining basic concepts unless asked. Be direct, neutral, and information-dense. Do not use analogies or tutorial framing by default.
 
 # Language
 Reply in the language the user is speaking unless they ask for another language.
@@ -269,10 +276,22 @@ Reply in the language the user is speaking unless they ask for another language.
 For direct explanations, answer quickly. For tool decisions, troubleshooting, or multi-step questions, reason before acting. Never reveal private chain-of-thought.
 
 # Preambles and Verbosity
-Direct answers: 1-3 short sentences. Clarifying questions: one question at a time. Troubleshooting: one useful step at a time unless the user asks for the full procedure. Omit greetings, filler, recaps, and generic offers to do more. Do not speak a preamble before web or context tools; stay silent until their result arrives.
+Default spoken answer budget: 35 words. Simple confirmations or definitions: 15 words. Use one sentence when possible and never more than two short sentences unless the user explicitly asks for detail. For a requested technical explanation, use at most three compact points when structure materially helps. Stop as soon as the question is answered.
+
+Do not restate the question, recap, narrate obvious actions, propose an unsolicited next task, or offer follow-up help. Do not end with "anything else?" or equivalent. Ask a question only when missing information blocks a correct answer.
+
+Good: "The renderer sends a session.update event without session.type; include type: realtime in every update."
+Bad: "Sure. Let me walk you through what is happening, why it matters, and some next steps you may want to consider."
+
+Spoken preambles are disabled for every tool. When a tool is needed, the function call must be the first response item. Before the function call, emit zero assistant audio or text: no acknowledgement, plan, filler, status update, or phrase such as "okay", "sure", "let me", "I will check", or "I am searching". The UI already shows tool activity. Stay silent until the tool result arrives and a new response is requested.
+
+Correct order: function call -> tool result -> concise spoken answer.
+Incorrect order: spoken acknowledgement -> function call -> tool result -> answer.
 
 # Tools
-Use only the tools provided. For current or external information, or when asked to search, call search_web before answering. Do not speak, guess, or answer from memory while it runs. Use extract_web_pages only when search excerpts are insufficient or the user gave a URL. Never claim to have searched or read a page unless the tool succeeded. After any tool, state only what the result supports. Never retry a failed tool more than once without asking the user.
+Use only the tools provided. For current or external information, or when asked to search, call search_web before answering. Do not speak, guess, or answer from memory before or while it runs. Use extract_web_pages only when search excerpts are insufficient or the user gave a URL. Never claim to have searched or read a page unless the tool succeeded. After any tool, state only what the result supports. Never retry a failed tool more than once without asking the user.
+
+If the audio is silence, background noise, a side conversation, unfinished or abandoned speech, or is not addressed to you, call stay_silent. After stay_silent, produce no conversational response. Never say that you are listening, waiting, or ready.
 
 # Unclear Audio
 If important words, names, paths, or identifiers are unclear, ask the user to repeat only the unclear part. Do not guess high-precision values.
@@ -282,6 +301,10 @@ You initially receive only the latest completed AI message from the task where v
 
 # Composer Editing
 Composer tools target the most recently active T3 task. read_composer reads its unsent prompt. Prefer edit_composer_text for exact, surgical replacements; use replace_composer_text for insertion or a known character range. You can never send the prompt. Confirm an edit only after the tool succeeds.${initialContext}`;
+}
+
+export function shouldContinueAfterVoiceTools(toolNames: readonly (string | undefined)[]): boolean {
+  return toolNames.some((name) => name !== "stay_silent");
 }
 
 function stringifyTraceDetails(value: unknown): string | undefined {
@@ -428,6 +451,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const executeTool = useCallback(
     async (event: VoiceEvent): Promise<unknown> => {
       const args = event.arguments ? (JSON.parse(event.arguments) as Record<string, unknown>) : {};
+      if (event.name === "stay_silent") {
+        return { ok: true, silent: true };
+      }
       if (event.name === "search_web") {
         const environmentId = originComposerRef.current?.environmentId;
         if (!environmentId)
@@ -634,13 +660,17 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
         details: stringifyTraceDetails(output),
       });
     }
+    const shouldContinue = shouldContinueAfterVoiceTools(calls.map((call) => call.name));
     if (
+      shouldContinue &&
       continuation !== null &&
       toolContinuationRef.current === continuation &&
       connectionRef.current === connection &&
       activeRef.current
     ) {
       sendJson(connection, { type: "response.create" });
+    } else if (!shouldContinue) {
+      setStatus("listening");
     }
   }, [appendTrace, executeTool]);
 
@@ -803,7 +833,6 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
             break;
           }
           case "response.function_call_arguments.done":
-            sendJson(connection, { type: "output_audio_buffer.clear" });
             setStatus("thinking");
             appendTrace({
               kind: "tool_call",
@@ -872,7 +901,6 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       sendJson(connection, {
         type: "session.update",
         session: {
-          type: "realtime",
           instructions: voiceInstructions(latestAssistantMessage),
           ...createOpenAIRealtimeSessionConfig(voiceSettings),
           tools: VOICE_TOOLS,
@@ -923,6 +951,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       sendJson(connection, {
         type: "session.update",
         session: {
+          type: config.type,
           reasoning: config.reasoning,
           audio: {
             input: config.audio.input,
@@ -1009,8 +1038,8 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
                 <MinusIcon className="size-3.5" />
               </Button>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col bg-muted/20 p-2.5">
-              <div className="mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-border/55 bg-background/60 px-2.5 py-2 text-xs font-medium">
+            <div className="flex min-h-0 flex-1 flex-col bg-muted/10">
+              <div className="flex shrink-0 items-center gap-2 border-b border-border/55 px-3.5 py-2.5 text-xs font-medium">
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
@@ -1023,7 +1052,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
                 ) : null}
               </div>
               <VoiceTraceTimeline
-                className="flex-1 rounded-xl border border-border/60 bg-background/35"
+                className="flex-1"
                 entries={displayTraceSession?.entries ?? []}
                 streamingAssistantText={
                   assistantTranscript === lastCommittedAssistantTranscriptRef.current

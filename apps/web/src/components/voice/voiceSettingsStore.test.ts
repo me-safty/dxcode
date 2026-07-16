@@ -34,6 +34,7 @@ describe("voice language settings", () => {
         noiseReduction: "far_field",
       }),
     ).toEqual({
+      type: "realtime",
       reasoning: { effort: "low" },
       audio: {
         input: {

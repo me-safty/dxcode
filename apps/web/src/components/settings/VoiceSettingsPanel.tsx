@@ -584,12 +584,8 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
             Completed conversations and tool traces will appear here.
           </div>
         ) : (
-          traceSessions.map((session, index) => (
-            <details
-              key={session.id}
-              className="group border-t border-border/60 first:border-t-0"
-              open={index === 0}
-            >
+          traceSessions.map((session) => (
+            <details key={session.id} className="group border-t border-border/60 first:border-t-0">
               <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3.5 marker:hidden sm:px-5">
                 <span
                   className={
@@ -607,11 +603,8 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                   {new Date(session.startedAt).toLocaleString()}
                 </time>
               </summary>
-              <div className="border-t border-border/50 bg-muted/15 p-3">
-                <VoiceTraceTimeline
-                  entries={session.entries}
-                  className="max-h-80 rounded-xl border border-border/60 bg-background/50"
-                />
+              <div className="border-t border-border/50">
+                <VoiceTraceTimeline entries={session.entries} className="max-h-80" />
               </div>
             </details>
           ))
