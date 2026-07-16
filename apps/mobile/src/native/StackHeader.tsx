@@ -107,6 +107,7 @@ function stabilizeOptionFunctions(
   path: string,
   latestFunctions: Map<string, (...args: unknown[]) => unknown>,
   wrappers: Map<string, (...args: unknown[]) => unknown>,
+  seen = new WeakSet<object>(),
 ): unknown {
   if (typeof value === "function") {
     latestFunctions.set(path, value as (...args: unknown[]) => unknown);
@@ -120,15 +121,19 @@ function stabilizeOptionFunctions(
     return wrapper;
   }
   if (Array.isArray(value)) {
+    if (seen.has(value)) return value;
+    seen.add(value);
     return value.map((entry, index) =>
-      stabilizeOptionFunctions(entry, `${path}[${index}]`, latestFunctions, wrappers),
+      stabilizeOptionFunctions(entry, `${path}[${index}]`, latestFunctions, wrappers, seen),
     );
   }
   if (value !== null && typeof value === "object") {
+    if (seen.has(value) || "current" in value) return value;
+    seen.add(value);
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
         key,
-        stabilizeOptionFunctions(entry, `${path}.${key}`, latestFunctions, wrappers),
+        stabilizeOptionFunctions(entry, `${path}.${key}`, latestFunctions, wrappers, seen),
       ]),
     );
   }
