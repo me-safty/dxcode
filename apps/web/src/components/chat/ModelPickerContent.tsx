@@ -504,6 +504,28 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     };
   }, [handleModelSelect, keybindings, modelJumpModelKeys, modelJumpShortcutContext]);
 
+  // LegendList only re-renders a row when its data item or `extraData`
+  // changes — a new `renderItem` closure alone is ignored. Everything the
+  // row render reads from surrounding state must therefore be represented
+  // here, or rows that keep their list position render stale output.
+  const listExtraData = useMemo(
+    () => ({
+      favoritesSet,
+      isSearching,
+      selectedInstanceId,
+      activeModelKey: `${props.activeInstanceId}:${props.model}`,
+      modelJumpLabelByKey,
+    }),
+    [
+      favoritesSet,
+      isSearching,
+      selectedInstanceId,
+      props.activeInstanceId,
+      props.model,
+      modelJumpLabelByKey,
+    ],
+  );
+
   useLayoutEffect(() => {
     setShowTopScrollFade(false);
     setShowBottomScrollFade(filteredModelKeys.length > 5);
@@ -619,11 +641,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
             {/* Model list */}
             <div className="relative min-h-0 flex-1 overflow-hidden">
-              <ComboboxListVirtualized className="model-picker-list size-full min-w-0 p-0">
+              <ComboboxListVirtualized className="not-empty:p-0 size-full min-w-0">
                 <LegendList<string>
                   ref={modelListRef}
                   data={filteredModelKeys}
-                  extraData={favoritesSet}
+                  extraData={listExtraData}
                   keyExtractor={(modelKey) => modelKey}
                   renderItem={({ item: modelKey, index }) => {
                     const model = filteredModelByKey.get(modelKey);
@@ -643,7 +665,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         providerAccentColor={model.instanceAccentColor}
                         isFavorite={favoritesSet.has(modelKey)}
                         isSelected={modelKey === `${props.activeInstanceId}:${props.model}`}
-                        showProvider
+                        showProvider={
+                          // When browsing a single provider's tab the sidebar
+                          // already says which provider these models belong
+                          // to, so the per-row provider line is redundant.
+                          // Keep it in mixed-provider views (favorites,
+                          // search) and for models that carry a sub-provider
+                          // distinction (e.g. "Claude · Bedrock").
+                          isSearching ||
+                          selectedInstanceId === "favorites" ||
+                          Boolean(model.subProvider)
+                        }
                         preferShortName={!isLocked}
                         useTriggerLabel={false}
                         showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
@@ -659,7 +691,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   onLayout={updateModelListScrollFades}
                   onScroll={updateModelListScrollFades}
                   className={cn(
-                    "scrollbar-gutter-both h-full overflow-x-hidden overscroll-y-contain py-1.5 [--fade-size:1.5rem]",
+                    "model-picker-list scrollbar-gutter-both h-full overflow-x-hidden overscroll-y-contain py-1.5 [--fade-size:1.5rem]",
                     showTopScrollFade && "mask-t-from-[calc(100%-var(--fade-size))]",
                     showBottomScrollFade && "mask-b-from-[calc(100%-var(--fade-size))]",
                   )}

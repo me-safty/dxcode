@@ -42,12 +42,28 @@ function stripLeadingQualifier(value: string, qualifier: string | null | undefin
   return value.replace(pattern, "").trim() || value;
 }
 
+export function getModelPickerDisplayAlias(value: string): string {
+  const trimmed = value.trim();
+  const gptMatch = /^GPT-(\d+(?:\.\d+)*)(?:(?:[-\s]+)(.+))?$/iu.exec(trimmed);
+  if (gptMatch) {
+    const suffix = gptMatch[2]?.trim().replace(/[-_]+/gu, " ");
+    return suffix ? `${gptMatch[1]} ${suffix}` : gptMatch[1]!;
+  }
+
+  const claudeMatch = /^Claude(?:\s+(.+))$/iu.exec(trimmed);
+  if (claudeMatch) {
+    return claudeMatch[1]!.trim() || trimmed;
+  }
+
+  return value;
+}
+
 export function getDisplayModelName(
   model: ModelEsque,
   options?: { preferShortName?: boolean },
 ): string {
   const name = options?.preferShortName && model.shortName ? model.shortName : model.name;
-  return stripLeadingQualifier(name, model.subProvider);
+  return getModelPickerDisplayAlias(stripLeadingQualifier(name, model.subProvider));
 }
 
 export function getTriggerDisplayModelName(model: ModelEsque): string {
