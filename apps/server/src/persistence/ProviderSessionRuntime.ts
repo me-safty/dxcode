@@ -56,6 +56,12 @@ export type GetProviderSessionRuntimeInput = typeof GetProviderSessionRuntimeInp
 export const DeleteProviderSessionRuntimeInput = Schema.Struct({ threadId: ThreadId });
 export type DeleteProviderSessionRuntimeInput = typeof DeleteProviderSessionRuntimeInput.Type;
 
+export const TouchProviderSessionRuntimeInput = Schema.Struct({
+  threadId: ThreadId,
+  lastSeenAt: IsoDateTime,
+});
+export type TouchProviderSessionRuntimeInput = typeof TouchProviderSessionRuntimeInput.Type;
+
 /**
  * ProviderSessionRuntimeRepository - Service tag for provider runtime persistence.
  */
@@ -96,6 +102,16 @@ export class ProviderSessionRuntimeRepository extends Context.Service<
      */
     readonly deleteByThreadId: (
       input: DeleteProviderSessionRuntimeInput,
+    ) => Effect.Effect<void, ProviderSessionRuntimeRepositoryError>;
+
+    /**
+     * Bump `last_seen_at` for an existing runtime row.
+     *
+     * No-op when no row matches. Cheaper than `upsert` for high-frequency
+     * activity signals because it skips the SELECT and JSON re-encoding.
+     */
+    readonly touchByThreadId: (
+      input: TouchProviderSessionRuntimeInput,
     ) => Effect.Effect<void, ProviderSessionRuntimeRepositoryError>;
   }
 >()("t3/persistence/ProviderSessionRuntime/ProviderSessionRuntimeRepository") {}
@@ -233,6 +249,16 @@ export const make = Effect.gen(function* () {
       `,
   });
 
+  const touchRuntimeByThreadId = SqlSchema.void({
+    Request: TouchProviderSessionRuntimeInput,
+    execute: ({ threadId, lastSeenAt }) =>
+      sql`
+        UPDATE provider_session_runtime
+        SET last_seen_at = ${lastSeenAt}
+        WHERE thread_id = ${threadId}
+      `,
+  });
+
   const upsert: ProviderSessionRuntimeRepository["Service"]["upsert"] = (runtime) =>
     upsertRuntimeRow(runtime).pipe(
       Effect.mapError(
@@ -308,11 +334,23 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const touchByThreadId: ProviderSessionRuntimeRepository["Service"]["touchByThreadId"] = (input) =>
+    touchRuntimeByThreadId(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProviderSessionRuntimeRepository.touchByThreadId:query",
+          "ProviderSessionRuntimeRepository.touchByThreadId:encodeRequest",
+          { threadId: input.threadId },
+        ),
+      ),
+    );
+
   return {
     upsert,
     getByThreadId,
     list,
     deleteByThreadId,
+    touchByThreadId,
   } satisfies ProviderSessionRuntimeRepository["Service"];
 });
 
