@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("033-034 thread storage lifecycle migrations", (it) => {
+layer("035-036 thread storage lifecycle migrations", (it) => {
   it.effect("queues archived and deleted threads", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -41,7 +41,7 @@ layer("033-034 thread storage lifecycle migrations", (it) => {
         deletedAt: "2026-07-03T00:00:00.000Z",
       });
 
-      yield* runMigrations({ toMigrationInclusive: 34 });
+      yield* runMigrations({ toMigrationInclusive: 36 });
 
       const manifests = yield* sql<{
         readonly threadId: string;
