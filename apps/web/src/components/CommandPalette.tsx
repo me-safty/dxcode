@@ -77,6 +77,7 @@ import {
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
   isUnsupportedWindowsProjectPath,
+  normalizeProjectPathForDispatch,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -101,6 +102,7 @@ import {
   type CommandPaletteView,
   filterBrowseEntries,
   filterCommandPaletteGroups,
+  getBrowseCreateFolderName,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
@@ -462,6 +464,9 @@ function OpenCommandPaletteDialog(props: {
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
+  const createDirectory = useAtomCommand(filesystemEnvironment.createDirectory, {
+    reportFailure: false,
+  });
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
@@ -483,6 +488,7 @@ function OpenCommandPaletteDialog(props: {
     null,
   );
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
+  const [isCreatingBrowseFolder, setIsCreatingBrowseFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [isRemoteProjectLookingUp, setIsRemoteProjectLookingUp] = useState(false);
   const [isRemoteProjectCloning, setIsRemoteProjectCloning] = useState(false);
@@ -626,6 +632,74 @@ function OpenCommandPaletteDialog(props: {
   const { filteredEntries: filteredBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
     () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
     [browseEntries, browseFilterQuery, highlightedItemValue],
+  );
+  const browseCreateFolderName = useMemo(
+    () =>
+      getBrowseCreateFolderName({
+        browseFilterQuery,
+        exactEntry: exactBrowseEntry,
+        browseParentPath: browseResult?.parentPath,
+        isBrowsePending,
+        relativePathNeedsActiveProject,
+      }),
+    [
+      browseFilterQuery,
+      browseResult?.parentPath,
+      exactBrowseEntry,
+      isBrowsePending,
+      relativePathNeedsActiveProject,
+    ],
+  );
+
+  const handleCreateBrowseFolder = useCallback(
+    async (folderName: string) => {
+      if (!browseEnvironmentId || isCreatingBrowseFolder) {
+        return;
+      }
+
+      const partialPath = normalizeProjectPathForDispatch(
+        appendBrowsePathSegment(getBrowseDirectoryPath(query), folderName),
+      );
+      if (partialPath.length === 0) {
+        return;
+      }
+
+      setIsCreatingBrowseFolder(true);
+      const createResult = await createDirectory({
+        environmentId: browseEnvironmentId,
+        input: {
+          partialPath,
+          ...(currentProjectCwdForBrowse ? { cwd: currentProjectCwdForBrowse } : {}),
+        },
+      });
+      setIsCreatingBrowseFolder(false);
+
+      if (createResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(createResult)) {
+          const error = squashAtomCommandFailure(createResult);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to create folder",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+        return;
+      }
+
+      const nextQuery = appendBrowsePathSegment(query, folderName);
+      setHighlightedItemValue(null);
+      setQuery(nextQuery);
+      setBrowseGeneration((generation) => generation + 1);
+    },
+    [
+      browseEnvironmentId,
+      createDirectory,
+      currentProjectCwdForBrowse,
+      isCreatingBrowseFolder,
+      query,
+    ],
   );
 
   const openProjectFromSearch = useMemo(
@@ -1384,8 +1458,11 @@ function OpenCommandPaletteDialog(props: {
     canBrowseUp,
     upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
     directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
+    createFolderIcon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+    createFolderName: browseCreateFolderName,
     browseUp,
     browseTo,
+    createFolder: handleCreateBrowseFolder,
   });
   const cloneDestinationBrowseGroups = useMemo(
     () =>
@@ -1497,9 +1574,22 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
+    if (
+      canSubmitBrowsePath &&
+      event.key === "Enter" &&
+      event.shiftKey &&
+      browseCreateFolderName &&
+      !isPrimaryModifierPressed(event)
+    ) {
+      event.preventDefault();
+      void handleCreateBrowseFolder(browseCreateFolderName);
+      return;
+    }
+
     const shouldSubmitBrowsePath =
       canSubmitBrowsePath &&
       event.key === "Enter" &&
+      !event.shiftKey &&
       (!hasHighlightedBrowseItem || isPrimaryModifierPressed(event));
 
     if (shouldSubmitBrowsePath) {
@@ -1758,6 +1848,7 @@ function OpenCommandPaletteDialog(props: {
                     aria-label={`${submitActionLabel} (${addShortcutLabel})`}
                     disabled={
                       relativePathNeedsActiveProject ||
+                      isCreatingBrowseFolder ||
                       (isCloneDestinationStep && isRemoteProjectPending)
                     }
                     onMouseDown={(event) => {
@@ -1825,12 +1916,16 @@ function OpenCommandPaletteDialog(props: {
                 ? { emptyStateMessage: "Choose a destination path and press Enter to clone." }
                 : relativePathNeedsActiveProject
                   ? { emptyStateMessage: "Relative paths require an active project." }
-                  : willCreateProjectPath
+                  : browseCreateFolderName
                     ? {
-                        emptyStateMessage:
-                          "Press Enter to create this folder and add it as a project.",
+                        emptyStateMessage: `Press Shift+Enter to create "${browseCreateFolderName}", or Enter to ${isCloneDestinationStep ? "clone here" : "add it as a project"}.`,
                       }
-                    : {})}
+                    : willCreateProjectPath
+                      ? {
+                          emptyStateMessage:
+                            "Press Enter to create this folder and add it as a project.",
+                        }
+                      : {})}
           />
         </CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">
@@ -1855,6 +1950,13 @@ function OpenCommandPaletteDialog(props: {
               <KbdGroup className="items-center gap-1.5">
                 <Kbd>Enter</Kbd>
                 <span className={cn("text-muted-foreground/80")}>Select</span>
+              </KbdGroup>
+            ) : null}
+            {isBrowsing && browseCreateFolderName ? (
+              <KbdGroup className="items-center gap-1.5">
+                <Kbd>Shift</Kbd>
+                <Kbd>Enter</Kbd>
+                <span className={cn("text-muted-foreground/80")}>Create folder</span>
               </KbdGroup>
             ) : null}
             {isSubmenu ? (
