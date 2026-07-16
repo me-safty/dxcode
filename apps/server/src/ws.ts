@@ -34,6 +34,7 @@ import {
   type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadActivitiesError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   type ProjectEntriesFailure,
@@ -114,6 +115,24 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
+
+const ORCHESTRATION_SUBSCRIPTION_REPLAY_LIMIT = 1_000;
+
+const subscriptionReplayLimit = (
+  afterSequence: number,
+  snapshotSequence: number,
+): number | null => {
+  const eventCount = snapshotSequence - afterSequence;
+  if (
+    !Number.isSafeInteger(eventCount) ||
+    eventCount < 0 ||
+    eventCount > ORCHESTRATION_SUBSCRIPTION_REPLAY_LIMIT
+  ) {
+    return null;
+  }
+  return eventCount;
+};
+
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -279,6 +298,7 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.getTurnDiff, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.getThreadActivities, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.replayEvents, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
@@ -1024,6 +1044,20 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.getThreadActivities]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadActivities,
+            projectionSnapshotQuery.getThreadActivitiesPage(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetThreadActivitiesError({
+                    message: "Failed to load thread activities page",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getFullThreadDiff,
@@ -1079,8 +1113,8 @@ const makeWsRpcLayer = (
               // live subscription is attached (into a scope-bound buffer) before
               // draining the catch-up replay so no event published during the
               // replay window is lost; overlapping events are deduped by sequence
-              // on the client. The full range is read (not the store's default
-              // page limit) since the shell filter runs after reading.
+              // on the client. A stale cursor receives a fresh snapshot instead
+              // of scanning the entire global event log.
               if (input.afterSequence !== undefined) {
                 const afterSequence = input.afterSequence;
                 return Stream.unwrap(
@@ -1089,8 +1123,41 @@ const makeWsRpcLayer = (
                     yield* Effect.forkScoped(
                       liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
                     );
+
+                    const { snapshotSequence } = yield* projectionSnapshotQuery
+                      .getSnapshotSequence()
+                      .pipe(
+                        Effect.mapError(
+                          (cause) =>
+                            new OrchestrationGetSnapshotError({
+                              message: "Failed to load orchestration snapshot sequence",
+                              cause,
+                            }),
+                        ),
+                      );
+                    const replayLimit = subscriptionReplayLimit(afterSequence, snapshotSequence);
+
+                    if (replayLimit === null) {
+                      const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+                        Effect.tapError((cause) =>
+                          Effect.logError("orchestration shell snapshot load failed", { cause }),
+                        ),
+                        Effect.mapError(
+                          (cause) =>
+                            new OrchestrationGetSnapshotError({
+                              message: "Failed to load orchestration shell snapshot",
+                              cause,
+                            }),
+                        ),
+                      );
+                      return Stream.concat(
+                        Stream.make({ kind: "snapshot" as const, snapshot }),
+                        Stream.fromQueue(liveBuffer),
+                      );
+                    }
+
                     const catchUpStream = orchestrationEngine
-                      .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
+                      .readEvents(afterSequence, replayLimit)
                       .pipe(
                         Stream.mapEffect(toShellStreamEvent),
                         Stream.flatMap((event) =>
@@ -1179,10 +1246,10 @@ const makeWsRpcLayer = (
               // catch-up followed by the buffered/ongoing live events. Overlapping
               // events are deduped by sequence on the client.
               //
-              // Read the full range after the cursor (not the store's default
-              // page-bounded limit): the range is normally tiny (a fresh HTTP
-              // snapshot sequence) and the per-thread filter runs after reading,
-              // so a global cap could otherwise omit this thread's events.
+              // A recent cursor replays the exact global range through the
+              // per-thread filter. A stale cursor receives a current thread
+              // snapshot instead, keeping catch-up bounded even when the global
+              // event log is very large.
               if (input.afterSequence !== undefined) {
                 const afterSequence = input.afterSequence;
                 return Stream.unwrap(
@@ -1191,8 +1258,48 @@ const makeWsRpcLayer = (
                     yield* Effect.forkScoped(
                       liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
                     );
+
+                    const { snapshotSequence } = yield* projectionSnapshotQuery
+                      .getSnapshotSequence()
+                      .pipe(
+                        Effect.mapError(
+                          (cause) =>
+                            new OrchestrationGetSnapshotError({
+                              message: "Failed to load orchestration snapshot sequence",
+                              cause,
+                            }),
+                        ),
+                      );
+                    const replayLimit = subscriptionReplayLimit(afterSequence, snapshotSequence);
+
+                    if (replayLimit === null) {
+                      const snapshot = yield* projectionSnapshotQuery
+                        .getThreadDetailSnapshot(input.threadId)
+                        .pipe(
+                          Effect.mapError(
+                            (cause) =>
+                              new OrchestrationGetSnapshotError({
+                                message: `Failed to load thread ${input.threadId}`,
+                                cause,
+                              }),
+                          ),
+                        );
+
+                      if (Option.isNone(snapshot)) {
+                        return yield* new OrchestrationGetSnapshotError({
+                          message: `Thread ${input.threadId} was not found`,
+                          cause: input.threadId,
+                        });
+                      }
+
+                      return Stream.concat(
+                        Stream.make({ kind: "snapshot" as const, snapshot: snapshot.value }),
+                        Stream.fromQueue(liveBuffer),
+                      );
+                    }
+
                     const catchUpStream = orchestrationEngine
-                      .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
+                      .readEvents(afterSequence, replayLimit)
                       .pipe(
                         Stream.filter(isThisThreadDetailEvent),
                         Stream.map((event) => ({ kind: "event" as const, event })),

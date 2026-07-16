@@ -62,6 +62,10 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import {
+  useOlderThreadActivities,
+  type OlderActivitiesCursor,
+} from "@t3tools/client-runtime/state/older-thread-activities";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
@@ -188,6 +192,7 @@ import {
   primaryServerKeybindingsAtom,
   serverEnvironment,
 } from "../state/server";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
@@ -1725,7 +1730,45 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
-  const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+
+  // ── Older-history lazy-load ────────────────────────────────────────────────
+  // The detail snapshot windows activities to the most recent page (the server
+  // sets `hasMoreActivities` when older ones exist); older pages are fetched on
+  // demand (infinite scroll-up) and prepended by the shared engine. Messages
+  // aren't windowed server-side, so this just back-fills the older tool
+  // activity.
+  const loadThreadActivities = useAtomCommand(orchestrationEnvironment.loadThreadActivities, {
+    reportFailure: false,
+  });
+  const activeThreadEnvironmentIdForActivities = activeThread?.environmentId ?? null;
+  const activeThreadIdForActivities = activeThread?.id ?? null;
+  const loadOlderActivitiesPage = useCallback(
+    async (cursor: OlderActivitiesCursor) => {
+      if (activeThreadEnvironmentIdForActivities === null || activeThreadIdForActivities === null) {
+        return null;
+      }
+      const result = await loadThreadActivities({
+        environmentId: activeThreadEnvironmentIdForActivities,
+        input: { threadId: activeThreadIdForActivities, ...cursor },
+      });
+      // Failures stay silent on web (the "Load older history" affordance itself
+      // is the retry surface); returning null keeps `hasMore` for the retry.
+      return result._tag === "Success" ? result.value : null;
+    },
+    [activeThreadEnvironmentIdForActivities, activeThreadIdForActivities, loadThreadActivities],
+  );
+  const {
+    mergedActivities: threadActivities,
+    hasMoreOlder: hasMoreOlderActivities,
+    loadingOlder: loadingOlderActivities,
+    loadOlder: loadOlderActivities,
+  } = useOlderThreadActivities({
+    threadKey: activeThread ? `${activeThread.environmentId}\u0000${activeThread.id}` : null,
+    liveActivities: activeThread?.activities ?? EMPTY_ACTIVITIES,
+    hasMoreLiveActivities: activeThread?.hasMoreActivities ?? false,
+    loadPage: loadOlderActivitiesPage,
+  });
+
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),
@@ -5076,6 +5119,9 @@ function ChatViewContent(props: ChatViewProps) {
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
+                hasMoreOlder={hasMoreOlderActivities}
+                loadingOlder={loadingOlderActivities}
+                onLoadOlder={loadOlderActivities}
                 latestTurn={activeLatestTurn}
                 runningTurnId={
                   activeThread.session?.status === "running"
@@ -5179,7 +5225,11 @@ function ChatViewContent(props: ChatViewProps) {
                       providerStatuses={providerStatuses as ServerProvider[]}
                       activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
                       activeThreadModelSelection={activeThread?.modelSelection}
-                      activeThreadActivities={activeThread?.activities}
+                      // Merged set (older pages + live window), not the windowed
+                      // live slice: the context meter scans for the latest
+                      // context-window.updated event, which can sit in a
+                      // lazy-loaded page on long threads.
+                      activeThreadActivities={threadActivities}
                       resolvedTheme={resolvedTheme}
                       settings={settings}
                       keybindings={keybindings}
