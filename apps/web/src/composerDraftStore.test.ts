@@ -61,6 +61,7 @@ import {
   COMPOSER_DRAFT_STORAGE_KEY,
   clearComposerDraftsEnvironment,
   finalizePromotedDraftThreadByRef,
+  hasComposerDraftUserContent,
   markPromotedDraftThread,
   markPromotedDraftThreadByRef,
   markPromotedDraftThreads,
@@ -170,6 +171,25 @@ function draftFor(threadId: ThreadId, environmentId: EnvironmentId = LEGACY_TEST
 function draftByKey(key: string) {
   return useComposerDraftStore.getState().draftsByThreadKey[key] ?? undefined;
 }
+
+describe("hasComposerDraftUserContent", () => {
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("detects typed prompt content", () => {
+    const draftId = DraftId.make("draft-with-input");
+    const projectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-input"));
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId);
+
+    expect(hasComposerDraftUserContent(store.getComposerDraft(draftId))).toBe(false);
+
+    store.setPrompt(draftId, "unfinished message");
+
+    expect(hasComposerDraftUserContent(store.getComposerDraft(draftId))).toBe(true);
+  });
+});
 
 describe("composerDraftStore addImages", () => {
   const threadId = ThreadId.make("thread-dedupe");

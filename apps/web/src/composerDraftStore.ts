@@ -682,6 +682,20 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
   );
 }
 
+/** Whether the composer contains user-authored content worth materializing as a thread. */
+export function hasComposerDraftUserContent(draft: ComposerThreadDraftState | null): boolean {
+  return Boolean(
+    draft &&
+    (draft.prompt.length > 0 ||
+      draft.images.length > 0 ||
+      draft.persistedAttachments.length > 0 ||
+      draft.terminalContexts.length > 0 ||
+      draft.elementContexts.length > 0 ||
+      draft.previewAnnotations.length > 0 ||
+      draft.reviewComments.length > 0),
+  );
+}
+
 function normalizeProviderDriverKind(value: unknown): ProviderDriverKind | null {
   return isProviderDriverKind(value) ? value : null;
 }

@@ -112,7 +112,7 @@ import {
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { readLocalApi } from "../localApi";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { hasComposerDraftUserContent, useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
@@ -400,6 +400,12 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const isDraft = useComposerDraftStore((store) => {
+    return (
+      store.getDraftThreadByRef(threadRef) !== null &&
+      hasComposerDraftUserContent(store.getComposerDraft(threadRef))
+    );
+  });
   const threadDrag = useDraggable({ id: threadKey });
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
@@ -796,6 +802,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 {thread.title}
               </TooltipPopup>
             </Tooltip>
+          )}
+          {isDraft && (
+            <span
+              data-testid={`thread-draft-${thread.id}`}
+              className="shrink-0 rounded-full bg-amber-500/12 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+            >
+              Draft
+            </span>
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
