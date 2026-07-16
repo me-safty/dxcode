@@ -287,11 +287,17 @@ function RootStackLayout(props: {
   // Launcher app shortcuts: routes shortcut taps and tracks opened threads.
   useAppShortcuts(props.state);
   useEffect(() => {
-    if (!pendingShare || presentedShareIdRef.current === pendingShare.id) {
+    if (!pendingShare) {
+      // Allow a later, intentional share of identical text/URL content to
+      // present again after the previous inbox item was fully consumed.
+      presentedShareIdRef.current = null;
+      return;
+    }
+    if (presentedShareIdRef.current === pendingShare.id) {
       return;
     }
     // Do not replace an in-progress task flow. A second queued share opens
-    // after the current sheet is sent, saved, or dismissed.
+    // after the current sheet is sent or dismissed.
     if (props.state.routes[props.state.index]?.name === "NewTaskSheet") {
       return;
     }

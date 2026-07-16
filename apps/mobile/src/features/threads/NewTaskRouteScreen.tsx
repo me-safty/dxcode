@@ -86,11 +86,11 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   const insets = useSafeAreaInsets();
   const chevronColor = useThemeColor("--color-chevron");
   const accentColor = useThemeColor("--color-icon-muted");
-  const { pendingShare } = useIncomingShare();
+  const { getShare } = useIncomingShare();
   const routeShareId = Array.isArray(route.params?.incomingShareId)
     ? route.params.incomingShareId[0]
     : route.params?.incomingShareId;
-  const incomingShare = pendingShare?.id === routeShareId ? pendingShare : null;
+  const incomingShare = routeShareId ? getShare(routeShareId) : null;
   const repositoryGroups = useMemo(
     () => groupProjectsByRepository({ projects, threads }),
     [projects, threads],
@@ -171,7 +171,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           <View className="gap-1 rounded-[24px] bg-primary/10 px-5 py-4">
             <Text className="text-base font-t3-bold text-foreground">Shared content ready</Text>
             <Text className="text-sm leading-normal text-foreground-muted">
-              Choose a project, then send it as-is or save it as a draft for more editing.
+              Choose a project to start a task with this shared content.
               {incomingShare.attachments.length > 0
                 ? ` ${incomingShare.attachments.length} shared image${incomingShare.attachments.length === 1 ? "" : "s"} will be attached.`
                 : ""}

@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import * as Crypto from "expo-crypto";
 import {
   clearSharedPayloads,
   getResolvedSharedPayloadsAsync,
@@ -6,15 +7,11 @@ import {
   type ResolvedSharePayload,
   type SharePayload,
 } from "expo-sharing";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Alert, AppState, Platform } from "react-native";
 
-import { uuidv4 } from "../../lib/uuid";
-import {
-  buildIncomingShareDraft,
-  hasIncomingShareContent,
-  type IncomingShareDraft,
-} from "./incoming-share-model";
+import { buildIncomingShareDraft, type IncomingShareDraft } from "./incoming-share-model";
+import { IncomingShareInbox } from "./incoming-share-inbox";
 import {
   loadIncomingShareDrafts,
   removeIncomingShareDraft,
@@ -25,6 +22,7 @@ type IncomingShareContextValue = {
   readonly pendingShare: IncomingShareDraft | null;
   readonly isLoading: boolean;
   readonly error: Error | null;
+  readonly getShare: (shareId: string) => IncomingShareDraft | null;
   readonly consumeShare: (shareId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
 };
@@ -41,14 +39,6 @@ function receiveSharingEnabled(): boolean {
   return Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true;
 }
 
-function sortAndDedupe(
-  drafts: ReadonlyArray<IncomingShareDraft>,
-): ReadonlyArray<IncomingShareDraft> {
-  return [...new Map(drafts.map((draft) => [draft.id, draft])).values()].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  );
-}
-
 async function resolvedPayloadsForImages(): Promise<ReadonlyArray<ResolvedSharePayload>> {
   try {
     return await getResolvedSharedPayloadsAsync();
@@ -60,6 +50,18 @@ async function resolvedPayloadsForImages(): Promise<ReadonlyArray<ResolvedShareP
     console.warn("[incoming-share] could not resolve shared file metadata", error);
     return [];
   }
+}
+
+async function incomingShareIdForPayloads(payloads: ReadonlyArray<SharePayload>): Promise<string> {
+  const fingerprint = JSON.stringify(
+    payloads.map((payload) => ({
+      shareType: payload.shareType,
+      mimeType: payload.mimeType ?? null,
+      value: payload.value,
+    })),
+  );
+  const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, fingerprint);
+  return `share-${digest}`;
 }
 
 async function readBase64(uri: string): Promise<string> {
@@ -82,62 +84,96 @@ async function removeOwnedFile(uri: string): Promise<void> {
   }
 }
 
+async function removeRawImagePayloadFiles(payloads: ReadonlyArray<SharePayload>): Promise<void> {
+  const removals: Promise<void>[] = [];
+  for (const payload of payloads) {
+    if (payload.shareType === "image") {
+      removals.push(removeOwnedFile(payload.value));
+    }
+  }
+  await Promise.all(removals);
+}
+
+// Keep one operation queue across provider remounts (including development
+// Strict Mode remounts) so two app lifecycle notifications cannot ingest the
+// same native handoff independently.
+const incomingShareInbox = new IncomingShareInbox({
+  loadDrafts: loadIncomingShareDrafts,
+  writeDraft: writeIncomingShareDraft,
+  removeDraft: removeIncomingShareDraft,
+  getPayloads: getSharedPayloads,
+  clearPayloads: clearSharedPayloads,
+  buildDraft: async ({ payloads, id, createdAt }) => {
+    const cleanupUris = new Set<string>();
+    const resolvedPayloads = payloads.some((payload) => payload.shareType === "image")
+      ? await resolvedPayloadsForImages()
+      : [];
+    const draft = await buildIncomingShareDraft({
+      payloads,
+      resolvedPayloads,
+      fileReader: {
+        readBase64,
+        removeOwnedFile: (uri) => {
+          cleanupUris.add(uri);
+        },
+      },
+      id,
+      createdAt,
+    });
+    return {
+      draft,
+      cleanup: async () => {
+        await Promise.all([...cleanupUris].map(removeOwnedFile));
+      },
+    };
+  },
+  cleanupReplayedPayloads: removeRawImagePayloadFiles,
+  idForPayloads: incomingShareIdForPayloads,
+  now: () => new Date().toISOString(),
+  onClearError: (error) => {
+    console.warn("[incoming-share] could not acknowledge native payload", error);
+  },
+  onCleanupError: (error) => {
+    console.warn("[incoming-share] could not remove temporary shared file", error);
+  },
+});
+
 export function IncomingShareProvider(props: React.PropsWithChildren) {
   const enabled = receiveSharingEnabled();
   const [drafts, setDrafts] = useState<ReadonlyArray<IncomingShareDraft>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
-    if (!enabled) {
-      return;
-    }
     if (refreshPromiseRef.current) {
       return refreshPromiseRef.current;
     }
 
     const operation = (async () => {
-      let payloads: SharePayload[];
       try {
-        payloads = getSharedPayloads();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause : new Error("Could not read shared content."));
-        return;
-      }
-      if (payloads.length === 0) {
-        return;
-      }
-
-      try {
-        const resolvedPayloads = payloads.some((payload) => payload.shareType === "image")
-          ? await resolvedPayloadsForImages()
-          : [];
-        const draft = await buildIncomingShareDraft({
-          payloads,
-          resolvedPayloads,
-          fileReader: { readBase64, removeOwnedFile },
-          id: uuidv4(),
-          createdAt: new Date().toISOString(),
-        });
-        if (!hasIncomingShareContent(draft)) {
-          throw new Error(
-            draft.warnings[0] ?? "The shared content is not supported by the composer.",
-          );
+        const snapshot = await incomingShareInbox.refresh({ ingestNative: enabled });
+        if (mountedRef.current) {
+          setDrafts(snapshot);
+          setError(null);
         }
-        // Persist before acknowledging the native handoff. If the process is
-        // killed while the user chooses a project, the next launch recovers it.
-        await writeIncomingShareDraft(draft);
-        setDrafts((current) => sortAndDedupe([draft, ...current]));
-        setError(null);
       } catch (cause) {
-        setError(cause instanceof Error ? cause : new Error("Could not import shared content."));
-      } finally {
-        // A failed/unsupported payload must not reopen the share flow forever.
-        try {
-          clearSharedPayloads();
-        } catch (cause) {
-          console.warn("[incoming-share] could not acknowledge native payload", cause);
+        const persisted = await incomingShareInbox
+          .refresh({ ingestNative: false })
+          .catch(() => null);
+        if (mountedRef.current) {
+          if (persisted) {
+            setDrafts(persisted);
+          }
+          setError(cause instanceof Error ? cause : new Error("Could not import shared content."));
         }
       }
     })().finally(() => {
@@ -149,28 +185,16 @@ export function IncomingShareProvider(props: React.PropsWithChildren) {
   }, [enabled]);
 
   useEffect(() => {
-    let cancelled = false;
-    void loadIncomingShareDrafts()
-      .then((persisted) => {
-        if (!cancelled) {
-          setDrafts((current) => sortAndDedupe([...current, ...persisted]));
-        }
-      })
-      .catch((cause) => {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause : new Error("Could not load shared drafts."));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoading(false);
-          void refresh();
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+    void refresh().finally(() => {
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
+    });
   }, [refresh]);
+
+  const refreshOnAppActive = useEffectEvent(() => {
+    void refresh();
+  });
 
   useEffect(() => {
     if (!enabled) {
@@ -178,35 +202,49 @@ export function IncomingShareProvider(props: React.PropsWithChildren) {
     }
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
-        void refresh();
+        refreshOnAppActive();
       }
     });
     return () => subscription.remove();
-  }, [enabled, refresh]);
+  }, [enabled]);
 
   useEffect(() => {
     if (!error) {
       return;
     }
     Alert.alert("Could not import shared content", error.message, [
-      { text: "OK", onPress: () => setError(null) },
+      { text: "Dismiss", style: "cancel", onPress: () => setError(null) },
+      {
+        text: "Retry",
+        onPress: () => {
+          setError(null);
+          void refresh();
+        },
+      },
     ]);
-  }, [error]);
+  }, [error, refresh]);
 
   const consumeShare = useCallback(async (shareId: string) => {
-    await removeIncomingShareDraft(shareId);
-    setDrafts((current) => current.filter((draft) => draft.id !== shareId));
+    const snapshot = await incomingShareInbox.consume(shareId);
+    if (mountedRef.current) {
+      setDrafts(snapshot);
+    }
   }, []);
+  const getShare = useCallback(
+    (shareId: string) => drafts.find((draft) => draft.id === shareId) ?? null,
+    [drafts],
+  );
 
   const value = useMemo<IncomingShareContextValue>(
     () => ({
       pendingShare: drafts[0] ?? null,
       isLoading,
       error,
+      getShare,
       consumeShare,
       refresh,
     }),
-    [consumeShare, drafts, error, isLoading, refresh],
+    [consumeShare, drafts, error, getShare, isLoading, refresh],
   );
 
   return (

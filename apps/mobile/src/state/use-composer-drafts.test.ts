@@ -95,6 +95,7 @@ describe("mobile composer drafts", () => {
     const draft: ComposerDraft = {
       text: "send this",
       attachments: [],
+      importedShareIds: ["share-1"],
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5.4",
@@ -109,7 +110,8 @@ describe("mobile composer drafts", () => {
 
     expect(clearComposerDraftContentState({ [draftKey]: draft }, draftKey)).toEqual({
       [draftKey]: {
-        ...draft,
+        modelSelection: draft.modelSelection,
+        workspaceSelection: draft.workspaceSelection,
         text: "",
         attachments: [],
       },
@@ -146,14 +148,25 @@ describe("mobile composer drafts", () => {
     const existing: Record<string, ComposerDraft> = {
       [draftKey]: { text: "Existing context", attachments: [] },
     };
-    const content = { text: "Shared note", attachments: [sharedAttachment] };
+    const content = {
+      text: "Shared note",
+      attachments: [sharedAttachment],
+      sourceShareId: "share-1",
+    };
 
     const merged = mergeComposerDraftContentState(existing, draftKey, content);
     expect(merged[draftKey]).toMatchObject({
       text: "Existing context\n\nShared note",
       attachments: [sharedAttachment],
+      importedShareIds: ["share-1"],
     });
     expect(mergeComposerDraftContentState(merged, draftKey, content)).toBe(merged);
+
+    const edited = {
+      ...merged,
+      [draftKey]: { ...merged[draftKey]!, text: "User edited the imported context" },
+    };
+    expect(mergeComposerDraftContentState(edited, draftKey, content)).toBe(edited);
   });
 
   it("preserves existing images when shared content exceeds the draft attachment limit", () => {
