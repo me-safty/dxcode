@@ -7,8 +7,8 @@ import * as NodeUtil from "node:util";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
-export const SHOWCASE_PROJECT_ID = "codex";
-export const SHOWCASE_THREAD_ID = "terminal-heartbeat";
+export const SHOWCASE_PROJECT_ID = "t3code";
+export const SHOWCASE_THREAD_ID = "remote-command-center";
 export const SHOWCASE_TERMINAL_ID = "term-1";
 
 export const SHOWCASE_SCENES = ["threads", "thread", "terminal", "review", "environments"] as const;
@@ -45,54 +45,47 @@ const PROJECT_SCRIPTS = JSON.stringify([
 ]);
 
 export const SHOWCASE_TERMINAL_BUFFER = [
-  "\u001b[38;5;75m~/Code/codex\u001b[0m \u001b[38;5;212mfeat/terminal-heartbeat\u001b[0m",
-  "$ cargo nextest run --workspace",
+  "\u001b[38;5;75m~/Code/t3code\u001b[0m \u001b[38;5;212mfeat/remote-command-center\u001b[0m",
+  "$ vp test run --changed",
   "",
-  "  \u001b[38;5;117mcodex-core\u001b[0m         418 passed",
-  "  \u001b[38;5;213mcodex-tui\u001b[0m          267 passed",
-  "  \u001b[38;5;221mprotocol\u001b[0m           162 passed",
+  "  \u001b[38;5;117mt3code-mobile\u001b[0m       184 passed",
+  "  \u001b[38;5;213mclient-runtime\u001b[0m      263 passed",
+  "  \u001b[38;5;221mserver\u001b[0m              165 passed",
   "",
-  "\u001b[32m✨ 847 tests passed\u001b[0m  ·  terminal pulse is steady",
+  "\u001b[32m✨ 612 tests passed\u001b[0m  ·  3 environments online",
   "",
-  "\u001b[38;5;75m~/Code/codex\u001b[0m \u001b[38;5;212mfeat/terminal-heartbeat\u001b[0m $ ",
+  "\u001b[38;5;75m~/Code/t3code\u001b[0m \u001b[38;5;212mfeat/remote-command-center\u001b[0m $ ",
 ].join("\r\n");
 
-const BASE_STATUS_INDICATOR = `use ratatui::text::Line;
-
-pub(crate) fn status_line(label: &str) -> Line<'static> {
-    Line::from(format!("  {label}"))
+const BASE_ENVIRONMENT_PRESENCE = `export function environmentLabel(count: number): string {
+  return \`${"${count}"} environments\`;
 }
 `;
 
-const UPDATED_STATUS_INDICATOR = `use ratatui::{style::Stylize, text::{Line, Span}};
+const UPDATED_ENVIRONMENT_PRESENCE = `const PULSE = ["✦", "✧", "·", "✧"] as const;
 
-const PULSE: [&str; 4] = ["✦", "✧", "·", "✧"];
-
-pub(crate) fn status_line(label: &str, frame: usize) -> Line<'static> {
-    Line::from(vec![
-        Span::raw("  "),
-        Span::raw(PULSE[frame % PULSE.len()]).cyan(),
-        Span::raw(format!("  {label}")).white(),
-    ])
+export function environmentLabel(connected: number, total: number, frame: number): string {
+  const pulse = PULSE[frame % PULSE.length];
+  return \`${"${pulse} ${connected}/${total}"} ready\`;
 }
 `;
 
-const TOOL_CALL_CARD = `use ratatui::{style::Stylize, text::Line};
+const REMOTE_HANDOFF_CARD = `import { View, Text } from "react-native";
 
-pub(crate) fn completed_tool(title: &str, detail: &str) -> Vec<Line<'static>> {
-    vec![
-        Line::from(format!("  ✓  {title}")).green().bold(),
-        Line::from(format!("     {detail}")).dark_gray(),
-    ]
+export function RemoteHandoffCard(props: { machine: string; latencyMs: number }) {
+  return (
+    <View className="rounded-2xl bg-surface-2 p-4">
+      <Text className="font-semibold">Ready on {props.machine}</Text>
+      <Text className="text-success">Handoff in {props.latencyMs}ms</Text>
+    </View>
+  );
 }
 `;
 
 const PROJECT_FAVICONS = {
-  codex: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#182848"/><stop offset="1" stop-color="#10151f"/></linearGradient></defs>
-  <rect width="64" height="64" rx="15" fill="url(#g)"/>
-  <path d="M17 22l10 10-10 10M31 43h16" fill="none" stroke="#79e7ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M46 13l1.7 4.3L52 19l-4.3 1.7L46 25l-1.7-4.3L40 19l4.3-1.7z" fill="#ffd166"/>
+  t3code: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="10" fill="#000"/>
+  <path d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z" fill="#fff"/>
 </svg>`,
   react: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="15" fill="#20232a"/>
@@ -111,11 +104,11 @@ const PROJECT_FAVICONS = {
 
 export const SHOWCASE_PROJECTS = [
   {
-    id: "codex",
-    title: "Codex",
-    directory: "codex",
-    repositoryUrl: "https://github.com/openai/codex.git",
-    favicon: PROJECT_FAVICONS.codex,
+    id: "t3code",
+    title: "T3 Code",
+    directory: "t3code",
+    repositoryUrl: "https://github.com/pingdotgg/t3code.git",
+    favicon: PROJECT_FAVICONS.t3code,
   },
   {
     id: "react",
@@ -137,7 +130,7 @@ export const SHOWCASE_ENVIRONMENTS = [
   {
     id: "moonbase-terminal",
     label: "Moonbase Terminal",
-    projectIds: ["codex"],
+    projectIds: ["t3code"],
   },
   {
     id: "suspense-station",
@@ -154,25 +147,25 @@ export const SHOWCASE_ENVIRONMENTS = [
 export const SHOWCASE_THREADS = [
   {
     id: SHOWCASE_THREAD_ID,
-    projectId: "codex",
-    title: "Give the terminal a heartbeat ✦",
-    branch: "feat/terminal-heartbeat",
+    projectId: "t3code",
+    title: "Make remote coding feel local ✦",
+    branch: "feat/remote-command-center",
     minutesAgo: 3,
     request:
-      "Give the Codex terminal a little pulse. Stream tool calls as crisp cards, make success feel electric, and keep everything fast enough to disappear.",
+      "Give T3 Code a remote-first command center. Make three machines feel one tap away, keep agent work in sync, and make every handoff feel instant.",
     response:
-      "The terminal has a heartbeat now — expressive, but never noisy. ✦\n\n- Tool calls arrive as compact live cards\n- Successful runs resolve with a subtle electric pulse\n- Reconnects preserve the exact animation frame\n- Reduced-motion mode stays completely calm\n\nI also ran the full Rust workspace: **847 tests passed**.",
+      "T3 Code now treats every machine like it is right here in the room. ✦\n\n- Moonbase, Suspense Station, and Kernel Cabin stay live together\n- Terminal state follows you without losing a single line\n- Agent work remains perfectly in sync across devices\n- Handoffs land before your train of thought can wander\n\nI also ran the changed workspace: **612 tests passed**.",
   },
   {
-    id: "green-build-celebration",
-    projectId: "codex",
-    title: "Teach agents to celebrate green builds",
-    branch: "feat/green-builds",
+    id: "pocket-command-center",
+    projectId: "t3code",
+    title: "Put the command center in your pocket",
+    branch: "feat/pocket-command-center",
     minutesAgo: 21,
     state: "approval" as const,
-    request: "Make successful builds feel rewarding without turning the CLI into a slot machine.",
+    request: "Make switching between desktop, phone, and tablet feel like one continuous session.",
     response:
-      "Added a restrained success moment: one shimmer, one crisp summary, then straight back to work. The final color treatment is ready for approval.",
+      "The handoff flow preserves the selected thread, terminal buffer, and working diff. The final motion treatment is ready for approval.",
   },
   {
     id: "buttery-suspense",
@@ -249,30 +242,32 @@ async function initializeRepository(input: {
   await runGit(input.workspaceRoot, ["commit", "-m", input.commitMessage]);
 }
 
-async function seedCodexWorkspace(workspaceRoot: string): Promise<void> {
-  await NodeFSP.mkdir(NodePath.join(workspaceRoot, "codex-rs/tui/src"), { recursive: true });
+async function seedT3CodeWorkspace(workspaceRoot: string): Promise<void> {
+  await NodeFSP.mkdir(NodePath.join(workspaceRoot, "apps/mobile/src/features/home"), {
+    recursive: true,
+  });
   await NodeFSP.writeFile(
-    NodePath.join(workspaceRoot, "Cargo.toml"),
-    `[workspace]\nmembers = ["codex-rs/tui"]\nresolver = "2"\n`,
+    NodePath.join(workspaceRoot, "package.json"),
+    `${JSON.stringify({ name: "t3code", private: true, scripts: { test: "vp test" } }, null, 2)}\n`,
   );
-  await NodeFSP.writeFile(NodePath.join(workspaceRoot, "favicon.svg"), PROJECT_FAVICONS.codex);
+  await NodeFSP.writeFile(NodePath.join(workspaceRoot, "favicon.svg"), PROJECT_FAVICONS.t3code);
   await NodeFSP.writeFile(
-    NodePath.join(workspaceRoot, "codex-rs/tui/src/status_indicator.rs"),
-    BASE_STATUS_INDICATOR,
+    NodePath.join(workspaceRoot, "apps/mobile/src/features/home/environmentPresence.ts"),
+    BASE_ENVIRONMENT_PRESENCE,
   );
   await initializeRepository({
     workspaceRoot,
-    repositoryUrl: "https://github.com/openai/codex.git",
-    commitMessage: "Render terminal status",
+    repositoryUrl: "https://github.com/pingdotgg/t3code.git",
+    commitMessage: "Show connected environments",
   });
-  await runGit(workspaceRoot, ["checkout", "-b", "feat/terminal-heartbeat"]);
+  await runGit(workspaceRoot, ["checkout", "-b", "feat/remote-command-center"]);
   await NodeFSP.writeFile(
-    NodePath.join(workspaceRoot, "codex-rs/tui/src/status_indicator.rs"),
-    UPDATED_STATUS_INDICATOR,
+    NodePath.join(workspaceRoot, "apps/mobile/src/features/home/environmentPresence.ts"),
+    UPDATED_ENVIRONMENT_PRESENCE,
   );
   await NodeFSP.writeFile(
-    NodePath.join(workspaceRoot, "codex-rs/tui/src/tool_call_card.rs"),
-    TOOL_CALL_CARD,
+    NodePath.join(workspaceRoot, "apps/mobile/src/features/home/RemoteHandoffCard.tsx"),
+    REMOTE_HANDOFF_CARD,
   );
 }
 
@@ -460,42 +455,42 @@ function seedDatabase(
       ) VALUES (?, ?, ?, 'tool', 'tool.completed', ?, ?, ?, ?)`,
     );
     insertActivity.run(
-      "trace-render-loop",
+      "trace-remote-handoff",
       SHOWCASE_THREAD_ID,
       turnId,
-      "Traced the terminal rendering loop",
+      "Traced the remote handoff path",
       JSON.stringify({
         itemType: "command_execution",
-        title: "Traced the terminal rendering loop",
-        detail: "Found a zero-allocation path for the pulse frames",
+        title: "Traced the remote handoff path",
+        detail: "Three environments, one continuous workspace",
         status: "completed",
       }),
       1,
       minutesBefore(now, 8),
     );
     insertActivity.run(
-      "paint-tool-cards",
+      "sync-command-center",
       SHOWCASE_THREAD_ID,
       turnId,
-      "Painted live tool-call cards",
+      "Synced the command center",
       JSON.stringify({
         itemType: "file_change",
-        title: "Painted live tool-call cards",
-        detail: "2 files changed · cyan pulse · calm reconnects",
+        title: "Synced the command center",
+        detail: "2 files changed · instant handoffs · calm reconnects",
         status: "completed",
       }),
       2,
       minutesBefore(now, 6),
     );
     insertActivity.run(
-      "run-rust-suite",
+      "run-changed-suite",
       SHOWCASE_THREAD_ID,
       turnId,
-      "Ran the Rust workspace",
+      "Ran the changed workspace",
       JSON.stringify({
         itemType: "command_execution",
-        title: "Ran the Rust workspace",
-        detail: "847 tests passed · 0 flaky retries",
+        title: "Ran the changed workspace",
+        detail: "612 tests passed · 3 environments online",
         status: "completed",
       }),
       3,
@@ -543,7 +538,7 @@ export async function seedShowcaseEnvironment(input: {
   if (!workspaceRoot) throw new Error("The primary showcase workspace is not configured.");
   const dbPath = NodePath.join(input.baseDir, "userdata", "state.sqlite");
   if (primaryProject.id === SHOWCASE_PROJECT_ID) {
-    await seedCodexWorkspace(workspaceRoot);
+    await seedT3CodeWorkspace(workspaceRoot);
   }
   await Promise.all(
     projects

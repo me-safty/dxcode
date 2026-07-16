@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Keyboard, View } from "react-native";
-import { StackActions, useNavigation } from "@react-navigation/native";
+import { CommonActions, StackActions, useNavigation } from "@react-navigation/native";
 
 import { useConnectionController } from "../connection/useConnectionController";
 import { useProjects, useThreadShells } from "../../state/entities";
@@ -13,7 +13,7 @@ import {
 } from "./nativeShowcaseScene";
 
 const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
-const SHOWCASE_THREAD_ID = "terminal-heartbeat";
+const SHOWCASE_THREAD_ID = "remote-command-center";
 
 function sceneFromPathname(pathname: string): ShowcaseScene | null {
   const routePath = pathname.split(/[?#]/u, 1)[0] ?? pathname;
@@ -94,20 +94,39 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
       threadId: SHOWCASE_THREAD_ID,
     };
     if (requestedScene === "threads") {
-      navigation.dispatch(StackActions.replace("Home"));
-    } else if (requestedScene === "environments") {
-      navigation.dispatch(
-        StackActions.replace("SettingsSheet", { screen: "SettingsEnvironments" }),
-      );
-    } else if (requestedScene === "thread") {
-      navigation.dispatch(StackActions.replace("Thread", params));
-    } else if (requestedScene === "terminal") {
-      navigation.dispatch(
-        StackActions.replace("ThreadTerminal", { ...params, terminalId: "term-1" }),
-      );
-    } else if (requestedScene === "review") {
-      navigation.dispatch(StackActions.replace("ThreadReview", params));
+      navigation.dispatch(StackActions.popToTop());
+      return;
     }
+    const routes: Array<{
+      name: string;
+      params?: Record<string, unknown>;
+      state?: { index: number; routes: Array<{ name: string }> };
+    }> = [{ name: "Home" }];
+    if (requestedScene === "environments") {
+      routes.push({
+        name: "SettingsSheet",
+        state: {
+          index: 1,
+          routes: [{ name: "Settings" }, { name: "SettingsEnvironments" }],
+        },
+      });
+    } else {
+      routes.push({ name: "Thread", params });
+      if (requestedScene === "terminal") {
+        routes.push({
+          name: "ThreadTerminal",
+          params: { ...params, terminalId: "term-1" },
+        });
+      } else if (requestedScene === "review") {
+        routes.push({ name: "ThreadReview", params });
+      }
+    }
+    navigation.dispatch(
+      CommonActions.reset({
+        index: routes.length - 1,
+        routes,
+      }),
+    );
   }, [hasFixture, navigation, requestedScene, scene, showcaseThread]);
 
   useEffect(() => {

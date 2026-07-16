@@ -284,6 +284,20 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function stopProcess(child: NodeChildProcess.ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+  });
+  child.kill("SIGTERM");
+  await Promise.race([exited, delay(5_000)]);
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  child.kill("SIGKILL");
+  await Promise.race([exited, delay(1_000)]);
+}
+
 async function waitForPort(port: number, label = "Process", timeoutMs = 60_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1075,9 +1089,16 @@ async function main(): Promise<void> {
       for (const udid of startedIosUdids) {
         await runCommand("xcrun", ["simctl", "shutdown", udid]).catch(() => undefined);
       }
-      metro?.kill("SIGTERM");
-      for (const server of showcaseServers) server.kill("SIGTERM");
-      await NodeFSP.rm(showcaseRootDir, { recursive: true, force: true });
+      await Promise.all([
+        ...(metro ? [stopProcess(metro)] : []),
+        ...showcaseServers.map((server) => stopProcess(server)),
+      ]);
+      await NodeFSP.rm(showcaseRootDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   }
 }

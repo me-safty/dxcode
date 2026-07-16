@@ -97,22 +97,22 @@ it("maps capture scenes to the real application routes", () => {
   );
   assert.equal(
     showcaseSceneUrl("thread", "environment-1"),
-    "t3code-dev://threads/environment-1/terminal-heartbeat",
+    "t3code-dev://threads/environment-1/remote-command-center",
   );
   assert.equal(
     showcaseSceneUrl("terminal", "environment-1"),
-    "t3code-dev://threads/environment-1/terminal-heartbeat/terminal?terminalId=term-1",
+    "t3code-dev://threads/environment-1/remote-command-center/terminal?terminalId=term-1",
   );
   assert.equal(
     showcaseSceneUrl("review", "environment-1"),
-    "t3code-dev://threads/environment-1/terminal-heartbeat/review",
+    "t3code-dev://threads/environment-1/remote-command-center/review",
   );
 });
 
 it("seeds a playful multi-environment project spectrum", () => {
   assert.deepStrictEqual(
     SHOWCASE_PROJECTS.map((project) => project.title),
-    ["Codex", "React", "Linux"],
+    ["T3 Code", "React", "Linux"],
   );
   assert.deepStrictEqual(
     SHOWCASE_ENVIRONMENTS.map((environment) => environment.label),

@@ -21,8 +21,8 @@ The command:
 
 1. Creates three temporary T3 base directories and starts a local server for each on an available
    port.
-2. Creates Codex, React, and Linux Git repositories with recognizable favicons, feature branches,
-   and a deterministic Codex review diff.
+2. Creates T3 Code, React, and Linux Git repositories with recognizable favicons, feature branches,
+   and a deterministic T3 Code review diff.
 3. Seeds each server's migrated SQLite database with playful threads, messages, activities, and
    terminal history.
 4. Starts an isolated Metro server, builds the selected native apps, and boots each device.
