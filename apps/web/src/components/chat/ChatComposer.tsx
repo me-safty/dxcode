@@ -44,7 +44,7 @@ import {
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
-  type ComposerImageAttachment,
+  type ComposerAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
   useComposerDraftStore,
@@ -95,6 +95,7 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  FileTextIcon,
   ListTodoIcon,
   PencilRulerIcon,
   type LucideIcon,
@@ -124,6 +125,7 @@ import {
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { formatAttachmentSizeLabel } from "../../lib/attachmentSize";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -410,7 +412,7 @@ export interface ChatComposerHandle {
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
-    images: ComposerImageAttachment[];
+    images: ComposerAttachment[];
     terminalContexts: TerminalContextDraft[];
     elementContexts: ElementContextDraft[];
     previewAnnotations: PreviewAnnotationPayload[];
@@ -499,7 +501,7 @@ export interface ChatComposerProps {
 
   // Refs the parent needs kept in sync
   promptRef: React.RefObject<string>;
-  composerImagesRef: React.RefObject<ComposerImageAttachment[]>;
+  composerImagesRef: React.RefObject<ComposerAttachment[]>;
   composerTerminalContextsRef: React.RefObject<TerminalContextDraft[]>;
   composerElementContextsRef: React.RefObject<ElementContextDraft[]>;
   composerRef: React.RefObject<ChatComposerHandle | null>;
@@ -1151,14 +1153,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const addComposerImage = useCallback(
-    (image: ComposerImageAttachment) => {
+    (image: ComposerAttachment) => {
       addComposerDraftImage(composerDraftTarget, image);
     },
     [composerDraftTarget, addComposerDraftImage],
   );
 
   const addComposerImagesToDraft = useCallback(
-    (images: ComposerImageAttachment[]) => {
+    (images: ComposerAttachment[]) => {
       addComposerDraftImages(composerDraftTarget, images);
     },
     [composerDraftTarget, addComposerDraftImages],
@@ -1368,6 +1370,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             try {
               const dataUrl = await readFileAsDataUrl(image.file);
               stagedAttachmentById.set(image.id, {
+                type: image.type,
                 id: image.id,
                 name: image.name,
                 mimeType: image.mimeType,
@@ -1765,32 +1768,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (pendingUserInputs.length > 0) {
       toastManager.add({
         type: "error",
-        title: "Attach images after answering plan questions.",
+        title: "Attach files after answering plan questions.",
       });
       return;
     }
-    const nextImages: ComposerImageAttachment[] = [];
+    const nextImages: ComposerAttachment[] = [];
     let nextImageCount = composerImagesRef.current.length;
     let error: string | null = null;
     for (const file of files) {
-      if (!file.type.startsWith("image/")) {
-        error = `Unsupported file type for '${file.name}'. Please attach image files only.`;
-        continue;
-      }
       if (file.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
         error = `'${file.name}' exceeds the ${IMAGE_SIZE_LIMIT_LABEL} attachment limit.`;
         continue;
       }
       if (nextImageCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} attachments per message.`;
         break;
       }
+      const isImage = file.type.startsWith("image/");
       const previewUrl = URL.createObjectURL(file);
       nextImages.push({
-        type: "image",
+        type: isImage ? "image" : "file",
         id: randomUUID(),
-        name: file.name || "image",
-        mimeType: file.type,
+        name: file.name || (isImage ? "image" : "file"),
+        mimeType: file.type || "application/octet-stream",
         sizeBytes: file.size,
         previewUrl,
         file,
@@ -1815,10 +1815,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) return;
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    if (imageFiles.length === 0) return;
     event.preventDefault();
-    addComposerImages(imageFiles);
+    addComposerImages(files);
   };
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -2269,7 +2267,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     removeComposerDraftPreviewAnnotation(composerDraftTarget, annotationId)
                   }
                   onExpandImage={(imageId) => {
-                    const preview = buildExpandedImagePreview(composerImages, imageId);
+                    const preview = buildExpandedImagePreview(
+                      composerImages.filter((attachment) => attachment.type === "image"),
+                      imageId,
+                    );
                     if (preview) onExpandImage(preview);
                   }}
                   className="mb-3"
@@ -2320,15 +2321,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     .map((image) => (
                       <div
                         key={image.id}
-                        className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
+                        className={
+                          image.type === "file"
+                            ? "relative flex h-16 w-40 items-center gap-2 overflow-hidden rounded-lg border border-border/80 bg-background px-2"
+                            : "relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
+                        }
                       >
-                        {image.previewUrl ? (
+                        {image.type === "file" ? (
+                          <>
+                            <FileTextIcon className="size-5 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0 pr-5">
+                              <div className="truncate text-xs" title={image.name}>
+                                {image.name}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground/70">
+                                {formatAttachmentSizeLabel(image.sizeBytes)}
+                              </div>
+                            </div>
+                          </>
+                        ) : image.previewUrl ? (
                           <button
                             type="button"
                             className="h-full w-full cursor-zoom-in"
                             aria-label={`Preview ${image.name}`}
                             onClick={() => {
-                              const preview = buildExpandedImagePreview(composerImages, image.id);
+                              const preview = buildExpandedImagePreview(
+                                composerImages.filter((attachment) => attachment.type === "image"),
+                                image.id,
+                              );
                               if (!preview) return;
                               onExpandImage(preview);
                             }}
