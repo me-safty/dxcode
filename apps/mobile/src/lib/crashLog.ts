@@ -42,7 +42,10 @@ function persistCrashRecord(error: unknown): void {
     stack: cause?.stack ?? null,
   };
   crashSequence += 1;
-  const file = new File(directory, `crash-${Date.now()}-${crashSequence}.json`);
+  // Keep lexical directory ordering aligned with capture order for records
+  // written within the same millisecond.
+  const sequence = String(crashSequence).padStart(6, "0");
+  const file = new File(directory, `crash-${Date.now()}-${sequence}.json`);
   file.create({ intermediates: true, overwrite: true });
   file.write(JSON.stringify(record, null, 2));
 }
