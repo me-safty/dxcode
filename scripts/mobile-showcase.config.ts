@@ -38,6 +38,20 @@ export interface ShowcaseConfig {
   readonly devices: ReadonlyArray<ShowcaseDevice>;
 }
 
+const ANDROID_ABIS = ["arm64-v8a", "x86_64", "x86", "armeabi-v7a"] as const;
+
+export function resolveShowcaseAndroidAbi(
+  value: string | undefined,
+): NonNullable<ShowcaseAndroidDevice["abi"]> {
+  if (!value) return "arm64-v8a";
+  if (ANDROID_ABIS.some((abi) => abi === value)) {
+    return value as NonNullable<ShowcaseAndroidDevice["abi"]>;
+  }
+  throw new Error(
+    `Unsupported T3_SHOWCASE_ANDROID_ABI '${value}'. Use ${ANDROID_ABIS.join(", ")}.`,
+  );
+}
+
 /**
  * The defaults cover the current large iPhone, 13-inch iPad, and a flagship
  * Pixel AVD. Edit this matrix (or pass --device / --scene) without changing
@@ -69,8 +83,15 @@ const config: ShowcaseConfig = {
       id: "pixel",
       platform: "android",
       avd: "Pixel_10_Pro",
-      abi: "arm64-v8a",
+      // Apple Silicon uses ARM64 locally; CI overrides this with x86_64 so its
+      // Blacksmith Linux runner can use KVM acceleration.
+      abi: resolveShowcaseAndroidAbi(process.env.T3_SHOWCASE_ANDROID_ABI),
       appearance: "dark",
+      viewport: {
+        width: 1280,
+        height: 2856,
+        density: 480,
+      },
       scenes: ["thread", "terminal", "review", "threads", "environments"],
     },
     {

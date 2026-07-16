@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 
-import type { ShowcaseConfig } from "./mobile-showcase.config.ts";
+import { resolveShowcaseAndroidAbi, type ShowcaseConfig } from "./mobile-showcase.config.ts";
 import {
   SHOWCASE_ENVIRONMENTS,
   SHOWCASE_PROJECTS,
@@ -52,6 +52,12 @@ it("parses repeatable capture filters", () => {
   assert.deepStrictEqual([...options.deviceIds], ["phone"]);
   assert.deepStrictEqual([...options.scenes], ["review"]);
   assert.equal(options.skipBuild, true);
+});
+
+it("selects an explicit CI Android ABI without changing the local default", () => {
+  assert.equal(resolveShowcaseAndroidAbi(undefined), "arm64-v8a");
+  assert.equal(resolveShowcaseAndroidAbi("x86_64"), "x86_64");
+  assert.throws(() => resolveShowcaseAndroidAbi("mips"), /Unsupported T3_SHOWCASE_ANDROID_ABI/u);
 });
 
 it("plans only scenes supported by each selected device", () => {

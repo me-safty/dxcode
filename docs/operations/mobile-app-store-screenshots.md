@@ -58,6 +58,21 @@ PNG files in the complete matrix.
 Edit [mobile-showcase.config.ts](../../scripts/mobile-showcase.config.ts) to change simulator or AVD
 names, light/dark appearance, scenes, output directory, capture delay, Android ABI, or viewport.
 
+## Capture in GitHub Actions
+
+Run the `Mobile Showcase Screenshots` workflow from GitHub's Actions tab and choose `all`, `ios`, or
+`android`. The default `all` dispatch runs iOS and Android concurrently: iPhone and iPad capture on a
+12-vCPU Blacksmith macOS runner, while Pixel phone and tablet capture on a 16-vCPU Blacksmith Linux
+runner with a KVM-accelerated x86_64 emulator.
+
+Every job uploads its PNGs even when a later capture fails, which makes partial runs useful for
+diagnosis. Download `app-store-screenshots-ios` and `app-store-screenshots-android` from the workflow
+run's Artifacts section. Artifacts are retained for 14 days.
+
+The workflow uses the same checked-in device and scene matrix as local capture. Android remains
+ARM64 by default for local Apple Silicon development; CI sets `T3_SHOWCASE_ANDROID_ABI=x86_64` so the
+debug APK matches its accelerated emulator.
+
 ## Fast iteration
 
 Capture one scene or device:

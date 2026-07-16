@@ -352,18 +352,22 @@ exec /bin/cat
 
 async function createShowcaseLabelProbe(baseDir: string, label: string): Promise<string> {
   const binDirectory = NodePath.join(baseDir, "showcase-bin");
-  const probePath = NodePath.join(binDirectory, "scutil");
   await NodeFSP.mkdir(binDirectory, { recursive: true });
-  await NodeFSP.writeFile(
-    probePath,
-    `#!/bin/sh
+  const probeScript = `#!/bin/sh
 if [ "$1" = "--get" ] && [ "$2" = "ComputerName" ]; then
   printf '%s\\n' ${JSON.stringify(label)}
   exit 0
 fi
+if [ "$1" = "--pretty" ]; then
+  printf '%s\\n' ${JSON.stringify(label)}
+  exit 0
+fi
 exit 1
-`,
-    { mode: 0o755 },
+`;
+  await Promise.all(
+    ["scutil", "hostnamectl"].map((executable) =>
+      NodeFSP.writeFile(NodePath.join(binDirectory, executable), probeScript, { mode: 0o755 }),
+    ),
   );
   return binDirectory;
 }
