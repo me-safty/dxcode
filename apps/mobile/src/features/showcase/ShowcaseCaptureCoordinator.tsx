@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Keyboard, View } from "react-native";
 import { CommonActions, StackActions, useNavigation } from "@react-navigation/native";
+import { AsyncResult } from "effect/unstable/reactivity";
 
 import { useConnectionController } from "../connection/useConnectionController";
 import { useProjects, useThreadShells } from "../../state/entities";
@@ -17,6 +18,7 @@ import {
   buildShowcasePendingTasks,
   SHOWCASE_PENDING_TASK_DEFINITIONS,
 } from "./showcasePendingTasks";
+import { retryShowcaseOperation } from "./showcaseRetry";
 
 const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
 const SHOWCASE_THREAD_ID = "remote-command-center";
@@ -40,7 +42,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   const projects = useProjects();
   const threads = useThreadShells();
   const attemptedPairingRef = useRef(new Set<string>());
-  const attemptedPendingTaskSeedRef = useRef(false);
+  const seededPendingTaskIdsRef = useRef(new Set<string>());
   const [pairingUrls, setPairingUrls] = useState<ReadonlyArray<string>>([]);
   const [pendingTasksReady, setPendingTasksReady] = useState(false);
   const [requestedScene, setRequestedScene] = useState<ShowcaseScene | null>(null);
@@ -74,11 +76,16 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
     if (!SHOWCASE_ENABLED || pairingUrls.length === 0) return;
     let cancelled = false;
     void (async () => {
-      for (const pairingUrl of pairingUrls) {
-        if (cancelled || attemptedPairingRef.current.has(pairingUrl)) continue;
-        attemptedPairingRef.current.add(pairingUrl);
-        await connectPairingUrl(pairingUrl);
-      }
+      await Promise.all(
+        pairingUrls.map(async (pairingUrl) => {
+          if (cancelled || attemptedPairingRef.current.has(pairingUrl)) return;
+          const paired = await retryShowcaseOperation(
+            async () => AsyncResult.isSuccess(await connectPairingUrl(pairingUrl)),
+            { isCancelled: () => cancelled },
+          );
+          if (paired) attemptedPairingRef.current.add(pairingUrl);
+        }),
+      );
     })();
     return () => {
       cancelled = true;
@@ -95,20 +102,35 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   const showcaseThread = threads.find((thread) => String(thread.id) === SHOWCASE_THREAD_ID);
 
   useEffect(() => {
-    if (!SHOWCASE_ENABLED || !hasServerFixture || attemptedPendingTaskSeedRef.current) return;
+    if (!SHOWCASE_ENABLED || !hasServerFixture || pendingTasksReady) return;
 
     const pendingTasks = buildShowcasePendingTasks(projects, Date.now());
     if (pendingTasks.length !== SHOWCASE_PENDING_TASK_DEFINITIONS.length) return;
 
-    attemptedPendingTaskSeedRef.current = true;
+    let cancelled = false;
     for (const task of pendingTasks) holdEditingQueuedMessage(task.messageId);
-    void Promise.all(pendingTasks.map((task) => enqueueThreadOutboxMessage(task)))
-      .then(() => setPendingTasksReady(true))
-      .catch((error: unknown) => {
-        attemptedPendingTaskSeedRef.current = false;
-        console.warn("[showcase] failed to seed pending offline tasks", error);
-      });
-  }, [hasServerFixture, projects]);
+    void (async () => {
+      const results = await Promise.all(
+        pendingTasks.map(async (task) => {
+          const messageId = String(task.messageId);
+          if (seededPendingTaskIdsRef.current.has(messageId)) return true;
+          const seeded = await retryShowcaseOperation(
+            async () => {
+              await enqueueThreadOutboxMessage(task);
+              return true;
+            },
+            { isCancelled: () => cancelled },
+          );
+          if (seeded) seededPendingTaskIdsRef.current.add(messageId);
+          return seeded;
+        }),
+      );
+      if (!cancelled && results.every(Boolean)) setPendingTasksReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasServerFixture, pendingTasksReady, projects]);
 
   useEffect(() => {
     if (!SHOWCASE_ENABLED || requestedScene === null || !hasFixture || !showcaseThread) return;
@@ -173,18 +195,19 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
     }
     if (scene === "terminal") Keyboard.dismiss();
 
+    let renderFrame: number | null = null;
     let readyFrame: number | null = null;
     const settleTimer = setTimeout(() => {
-      const renderFrame = requestAnimationFrame(() => {
+      renderFrame = requestAnimationFrame(() => {
         readyFrame = requestAnimationFrame(() => {
           markNativeShowcaseReady(scene);
           setReadyScene(scene);
         });
       });
-      readyFrame = renderFrame;
     }, 500);
     return () => {
       clearTimeout(settleTimer);
+      if (renderFrame !== null) cancelAnimationFrame(renderFrame);
       if (readyFrame !== null) cancelAnimationFrame(readyFrame);
     };
   }, [hasFixture, requestedScene, scene]);

@@ -17,6 +17,7 @@ import { useThemeColor } from "../../lib/useThemeColor";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import {
   applyShowcaseLocalEnvironmentDisplayUrls,
+  resolveShowcaseEnvironmentUpdateDisplayUrl,
   SHOWCASE_AVAILABLE_CLOUD_ENVIRONMENTS,
   SHOWCASE_CONNECTED_CLOUD_ENVIRONMENTS,
 } from "../showcase/showcaseEnvironmentRows";
@@ -57,6 +58,32 @@ export function SettingsEnvironmentsRouteScreen() {
   const handleToggle = useCallback((environmentId: EnvironmentId) => {
     setExpandedId((prev) => (prev === environmentId ? null : environmentId));
   }, []);
+  const handleUpdateEnvironment = useCallback(
+    (
+      environmentId: EnvironmentId,
+      updates: { readonly label: string; readonly displayUrl: string },
+    ) => {
+      if (!SHOWCASE_ENABLED) return onUpdateEnvironment(environmentId, updates);
+      const actualEnvironment = environmentSections.localEnvironments.find(
+        (environment) => environment.environmentId === environmentId,
+      );
+      const presentedEnvironment = localEnvironments.find(
+        (environment) => environment.environmentId === environmentId,
+      );
+      return onUpdateEnvironment(environmentId, {
+        ...updates,
+        displayUrl:
+          actualEnvironment && presentedEnvironment
+            ? resolveShowcaseEnvironmentUpdateDisplayUrl({
+                actualDisplayUrl: actualEnvironment.displayUrl,
+                presentedDisplayUrl: presentedEnvironment.displayUrl,
+                submittedDisplayUrl: updates.displayUrl,
+              })
+            : updates.displayUrl,
+      });
+    },
+    [environmentSections.localEnvironments, localEnvironments, onUpdateEnvironment],
+  );
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -112,7 +139,7 @@ export function SettingsEnvironmentsRouteScreen() {
                   onToggle={() => handleToggle(environment.environmentId)}
                   onReconnect={onReconnectEnvironment}
                   onRemove={onRemoveEnvironmentPress}
-                  onUpdate={onUpdateEnvironment}
+                  onUpdate={handleUpdateEnvironment}
                 />
               </View>
             ))}

@@ -20,6 +20,16 @@ export function applyShowcaseLocalEnvironmentDisplayUrls(
   }));
 }
 
+export function resolveShowcaseEnvironmentUpdateDisplayUrl(input: {
+  readonly actualDisplayUrl: string;
+  readonly presentedDisplayUrl: string;
+  readonly submittedDisplayUrl: string;
+}): string {
+  return input.submittedDisplayUrl === input.presentedDisplayUrl
+    ? input.actualDisplayUrl
+    : input.submittedDisplayUrl;
+}
+
 const pocketPiId = EnvironmentId.make("showcase-pocket-pi");
 const pocketPiEndpoint = {
   httpBaseUrl: "https://pocket-pi.t3.sh",

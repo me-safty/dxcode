@@ -19,6 +19,7 @@ import {
   planShowcaseCaptures,
   readPngDimensions,
   readPngMetadata,
+  resolveAndroidSdkRoot,
   selectLanIpv4Address,
   showcaseSceneUrl,
   validateStoreAsset,
@@ -92,6 +93,24 @@ it("selects an explicit CI Android ABI without changing the local default", () =
   assert.equal(resolveShowcaseAndroidAbi(undefined), "arm64-v8a");
   assert.equal(resolveShowcaseAndroidAbi("x86_64"), "x86_64");
   assert.throws(() => resolveShowcaseAndroidAbi("mips"), /Unsupported T3_SHOWCASE_ANDROID_ABI/u);
+});
+
+it("uses platform-correct default Android SDK roots", () => {
+  assert.equal(
+    resolveAndroidSdkRoot({ HOME: "/Users/showcase" }, "darwin"),
+    "/Users/showcase/Library/Android/sdk",
+  );
+  assert.equal(
+    resolveAndroidSdkRoot({ HOME: "/home/showcase" }, "linux"),
+    "/home/showcase/Android/Sdk",
+  );
+  assert.equal(
+    resolveAndroidSdkRoot(
+      { HOME: "/home/showcase", ANDROID_SDK_ROOT: "/opt/android-sdk" },
+      "linux",
+    ),
+    "/opt/android-sdk",
+  );
 });
 
 it("plans only scenes supported by each selected device", () => {
