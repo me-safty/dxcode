@@ -41,6 +41,15 @@ describe("remarkNormalizeListItemIndentation", () => {
     expect(html).not.toContain("**important**");
   });
 
+  it("preserves every recovered block separated by blank lines", () => {
+    const html = renderMarkdown(`-       **first block**
+
+        [second block](https://example.com)`);
+
+    expect(html).toContain("<strong>first block</strong>");
+    expect(html).toContain('<a href="https://example.com">second block</a>');
+  });
+
   it("preserves fenced code blocks within list items", () => {
     const html = renderMarkdown(`- \`\`\`ts
   const value = 1;
