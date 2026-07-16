@@ -501,7 +501,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepNestedInclude(mac, {
         extendInfo: {
           NSMicrophoneUsageDescription:
-            "T3 Code uses the microphone for user-initiated Grok voice conversations.",
+            "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
         },
       });
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),

@@ -2587,8 +2587,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         onClick={voiceSession.start}
                         aria-label={
                           voiceSession.active
-                            ? "Open active Grok voice session"
-                            : "Start Grok voice"
+                            ? "Open active OpenAI voice session"
+                            : "Start OpenAI voice"
                         }
                       >
                         {voiceSession.active ? (
@@ -2600,7 +2600,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                   />
                   <TooltipPopup side="top">
-                    {voiceSession.active ? "Open active Grok voice session" : "Start Grok voice"}
+                    {voiceSession.active
+                      ? "Open active OpenAI voice session"
+                      : "Start OpenAI voice"}
                   </TooltipPopup>
                 </Tooltip>
                 <ComposerFooterPrimaryActions

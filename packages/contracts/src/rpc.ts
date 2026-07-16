@@ -147,6 +147,7 @@ import {
   VoiceApiError,
   VoiceCredentialInput,
   VoiceCredentialStatus,
+  VoiceSessionInput,
   VoiceSessionAccess,
   VoiceWebExtractInput,
   VoiceWebExtractResult,
@@ -357,7 +358,7 @@ export const WsVoiceRemoveCredentialRpc = Rpc.make(WS_METHODS.voiceRemoveCredent
 });
 
 export const WsVoiceCreateSessionRpc = Rpc.make(WS_METHODS.voiceCreateSession, {
-  payload: Schema.Struct({}),
+  payload: VoiceSessionInput,
   success: VoiceSessionAccess,
   error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
 });

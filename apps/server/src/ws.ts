@@ -1324,10 +1324,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.voiceRemoveCredential, voiceSessionService.removeCredential, {
             "rpc.aggregate": "voice",
           }),
-        [WS_METHODS.voiceCreateSession]: (_input) =>
-          observeRpcEffect(WS_METHODS.voiceCreateSession, voiceSessionService.createSession, {
-            "rpc.aggregate": "voice",
-          }),
+        [WS_METHODS.voiceCreateSession]: ({ model }) =>
+          observeRpcEffect(
+            WS_METHODS.voiceCreateSession,
+            voiceSessionService.createSession(model),
+            {
+              "rpc.aggregate": "voice",
+            },
+          ),
         [WS_METHODS.voiceGetParallelCredentialStatus]: (_input) =>
           observeRpcEffect(
             WS_METHODS.voiceGetParallelCredentialStatus,

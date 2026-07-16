@@ -11,10 +11,18 @@ export const VoiceCredentialInput = Schema.Struct({
 });
 export type VoiceCredentialInput = typeof VoiceCredentialInput.Type;
 
+export const VoiceRealtimeModel = Schema.Literals(["gpt-realtime-2.1-mini", "gpt-realtime-2.1"]);
+export type VoiceRealtimeModel = typeof VoiceRealtimeModel.Type;
+
+export const VoiceSessionInput = Schema.Struct({
+  model: VoiceRealtimeModel,
+});
+export type VoiceSessionInput = typeof VoiceSessionInput.Type;
+
 export const VoiceSessionAccess = Schema.Struct({
   clientSecret: Schema.String,
   expiresAt: Schema.Number,
-  websocketUrl: Schema.String,
+  realtimeUrl: Schema.String,
 });
 export type VoiceSessionAccess = typeof VoiceSessionAccess.Type;
 

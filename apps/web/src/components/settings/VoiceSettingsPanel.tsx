@@ -25,10 +25,20 @@ import { VoiceTraceTimeline } from "../voice/VoiceTraceTimeline";
 import {
   DEFAULT_VOICE_SPEED,
   isVoiceLanguage,
+  isVoiceName,
+  isVoiceNoiseReduction,
+  isVoiceRealtimeModel,
+  isVoiceReasoningEffort,
+  isVoiceTurnEagerness,
   VOICE_LANGUAGE_OPTIONS,
+  VOICE_MODEL_OPTIONS,
+  VOICE_NOISE_REDUCTION_OPTIONS,
+  VOICE_OPTIONS,
+  VOICE_REASONING_OPTIONS,
   VOICE_SPEED_MAX,
   VOICE_SPEED_MIN,
   VOICE_SPEED_STEP,
+  VOICE_TURN_EAGERNESS_OPTIONS,
   voiceLanguageLabel,
   useVoiceSettingsStore,
 } from "../voice/voiceSettingsStore";
@@ -80,10 +90,20 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   const [parallelFeedback, setParallelFeedback] = useState<string | null>(null);
   const traceSessions = useVoiceTraceStore((state) => state.sessions);
   const clearTraceHistory = useVoiceTraceStore((state) => state.clearHistory);
+  const voiceModel = useVoiceSettingsStore((state) => state.model);
+  const voiceName = useVoiceSettingsStore((state) => state.voice);
   const voiceSpeed = useVoiceSettingsStore((state) => state.speed);
   const voiceLanguage = useVoiceSettingsStore((state) => state.language);
+  const reasoningEffort = useVoiceSettingsStore((state) => state.reasoningEffort);
+  const turnEagerness = useVoiceSettingsStore((state) => state.turnEagerness);
+  const noiseReduction = useVoiceSettingsStore((state) => state.noiseReduction);
+  const setVoiceModel = useVoiceSettingsStore((state) => state.setModel);
+  const setVoiceName = useVoiceSettingsStore((state) => state.setVoice);
   const setVoiceSpeed = useVoiceSettingsStore((state) => state.setSpeed);
   const setVoiceLanguage = useVoiceSettingsStore((state) => state.setLanguage);
+  const setReasoningEffort = useVoiceSettingsStore((state) => state.setReasoningEffort);
+  const setTurnEagerness = useVoiceSettingsStore((state) => state.setTurnEagerness);
+  const setNoiseReduction = useVoiceSettingsStore((state) => state.setNoiseReduction);
 
   useEffect(() => {
     if (queriedStatus) setConfigured(queriedStatus.configured);
@@ -112,11 +132,11 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
     if (!environmentId || !configured || busy) return;
     setBusy("test");
     setFeedback(null);
-    const result = await createVoiceSession({ environmentId, input: {} });
+    const result = await createVoiceSession({ environmentId, input: { model: voiceModel } });
     setBusy(null);
     setFeedback(
       result._tag === "Success"
-        ? "Connection successful. Grok Voice is ready."
+        ? "Connection successful. OpenAI Realtime is ready."
         : messageFromError(squashAtomCommandFailure(result)),
     );
   };
@@ -129,7 +149,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
     setBusy(null);
     if (result._tag === "Success") {
       setConfigured(false);
-      setFeedback("Saved xAI API key removed.");
+      setFeedback("Saved OpenAI API key removed.");
     } else {
       setFeedback(messageFromError(squashAtomCommandFailure(result)));
     }
@@ -191,11 +211,11 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
       <div>
         <h1 className="text-xl font-semibold tracking-[-0.02em]">Voice</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Configure the global Grok voice layer for T3 Code.
+          Configure the global OpenAI Realtime voice layer for T3 Code.
         </p>
       </div>
 
-      <SettingsSection title="xAI Voice" icon={<Mic2Icon className="size-3.5" />}>
+      <SettingsSection title="OpenAI Realtime" icon={<Mic2Icon className="size-3.5" />}>
         <SettingsRow
           title="API key"
           description="Stored only by the selected T3 Code server. The app uses it to mint short-lived browser credentials."
@@ -212,8 +232,8 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
               autoComplete="off"
               value={apiKey}
               onChange={(event) => setApiKey(event.currentTarget.value)}
-              placeholder={configured ? "Enter a replacement xAI API key" : "xai-…"}
-              aria-label="xAI API key"
+              placeholder={configured ? "Enter a replacement OpenAI API key" : "sk-…"}
+              aria-label="OpenAI API key"
             />
             <Button
               className="shrink-0"
@@ -232,7 +252,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
         </SettingsRow>
         <SettingsRow
           title="Connection"
-          description="Validate the saved key by requesting a short-lived Grok Voice session credential."
+          description="Validate the saved key by requesting a short-lived OpenAI Realtime client secret."
           status={feedback}
           control={
             <div className="flex gap-2">
@@ -271,7 +291,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
       <SettingsSection title="Parallel Web" icon={<Globe2Icon className="size-3.5" />}>
         <SettingsRow
           title="API key"
-          description="Stored only by the selected T3 Code server. Grok uses Parallel Search and Extract through server-side tools."
+          description="Stored only by the selected T3 Code server. The voice agent uses Parallel Search and Extract through server-side tools."
           status={
             <span
               className={parallelConfigured ? "text-emerald-600 dark:text-emerald-400" : undefined}
@@ -349,9 +369,62 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
 
       <SettingsSection title="Voice preferences" icon={<GaugeIcon className="size-3.5" />}>
         <SettingsRow
+          title="Model"
+          description="Mini is the recommended default for conversational speed and cost. The full model is stronger for difficult explanations and tool decisions. Changes apply to the next session."
+          control={
+            <Select
+              value={voiceModel}
+              onValueChange={(value) => {
+                if (isVoiceRealtimeModel(value)) setVoiceModel(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-72" aria-label="Realtime model">
+                <SelectValue>
+                  {VOICE_MODEL_OPTIONS.find((option) => option.value === voiceModel)?.label}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {VOICE_MODEL_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <div>
+                      <div>{option.label}</div>
+                      <div className="text-[11px] text-muted-foreground">{option.description}</div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          title="Voice"
+          description="Choose the generated voice. OpenAI recommends Marin or Cedar. The voice is fixed after a session first speaks."
+          control={
+            <Select
+              value={voiceName}
+              onValueChange={(value) => {
+                if (isVoiceName(value)) setVoiceName(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-72" aria-label="OpenAI voice">
+                <SelectValue>
+                  {VOICE_OPTIONS.find((option) => option.value === voiceName)?.label}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {VOICE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
           title="Speech pace"
-          description="Adjust how quickly Grok speaks. Changes apply to the active voice session."
-          status={`${VOICE_SPEED_MIN.toFixed(1)}× minimum · ${DEFAULT_VOICE_SPEED.toFixed(1)}× recommended · ${VOICE_SPEED_MAX.toFixed(1)}× maximum`}
+          description="Adjust OpenAI's post-processing playback speed. Changes are applied between model turns."
+          status={`${VOICE_SPEED_MIN.toFixed(2)}× minimum · ${DEFAULT_VOICE_SPEED.toFixed(1)}× recommended · ${VOICE_SPEED_MAX.toFixed(1)}× maximum`}
           control={
             <div className="flex w-full items-center gap-3 sm:w-64">
               <input
@@ -362,7 +435,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                 max={VOICE_SPEED_MAX}
                 step={VOICE_SPEED_STEP}
                 value={voiceSpeed}
-                aria-label="Grok speech pace"
+                aria-label="OpenAI speech pace"
                 aria-valuetext={`${voiceSpeed.toFixed(2)} times speed`}
                 onChange={(event) => setVoiceSpeed(event.currentTarget.valueAsNumber)}
               />
@@ -376,8 +449,8 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
           }
         />
         <SettingsRow
-          title="Spoken language"
-          description="Bias speech recognition toward a supported language. Auto detects the language and is recommended for multilingual conversations."
+          title="Input language"
+          description="Optionally bias input transcription with an ISO-639-1 language code. Auto is recommended for multilingual conversations and does not restrict the language OpenAI speaks."
           control={
             <Select
               value={voiceLanguage}
@@ -385,11 +458,95 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                 if (isVoiceLanguage(value)) setVoiceLanguage(value);
               }}
             >
-              <SelectTrigger className="w-full sm:w-64" aria-label="Grok spoken language">
+              <SelectTrigger className="w-full sm:w-72" aria-label="Input transcription language">
                 <SelectValue>{voiceLanguageLabel(voiceLanguage)}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 {VOICE_LANGUAGE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          title="Reasoning effort"
+          description="Controls the latency and depth tradeoff. OpenAI recommends Low for most production voice agents."
+          control={
+            <Select
+              value={reasoningEffort}
+              onValueChange={(value) => {
+                if (isVoiceReasoningEffort(value)) setReasoningEffort(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-72" aria-label="Reasoning effort">
+                <SelectValue>
+                  {
+                    VOICE_REASONING_OPTIONS.find((option) => option.value === reasoningEffort)
+                      ?.label
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {VOICE_REASONING_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          title="Turn taking"
+          description="Semantic VAD waits for the meaning of your sentence, not only a fixed silence. Patient waits longer; Quick responds sooner."
+          control={
+            <Select
+              value={turnEagerness}
+              onValueChange={(value) => {
+                if (isVoiceTurnEagerness(value)) setTurnEagerness(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-72" aria-label="Turn-taking eagerness">
+                <SelectValue>
+                  {
+                    VOICE_TURN_EAGERNESS_OPTIONS.find((option) => option.value === turnEagerness)
+                      ?.label
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {VOICE_TURN_EAGERNESS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          title="Microphone profile"
+          description="OpenAI filters audio before turn detection and model input. Choose the profile matching the microphone distance."
+          control={
+            <Select
+              value={noiseReduction}
+              onValueChange={(value) => {
+                if (isVoiceNoiseReduction(value)) setNoiseReduction(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-72" aria-label="Microphone noise profile">
+                <SelectValue>
+                  {
+                    VOICE_NOISE_REDUCTION_OPTIONS.find((option) => option.value === noiseReduction)
+                      ?.label
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {VOICE_NOISE_REDUCTION_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -407,7 +564,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
         />
         <SettingsRow
           title="Context and composer access"
-          description="The latest AI message is shared initially. Grok can page older messages from that task, search and extract web sources through Parallel, and edit unsent composer text, but it cannot send prompts."
+          description="The latest AI message is shared initially. OpenAI can page older messages from that task, search and extract web sources through Parallel, and edit unsent composer text, but it cannot send prompts."
         />
       </SettingsSection>
 

@@ -1455,7 +1455,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       extendInfo: {
         NSMicrophoneUsageDescription:
-          "T3 Code uses the microphone for user-initiated Grok voice conversations.",
+          "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
       },
       protocols: voiceVariant
         ? []

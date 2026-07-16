@@ -806,7 +806,7 @@ const buildAppUnderTest = (options?: {
           getCredentialStatus: Effect.succeed({ configured: false }),
           setCredential: () => Effect.succeed({ configured: true }),
           removeCredential: Effect.succeed({ configured: false }),
-          createSession: Effect.die("Unexpected xAI voice session request."),
+          createSession: () => Effect.die("Unexpected OpenAI Realtime session request."),
           getParallelCredentialStatus: Effect.succeed({ configured: false }),
           setParallelCredential: () => Effect.succeed({ configured: true }),
           removeParallelCredential: Effect.succeed({ configured: false }),

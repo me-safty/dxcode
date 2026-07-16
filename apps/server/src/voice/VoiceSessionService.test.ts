@@ -35,44 +35,63 @@ function makeTestLayer(
   };
 }
 
-it.effect("stores xAI API keys server-side and returns only an ephemeral voice credential", () => {
+it.effect("stores OpenAI API keys server-side and returns only an ephemeral credential", () => {
   const { execute, layer } = makeTestLayer();
 
   return Effect.gen(function* () {
     const voice = yield* VoiceSessionService.VoiceSessionService;
     assert.deepStrictEqual(yield* voice.getCredentialStatus, { configured: false });
 
-    assert.deepStrictEqual(yield* voice.setCredential("  xai-user-key  "), {
+    assert.deepStrictEqual(yield* voice.setCredential("  openai-user-key  "), {
       configured: true,
     });
     assert.deepStrictEqual(yield* voice.getCredentialStatus, { configured: true });
 
-    const access = yield* voice.createSession;
+    const access = yield* voice.createSession("gpt-realtime-2.1-mini");
     assert.deepStrictEqual(access, {
       clientSecret: "ephemeral-secret",
       expiresAt: 1_800_000_000,
-      websocketUrl: "wss://api.x.ai/v1/realtime?model=grok-voice-latest&reasoning.effort=high",
+      realtimeUrl: "https://api.openai.com/v1/realtime/calls",
     });
     assert.equal(execute.mock.calls.length, 1);
     const request = execute.mock.calls[0]?.[0];
     assert.isDefined(request);
-    assert.equal(request.headers.authorization, "Bearer xai-user-key");
+    assert.equal(request.headers.authorization, "Bearer openai-user-key");
+    const body = (request.body as { readonly body?: Uint8Array }).body;
+    assert.isDefined(body);
+    // @effect-diagnostics-next-line preferSchemaOverJson:off
+    assert.deepStrictEqual(JSON.parse(new TextDecoder().decode(body)), {
+      expires_after: { anchor: "created_at", seconds: 600 },
+      session: {
+        type: "realtime",
+        model: "gpt-realtime-2.1-mini",
+        audio: {
+          input: {
+            turn_detection: {
+              type: "server_vad",
+              create_response: false,
+              interrupt_response: true,
+            },
+          },
+        },
+      },
+    });
 
     assert.deepStrictEqual(yield* voice.removeCredential, { configured: false });
     assert.deepStrictEqual(yield* voice.getCredentialStatus, { configured: false });
   }).pipe(Effect.provide(layer));
 });
 
-it.effect("maps xAI authentication failures without exposing the saved key", () => {
+it.effect("maps OpenAI authentication failures without exposing the saved key", () => {
   const { layer } = makeTestLayer(() => new Response(null, { status: 401 }));
 
   return Effect.gen(function* () {
     const voice = yield* VoiceSessionService.VoiceSessionService;
-    yield* voice.setCredential("xai-sensitive-key");
-    const error = yield* Effect.flip(voice.createSession);
+    yield* voice.setCredential("openai-sensitive-key");
+    const error = yield* Effect.flip(voice.createSession("gpt-realtime-2.1"));
 
     assert.equal(error.reason, "credential_invalid");
-    assert.notInclude(error.message, "xai-sensitive-key");
+    assert.notInclude(error.message, "openai-sensitive-key");
   }).pipe(Effect.provide(layer));
 });
 
@@ -163,7 +182,7 @@ it.effect("keeps the Parallel key server-side and maps Search and Extract respon
       search_queries: ["latest relevant news"],
       mode: "basic",
       max_chars_total: 12_000,
-      client_model: "grok-voice-latest",
+      client_model: "gpt-realtime-2.1-mini",
     });
   }).pipe(Effect.provide(layer));
 });

@@ -101,7 +101,7 @@ export function VoiceTraceTimeline({
           <div className="rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-2 text-xs">
             <div className="flex items-center gap-1.5 font-medium">
               <BotIcon className="size-3.5" />
-              Grok
+              OpenAI
               <span className="ml-auto text-[10px] font-normal text-muted-foreground">Live</span>
             </div>
             <p className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed text-foreground/75">

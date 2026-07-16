@@ -9,6 +9,14 @@ const MAX_ENTRY_TEXT_LENGTH = 12_000;
 const MAX_SESSION_TEXT_LENGTH = 120_000;
 let traceIdSequence = 0;
 
+if (typeof window !== "undefined") {
+  try {
+    window.localStorage.removeItem("t3code:voice-traces:v1");
+  } catch {
+    // Storage can be unavailable in hardened browser contexts.
+  }
+}
+
 function nextTraceId(prefix: "session" | "entry"): string {
   traceIdSequence += 1;
   return `${prefix}-${Date.now().toString(36)}-${traceIdSequence.toString(36)}`;
@@ -189,8 +197,8 @@ export const useVoiceTraceStore = create<VoiceTraceState>()(
       clearHistory: () => set({ sessions: [], activeSessionId: null }),
     }),
     {
-      name: "t3code:voice-traces:v1",
-      version: 1,
+      name: "t3code:voice-traces:v2",
+      version: 2,
       storage: createJSONStorage(() =>
         resolveStorage(typeof window === "undefined" ? undefined : window.localStorage),
       ),

@@ -8,6 +8,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import {
   VoiceApiError,
   type VoiceCredentialStatus,
+  type VoiceRealtimeModel,
   type VoiceSessionAccess,
   type VoiceWebExtractInput,
   type VoiceWebExtractResult,
@@ -17,15 +18,14 @@ import {
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
-const XAI_VOICE_API_KEY_SECRET = "xai-voice-api-key";
+const OPENAI_REALTIME_API_KEY_SECRET = "openai-realtime-api-key";
+const LEGACY_XAI_VOICE_API_KEY_SECRET = "xai-voice-api-key";
 const PARALLEL_API_KEY_SECRET = "parallel-api-key";
-const XAI_CLIENT_SECRET_URL = "https://api.x.ai/v1/realtime/client_secrets";
+const OPENAI_CLIENT_SECRET_URL = "https://api.openai.com/v1/realtime/client_secrets";
+const OPENAI_REALTIME_URL = "https://api.openai.com/v1/realtime/calls";
 const PARALLEL_SEARCH_URL = "https://api.parallel.ai/v1/search";
 const PARALLEL_EXTRACT_URL = "https://api.parallel.ai/v1/extract";
-const XAI_VOICE_WEBSOCKET_URL =
-  "wss://api.x.ai/v1/realtime?model=grok-voice-latest&reasoning.effort=high";
-
-const XaiClientSecretResponse = Schema.Struct({
+const OpenAIClientSecretResponse = Schema.Struct({
   value: Schema.String,
   expires_at: Schema.Number,
 });
@@ -67,7 +67,7 @@ function bytesToString(value: Uint8Array): string {
   return new TextDecoder().decode(value);
 }
 
-function secretStoreFailure(provider: "xAI voice" | "Parallel"): VoiceApiError {
+function secretStoreFailure(provider: "OpenAI Realtime" | "Parallel"): VoiceApiError {
   return new VoiceApiError({
     reason: "secret_store_failed",
     message: `T3 Code could not access the saved ${provider} credential.`,
@@ -117,7 +117,9 @@ export class VoiceSessionService extends Context.Service<
     readonly getCredentialStatus: Effect.Effect<VoiceCredentialStatus, VoiceApiError>;
     readonly setCredential: (apiKey: string) => Effect.Effect<VoiceCredentialStatus, VoiceApiError>;
     readonly removeCredential: Effect.Effect<VoiceCredentialStatus, VoiceApiError>;
-    readonly createSession: Effect.Effect<VoiceSessionAccess, VoiceApiError>;
+    readonly createSession: (
+      model: VoiceRealtimeModel,
+    ) => Effect.Effect<VoiceSessionAccess, VoiceApiError>;
     readonly getParallelCredentialStatus: Effect.Effect<VoiceCredentialStatus, VoiceApiError>;
     readonly setParallelCredential: (
       apiKey: string,
@@ -136,8 +138,12 @@ export const make = Effect.gen(function* () {
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
 
-  const readCredential = secretStore.get(XAI_VOICE_API_KEY_SECRET).pipe(
-    Effect.mapError(() => secretStoreFailure("xAI voice")),
+  // The old provider credential has no consumer after this migration. Remove it
+  // during service startup so upgrading does not leave an unused xAI key behind.
+  yield* secretStore.remove(LEGACY_XAI_VOICE_API_KEY_SECRET).pipe(Effect.catch(() => Effect.void));
+
+  const readCredential = secretStore.get(OPENAI_REALTIME_API_KEY_SECRET).pipe(
+    Effect.mapError(() => secretStoreFailure("OpenAI Realtime")),
     Effect.map(Option.map(bytesToString)),
   );
   const readParallelCredential = secretStore.get(PARALLEL_API_KEY_SECRET).pipe(
@@ -157,39 +163,56 @@ export const make = Effect.gen(function* () {
     if (trimmed.length === 0) {
       return yield* new VoiceApiError({
         reason: "credential_invalid",
-        message: "Enter a non-empty xAI API key.",
+        message: "Enter a non-empty OpenAI API key.",
       });
     }
     yield* secretStore
-      .set(XAI_VOICE_API_KEY_SECRET, stringToBytes(trimmed))
-      .pipe(Effect.mapError(() => secretStoreFailure("xAI voice")));
+      .set(OPENAI_REALTIME_API_KEY_SECRET, stringToBytes(trimmed))
+      .pipe(Effect.mapError(() => secretStoreFailure("OpenAI Realtime")));
     return { configured: true };
   });
 
-  const removeCredential = secretStore.remove(XAI_VOICE_API_KEY_SECRET).pipe(
-    Effect.mapError(() => secretStoreFailure("xAI voice")),
+  const removeCredential = secretStore.remove(OPENAI_REALTIME_API_KEY_SECRET).pipe(
+    Effect.mapError(() => secretStoreFailure("OpenAI Realtime")),
     Effect.as({ configured: false }),
     Effect.withSpan("VoiceSessionService.removeCredential"),
   );
 
-  const createSession = Effect.gen(function* () {
+  const createSession: VoiceSessionService["Service"]["createSession"] = Effect.fn(
+    "VoiceSessionService.createSession",
+  )(function* (model) {
     const credential = yield* readCredential;
     if (Option.isNone(credential)) {
       return yield* new VoiceApiError({
         reason: "credential_not_configured",
-        message: "Add an xAI API key in Voice settings before starting a voice session.",
+        message: "Add an OpenAI API key in Voice settings before starting a voice session.",
       });
     }
 
-    const request = yield* HttpClientRequest.post(XAI_CLIENT_SECRET_URL).pipe(
+    const request = yield* HttpClientRequest.post(OPENAI_CLIENT_SECRET_URL).pipe(
       HttpClientRequest.setHeader("authorization", `Bearer ${credential.value}`),
       HttpClientRequest.setHeader("content-type", "application/json"),
-      HttpClientRequest.bodyJson({ expires_after: { seconds: 300 } }),
+      HttpClientRequest.bodyJson({
+        expires_after: { anchor: "created_at", seconds: 600 },
+        session: {
+          type: "realtime",
+          model,
+          audio: {
+            input: {
+              turn_detection: {
+                type: "server_vad",
+                create_response: false,
+                interrupt_response: true,
+              },
+            },
+          },
+        },
+      }),
       Effect.mapError(
         () =>
           new VoiceApiError({
             reason: "upstream_unavailable",
-            message: "T3 Code could not prepare the xAI voice request.",
+            message: "T3 Code could not prepare the OpenAI Realtime request.",
           }),
       ),
     );
@@ -198,7 +221,7 @@ export const make = Effect.gen(function* () {
         () =>
           new VoiceApiError({
             reason: "upstream_unavailable",
-            message: "T3 Code could not reach the xAI Voice API.",
+            message: "T3 Code could not reach the OpenAI Realtime API.",
           }),
       ),
     );
@@ -210,26 +233,28 @@ export const make = Effect.gen(function* () {
             : "upstream_unavailable",
         message:
           response.status === 401 || response.status === 403
-            ? "xAI rejected this API key. Check the key and its team permissions."
-            : `xAI could not create a voice session (HTTP ${response.status}).`,
+            ? "OpenAI rejected this API key. Check the key and its project permissions."
+            : `OpenAI could not create a Realtime session (HTTP ${response.status}).`,
       });
     }
 
-    const result = yield* HttpClientResponse.schemaBodyJson(XaiClientSecretResponse)(response).pipe(
+    const result = yield* HttpClientResponse.schemaBodyJson(OpenAIClientSecretResponse)(
+      response,
+    ).pipe(
       Effect.mapError(
         () =>
           new VoiceApiError({
             reason: "upstream_unavailable",
-            message: "xAI returned an invalid voice-session credential.",
+            message: "OpenAI returned an invalid Realtime session credential.",
           }),
       ),
     );
     return {
       clientSecret: result.value,
       expiresAt: result.expires_at,
-      websocketUrl: XAI_VOICE_WEBSOCKET_URL,
+      realtimeUrl: OPENAI_REALTIME_URL,
     };
-  }).pipe(Effect.withSpan("VoiceSessionService.createSession"));
+  });
 
   const getParallelCredentialStatus = readParallelCredential.pipe(
     Effect.map((credential) => ({ configured: Option.isSome(credential) })),
@@ -279,7 +304,7 @@ export const make = Effect.gen(function* () {
         search_queries: input.searchQueries,
         mode: "basic",
         max_chars_total: 12_000,
-        client_model: "grok-voice-latest",
+        client_model: "gpt-realtime-2.1-mini",
       }),
       Effect.mapError(
         () =>
@@ -351,7 +376,7 @@ export const make = Effect.gen(function* () {
         ...(input.searchQueries ? { search_queries: input.searchQueries } : {}),
         ...(input.sessionId ? { session_id: input.sessionId } : {}),
         max_chars_total: 20_000,
-        client_model: "grok-voice-latest",
+        client_model: "gpt-realtime-2.1-mini",
       }),
       Effect.mapError(
         () =>

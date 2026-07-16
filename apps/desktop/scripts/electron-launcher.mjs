@@ -229,7 +229,7 @@ function patchMainBundleInfoPlist(appBundlePath, iconPath) {
   setPlistString(
     infoPlistPath,
     "NSMicrophoneUsageDescription",
-    "T3 Code uses the microphone for user-initiated Grok voice conversations.",
+    "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
   );
   setPlistJson(infoPlistPath, "CFBundleURLTypes", [
     {
