@@ -281,3 +281,146 @@ Logged in to gitlab.com as gitlab-user
     );
   }).pipe(Effect.provide(testLayer));
 });
+
+it.effect("falls back to plain `gh auth status` when the CLI predates --json", () => {
+  const calls: string[] = [];
+  const processMock = {
+    run: (input: VcsProcess.VcsProcessInput) => {
+      calls.push([input.command, ...input.args].join(" "));
+      if (input.args[0] === "--version") {
+        return Effect.succeed(processOutput(`${input.command} version 2.45.0\n`));
+      }
+      if (input.command === "gh" && input.args.join(" ") === "auth status --json hosts") {
+        return Effect.succeed(
+          processOutput("", {
+            stderr: "unknown flag: --json\n",
+            exitCode: ChildProcessSpawner.ExitCode(1),
+          }),
+        );
+      }
+      if (input.command === "gh" && input.args.join(" ") === "auth status") {
+        return Effect.succeed(
+          processOutput(
+            [
+              "github.com",
+              "  ✓ Logged in to github.com as octocat (/home/user/.config/gh/hosts.yml)",
+              "  ✓ Token: gho_************",
+            ].join("\n"),
+          ),
+        );
+      }
+      return Effect.fail(
+        new VcsProcessSpawnError({
+          operation: "source-control.discovery.probe",
+          command: input.command,
+          cwd: input.cwd,
+          cause: new Error("not found"),
+        }),
+      );
+    },
+  } satisfies Partial<VcsProcess.VcsProcess["Service"]>;
+
+  const testLayer = SourceControlDiscovery.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "t3-source-control-discovery-fallback-test-",
+        }).pipe(Layer.provide(NodeServices.layer)),
+        Layer.mock(VcsProcess.VcsProcess)(processMock),
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({}),
+        sourceControlProviderRegistryTestLayer({
+          process: processMock,
+          bitbucket: {
+            probeAuth: Effect.succeed({
+              status: "unauthenticated" as const,
+              account: Option.none(),
+              host: Option.none(),
+              detail: Option.none(),
+            }),
+          },
+        }),
+      ),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  return Effect.gen(function* () {
+    const discovery = yield* SourceControlDiscovery.SourceControlDiscovery;
+    const result = yield* discovery.discover;
+
+    const github = result.sourceControlProviders.find((item) => item.kind === "github");
+    assert.ok(github);
+    assert.strictEqual(github.auth.status, "authenticated");
+    assert.deepStrictEqual(github.auth.account, Option.some("octocat"));
+    assert.ok(calls.includes("gh auth status"));
+  }).pipe(Effect.provide(testLayer));
+});
+
+it.effect("does NOT fall back when the primary probe reports a genuine sign-out", () => {
+  const calls: string[] = [];
+  const processMock = {
+    run: (input: VcsProcess.VcsProcessInput) => {
+      calls.push([input.command, ...input.args].join(" "));
+      if (input.args[0] === "--version") {
+        return Effect.succeed(processOutput(`${input.command} version 2.95.0\n`));
+      }
+      if (input.command === "gh" && input.args.join(" ") === "auth status --json hosts") {
+        // Modern CLI, simply not logged in: non-zero exit, specific message, no --json flag error.
+        return Effect.succeed(
+          processOutput("", {
+            stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n",
+            exitCode: ChildProcessSpawner.ExitCode(1),
+          }),
+        );
+      }
+      return Effect.fail(
+        new VcsProcessSpawnError({
+          operation: "source-control.discovery.probe",
+          command: input.command,
+          cwd: input.cwd,
+          cause: new Error("not found"),
+        }),
+      );
+    },
+  } satisfies Partial<VcsProcess.VcsProcess["Service"]>;
+
+  const testLayer = SourceControlDiscovery.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "t3-source-control-discovery-no-fallback-test-",
+        }).pipe(Layer.provide(NodeServices.layer)),
+        Layer.mock(VcsProcess.VcsProcess)(processMock),
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({}),
+        sourceControlProviderRegistryTestLayer({
+          process: processMock,
+          bitbucket: {
+            probeAuth: Effect.succeed({
+              status: "unauthenticated" as const,
+              account: Option.none(),
+              host: Option.none(),
+              detail: Option.none(),
+            }),
+          },
+        }),
+      ),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  return Effect.gen(function* () {
+    const discovery = yield* SourceControlDiscovery.SourceControlDiscovery;
+    const result = yield* discovery.discover;
+
+    const github = result.sourceControlProviders.find((item) => item.kind === "github");
+    assert.ok(github);
+    assert.strictEqual(github.auth.status, "unauthenticated");
+    // The fallback `gh auth status` must NOT have been invoked, and the specific
+    // sign-out detail from the primary probe must be preserved.
+    assert.strictEqual(calls.filter((call) => call === "gh auth status").length, 0);
+    assert.deepStrictEqual(
+      github.auth.detail,
+      Option.some("You are not logged into any GitHub hosts. To log in, run: gh auth login"),
+    );
+  }).pipe(Effect.provide(testLayer));
+});

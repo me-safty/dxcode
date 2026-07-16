@@ -33,6 +33,11 @@ export type SourceControlCliDiscoverySpec = SourceControlDiscoverySpecBase & {
   readonly executable: string;
   readonly versionArgs: ReadonlyArray<string>;
   readonly authArgs: ReadonlyArray<string>;
+  /**
+   * Args retried when `authArgs` exits non-zero without resolving an account —
+   * typically an older CLI that does not support the flags in `authArgs`.
+   */
+  readonly authFallbackArgs?: ReadonlyArray<string>;
   readonly parseAuth: (input: SourceControlAuthProbeInput) => SourceControlProviderAuth;
   readonly refineUnknownRemote?: (
     input: SourceControlUnknownRemoteRefinementInput,
@@ -118,6 +123,15 @@ export function combinedAuthOutput(input: SourceControlAuthProbeInput): string {
     }
   }
   return parts.join("\n");
+}
+
+// Cobra-based CLIs (gh, glab, …) print these when handed a flag/subcommand they
+// don't support — the signal that a probe failed because the CLI is too old for
+// the primary args, rather than because the user is signed out.
+const UNSUPPORTED_INVOCATION_PATTERN = /unknown (?:flag|shorthand flag|command)/iu;
+
+export function looksLikeUnsupportedInvocation(input: SourceControlAuthProbeInput): boolean {
+  return input.exitCode !== 0 && UNSUPPORTED_INVOCATION_PATTERN.test(combinedAuthOutput(input));
 }
 
 function sanitizedAuthLines(text: string): ReadonlyArray<string> {
@@ -237,32 +251,54 @@ export function probeSourceControlProvider(input: {
         } satisfies SourceControlProviderDiscoveryItem);
       }
 
-      return input.process
-        .run({
+      const runAuth = (args: ReadonlyArray<string>) =>
+        input.process.run({
           operation: "source-control.discovery.auth",
           command: spec.executable,
-          args: spec.authArgs,
+          args,
           cwd: input.cwd,
           allowNonZeroExit: true,
           timeoutMs: 5_000,
           maxOutputBytes: 8_000,
           appendTruncationMarker: true,
-        })
-        .pipe(
-          Effect.map(
-            (result) =>
-              ({
+        });
+
+      return runAuth(spec.authArgs).pipe(
+        Effect.flatMap((result) => {
+          const auth = spec.parseAuth(result);
+          const fallbackArgs = spec.authFallbackArgs;
+          // Only retry with the fallback args when the CLI actually rejected the
+          // primary invocation (an older CLI that predates those flags). A genuine
+          // "not signed in" result already carries specific detail, so it must not
+          // trigger the fallback or have its detail replaced by a generic hint.
+          if (
+            fallbackArgs === undefined ||
+            auth.status === "authenticated" ||
+            !looksLikeUnsupportedInvocation(result)
+          ) {
+            return Effect.succeed({ ...item, auth } satisfies SourceControlProviderDiscoveryItem);
+          }
+
+          return runAuth(fallbackArgs).pipe(
+            Effect.map((fallbackResult) => {
+              const fallbackAuth = spec.parseAuth(fallbackResult);
+              return {
                 ...item,
-                auth: spec.parseAuth(result),
-              }) satisfies SourceControlProviderDiscoveryItem,
-          ),
-          Effect.catch((cause) =>
-            Effect.succeed({
-              ...item,
-              auth: unknownAuth(Option.getOrUndefined(detailFromCause(cause))),
-            } satisfies SourceControlProviderDiscoveryItem),
-          ),
-        );
+                auth: fallbackAuth.status === "unknown" ? auth : fallbackAuth,
+              } satisfies SourceControlProviderDiscoveryItem;
+            }),
+            Effect.orElseSucceed(
+              () => ({ ...item, auth }) satisfies SourceControlProviderDiscoveryItem,
+            ),
+          );
+        }),
+        Effect.catch((cause) =>
+          Effect.succeed({
+            ...item,
+            auth: unknownAuth(Option.getOrUndefined(detailFromCause(cause))),
+          } satisfies SourceControlProviderDiscoveryItem),
+        ),
+      );
     }),
   );
 }
