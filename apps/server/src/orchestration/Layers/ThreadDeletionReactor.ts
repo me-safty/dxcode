@@ -5,15 +5,22 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
+import { ProviderEventLoggers } from "../../provider/Layers/ProviderEventLoggers.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ThreadColdStorage } from "../Services/ThreadColdStorage.ts";
 import {
   ThreadDeletionReactor,
   type ThreadDeletionReactorShape,
 } from "../Services/ThreadDeletionReactor.ts";
 
 type ThreadDeletedEvent = Extract<OrchestrationEvent, { type: "thread.deleted" }>;
+type ThreadArchivedEvent = Extract<OrchestrationEvent, { type: "thread.archived" }>;
+type ThreadLifecycleJob =
+  | { readonly type: "archive"; readonly threadId: ThreadArchivedEvent["payload"]["threadId"] }
+  | { readonly type: "delete"; readonly threadId: ThreadDeletedEvent["payload"]["threadId"] }
+  | { readonly type: "compact-legacy-storage" };
 
 export const logCleanupCauseUnlessInterrupted = <R, E>({
   effect,
@@ -40,6 +47,8 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const threadColdStorage = yield* ThreadColdStorage;
+  const providerEventLoggers = yield* ProviderEventLoggers;
 
   const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
@@ -55,39 +64,97 @@ const make = Effect.gen(function* () {
       threadId,
     });
 
-  const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (
-    event: ThreadDeletedEvent,
+  const closeProviderLogWritersRequired = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+    Effect.all(
+      [providerEventLoggers.native, providerEventLoggers.canonical].flatMap((logger) =>
+        logger?.closeThread ? [logger.closeThread(threadId)] : [],
+      ),
+      { discard: true },
+    );
+
+  const closeProviderLogWriters = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+    logCleanupCauseUnlessInterrupted({
+      effect: closeProviderLogWritersRequired(threadId),
+      message: "thread lifecycle cleanup skipped provider log writer close",
+      threadId,
+    });
+
+  const processLifecycleJob = Effect.fn("processThreadLifecycleJob")(function* (
+    job: ThreadLifecycleJob,
   ) {
-    const { threadId } = event.payload;
+    if (job.type === "compact-legacy-storage") {
+      yield* threadColdStorage.compactLegacyStorage;
+      return;
+    }
+    const { threadId } = job;
+    if (job.type === "archive") {
+      // Archiving must not snapshot or delete hot rows while any active writer
+      // can still mutate them. A failure leaves the durable archived shell or
+      // manifest discoverable so startup recovery can retry the boundary.
+      yield* providerService.stopSession({ threadId });
+      yield* terminalManager.close({ threadId, deleteHistory: true });
+      yield* closeProviderLogWritersRequired(threadId);
+      yield* threadColdStorage.archiveThread(threadId);
+      return;
+    }
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
+    yield* closeProviderLogWriters(threadId);
+    yield* threadColdStorage.deleteThread(threadId);
   });
 
-  const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>
-    processThreadDeleted(event).pipe(
+  const processLifecycleJobSafely = (job: ThreadLifecycleJob) =>
+    processLifecycleJob(job).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
-        return Effect.logWarning("thread deletion reactor failed to process event", {
-          eventType: event.type,
-          threadId: event.payload.threadId,
+        return Effect.logWarning("thread lifecycle reactor failed to process job", {
+          lifecycleAction: job.type,
+          ...(job.type === "compact-legacy-storage" ? {} : { threadId: job.threadId }),
           cause: Cause.pretty(cause),
         });
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processThreadDeletedSafely);
+  const worker = yield* makeDrainableWorker(processLifecycleJobSafely);
 
   const start: ThreadDeletionReactorShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.deleted") {
-          return Effect.void;
+        if (event.type === "thread.deleted") {
+          return worker.enqueue({ type: "delete", threadId: event.payload.threadId });
         }
-        return worker.enqueue(event);
+        if (event.type === "thread.archived") {
+          return worker.enqueue({ type: "archive", threadId: event.payload.threadId });
+        }
+        return Effect.void;
       }),
     );
+
+    const pendingJobs = yield* Effect.all([
+      threadColdStorage.listPendingDeleteThreadIds,
+      threadColdStorage.listPendingArchiveThreadIds,
+    ]).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("failed to read pending thread storage migrations", {
+          cause: Cause.pretty(cause),
+        }).pipe(Effect.as(null)),
+      ),
+    );
+    if (pendingJobs === null) return;
+    const [pendingDeletes, pendingArchives] = pendingJobs;
+    yield* Effect.forEach(
+      pendingDeletes,
+      (threadId) => worker.enqueue({ type: "delete", threadId }),
+      { discard: true },
+    );
+    yield* Effect.forEach(
+      pendingArchives,
+      (threadId) => worker.enqueue({ type: "archive", threadId }),
+      { discard: true },
+    );
+    yield* worker.enqueue({ type: "compact-legacy-storage" });
   });
 
   return {
