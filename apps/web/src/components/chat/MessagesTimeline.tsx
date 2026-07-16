@@ -69,6 +69,7 @@ import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
+  resolveOlderHistoryAutoLoad,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
@@ -329,6 +330,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     null,
   );
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
+  const olderHistoryAutoLoadArmedRef = useRef(true);
+  const requestOlderHistory = useCallback(() => {
+    // Disarm before both automatic and explicit requests. If a request fails,
+    // prop changes while the viewport remains at the start must not trigger an
+    // immediate retry loop; the header button still permits a deliberate retry.
+    olderHistoryAutoLoadArmedRef.current = false;
+    onLoadOlder?.();
+  }, [onLoadOlder]);
+  useEffect(() => {
+    olderHistoryAutoLoadArmedRef.current = true;
+  }, [routeThreadKey]);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -362,8 +374,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
     // Reaching the top lazy-loads older history; maintainVisibleContentPosition
     // (set on the list) keeps the viewport anchored when rows prepend.
-    if (state?.isAtStart && hasMoreOlder && !loadingOlder) {
-      onLoadOlder?.();
+    const olderHistoryDecision = resolveOlderHistoryAutoLoad({
+      armed: olderHistoryAutoLoadArmedRef.current,
+      hasMore: hasMoreOlder,
+      isAtStart: state?.isAtStart ?? false,
+      loading: loadingOlder,
+    });
+    olderHistoryAutoLoadArmedRef.current = olderHistoryDecision.armed;
+    if (olderHistoryDecision.shouldLoad) {
+      requestOlderHistory();
     }
     if (!state || minimapItems.length === 0) {
       return;
@@ -394,7 +413,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onIsAtEndChange,
     hasMoreOlder,
     loadingOlder,
-    onLoadOlder,
+    requestOlderHistory,
   ]);
 
   useEffect(() => {
@@ -438,7 +457,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return (
         <button
           type="button"
-          onClick={onLoadOlder}
+          onClick={requestOlderHistory}
           className="flex w-full cursor-pointer items-center justify-center py-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           Load older history
@@ -446,7 +465,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       );
     }
     return TIMELINE_LIST_HEADER;
-  }, [loadingOlder, hasMoreOlder, onLoadOlder]);
+  }, [loadingOlder, hasMoreOlder, requestOlderHistory]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({

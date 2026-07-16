@@ -21,6 +21,33 @@ export interface TimelineEndState {
   readonly isNearEnd?: boolean;
 }
 
+export interface OlderHistoryAutoLoadDecision {
+  readonly armed: boolean;
+  readonly shouldLoad: boolean;
+}
+
+/**
+ * Treat reaching the start as an edge, not a continuously-true condition.
+ * A failed request leaves the viewport at the start, so level-triggered loading
+ * would immediately retry on every render. Leaving the start rearms one future
+ * automatic request; the visible header control remains available for explicit
+ * retries while the edge is disarmed.
+ */
+export function resolveOlderHistoryAutoLoad(input: {
+  readonly armed: boolean;
+  readonly hasMore: boolean;
+  readonly isAtStart: boolean;
+  readonly loading: boolean;
+}): OlderHistoryAutoLoadDecision {
+  if (!input.isAtStart) {
+    return { armed: true, shouldLoad: false };
+  }
+  if (!input.armed || !input.hasMore || input.loading) {
+    return { armed: input.armed, shouldLoad: false };
+  }
+  return { armed: false, shouldLoad: true };
+}
+
 export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boolean | undefined {
   return state?.isNearEnd ?? state?.isAtEnd;
 }

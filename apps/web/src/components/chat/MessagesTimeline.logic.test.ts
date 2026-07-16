@@ -4,8 +4,46 @@ import {
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
+  resolveOlderHistoryAutoLoad,
   resolveAssistantMessageCopyState,
 } from "./MessagesTimeline.logic";
+
+describe("resolveOlderHistoryAutoLoad", () => {
+  it("does not retry continuously while a failed request leaves the viewport at the start", () => {
+    const first = resolveOlderHistoryAutoLoad({
+      armed: true,
+      hasMore: true,
+      isAtStart: true,
+      loading: false,
+    });
+    expect(first).toEqual({ armed: false, shouldLoad: true });
+
+    const afterFailure = resolveOlderHistoryAutoLoad({
+      armed: first.armed,
+      hasMore: true,
+      isAtStart: true,
+      loading: false,
+    });
+    expect(afterFailure).toEqual({ armed: false, shouldLoad: false });
+
+    const afterLeavingStart = resolveOlderHistoryAutoLoad({
+      armed: afterFailure.armed,
+      hasMore: true,
+      isAtStart: false,
+      loading: false,
+    });
+    expect(afterLeavingStart).toEqual({ armed: true, shouldLoad: false });
+
+    expect(
+      resolveOlderHistoryAutoLoad({
+        armed: afterLeavingStart.armed,
+        hasMore: true,
+        isAtStart: true,
+        loading: false,
+      }),
+    ).toEqual({ armed: false, shouldLoad: true });
+  });
+});
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
