@@ -3759,12 +3759,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   );
 
   const rollbackThread: ClaudeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
-    function* (threadId, numTurns) {
-      const context = yield* requireSession(threadId);
-      const nextLength = Math.max(0, context.turns.length - numTurns);
-      context.turns.splice(nextLength);
-      yield* updateResumeCursor(context);
-      return yield* snapshotThread(context);
+    function* (_threadId, _numTurns) {
+      return yield* new ProviderAdapterValidationError({
+        provider: PROVIDER,
+        operation: "rollbackThread",
+        issue: "Claude SDK does not support turn rollback.",
+      });
     },
   );
 
@@ -3850,6 +3850,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      threadRollback: "unsupported",
     },
     startSession,
     sendTurn,

@@ -1113,20 +1113,14 @@ export function makeCursorAdapter(
         return { threadId, turns: ctx.turns };
       });
 
-    const rollbackThread: CursorAdapterShape["rollbackThread"] = (threadId, numTurns) =>
-      Effect.gen(function* () {
-        const ctx = yield* requireSession(threadId);
-        if (!Number.isInteger(numTurns) || numTurns < 1) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "rollbackThread",
-            issue: "numTurns must be an integer >= 1.",
-          });
-        }
-        const nextLength = Math.max(0, ctx.turns.length - numTurns);
-        ctx.turns.splice(nextLength);
-        return { threadId, turns: ctx.turns };
-      });
+    const rollbackThread: CursorAdapterShape["rollbackThread"] = (_threadId, _numTurns) =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "rollbackThread",
+          issue: "Cursor ACP does not support turn rollback.",
+        }),
+      );
 
     const stopSession: CursorAdapterShape["stopSession"] = (threadId) =>
       withThreadLock(
@@ -1163,7 +1157,7 @@ export function makeCursorAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: { sessionModelSwitch: "in-session", threadRollback: "unsupported" },
       startSession,
       sendTurn,
       interruptTurn,

@@ -79,6 +79,7 @@ function createProviderServiceHarness(
   hasSession = true,
   sessionCwd = cwd,
   providerName: ProviderSession["provider"] = ProviderDriverKind.make("codex"),
+  threadRollback: "provider-native" | "unsupported" = "provider-native",
 ) {
   const now = "2026-01-01T00:00:00.000Z";
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
@@ -93,6 +94,7 @@ function createProviderServiceHarness(
       ? Effect.succeed([
           {
             provider: providerName,
+            providerInstanceId: ProviderInstanceId.make(String(providerName)),
             status: "ready",
             runtimeMode: "full-access",
             threadId: ThreadId.make("thread-1"),
@@ -110,7 +112,7 @@ function createProviderServiceHarness(
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
     listSessions,
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+    getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session", threadRollback }),
     getInstanceInfo: (instanceId) =>
       Effect.succeed({
         instanceId,
@@ -145,13 +147,16 @@ async function waitForThread(
       readonly id: ThreadId;
       readonly latestTurn: { readonly turnId: string } | null;
       readonly checkpoints: ReadonlyArray<{ readonly checkpointTurnCount: number }>;
-      readonly activities: ReadonlyArray<{ readonly kind: string }>;
+      readonly activities: ReadonlyArray<{
+        readonly kind: string;
+        readonly payload: unknown;
+      }>;
     }>;
   }>,
   predicate: (thread: {
     latestTurn: { turnId: string } | null;
     checkpoints: ReadonlyArray<{ checkpointTurnCount: number }>;
-    activities: ReadonlyArray<{ kind: string }>;
+    activities: ReadonlyArray<{ kind: string; payload: unknown }>;
   }) => boolean,
   timeoutMs = 15_000,
 ) {
@@ -159,7 +164,7 @@ async function waitForThread(
   const poll = async (): Promise<{
     latestTurn: { turnId: string } | null;
     checkpoints: ReadonlyArray<{ checkpointTurnCount: number }>;
-    activities: ReadonlyArray<{ kind: string }>;
+    activities: ReadonlyArray<{ kind: string; payload: unknown }>;
   }> => {
     const snapshot = await readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
@@ -279,6 +284,7 @@ describe("CheckpointReactor", () => {
     readonly threadWorktreePath?: string | null;
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
+    readonly threadRollback?: "provider-native" | "unsupported";
     readonly gitStatusRefreshCalls?: Array<string>;
   }) {
     const cwd = createGitRepository();
@@ -288,6 +294,7 @@ describe("CheckpointReactor", () => {
       options?.hasSession ?? true,
       options?.providerSessionCwd ?? cwd,
       options?.providerName ?? ProviderDriverKind.make("codex"),
+      options?.threadRollback ?? "provider-native",
     );
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -323,6 +330,27 @@ describe("CheckpointReactor", () => {
       refreshStatus: () => Effect.die("refreshStatus should not be called in this test"),
       streamStatus: () => Stream.empty,
     });
+    const refreshWorkspaceEntries = vi.fn((_cwd: string) => undefined);
+    const workspaceEntriesLayer = Layer.effect(
+      WorkspaceEntries.WorkspaceEntries,
+      Effect.gen(function* () {
+        const entries = yield* WorkspaceEntries.WorkspaceEntries;
+        return WorkspaceEntries.WorkspaceEntries.of({
+          ...entries,
+          refresh: (cwd) =>
+            Effect.sync(() => refreshWorkspaceEntries(cwd)).pipe(
+              Effect.andThen(entries.refresh(cwd)),
+            ),
+        });
+      }),
+    ).pipe(
+      Layer.provide(
+        WorkspaceEntries.layer.pipe(
+          Layer.provide(WorkspacePaths.layer),
+          Layer.provideMerge(VcsDriverRegistry.layer),
+        ),
+      ),
+    );
 
     const layer = CheckpointReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
@@ -331,12 +359,7 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
-      Layer.provideMerge(
-        WorkspaceEntries.layer.pipe(
-          Layer.provide(WorkspacePaths.layer),
-          Layer.provideMerge(VcsDriverRegistry.layer),
-        ),
-      ),
+      Layer.provideMerge(workspaceEntriesLayer),
       Layer.provideMerge(WorkspacePaths.layer),
       Layer.provideMerge(VcsProcess.layer),
       Layer.provideMerge(ServerConfigLayer),
@@ -411,12 +434,18 @@ describe("CheckpointReactor", () => {
       );
     }
 
+    const restoreCheckpoint = vi.spyOn(checkpointStore, "restoreCheckpoint");
+    const deleteCheckpointRefs = vi.spyOn(checkpointStore, "deleteCheckpointRefs");
+
     return {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       provider,
       cwd,
       drain,
+      restoreCheckpoint,
+      deleteCheckpointRefs,
+      refreshWorkspaceEntries,
     };
   }
 
@@ -963,14 +992,22 @@ describe("CheckpointReactor", () => {
       threadId: ThreadId.make("thread-1"),
       numTurns: 1,
     });
+    expect(harness.restoreCheckpoint).toHaveBeenCalledTimes(1);
+    expect(harness.deleteCheckpointRefs).toHaveBeenCalledTimes(1);
+    expect(harness.refreshWorkspaceEntries).toHaveBeenCalledTimes(1);
     expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v2\n");
     expect(
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2)),
     ).toBe(false);
   });
 
-  it("executes provider revert and emits thread.reverted for claude sessions", async () => {
-    const harness = await createHarness({ providerName: ProviderDriverKind.make("claudeAgent") });
+  it("rejects unsupported rollback before mutating the workspace or thread", async () => {
+    const gitStatusRefreshCalls: Array<string> = [];
+    const harness = await createHarness({
+      providerName: ProviderDriverKind.make("claudeAgent"),
+      threadRollback: "unsupported",
+      gitStatusRefreshCalls,
+    });
     const createdAt = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
@@ -1030,12 +1067,31 @@ describe("CheckpointReactor", () => {
       }),
     );
 
-    await waitForEvent(harness.engine, (event) => event.type === "thread.reverted");
-    expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1);
-    expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
-      threadId: ThreadId.make("thread-1"),
-      numTurns: 1,
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some((activity) => activity.kind === "checkpoint.revert.failed"),
+    );
+    const failure = thread.activities.find(
+      (activity) => activity.kind === "checkpoint.revert.failed",
+    );
+
+    expect(
+      thread.activities.filter((activity) => activity.kind === "checkpoint.revert.failed"),
+    ).toHaveLength(1);
+    expect(failure?.payload).toEqual({
+      turnCount: 1,
+      detail: "The active provider does not support conversation rollback.",
     });
+    expect(thread.latestTurn?.turnId).toBe("turn-claude-2");
+    expect(thread.checkpoints).toHaveLength(2);
+    expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
+    expect(harness.restoreCheckpoint).not.toHaveBeenCalled();
+    expect(harness.deleteCheckpointRefs).not.toHaveBeenCalled();
+    expect(harness.refreshWorkspaceEntries).not.toHaveBeenCalled();
+    expect(gitStatusRefreshCalls).toEqual([]);
+    expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2)),
+    ).toBe(true);
   });
 
   it("processes consecutive revert requests with deterministic rollback sequencing", async () => {

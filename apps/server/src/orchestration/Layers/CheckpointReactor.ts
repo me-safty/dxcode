@@ -7,6 +7,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationEvent,
+  type ProviderInstanceId,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -151,11 +152,21 @@ const make = Effect.gen(function* () {
 
   const resolveSessionRuntimeForThread = Effect.fn("resolveSessionRuntimeForThread")(function* (
     threadId: ThreadId,
-  ): Effect.fn.Return<Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }>> {
+  ): Effect.fn.Return<
+    Option.Option<{
+      readonly threadId: ThreadId;
+      readonly cwd: string;
+      readonly providerInstanceId: ProviderInstanceId;
+    }>
+  > {
     const sessions = yield* providerService.listSessions();
     const session = sessions.find((entry) => entry.threadId === threadId);
-    return session?.cwd
-      ? Option.some({ threadId: session.threadId, cwd: session.cwd })
+    return session?.cwd && session.providerInstanceId
+      ? Option.some({
+          threadId: session.threadId,
+          cwd: session.cwd,
+          providerInstanceId: session.providerInstanceId,
+        })
       : Option.none();
   });
 
@@ -629,6 +640,18 @@ const make = Effect.gen(function* () {
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
         detail: "No active provider session with workspace cwd is bound to this thread.",
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
+      return;
+    }
+    const capabilities = yield* providerService.getCapabilities(
+      sessionRuntime.value.providerInstanceId,
+    );
+    if (capabilities.threadRollback === "unsupported") {
+      yield* appendRevertFailureActivity({
+        threadId: event.payload.threadId,
+        turnCount: event.payload.turnCount,
+        detail: "The active provider does not support conversation rollback.",
         createdAt: now,
       }).pipe(Effect.catch(() => Effect.void));
       return;

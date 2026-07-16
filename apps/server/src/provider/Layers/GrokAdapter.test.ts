@@ -26,6 +26,7 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
+import { ProviderAdapterValidationError } from "../Errors.ts";
 import { grokPromptSettlementBelongsToContext, makeGrokAdapter } from "./GrokAdapter.ts";
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
@@ -123,6 +124,27 @@ it("requires a settlement to match the live Grok turn", () => {
 });
 
 it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
+  it.effect("rejects rollback because Grok ACP has no native rollback", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeTestAdapter("");
+      const result = yield* adapter
+        .rollbackThread(ThreadId.make("grok-rollback-thread"), 1)
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.deepEqual(
+          result.failure,
+          new ProviderAdapterValidationError({
+            provider: ProviderDriverKind.make("grok"),
+            operation: "rollbackThread",
+            issue: "Grok ACP does not support turn rollback.",
+          }),
+        );
+      }
+    }),
+  );
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-mock-thread");

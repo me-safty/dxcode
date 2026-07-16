@@ -1396,22 +1396,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         return { threadId, turns: ctx.turns };
       });
 
-    const rollbackThread: GrokAdapterShape["rollbackThread"] = (threadId, numTurns) =>
-      Effect.gen(function* () {
-        yield* requireSession(threadId);
-        if (!Number.isInteger(numTurns) || numTurns < 1) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "rollbackThread",
-            issue: "numTurns must be an integer >= 1.",
-          });
-        }
-        return yield* new ProviderAdapterRequestError({
+    const rollbackThread: GrokAdapterShape["rollbackThread"] = (_threadId, _numTurns) =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
           provider: PROVIDER,
-          method: "thread/rollback",
-          detail: "Grok ACP sessions do not support provider-side rollback yet.",
-        });
-      });
+          operation: "rollbackThread",
+          issue: "Grok ACP does not support turn rollback.",
+        }),
+      );
 
     const stopSession: GrokAdapterShape["stopSession"] = (threadId) =>
       withThreadLock(
@@ -1445,7 +1437,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: { sessionModelSwitch: "in-session", threadRollback: "unsupported" },
       startSession,
       sendTurn,
       interruptTurn,

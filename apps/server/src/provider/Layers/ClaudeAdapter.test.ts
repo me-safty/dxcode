@@ -2940,87 +2940,28 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect(
-    "supports rollbackThread by trimming in-memory turns and preserving earlier turns",
-    () => {
-      const harness = makeHarness();
-      return Effect.gen(function* () {
-        const adapter = yield* ClaudeAdapter;
+  it.effect("rejects rollback because the Claude SDK has no native rollback", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const result = yield* adapter.rollbackThread(THREAD_ID, 1).pipe(Effect.result);
 
-        const session = yield* adapter.startSession({
-          threadId: THREAD_ID,
-          provider: ProviderDriverKind.make("claudeAgent"),
-          runtimeMode: "full-access",
-        });
-
-        const firstTurn = yield* adapter.sendTurn({
-          threadId: session.threadId,
-          input: "first",
-          attachments: [],
-        });
-
-        const firstCompletedFiber = yield* Stream.filter(
-          adapter.streamEvents,
-          (event) => event.type === "turn.completed",
-        ).pipe(Stream.runHead, Effect.forkChild);
-
-        harness.query.emit({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          errors: [],
-          session_id: "sdk-session-rollback",
-          uuid: "result-first",
-        } as unknown as SDKMessage);
-
-        const firstCompleted = yield* Fiber.join(firstCompletedFiber);
-        assert.equal(firstCompleted._tag, "Some");
-        if (firstCompleted._tag === "Some" && firstCompleted.value.type === "turn.completed") {
-          assert.equal(String(firstCompleted.value.turnId), String(firstTurn.turnId));
-        }
-
-        const secondTurn = yield* adapter.sendTurn({
-          threadId: session.threadId,
-          input: "second",
-          attachments: [],
-        });
-
-        const secondCompletedFiber = yield* Stream.filter(
-          adapter.streamEvents,
-          (event) => event.type === "turn.completed",
-        ).pipe(Stream.runHead, Effect.forkChild);
-
-        harness.query.emit({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          errors: [],
-          session_id: "sdk-session-rollback",
-          uuid: "result-second",
-        } as unknown as SDKMessage);
-
-        const secondCompleted = yield* Fiber.join(secondCompletedFiber);
-        assert.equal(secondCompleted._tag, "Some");
-        if (secondCompleted._tag === "Some" && secondCompleted.value.type === "turn.completed") {
-          assert.equal(String(secondCompleted.value.turnId), String(secondTurn.turnId));
-        }
-
-        const threadBeforeRollback = yield* adapter.readThread(session.threadId);
-        assert.equal(threadBeforeRollback.turns.length, 2);
-
-        const rolledBack = yield* adapter.rollbackThread(session.threadId, 1);
-        assert.equal(rolledBack.turns.length, 1);
-        assert.equal(rolledBack.turns[0]?.id, firstTurn.turnId);
-
-        const threadAfterRollback = yield* adapter.readThread(session.threadId);
-        assert.equal(threadAfterRollback.turns.length, 1);
-        assert.equal(threadAfterRollback.turns[0]?.id, firstTurn.turnId);
-      }).pipe(
-        Effect.provideService(Random.Random, makeDeterministicRandomService()),
-        Effect.provide(harness.layer),
-      );
-    },
-  );
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.deepEqual(
+          result.failure,
+          new ProviderAdapterValidationError({
+            provider: ProviderDriverKind.make("claudeAgent"),
+            operation: "rollbackThread",
+            issue: "Claude SDK does not support turn rollback.",
+          }),
+        );
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
 
   it.effect("updates model on sendTurn when model override is provided", () => {
     const harness = makeHarness();

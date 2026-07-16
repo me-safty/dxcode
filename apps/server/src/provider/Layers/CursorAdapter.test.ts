@@ -27,6 +27,7 @@ import {
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
@@ -168,6 +169,27 @@ const cursorAdapterTestLayer = it.layer(
 );
 
 cursorAdapterTestLayer("CursorAdapterLive", (it) => {
+  it.effect("rejects rollback because Cursor ACP has no native rollback", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const result = yield* adapter
+        .rollbackThread(ThreadId.make("cursor-rollback-thread"), 1)
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.deepEqual(
+          result.failure,
+          new ProviderAdapterValidationError({
+            provider: ProviderDriverKind.make("cursor"),
+            operation: "rollbackThread",
+            issue: "Cursor ACP does not support turn rollback.",
+          }),
+        );
+      }
+    }),
+  );
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;
