@@ -44,10 +44,24 @@ export function buildGrokAcpSpawnInput(
   };
 }
 
-function resolveGrokAuthMethodId(environment: NodeJS.ProcessEnv | undefined): string {
-  return environment?.[GROK_API_KEY_ENV]?.trim()
+export function resolveGrokAuthMethodId(
+  environment: NodeJS.ProcessEnv | undefined,
+  advertisedMethodIds?: ReadonlyArray<string>,
+): string {
+  const preferred = environment?.[GROK_API_KEY_ENV]?.trim()
     ? GROK_AUTH_METHOD_API_KEY
     : GROK_AUTH_METHOD_CACHED_TOKEN;
+  if (!advertisedMethodIds || advertisedMethodIds.length === 0) {
+    // Older ACP agents may omit authMethods; preserve the configured legacy default.
+    return preferred;
+  }
+  if (advertisedMethodIds.includes(preferred)) {
+    return preferred;
+  }
+  if (advertisedMethodIds.includes(GROK_AUTH_METHOD_CACHED_TOKEN)) {
+    return GROK_AUTH_METHOD_CACHED_TOKEN;
+  }
+  return advertisedMethodIds[0]!;
 }
 
 export const makeGrokAcpRuntime = (
@@ -62,7 +76,11 @@ export const makeGrokAcpRuntime = (
       AcpSessionRuntime.layer({
         ...input,
         spawn: buildGrokAcpSpawnInput(input.grokSettings, input.cwd, input.environment),
-        authMethodId: resolveGrokAuthMethodId(input.environment),
+        authMethodId: (initializeResult) =>
+          resolveGrokAuthMethodId(
+            input.environment,
+            initializeResult.authMethods?.map((method) => method.id),
+          ),
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
@@ -77,8 +95,8 @@ export const makeGrokAcpRuntime = (
 
 export function resolveGrokAcpBaseModelId(model: string | null | undefined): string {
   const trimmed = model?.trim();
-  const base = trimmed && trimmed.length > 0 ? trimmed : "grok-build";
-  return normalizeModelSlug(base, GROK_DRIVER_KIND) ?? "grok-build";
+  const base = trimmed && trimmed.length > 0 ? trimmed : "grok-4.5";
+  return normalizeModelSlug(base, GROK_DRIVER_KIND) ?? "grok-4.5";
 }
 
 export function currentGrokModelIdFromSessionSetup(

@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { GrokSettings } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { buildInitialGrokProviderSnapshot, checkGrokProviderStatus } from "./GrokProvider.ts";
 
@@ -30,6 +31,7 @@ describe("buildInitialGrokProviderSnapshot", () => {
       expect(snapshot.installed).toBe(true);
       expect(snapshot.status).toBe("warning");
       expect(snapshot.version).toBeNull();
+      expect(snapshot.models.map((model) => model.slug)).toEqual(["grok-4.5"]);
       expect(snapshot.message).toContain("Checking Grok");
       expect(snapshot.requiresNewThreadForModelChange).toBe(true);
     }),
@@ -57,15 +59,18 @@ it.layer(NodeServices.layer)("checkGrokProviderStatus", (it) => {
       const secretStderr = "broken grok install: secret-token-value";
       const snapshot = yield* Effect.scoped(
         Effect.gen(function* () {
+          const hostPlatform = yield* HostProcessPlatform;
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-grok-version-" });
-          const grokPath = path.join(dir, "grok");
+          const grokPath = path.join(dir, hostPlatform === "win32" ? "grok.cmd" : "grok");
           yield* fs.writeFileString(
             grokPath,
-            ["#!/bin/sh", `printf "%s\\n" "${secretStderr}" >&2`, "exit 2", ""].join("\n"),
+            hostPlatform === "win32"
+              ? ["@echo off", `echo ${secretStderr} 1>&2`, "exit /b 2", ""].join("\r\n")
+              : ["#!/bin/sh", `printf "%s\\n" "${secretStderr}" >&2`, "exit 2", ""].join("\n"),
           );
-          yield* fs.chmod(grokPath, 0o755);
+          if (hostPlatform !== "win32") yield* fs.chmod(grokPath, 0o755);
 
           return yield* checkGrokProviderStatus(
             decodeGrokSettings({ enabled: true, binaryPath: grokPath }),
@@ -85,15 +90,18 @@ it.layer(NodeServices.layer)("checkGrokProviderStatus", (it) => {
     Effect.gen(function* () {
       const snapshot = yield* Effect.scoped(
         Effect.gen(function* () {
+          const hostPlatform = yield* HostProcessPlatform;
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-grok-success-" });
-          const grokPath = path.join(dir, "grok");
+          const grokPath = path.join(dir, hostPlatform === "win32" ? "grok.cmd" : "grok");
           yield* fs.writeFileString(
             grokPath,
-            ["#!/bin/sh", 'printf "grok-cli 0.0.99\\n"', "exit 0", ""].join("\n"),
+            hostPlatform === "win32"
+              ? ["@echo off", "echo grok-cli 0.0.99", "exit /b 0", ""].join("\r\n")
+              : ["#!/bin/sh", 'printf "grok-cli 0.0.99\\n"', "exit 0", ""].join("\n"),
           );
-          yield* fs.chmod(grokPath, 0o755);
+          if (hostPlatform !== "win32") yield* fs.chmod(grokPath, 0o755);
 
           return yield* checkGrokProviderStatus(
             decodeGrokSettings({ enabled: true, binaryPath: grokPath }),
@@ -103,7 +111,7 @@ it.layer(NodeServices.layer)("checkGrokProviderStatus", (it) => {
 
       expect(snapshot.status).toBe("error");
       expect(snapshot.installed).toBe(true);
-      expect(snapshot.models.map((model) => model.slug)).toEqual(["grok-build"]);
+      expect(snapshot.models.map((model) => model.slug)).toEqual(["grok-4.5"]);
       expect(snapshot.message).toContain("ACP startup failed");
     }),
   );

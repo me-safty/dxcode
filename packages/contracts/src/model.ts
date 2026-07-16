@@ -140,7 +140,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-sonnet-5",
   [CURSOR_DRIVER_KIND]: "auto",
-  [GROK_DRIVER_KIND]: "grok-build",
+  [GROK_DRIVER_KIND]: "grok-4.5",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
 };
 

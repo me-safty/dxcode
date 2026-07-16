@@ -19,7 +19,7 @@ const makeProbeRuntime = Effect.gen(function* () {
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* makeGrokAcpRuntime({
     grokSettings: { binaryPath: "grok" },
-    environment: process.env,
+    environment: { ...process.env, XAI_API_KEY: "" },
     childProcessSpawner,
     cwd: process.cwd(),
     clientInfo: { name: "t3-grok-probe", version: "0.0.0" },
@@ -53,17 +53,28 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("session/set_model accepts a no-op switch to the current model", () =>
+  it.effect("session/set_model selects Grok 4.5 when advertised", () =>
     Effect.gen(function* () {
       const runtime = yield* makeProbeRuntime;
       const started = yield* runtime.start();
-      const currentModelId = started.sessionSetupResult.models?.currentModelId?.trim();
-      expect(currentModelId).toBeDefined();
-      if (!currentModelId) return;
+      const models = started.sessionSetupResult.models;
+      const grok45 = models?.availableModels.find((model) => model.modelId === "grok-4.5");
+      expect(grok45).toBeDefined();
 
-      // No-op switch — selecting the model the session already runs on must
-      // succeed against every Grok build that implements `session/set_model`.
-      yield* runtime.setSessionModel(currentModelId);
+      yield* runtime.setSessionModel("grok-4.5");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("runs a real Grok 4.5 prompt through cached SuperGrok OAuth", () =>
+    Effect.gen(function* () {
+      const runtime = yield* makeProbeRuntime;
+      yield* runtime.start();
+      yield* runtime.setSessionModel("grok-4.5");
+
+      const result = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "Reply with exactly: T3_GROK_45_OAUTH_OK" }],
+      });
+      expect(result.stopReason).toBe("end_turn");
+    }).pipe(Effect.timeout("90 seconds"), Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

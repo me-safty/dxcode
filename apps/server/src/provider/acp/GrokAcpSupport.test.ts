@@ -6,13 +6,34 @@ import {
   applyGrokAcpModelSelection,
   buildGrokAcpSpawnInput,
   resolveGrokAcpBaseModelId,
+  resolveGrokAuthMethodId,
 } from "./GrokAcpSupport.ts";
 
 describe("resolveGrokAcpBaseModelId", () => {
   it("normalizes empty and custom Grok model ids", () => {
-    expect(resolveGrokAcpBaseModelId(undefined)).toBe("grok-build");
-    expect(resolveGrokAcpBaseModelId("   ")).toBe("grok-build");
+    expect(resolveGrokAcpBaseModelId(undefined)).toBe("grok-4.5");
+    expect(resolveGrokAcpBaseModelId("   ")).toBe("grok-4.5");
     expect(resolveGrokAcpBaseModelId("  grok-test-custom-model  ")).toBe("grok-test-custom-model");
+  });
+});
+
+describe("resolveGrokAuthMethodId", () => {
+  it("uses cached OAuth when no API key is configured", () => {
+    expect(resolveGrokAuthMethodId(undefined)).toBe("cached_token");
+    expect(resolveGrokAuthMethodId({ XAI_API_KEY: "   " })).toBe("cached_token");
+  });
+
+  it("uses an API key only when the CLI advertises that method", () => {
+    expect(resolveGrokAuthMethodId({ XAI_API_KEY: "secret" })).toBe("xai.api_key");
+    expect(resolveGrokAuthMethodId({ XAI_API_KEY: "secret" }, ["cached_token", "grok.com"])).toBe(
+      "cached_token",
+    );
+    expect(resolveGrokAuthMethodId({ XAI_API_KEY: "secret" }, ["grok.com", "cached_token"])).toBe(
+      "cached_token",
+    );
+    expect(
+      resolveGrokAuthMethodId({ XAI_API_KEY: "secret" }, ["xai.api_key", "cached_token"]),
+    ).toBe("xai.api_key");
   });
 });
 
