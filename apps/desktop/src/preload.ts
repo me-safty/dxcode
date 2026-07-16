@@ -27,6 +27,52 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
 
+// On Linux, Chromium fires `contextmenu` on right-button PRESS (Windows fires it
+// on release). Popping the native menu while the button is still held makes the
+// menu grab the pointer, and the subsequent release "clicks" whatever item sits
+// under the cursor — a random item activates the instant the menu opens (#3698).
+// Track pointer-button state and delay opening the menu until the press that
+// triggered it has been released, matching the Windows semantics.
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Preload script has no Effect runtime.
+const gateContextMenuOnPointerRelease = process.platform === "linux";
+let pointerButtonsHeld = 0;
+if (gateContextMenuOnPointerRelease) {
+  window.addEventListener("pointerdown", (event) => (pointerButtonsHeld = event.buttons), true);
+  window.addEventListener("pointerup", (event) => (pointerButtonsHeld = event.buttons), true);
+  window.addEventListener("pointercancel", () => (pointerButtonsHeld = 0), true);
+  window.addEventListener("blur", () => (pointerButtonsHeld = 0));
+}
+
+// Resolves true once every button held at request time is released (buttons
+// pressed mid-gesture don't keep the menu waiting), or false when the gesture
+// is cancelled (pointercancel / focus loss) — opening a menu then would either
+// land mid-hold (re-triggering #3698) or appear at stale coordinates the user
+// no longer expects.
+function waitForPointerRelease(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const buttonsAtRequest = pointerButtonsHeld;
+    if (buttonsAtRequest === 0) {
+      resolve(true);
+      return;
+    }
+    const finish = (proceed: boolean) => {
+      window.removeEventListener("pointerup", onPointerUp, true);
+      window.removeEventListener("pointercancel", onAbort, true);
+      window.removeEventListener("blur", onAbort);
+      resolve(proceed);
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      if ((event.buttons & buttonsAtRequest) === 0) {
+        finish(true);
+      }
+    };
+    const onAbort = () => finish(false);
+    window.addEventListener("pointerup", onPointerUp, true);
+    window.addEventListener("pointercancel", onAbort, true);
+    window.addEventListener("blur", onAbort);
+  });
+}
+
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
@@ -99,11 +145,15 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   pickFolder: (options) => ipcRenderer.invoke(IpcChannels.PICK_FOLDER_CHANNEL, options),
   confirm: (message) => ipcRenderer.invoke(IpcChannels.CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(IpcChannels.SET_THEME_CHANNEL, theme),
-  showContextMenu: (items, position) =>
-    ipcRenderer.invoke(IpcChannels.CONTEXT_MENU_CHANNEL, {
+  showContextMenu: async (items, position) => {
+    if (gateContextMenuOnPointerRelease && !(await waitForPointerRelease())) {
+      return null;
+    }
+    return ipcRenderer.invoke(IpcChannels.CONTEXT_MENU_CHANNEL, {
       items,
       ...(position === undefined ? {} : { position }),
-    }),
+    });
+  },
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
