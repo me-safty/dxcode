@@ -31,6 +31,11 @@ export interface SidebarProjectSnapshot extends Project {
   remoteEnvironmentLabels: readonly string[];
 }
 
+interface SidebarProjectGroupCandidate {
+  readonly logicalKey: string;
+  readonly member: SidebarProjectGroupMember;
+}
+
 function getProjectFreshnessTime(project: Project): number {
   const updatedAtTime = Date.parse(project.updatedAt);
   if (Number.isFinite(updatedAtTime)) {
@@ -87,7 +92,7 @@ export function buildSidebarProjectSnapshots(input: {
   // legacy behavior.
   isDesktopLocalEnvironment?: (environmentId: EnvironmentId) => boolean;
 }): SidebarProjectSnapshot[] {
-  const groupedMembers = new Map<string, SidebarProjectGroupMember[]>();
+  const winnersByPhysicalKey = new Map<string, SidebarProjectGroupCandidate>();
   for (const project of input.projects) {
     const logicalKey = deriveLogicalProjectKeyFromSettings(project, input.settings);
     const physicalProjectKey = derivePhysicalProjectKey(project);
@@ -96,26 +101,27 @@ export function buildSidebarProjectSnapshots(input: {
       physicalProjectKey,
       environmentLabel: input.resolveEnvironmentLabel(project.environmentId),
     };
-    const existing = groupedMembers.get(logicalKey);
-    if (existing) {
-      const duplicateIndex = existing.findIndex(
-        (existingMember) => existingMember.physicalProjectKey === physicalProjectKey,
-      );
-      if (duplicateIndex !== -1) {
-        const existingMember = existing[duplicateIndex];
-        if (
-          existingMember &&
-          shouldReplaceDuplicateMember({
-            existingMember,
-            candidateMember: member,
-            primaryEnvironmentId: input.primaryEnvironmentId,
-          })
-        ) {
-          existing[duplicateIndex] = member;
-        }
-        continue;
-      }
-      existing.push(member);
+    const existing = winnersByPhysicalKey.get(physicalProjectKey);
+    if (!existing) {
+      winnersByPhysicalKey.set(physicalProjectKey, { logicalKey, member });
+      continue;
+    }
+    if (
+      shouldReplaceDuplicateMember({
+        existingMember: existing.member,
+        candidateMember: member,
+        primaryEnvironmentId: input.primaryEnvironmentId,
+      })
+    ) {
+      winnersByPhysicalKey.set(physicalProjectKey, { logicalKey, member });
+    }
+  }
+
+  const groupedMembers = new Map<string, SidebarProjectGroupMember[]>();
+  for (const { logicalKey, member } of winnersByPhysicalKey.values()) {
+    const existingMembers = groupedMembers.get(logicalKey);
+    if (existingMembers) {
+      existingMembers.push(member);
     } else {
       groupedMembers.set(logicalKey, [member]);
     }

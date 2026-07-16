@@ -181,4 +181,37 @@ describe("environment grouping", () => {
     expect(snapshots[0]?.memberProjects.map((project) => project.id)).toEqual([canonical.id]);
     expect(snapshots[0]?.id).toBe(canonical.id);
   });
+
+  it("dedupes stale project rows before logical grouping", () => {
+    const staleWithoutRepositoryIdentity = makeProject({
+      id: ProjectId.make("project-stale"),
+      repositoryIdentity: null,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const canonical = makeProject({
+      id: ProjectId.make("project-canonical"),
+      repositoryIdentity,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    const remote = makeProject({
+      id: ProjectId.make("project-remote"),
+      environmentId: remoteEnvironmentId,
+      repositoryIdentity,
+    });
+
+    const snapshots = buildSidebarProjectSnapshots({
+      projects: [staleWithoutRepositoryIdentity, canonical, remote],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: (environmentId) =>
+        environmentId === remoteEnvironmentId ? "remote" : "primary",
+    });
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]?.projectKey).toBe(repositoryIdentity.canonicalKey);
+    expect(snapshots[0]?.memberProjects.map((project) => project.id)).toEqual([
+      canonical.id,
+      remote.id,
+    ]);
+  });
 });
