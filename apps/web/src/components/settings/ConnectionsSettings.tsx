@@ -1351,7 +1351,8 @@ function SavedBackendListRow({
   const environmentId = environment.environmentId;
   const connectionState = environment.connection.phase;
   const isConnected = connectionState === "connected";
-  const isConnecting = connectionState === "connecting" || connectionState === "reconnecting";
+  const isConnecting = connectionState === "connecting";
+  const isReconnecting = connectionState === "reconnecting";
   const stateDotClassName =
     connectionState === "connected"
       ? "bg-success"
@@ -1466,13 +1467,17 @@ function SavedBackendListRow({
               variant="outline"
               disabled={isConnecting || removingEnvironmentId === environmentId}
               onClick={() =>
-                void (isConnected ? onRemove(environmentId) : onConnect(environmentId))
+                void (isConnected || isReconnecting
+                  ? onRemove(environmentId)
+                  : onConnect(environmentId))
               }
             >
-              {isConnected
+              {isConnected || isReconnecting
                 ? removingEnvironmentId === environmentId
-                  ? "Disconnecting…"
-                  : "Disconnect"
+                  ? "Removing…"
+                  : isConnected
+                    ? "Disconnect"
+                    : "Remove"
                 : isConnecting
                   ? "Connecting…"
                   : "Connect"}
