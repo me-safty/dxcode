@@ -107,17 +107,19 @@ describe("IncomingShareInbox", () => {
     expect([...persisted.values()]).toEqual([]);
   });
 
-  it("consumes duplicate records left by a replay from the legacy random-id inbox", async () => {
+  it("consumes only the addressed share when another share has identical content", async () => {
     const { inbox, persisted } = createHarness();
-    persisted.set("legacy-first", draft("legacy-first", "2026-07-16T07:59:00.000Z"));
-    persisted.set("legacy-second", draft("legacy-second"));
+    persisted.set("share-first", draft("share-first", "2026-07-16T07:59:00.000Z"));
+    persisted.set("share-second", draft("share-second"));
 
     await expect(inbox.refresh({ ingestNative: false })).resolves.toEqual([
-      draft("legacy-second"),
-      draft("legacy-first", "2026-07-16T07:59:00.000Z"),
+      draft("share-second"),
+      draft("share-first", "2026-07-16T07:59:00.000Z"),
     ]);
-    await expect(inbox.consume("legacy-second")).resolves.toEqual([]);
-    expect([...persisted.values()]).toEqual([]);
+    await expect(inbox.consume("share-second")).resolves.toEqual([
+      draft("share-first", "2026-07-16T07:59:00.000Z"),
+    ]);
+    expect([...persisted.values()]).toEqual([draft("share-first", "2026-07-16T07:59:00.000Z")]);
   });
 
   it("keeps content-identical shares addressable by their own ids", async () => {

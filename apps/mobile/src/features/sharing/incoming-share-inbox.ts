@@ -39,18 +39,6 @@ export function sortAndDedupeIncomingShares(
     });
 }
 
-function incomingShareContentKey(draft: IncomingShareDraft): string {
-  return JSON.stringify([
-    draft.text,
-    draft.attachments.map((attachment) => [
-      attachment.name,
-      attachment.mimeType,
-      attachment.sizeBytes,
-      attachment.dataUrl,
-    ]),
-  ]);
-}
-
 /**
  * Serializes every durable inbox mutation. This prevents a stale storage load
  * or a foreground refresh from restoring an item after it has been consumed.
@@ -133,26 +121,10 @@ export class IncomingShareInbox {
 
   consume(shareId: string): Promise<ReadonlyArray<IncomingShareDraft>> {
     return this.runExclusive(async () => {
-      const persisted = await this.dependencies.loadDrafts();
-      const target = persisted.find((draft) => draft.id === shareId);
-      const targetContentKey = target ? incomingShareContentKey(target) : null;
-      const consumedIds = targetContentKey
-        ? [
-            ...persisted
-              .filter(
-                (draft) =>
-                  draft.id !== shareId && incomingShareContentKey(draft) === targetContentKey,
-              )
-              .map((draft) => draft.id),
-            // Remove the item the UI knows about last. If duplicate cleanup
-            // fails midway, a retry can still find this item and its content
-            // key to finish the whole operation.
-            shareId,
-          ]
-        : [shareId];
-      for (const consumedId of new Set(consumedIds)) {
-        await this.dependencies.removeDraft(consumedId);
-      }
+      // The stable payload-derived id already coalesces retries of the same
+      // native handoff. Payload equality cannot identify duplicate handoffs:
+      // users may intentionally share identical content more than once.
+      await this.dependencies.removeDraft(shareId);
       return sortAndDedupeIncomingShares(await this.dependencies.loadDrafts());
     });
   }
