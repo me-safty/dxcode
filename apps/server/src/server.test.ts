@@ -17,6 +17,7 @@ import {
   MessageId,
   ExternalLauncherCommandNotFoundError,
   type OrchestrationThreadShell,
+  type OrchestrationThread,
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -45,6 +46,7 @@ import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -121,6 +123,38 @@ const defaultModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "gpt-5-codex",
 } as const;
+const makeThreadMessageSentEvent = (input: {
+  readonly id: string;
+  readonly sequence: number;
+  readonly text: string;
+  readonly threadId: ThreadId;
+  readonly occurredAt?: string;
+}): OrchestrationEvent => {
+  const occurredAt = input.occurredAt ?? "2026-01-01T00:00:00.000Z";
+  return {
+    sequence: input.sequence,
+    eventId: EventId.make(`event-${input.id}`),
+    aggregateKind: "thread",
+    aggregateId: input.threadId,
+    occurredAt,
+    commandId: CommandId.make(`cmd-${input.id}`),
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.message-sent",
+    payload: {
+      threadId: input.threadId,
+      messageId: MessageId.make(`message-${input.id}`),
+      role: "user",
+      text: input.text,
+      attachments: [],
+      turnId: null,
+      streaming: false,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    },
+  } satisfies OrchestrationEvent;
+};
 const testEnvironmentDescriptor = {
   environmentId: EnvironmentId.make("environment-test"),
   label: "Test environment",
@@ -677,6 +711,11 @@ const buildAppUnderTest = (options?: {
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 0 }),
           streamDomainEvents: Stream.empty,
+          // Most tests do not exercise live orchestration events. Tests that do
+          // must override this intentionally inert subscription.
+          subscribeDomainEvents: Effect.flatMap(PubSub.unbounded<OrchestrationEvent>(), (pubsub) =>
+            PubSub.subscribe(pubsub),
+          ),
           ...options?.layers?.orchestrationEngine,
         }),
       ),
@@ -5576,6 +5615,167 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.deepEqual(replayResult, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("buffers thread detail events emitted while loading the initial thread snapshot", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-racy-subscribe");
+      const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+      const snapshotStarted = yield* Deferred.make<void>();
+      const snapshotGate = yield* Deferred.make<void>();
+      const thread = {
+        id: threadId,
+        projectId: defaultProjectId,
+        title: "Racy Subscribe",
+        modelSelection: defaultModelSelection,
+        interactionMode: "default" as const,
+        runtimeMode: "full-access" as const,
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        latestTurn: null,
+        messages: [],
+        session: null,
+        activities: [],
+        proposedPlans: [],
+        checkpoints: [],
+        deletedAt: null,
+      } satisfies OrchestrationThread;
+      const userMessageEvent = makeThreadMessageSentEvent({
+        id: "racy-first-user",
+        sequence: 2,
+        text: "hi",
+        threadId,
+        occurredAt: now,
+      });
+      const snapshotMessageEvent = makeThreadMessageSentEvent({
+        id: "already-in-snapshot",
+        sequence: 1,
+        text: "already represented by the snapshot",
+        threadId,
+        occurredAt: now,
+      });
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: () =>
+              Deferred.succeed(snapshotStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(snapshotGate)),
+                Effect.as(Option.some({ snapshotSequence: 1, thread })),
+              ),
+          },
+          orchestrationEngine: {
+            streamDomainEvents: Stream.empty,
+            subscribeDomainEvents: PubSub.subscribe(eventPubSub),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const fiber = yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId,
+            }).pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped);
+            yield* Deferred.await(snapshotStarted);
+            yield* PubSub.publish(eventPubSub, snapshotMessageEvent);
+            yield* PubSub.publish(eventPubSub, userMessageEvent);
+            yield* Deferred.succeed(snapshotGate, undefined);
+            return Array.from(yield* Fiber.join(fiber));
+          }),
+        ),
+      );
+
+      assert.equal(items[0]?.kind, "snapshot");
+      assert.equal(items[1]?.kind, "event");
+      if (items[1]?.kind === "event") {
+        const event = items[1].event;
+        assert.equal(event.type, "thread.message-sent");
+        if (event.type === "thread.message-sent") {
+          assert.equal(event.payload.text, "hi");
+        }
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("buffers live thread detail events while replaying afterSequence catch-up", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-racy-replay");
+      const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+      const replayStarted = yield* Deferred.make<void>();
+      const replayGate = yield* Deferred.make<void>();
+      const catchUpEvent = makeThreadMessageSentEvent({
+        id: "racy-replay-catch-up",
+        sequence: 2,
+        text: "persisted catch-up",
+        threadId,
+      });
+      const overlappingEvent = makeThreadMessageSentEvent({
+        id: "racy-replay-overlap",
+        sequence: 3,
+        text: "persisted and live during replay",
+        threadId,
+      });
+      const liveEvent = makeThreadMessageSentEvent({
+        id: "racy-replay-live",
+        sequence: 4,
+        text: "live after overlap",
+        threadId,
+      });
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEvents: (afterSequence, limit) =>
+              Stream.fromEffect(
+                Effect.gen(function* () {
+                  assert.equal(afterSequence, 1);
+                  assert.equal(limit, Number.MAX_SAFE_INTEGER);
+                  yield* Deferred.succeed(replayStarted, undefined);
+                  yield* Deferred.await(replayGate);
+                  return [catchUpEvent, overlappingEvent] as const;
+                }),
+              ).pipe(Stream.flatMap(Stream.fromIterable)),
+            streamDomainEvents: Stream.empty,
+            subscribeDomainEvents: PubSub.subscribe(eventPubSub),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const fiber = yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId,
+              afterSequence: 1,
+            }).pipe(Stream.take(3), Stream.runCollect, Effect.forkScoped);
+            yield* Deferred.await(replayStarted);
+            yield* PubSub.publish(eventPubSub, overlappingEvent);
+            yield* PubSub.publish(eventPubSub, liveEvent);
+            yield* Deferred.succeed(replayGate, undefined);
+            return Array.from(yield* Fiber.join(fiber));
+          }),
+        ),
+      );
+
+      assert.equal(items.length, 3);
+      assertTrue(items.every((item) => item.kind === "event"));
+      const events = items.flatMap((item) => (item.kind === "event" ? [item.event] : []));
+      assert.deepEqual(
+        events.map((event) => event.sequence),
+        [2, 3, 4],
+      );
+      assert.deepEqual(
+        events.map((event) => (event.type === "thread.message-sent" ? event.payload.text : null)),
+        ["persisted catch-up", "persisted and live during replay", "live after overlap"],
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
