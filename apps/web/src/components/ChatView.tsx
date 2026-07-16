@@ -2609,6 +2609,9 @@ function ChatViewContent(props: ChatViewProps) {
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        ...(input.previewUrl !== null
+          ? { previewUrl: input.previewUrl, autoOpenPreview: input.autoOpenPreview }
+          : {}),
       };
       const nextScripts = input.runOnWorktreeCreate
         ? [
@@ -2649,6 +2652,9 @@ function ChatViewContent(props: ChatViewProps) {
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        ...(input.previewUrl !== null
+          ? { previewUrl: input.previewUrl, autoOpenPreview: input.autoOpenPreview }
+          : { previewUrl: undefined, autoOpenPreview: undefined }),
       };
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId
