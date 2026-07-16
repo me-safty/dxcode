@@ -1,6 +1,14 @@
 import { assert, it } from "@effect/vitest";
 
-import { mapCodexModelCapabilities } from "./CodexProvider.ts";
+import { mapCodexModelCapabilities, toCodexShortName } from "./CodexProvider.ts";
+
+it("derives concise names for Codex-owned GPT models", () => {
+  assert.strictEqual(toCodexShortName("GPT-5.6-Sol"), "5.6 Sol");
+  assert.strictEqual(toCodexShortName("GPT-5.6-Terra"), "5.6 Terra");
+  assert.strictEqual(toCodexShortName("GPT-5.4-Mini"), "5.4 Mini");
+  assert.strictEqual(toCodexShortName("GPT-5.5"), "5.5");
+  assert.strictEqual(toCodexShortName("o3"), "o3");
+});
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({

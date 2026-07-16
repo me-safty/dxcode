@@ -5,8 +5,8 @@ import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
   type ModelEsque,
-  PROVIDER_ICON_BY_PROVIDER,
-} from "./providerIconUtils";
+} from "./modelDisplayNames";
+import { PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import { ComboboxItem } from "../ui/combobox";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";

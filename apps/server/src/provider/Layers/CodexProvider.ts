@@ -181,15 +181,30 @@ const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string =>
     .replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
 };
 
+export const toCodexShortName = (name: string): string => {
+  const match = /^GPT-(\d+(?:\.\d+)*)(?:(?:[-\s]+)(.+))?$/iu.exec(name.trim());
+  const version = match?.[1];
+  if (!version) {
+    return name;
+  }
+  const suffix = match[2]?.trim().replace(/[-_]+/gu, " ");
+  return suffix ? `${version} ${suffix}` : version;
+};
+
 function parseCodexModelListResponse(
   response: CodexSchema.V2ModelListResponse,
 ): ReadonlyArray<ServerProviderModel> {
-  return response.data.map((model) => ({
-    slug: model.model,
-    name: toDisplayName(model),
-    isCustom: false,
-    capabilities: mapCodexModelCapabilities(model),
-  }));
+  return response.data.map((model) => {
+    const name = toDisplayName(model);
+    const shortName = toCodexShortName(name);
+    return {
+      slug: model.model,
+      name,
+      ...(shortName !== name ? { shortName } : {}),
+      isCustom: false,
+      capabilities: mapCodexModelCapabilities(model),
+    };
+  });
 }
 
 function appendCustomCodexModels(

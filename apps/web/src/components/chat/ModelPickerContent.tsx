@@ -12,7 +12,7 @@ import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxListVirtualized } from "../ui/combobox";
-import { ModelEsque } from "./providerIconUtils";
+import { ModelEsque } from "./modelDisplayNames";
 import {
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
@@ -472,6 +472,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return mapping.size > 0 ? mapping : EMPTY_MODEL_JUMP_LABELS;
   }, [keybindings, modelJumpCommandByKey, modelJumpShortcutContext]);
 
+  const showProviderForEveryRow = isSearching || selectedInstanceId === "favorites";
+
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) {
@@ -514,6 +516,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       isSearching,
       selectedInstanceId,
       activeModelKey: `${props.activeInstanceId}:${props.model}`,
+      filteredModelByKey,
+      getModelDisabledReason,
       modelJumpLabelByKey,
     }),
     [
@@ -522,6 +526,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       selectedInstanceId,
       props.activeInstanceId,
       props.model,
+      filteredModelByKey,
+      getModelDisabledReason,
       modelJumpLabelByKey,
     ],
   );
@@ -672,11 +678,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                           // Keep it in mixed-provider views (favorites,
                           // search) and for models that carry a sub-provider
                           // distinction (e.g. "Claude · Bedrock").
-                          isSearching ||
-                          selectedInstanceId === "favorites" ||
-                          Boolean(model.subProvider)
+                          showProviderForEveryRow || Boolean(model.subProvider)
                         }
-                        preferShortName={!isLocked}
+                        preferShortName
                         useTriggerLabel={false}
                         showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
@@ -685,7 +689,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       />
                     );
                   }}
-                  estimatedItemSize={60}
+                  estimatedItemSize={showProviderForEveryRow ? 60 : 40}
                   drawDistance={480}
                   recycleItems
                   onLayout={updateModelListScrollFades}
