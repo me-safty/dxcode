@@ -5,7 +5,8 @@ import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PanelLayoutControlsProps {
-  terminalAvailable: boolean;
+  terminalToggleAvailable: boolean;
+  terminalToggleUnavailableReason: string | null;
   terminalOpen: boolean;
   terminalShortcutLabel: string | null;
   rightPanelAvailable: boolean;
@@ -16,7 +17,8 @@ interface PanelLayoutControlsProps {
 }
 
 export const PanelLayoutControls = memo(function PanelLayoutControls({
-  terminalAvailable,
+  terminalToggleAvailable,
+  terminalToggleUnavailableReason,
   terminalOpen,
   terminalShortcutLabel,
   rightPanelAvailable,
@@ -40,16 +42,16 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               aria-label="Toggle terminal drawer"
               variant="ghost"
               size="sm"
-              disabled={!terminalAvailable}
+              disabled={!terminalToggleAvailable}
             >
               <PanelBottomIcon className="size-3.5" />
             </Toggle>
           }
         />
         <TooltipPopup side="bottom">
-          {terminalAvailable
+          {terminalToggleAvailable
             ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-            : "Terminal drawer is unavailable"}
+            : terminalToggleUnavailableReason}
         </TooltipPopup>
       </Tooltip>
       <Tooltip>

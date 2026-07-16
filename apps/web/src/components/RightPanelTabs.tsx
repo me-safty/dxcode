@@ -45,6 +45,8 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   browserAvailable: boolean;
+  terminalAvailable: boolean;
+  terminalUnavailableReason: string | null;
   diffAvailable: boolean;
   filesAvailable: boolean;
   children: ReactNode;
@@ -92,9 +94,12 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddFiles: () => void;
   browserAvailable: boolean;
+  terminalAvailable: boolean;
+  terminalUnavailableReason: string | null;
   diffAvailable: boolean;
   filesAvailable: boolean;
 }) {
+  const terminalUnavailableReason = props.terminalUnavailableReason ?? "Terminals are unavailable.";
   const actions = [
     {
       label: "Browser",
@@ -108,8 +113,8 @@ function RightPanelEmptyState(props: {
       label: "Terminal",
       description: "Start a shell in this workspace.",
       icon: TerminalSquare,
-      available: true,
-      disabledReason: null,
+      available: props.terminalAvailable,
+      disabledReason: terminalUnavailableReason,
       onClick: props.onAddTerminal,
     },
     {
@@ -450,7 +455,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Globe2 />
                     Browser
                   </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddTerminal}>
+                  <SurfaceMenuItem
+                    available={props.terminalAvailable}
+                    disabledReason={props.terminalUnavailableReason ?? "Terminals are unavailable."}
+                    onClick={props.onAddTerminal}
+                  >
                     <TerminalSquare />
                     Terminal
                   </SurfaceMenuItem>
@@ -485,6 +494,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             browserAvailable={props.browserAvailable}
+            terminalAvailable={props.terminalAvailable}
+            terminalUnavailableReason={props.terminalUnavailableReason}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
           />
