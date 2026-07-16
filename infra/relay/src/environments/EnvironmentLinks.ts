@@ -314,7 +314,6 @@ const make = Effect.gen(function* () {
           and(
             eq(relayEnvironmentLinks.userId, input.userId),
             isNull(relayEnvironmentLinks.revokedAt),
-            eq(relayEnvironmentLinks.managedTunnelsEnabled, true),
           ),
         )
         .pipe(

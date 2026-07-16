@@ -9,7 +9,6 @@ import {
   RelayAgentAwarenessPreferences as RelayAgentAwarenessPreferencesSchema,
   RelayDeliveryKind as RelayDeliveryKindSchema,
 } from "@t3tools/contracts/relay";
-import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -298,9 +297,7 @@ function shouldUpdateLiveActivity(input: {
   if (!input.previousAggregate) {
     return true;
   }
-  // PostgreSQL jsonb does not preserve object key order, so compare canonical
-  // encodings instead of treating insertion order as an aggregate change.
-  if (stableStringify(input.previousAggregate) === stableStringify(input.nextAggregate)) {
+  if (JSON.stringify(input.previousAggregate) === JSON.stringify(input.nextAggregate)) {
     return false;
   }
   if (input.previousAggregate.activeCount !== input.nextAggregate.activeCount) {

@@ -116,42 +116,6 @@ describe("EnvironmentLinks", () => {
     );
   });
 
-  it.effect("lists only active managed links for client discovery", () => {
-    const whereConditions: Array<unknown> = [];
-    const fakeDb = {
-      select: (selection: unknown) => {
-        expect(selection).toBeDefined();
-        return {
-          from: (table: unknown) => {
-            expect(table).toBe(relayEnvironmentLinks);
-            return {
-              where: (condition: unknown) => {
-                whereConditions.push(condition);
-                return Effect.succeed([]);
-              },
-            };
-          },
-        };
-      },
-    } as unknown as RelayDb.RelayDb["Service"];
-
-    return Effect.gen(function* () {
-      const links = yield* EnvironmentLinks.EnvironmentLinks;
-      expect(yield* links.listForUser({ userId: "user-1" })).toEqual([]);
-      expect(whereConditions).toHaveLength(1);
-
-      const query = new PgDialect().sqlToQuery(whereConditions[0] as never);
-      expect(query.sql).toContain('"relay_environment_links"."user_id" = $1');
-      expect(query.sql).toContain('"relay_environment_links"."revoked_at" is null');
-      expect(query.sql).toContain('"relay_environment_links"."managed_tunnels_enabled" = $2');
-      expect(query.params).toEqual(["user-1", true]);
-    }).pipe(
-      Effect.provide(
-        EnvironmentLinks.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),
-      ),
-    );
-  });
-
   it.effect("revokes only the active link owned by the requesting user", () => {
     const updateValues: Array<Record<string, unknown>> = [];
     const whereConditions: Array<unknown> = [];

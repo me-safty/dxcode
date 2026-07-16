@@ -429,15 +429,12 @@ describe("buildCursorCapabilitiesFromConfigOptions", () => {
 describe("checkCursorProviderStatus", () => {
   it("reports the install docs when the Cursor CLI command is missing", async () => {
     const provider = await runNode(
-      checkCursorProviderStatus(
-        {
-          enabled: true,
-          binaryPath: missingCursorBinaryPath,
-          apiEndpoint: "",
-          customModels: [],
-        },
-        process.cwd(),
-      ),
+      checkCursorProviderStatus({
+        enabled: true,
+        binaryPath: missingCursorBinaryPath,
+        apiEndpoint: "",
+        customModels: [],
+      }),
     );
 
     expect(provider).toMatchObject({
@@ -459,7 +456,6 @@ describe("checkCursorProviderStatus", () => {
           apiEndpoint: "",
           customModels: [],
         },
-        process.cwd(),
         {
           ...process.env,
           T3_ACP_REQUEST_LOG_PATH: requestLogPath,
@@ -478,56 +474,16 @@ describe("checkCursorProviderStatus", () => {
 });
 
 describe("discoverCursorModelsViaAcp", () => {
-  it("starts the ACP process in the configured cwd", async () => {
-    const fixture = await runNode(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const directory = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-provider-cwd-",
-        });
-        const workspaceDirectory = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-provider-workspace-",
-        });
-        return {
-          cwd: yield* fileSystem.realPath(workspaceDirectory),
-          cwdLogPath: path.join(directory, "cwd.log"),
-          wrapperPath: yield* makeMockAgentWrapper(),
-        };
-      }),
-    );
-
-    await runNode(
-      discoverCursorModelsViaAcp(
-        {
-          enabled: true,
-          binaryPath: fixture.wrapperPath,
-          apiEndpoint: "",
-          customModels: [],
-        },
-        fixture.cwd,
-        { ...process.env, T3_ACP_CWD_LOG_PATH: fixture.cwdLogPath },
-      ).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
-    );
-
-    await expect(runNode(waitForFileContent(fixture.cwdLogPath))).resolves.toBe(`${fixture.cwd}\n`);
-  });
-
   it("keeps the ACP probe runtime alive long enough to discover models", async () => {
     const wrapperPath = await runNode(makeMockAgentWrapper());
 
     const models = await runNode(
-      discoverCursorModelsViaAcp(
-        {
-          enabled: true,
-          binaryPath: wrapperPath,
-          apiEndpoint: "",
-          customModels: [],
-        },
-        process.cwd(),
-      ).pipe(Effect.scoped),
+      discoverCursorModelsViaAcp({
+        enabled: true,
+        binaryPath: wrapperPath,
+        apiEndpoint: "",
+        customModels: [],
+      }).pipe(Effect.scoped),
     );
 
     expect(models.map((model) => model.slug)).toEqual([
@@ -544,15 +500,12 @@ describe("discoverCursorModelsViaAcp", () => {
     );
 
     await runNode(
-      discoverCursorModelsViaAcp(
-        {
-          enabled: true,
-          binaryPath: wrapperPath,
-          apiEndpoint: "",
-          customModels: [],
-        },
-        process.cwd(),
-      ),
+      discoverCursorModelsViaAcp({
+        enabled: true,
+        binaryPath: wrapperPath,
+        apiEndpoint: "",
+        customModels: [],
+      }),
     );
 
     const exitLog = await runNode(waitForFileContent(exitLogPath));

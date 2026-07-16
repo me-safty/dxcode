@@ -131,7 +131,6 @@ function buildGrokDiscoveredModelsFromSessionModelState(
 
 const discoverGrokModelsViaAcp = (
   grokSettings: GrokSettings,
-  cwd: string,
   environment: NodeJS.ProcessEnv = process.env,
 ) =>
   Effect.gen(function* () {
@@ -140,7 +139,7 @@ const discoverGrokModelsViaAcp = (
       grokSettings,
       environment,
       childProcessSpawner,
-      cwd,
+      cwd: process.cwd(),
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
     });
     const started = yield* acp.start();
@@ -167,7 +166,6 @@ const runGrokVersionCommand = (
 
 export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(function* (
   grokSettings: GrokSettings,
-  cwd: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): Effect.fn.Return<ServerProviderDraft, never, ChildProcessSpawner.ChildProcessSpawner> {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
@@ -255,7 +253,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     });
   }
 
-  const discoveryExit = yield* discoverGrokModelsViaAcp(grokSettings, cwd, environment).pipe(
+  const discoveryExit = yield* discoverGrokModelsViaAcp(grokSettings, environment).pipe(
     Effect.timeoutOption(GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS),
     Effect.exit,
   );

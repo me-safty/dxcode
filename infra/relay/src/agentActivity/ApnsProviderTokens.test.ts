@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 
 import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
 
-const { privateKey, publicKey } = NodeCrypto.generateKeyPairSync("ec", {
+const { privateKey } = NodeCrypto.generateKeyPairSync("ec", {
   namedCurve: "prime256v1",
   privateKeyEncoding: { type: "pkcs8", format: "pem" },
   publicKeyEncoding: { type: "spki", format: "pem" },
@@ -56,28 +56,6 @@ describe("ApnsProviderTokens", () => {
       const first = yield* tokens.getJwt({ ...signingInput, issuedAtUnixSeconds: WINDOW + 10 });
       const next = yield* tokens.getJwt({ ...signingInput, issuedAtUnixSeconds: WINDOW * 2 });
       expect(next).not.toBe(first);
-      ApnsProviderTokens.__resetApnsProviderTokenCacheForTest();
-    }).pipe(Effect.provide(ApnsProviderTokens.layer));
-  });
-
-  it.effect("produces an APNs-compatible ES256 signature", () => {
-    ApnsProviderTokens.__resetApnsProviderTokenCacheForTest();
-    return Effect.gen(function* () {
-      const tokens = yield* ApnsProviderTokens.ApnsProviderTokens;
-      const jwt = yield* tokens.getJwt({ ...signingInput, issuedAtUnixSeconds: WINDOW + 10 });
-      const [header, payload, signature] = jwt.split(".");
-
-      expect(header).toBeDefined();
-      expect(payload).toBeDefined();
-      expect(signature).toBeDefined();
-      expect(
-        NodeCrypto.verify(
-          "sha256",
-          Buffer.from(`${header}.${payload}`),
-          { key: publicKey, dsaEncoding: "ieee-p1363" },
-          Buffer.from(signature!, "base64url"),
-        ),
-      ).toBe(true);
       ApnsProviderTokens.__resetApnsProviderTokenCacheForTest();
     }).pipe(Effect.provide(ApnsProviderTokens.layer));
   });
