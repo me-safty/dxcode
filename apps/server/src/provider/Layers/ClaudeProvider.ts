@@ -22,9 +22,14 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   query as claudeQuery,
+  type Options as ClaudeQueryOptions,
   type SlashCommand as ClaudeSlashCommand,
   type SDKUserMessage,
+  type SettingSource,
 } from "@anthropic-ai/claude-agent-sdk";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import {
   buildBooleanOptionDescriptor,
@@ -37,6 +42,7 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
@@ -483,6 +489,63 @@ function claudeAuthMetadata(input: {
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
+/**
+ * Filesystem setting sources still consulted for account/slash-command init.
+ * MCP servers from those sources are suppressed via `strictMcpConfig` + empty
+ * `mcpServers` — capability probes must not boot user MCP (#3909).
+ */
+export const CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES = [
+  "user",
+  "project",
+  "local",
+] as const satisfies ReadonlyArray<SettingSource>;
+
+/** Absolute Claude HOME for capability-probe cwd + env alignment. */
+export function resolveClaudeCapabilitiesProbeHome(homeDir = NodeOS.homedir()): string {
+  const trimmed = homeDir.trim();
+  return trimmed.length > 0 ? NodePath.resolve(expandHomePath(trimmed)) : NodeOS.homedir();
+}
+
+/** Stable empty cwd under ~/.t3 so probes never inherit $HOME / server cwd. */
+export function resolveClaudeCapabilitiesProbeCwd(homeDir = NodeOS.homedir()): string {
+  return NodePath.join(
+    resolveClaudeCapabilitiesProbeHome(homeDir),
+    ".t3",
+    "claude-capability-probe",
+  );
+}
+
+/**
+ * Build Claude Agent SDK `query()` options for the periodic capability probe.
+ *
+ * Isolates the probe from user MCP servers and claude.ai connectors while
+ * still allowing setting-source slash-command discovery.
+ */
+export function buildClaudeCapabilitiesProbeQueryOptions(input: {
+  readonly binaryPath: string;
+  readonly abortController: AbortController;
+  readonly env: NodeJS.ProcessEnv;
+  readonly cwd: string;
+}): ClaudeQueryOptions {
+  return {
+    persistSession: false,
+    pathToClaudeCodeExecutable: input.binaryPath,
+    abortController: input.abortController,
+    cwd: input.cwd,
+    settingSources: [...CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES],
+    // Only honor the empty map below — ignore user/project/local MCP configs
+    // and claude.ai connectors that would otherwise spawn on every refresh.
+    mcpServers: {},
+    strictMcpConfig: true,
+    allowedTools: [],
+    env: {
+      ...input.env,
+      ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+    },
+    stderr: () => {},
+  };
+}
+
 function nonEmptyProbeString(value: string): string | undefined {
   const candidate = value.trim();
   return candidate ? candidate : undefined;
@@ -579,6 +642,10 @@ function waitForAbortSignal(signal: AbortSignal): Promise<void> {
  *
  * This is used as a fallback when `claude auth status` does not include
  * subscription type information.
+ *
+ * The probe runs on a ~5 minute refresh loop and must not boot user MCP
+ * servers or inherit the server process cwd (#3909). Options come from
+ * `buildClaudeCapabilitiesProbeQueryOptions`.
  */
 const probeClaudeCapabilities = (
   claudeSettings: ClaudeSettings,
@@ -587,6 +654,17 @@ const probeClaudeCapabilities = (
   const abort = new AbortController();
   return Effect.gen(function* () {
     const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+    // Normalize once so SDK cwd and env.HOME agree (raw HOME may be `~` / relative).
+    const probeHome = resolveClaudeCapabilitiesProbeHome(claudeEnvironment.HOME || undefined);
+    const probeCwd = resolveClaudeCapabilitiesProbeCwd(probeHome);
+    const probeEnvironment = {
+      ...claudeEnvironment,
+      HOME: probeHome,
+    };
+    yield* Effect.tryPromise({
+      try: () => NodeFS.promises.mkdir(probeCwd, { recursive: true }),
+      catch: (cause) => cause,
+    });
     return yield* Effect.tryPromise(async () => {
       const q = claudeQuery({
         // Never yield — we only need initialization data, not a conversation.
@@ -595,15 +673,12 @@ const probeClaudeCapabilities = (
         prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
           await waitForAbortSignal(abort.signal);
         })(),
-        options: {
-          persistSession: false,
-          pathToClaudeCodeExecutable: claudeSettings.binaryPath,
+        options: buildClaudeCapabilitiesProbeQueryOptions({
+          binaryPath: claudeSettings.binaryPath,
           abortController: abort,
-          settingSources: ["user", "project", "local"],
-          allowedTools: [],
-          env: claudeEnvironment,
-          stderr: () => {},
-        },
+          env: probeEnvironment,
+          cwd: probeCwd,
+        }),
       });
       const init = await q.initializationResult();
       const account = init.account as
