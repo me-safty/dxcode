@@ -62,25 +62,66 @@ function normalizeScreenOptions(
   return normalized as NativeStackNavigationOptions;
 }
 
+function optionsSignature(value: unknown, seen = new WeakSet<object>()): string {
+  if (value === null) return "null";
+  switch (typeof value) {
+    case "boolean":
+    case "number":
+    case "string":
+      return JSON.stringify(value);
+    case "undefined":
+      return "undefined";
+    case "function":
+      // Header factories are frequently recreated inline. Their source is
+      // stable across equivalent renders, while a reference comparison would
+      // make navigation.setOptions re-enter the navigator indefinitely.
+      return `function:${Function.prototype.toString.call(value)}`;
+    case "symbol":
+      return `symbol:${String(value)}`;
+    case "bigint":
+      return `bigint:${String(value)}`;
+    case "object": {
+      const object = value as object;
+      if (seen.has(object)) return "[circular]";
+      seen.add(object);
+      if (Array.isArray(value)) {
+        return `[${value.map((entry) => optionsSignature(entry, seen)).join(",")}]`;
+      }
+      // React refs carry mutable native instances that must not make static
+      // screen options appear different after every render.
+      if ("current" in object) return "[ref]";
+      return `{${Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map(
+          (key) =>
+            `${JSON.stringify(key)}:${optionsSignature((value as Record<string, unknown>)[key], seen)}`,
+        )
+        .join(",")}}`;
+    }
+  }
+  return String(value);
+}
+
 export function NativeStackScreenOptions(props: {
   readonly options?: AppNativeStackNavigationOptions;
   readonly listeners?: Record<string, (event: never) => void>;
   readonly name?: string;
 }) {
   const navigation = useNativeStackNavigation();
-  const lastAppliedOptionsRef = useRef<NativeStackNavigationOptions | undefined>(undefined);
+  const lastAppliedOptionsSignatureRef = useRef<string | undefined>(undefined);
   const normalizedOptions = useMemo(() => normalizeScreenOptions(props.options), [props.options]);
 
   useLayoutEffect(() => {
     if (!navigation || !normalizedOptions) {
       return;
     }
-    // Avoid re-entering navigation state when the same options object is
+    const signature = optionsSignature(normalizedOptions);
+    // Avoid re-entering navigation state when semantically equal options are
     // reapplied every layout (common when callers pass unstable object literals).
-    if (lastAppliedOptionsRef.current === normalizedOptions) {
+    if (lastAppliedOptionsSignatureRef.current === signature) {
       return;
     }
-    lastAppliedOptionsRef.current = normalizedOptions;
+    lastAppliedOptionsSignatureRef.current = signature;
     navigation.setOptions(normalizedOptions);
   }, [navigation, normalizedOptions]);
 
