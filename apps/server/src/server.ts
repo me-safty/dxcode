@@ -24,6 +24,7 @@ import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRe
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
+import { ProviderUsageStateLive } from "./provider/Layers/ProviderUsageState.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
@@ -166,6 +167,10 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
 
+const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
+  Layer.provide(VcsProjectConfig.layer),
+);
+
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
   Layer.provide(ProviderSessionRuntime.layer),
 );
@@ -182,10 +187,6 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
-
-const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
-  Layer.provide(VcsProjectConfig.layer),
-);
 
 const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.layer.pipe(
   Layer.provide(
@@ -279,9 +280,14 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   ),
 );
 
-const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
-  Layer.provideMerge(ProviderLayerLive),
-  Layer.provideMerge(OrchestrationLayerLive),
+const ProviderRuntimeLayerLive = Layer.mergeAll(
+  ProviderLayerLive,
+  ProviderUsageStateLive.pipe(Layer.provide(ProviderLayerLive)),
+  ProviderSessionReaperLive.pipe(
+    Layer.provideMerge(OrchestrationLayerLive),
+    Layer.provide(ProviderLayerLive),
+  ),
+  OrchestrationLayerLive,
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
@@ -300,7 +306,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  // PtyAdapter must be in the driver create context (BuiltInDriversEnv) so Grok/Claude
+  // usage probes can spawn TUIs. TerminalLayerLive only provide()s it privately.
+  Layer.provideMerge(ProviderInstanceRegistryHydrationLive.pipe(Layer.provide(PtyAdapterLive))),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

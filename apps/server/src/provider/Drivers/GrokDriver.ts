@@ -10,6 +10,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { PtyAdapter } from "../../terminal/PtyAdapter.ts";
 import { makeGrokTextGeneration } from "../../textGeneration/GrokTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeGrokAdapter } from "../Layers/GrokAdapter.ts";
@@ -55,6 +56,7 @@ export type GrokDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers
+  | PtyAdapter
   | ServerConfig
   | ServerSettingsService;
 
@@ -86,6 +88,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const httpClient = yield* HttpClient.HttpClient;
+      const ptyAdapter = yield* PtyAdapter;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -112,7 +115,12 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       });
       const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
 
-      const checkProvider = checkGrokProviderStatus(effectiveConfig, processEnv).pipe(
+      const checkProvider = checkGrokProviderStatus(
+        effectiveConfig,
+        processEnv,
+        instanceId,
+        ptyAdapter,
+      ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
