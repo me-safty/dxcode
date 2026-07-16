@@ -320,11 +320,28 @@ function hasConsecutiveLineNumbers(
   return typeof previous === "number" && typeof next === "number" && next === previous + 1;
 }
 
+function hasOnlyCommentRowsBetween(
+  rows: ReadonlyArray<NativeReviewDiffRow>,
+  previousRowIndex: number,
+  nextRowIndex: number,
+): boolean {
+  for (let rowIndex = previousRowIndex + 1; rowIndex < nextRowIndex; rowIndex += 1) {
+    if (rows[rowIndex]?.kind !== "comment") {
+      return false;
+    }
+  }
+  return true;
+}
+
 function canShareGrammarContext(
   previous: IndexedNativeReviewDiffLineRow,
   next: IndexedNativeReviewDiffLineRow,
+  rows: ReadonlyArray<NativeReviewDiffRow>,
 ): boolean {
-  if (next.rowIndex !== previous.rowIndex + 1 || next.row.fileId !== previous.row.fileId) {
+  if (
+    next.row.fileId !== previous.row.fileId ||
+    !hasOnlyCommentRowsBetween(rows, previous.rowIndex, next.rowIndex)
+  ) {
     return false;
   }
 
@@ -449,7 +466,8 @@ export async function highlightNativeReviewDiffVisibleRows(
     if (
       segmentFile &&
       (segmentFile.id !== file.id ||
-        (previousRow !== undefined && !canShareGrammarContext(previousRow, selectedRow)))
+        (previousRow !== undefined &&
+          !canShareGrammarContext(previousRow, selectedRow, input.rows)))
     ) {
       flushSegment();
     }

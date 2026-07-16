@@ -85,6 +85,43 @@ describe("highlightNativeReviewDiffVisibleRows", () => {
     expect(highlighted.tokensByRowId[exportRow.id]).toEqual(standalone.tokensByRowId[exportRow.id]);
   });
 
+  it("keeps grammar state across inline comment rows", async () => {
+    const openingRow = makeLine({
+      id: "template-open",
+      content: "const message = `open",
+      change: "add",
+      oldLineNumber: null,
+      newLineNumber: 1,
+    });
+    const closingRow = makeLine({
+      id: "template-close",
+      content: "closed`;",
+      change: "add",
+      oldLineNumber: null,
+      newLineNumber: 2,
+    });
+    const trailingRow = makeLine({
+      id: "trailing-row",
+      content: "export const answer = 42;",
+      change: "add",
+      oldLineNumber: null,
+      newLineNumber: 3,
+    });
+    const commentRow: NativeReviewDiffRow = {
+      kind: "comment",
+      id: "comment-1",
+      fileId: TYPESCRIPT_FILE.id,
+      commentText: "Review note",
+    };
+
+    const [withComment, contiguous] = await Promise.all([
+      highlight([openingRow, commentRow, closingRow, trailingRow]),
+      highlight([openingRow, closingRow, trailingRow]),
+    ]);
+
+    expect(withComment.tokensByRowId).toEqual(contiguous.tokensByRowId);
+  });
+
   it("does not join unhighlighted rows across cached gaps", async () => {
     const trailingRow = makeLine({
       id: "trailing-row",
