@@ -226,6 +226,11 @@ function patchMainBundleInfoPlist(appBundlePath, iconPath) {
   setPlistString(infoPlistPath, "CFBundleName", APP_DISPLAY_NAME);
   setPlistString(infoPlistPath, "CFBundleIdentifier", APP_BUNDLE_ID);
   setPlistString(infoPlistPath, "CFBundleIconFile", "icon.icns");
+  setPlistString(
+    infoPlistPath,
+    "NSMicrophoneUsageDescription",
+    "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
+  );
   setPlistJson(infoPlistPath, "CFBundleURLTypes", [
     {
       CFBundleURLName: APP_BUNDLE_ID,
