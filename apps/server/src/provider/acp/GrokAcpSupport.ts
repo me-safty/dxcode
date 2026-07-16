@@ -1,3 +1,4 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { type GrokSettings, ProviderDriverKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -5,6 +6,7 @@ import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
@@ -50,6 +52,21 @@ function resolveGrokAuthMethodId(environment: NodeJS.ProcessEnv | undefined): st
     : GROK_AUTH_METHOD_CACHED_TOKEN;
 }
 
+export function grokAcpRuntimeProcessOwnership(
+  processGroupPlatform: NodeJS.Platform,
+): Pick<
+  AcpSessionRuntime.AcpSessionRuntimeOptions,
+  "ownDescendantProcessGroups" | "ownDetachedProcessGroup" | "processGroupPlatform"
+> {
+  return {
+    // macOS keeps the prior provider-group teardown until a stable libproc
+    // identity provider can cover Grok's nested detached tool groups.
+    ownDescendantProcessGroups: processGroupPlatform === "linux",
+    ownDetachedProcessGroup: true,
+    processGroupPlatform,
+  };
+}
+
 export const makeGrokAcpRuntime = (
   input: GrokAcpRuntimeInput,
 ): Effect.Effect<
@@ -58,11 +75,15 @@ export const makeGrokAcpRuntime = (
   Scope.Scope
 > =>
   Effect.gen(function* () {
+    const processGroupPlatform = yield* HostProcessPlatform.pipe(
+      Effect.provide(NodeServices.layer),
+    );
     const acpContext = yield* Layer.build(
       AcpSessionRuntime.layer({
         ...input,
         spawn: buildGrokAcpSpawnInput(input.grokSettings, input.cwd, input.environment),
         authMethodId: resolveGrokAuthMethodId(input.environment),
+        ...grokAcpRuntimeProcessOwnership(processGroupPlatform),
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),

@@ -28,6 +28,7 @@ import {
   extractXAiAskUserQuestions,
   extractXAiBackgroundTaskCompletion,
   extractXAiMonitorTaskId,
+  isXAiPersistentMonitor,
   makeXAiAskUserQuestionCancelledResponse,
   makeXAiAskUserQuestionResponse,
   normalizeXAiAcpToolCallState,
@@ -122,21 +123,25 @@ export const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["register
         }));
         return requestUserInput({
           nativeItemId: `${identity.sessionId}:xai-question:${identity.toolCallId}`,
+          nativeMethod: method,
           nativeRequestId: identity.toolCallId,
+          nativeSessionId: identity.sessionId,
           questions,
         }).pipe(
-          Effect.map((answers) =>
-            answers === null
-              ? makeXAiAskUserQuestionCancelledResponse()
-              : makeXAiAskUserQuestionResponse(params, answers),
+          Effect.flatMap(({ acknowledgeNativeResponse, answers }) =>
+            Effect.succeed(
+              answers === null
+                ? makeXAiAskUserQuestionCancelledResponse()
+                : makeXAiAskUserQuestionResponse(params, answers),
+            ).pipe(Effect.tap(() => acknowledgeNativeResponse)),
           ),
         );
       }),
     { discard: true },
   );
 
-export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
-  const flavor: AcpAdapterV2Flavor = {
+export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdapterV2Flavor {
+  return {
     driver: GROK_PROVIDER,
     capabilities: GrokProviderCapabilitiesV2,
     // Idle settle over-settled preamble-before-tools turns and cancelled the
@@ -144,6 +149,8 @@ export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
     settleRootTurnWhenIdle: false,
     interruptPromptOnCancel: false,
     restartRuntimeAfterInterrupt: true,
+    restartRuntimeOnEveryInterrupt: true,
+    terminateRuntimeProcessGroupOnInterrupt: true,
     // Grok ACP initialize reports promptCapabilities.image:false but the agent
     // still accepts image content blocks (verified with real screenshots).
     supportsImagePrompts: true,
@@ -165,10 +172,15 @@ export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
     extractBackgroundTaskId: extractXAiMonitorTaskId,
     extractBackgroundToolMutation: extractXAiAcpBackgroundToolMutation,
     extractBackgroundTaskCompletion: extractXAiBackgroundTaskCompletion,
+    isPersistentBackgroundTool: isXAiPersistentMonitor,
     deferFinalizeForBackgroundWork: true,
     enablePostSettleContinuation: true,
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };
+}
+
+export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
+  const flavor = makeGrokAcpAdapterFlavor(options);
   return makeAcpAdapterV2({
     instanceId: options.instanceId,
     flavor,

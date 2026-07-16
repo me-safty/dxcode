@@ -264,32 +264,55 @@ export function extractXAiMonitorTaskId(toolCall: AcpToolCallState): string | un
 }
 
 /**
- * When get_command_or_subagent_output / TaskOutput completes a registered monitor
- * task, return hydration for that background tool id.
+ * Live Monitor start ACK `{ type: "Monitor", persistent: true }` (or matching
+ * rawInput). Persistent monitors should not hold root-turn deferred finalize.
  */
-export function extractXAiBackgroundTaskCompletion(toolCall: AcpToolCallState):
-  | {
-      readonly taskId: string;
-      readonly status: "running" | "completed" | "failed";
-      readonly appendOutput: string;
-    }
-  | undefined {
-  const rawInput = unknownRecord(toolCall.data.rawInput);
-  if (!isXAiGetSubagentOutputTool(toolCall, rawInput)) return undefined;
+export function isXAiPersistentMonitor(toolCall: AcpToolCallState): boolean {
+  if (!isXAiMonitorTool(toolCall)) return false;
   const rawOutput = unknownRecord(toolCall.data.rawOutput);
-  const result = unknownRecord(rawOutput?.Result) ?? unknownRecord(rawOutput?.result);
-  const taskId =
-    nonEmptyString(result?.task_id) ??
-    nonEmptyString(result?.taskId) ??
-    (Array.isArray(rawInput?.task_ids) ? nonEmptyString(rawInput.task_ids[0]) : undefined) ??
-    nonEmptyString(rawInput?.task_id);
-  if (taskId === undefined) return undefined;
+  if (rawOutput !== undefined && nonEmptyString(rawOutput.type)?.toLowerCase() === "monitor") {
+    return rawOutput.persistent === true;
+  }
+  const rawInput = unknownRecord(toolCall.data.rawInput);
+  return rawInput?.persistent === true;
+}
+
+/**
+ * When get_command_or_subagent_output / TaskOutput completes registered monitor
+ * task(s), return hydration for each completed background tool id.
+ */
+export function extractXAiBackgroundTaskCompletion(toolCall: AcpToolCallState): ReadonlyArray<{
+  readonly taskId: string;
+  readonly status: "running" | "completed" | "failed";
+  readonly appendOutput: string;
+}> {
+  const rawInput = unknownRecord(toolCall.data.rawInput);
+  if (!isXAiGetSubagentOutputTool(toolCall, rawInput)) return [];
   // Caller matches taskId against registered background tools (monitors).
   // Subagent hydration stays on extractXAiAcpSubagentUpdate.
   const text = xAiToolOutputText(toolCall);
   const status = statusFromGetOutputTool(toolCall, text);
   const appendOutput = resultFromGetOutputTool(toolCall, text) ?? "";
-  return { taskId, status, appendOutput };
+  // Prefer the completed identity from the result/header over the request list
+  // (one call can poll multiple task_ids).
+  const resultTaskId = resultTaskIdFromGetOutputTool(toolCall, text);
+  if (resultTaskId !== undefined) {
+    return [{ taskId: resultTaskId, status, appendOutput }];
+  }
+  const requestIds: string[] = [];
+  const push = (value: unknown) => {
+    const id = nonEmptyString(value);
+    if (id !== undefined && new RegExp(`^${XAI_UUID_RE}$`, "i").test(id)) {
+      requestIds.push(id);
+    }
+  };
+  if (Array.isArray(rawInput?.task_ids)) {
+    for (const entry of rawInput.task_ids) push(entry);
+  }
+  push(rawInput?.task_id);
+  push(rawInput?.taskId);
+  const unique = [...new Set(requestIds)];
+  return unique.map((taskId) => ({ taskId, status, appendOutput }));
 }
 
 /**
@@ -357,6 +380,9 @@ export function normalizeXAiAcpToolCallState(toolCall: AcpToolCallState): AcpToo
       .map((key) => rawOutput?.[key])
       .find((value) => typeof value === "number" && Number.isInteger(value));
     if (typeof exitCode === "number") {
+      if (exitCode === 0 && (xAiToolOutputText(withTitle)?.trim().length ?? 0) === 0) {
+        return { ...withTitle, status: "inProgress" };
+      }
       return {
         ...withTitle,
         status: exitCode === 0 ? "completed" : "failed",
@@ -380,60 +406,68 @@ export function normalizeXAiAcpToolCallState(toolCall: AcpToolCallState): AcpToo
 /**
  * Parse Grok synthetic monitor traffic that arrives as root text chunks
  * (`<monitor-event>` lines, batched `<monitor>` event blocks, and
- * "Monitor ... ended" reminders).
+ * "Monitor ... ended" reminders). Coalesced chunks may contain several events;
+ * return every match so later progress / end notices are not dropped.
  */
 export function extractXAiAcpBackgroundToolMutation(
   text: string,
-): XAiAcpBackgroundToolMutation | undefined {
-  const eventMatch = text.match(
-    new RegExp(
-      `<monitor-event\\s+task_id=["']?(${XAI_UUID_RE})["']?\\s*>\\s*([\\s\\S]*?)\\s*</monitor-event>`,
-      "i",
-    ),
+): ReadonlyArray<XAiAcpBackgroundToolMutation> {
+  const mutations: XAiAcpBackgroundToolMutation[] = [];
+
+  const eventRe = new RegExp(
+    `<monitor-event\\s+task_id=["']?(${XAI_UUID_RE})["']?\\s*>\\s*([\\s\\S]*?)\\s*</monitor-event>`,
+    "gi",
   );
-  if (eventMatch?.[1] !== undefined) {
+  for (const eventMatch of text.matchAll(eventRe)) {
+    if (eventMatch[1] === undefined) continue;
     const line = (eventMatch[2] ?? "").trim();
-    return {
+    mutations.push({
       taskId: eventMatch[1],
       status: "running",
       appendOutput: line.length > 0 ? `${line}\n` : "",
-    };
+    });
   }
 
   // Batched form: "N monitor events from 1 monitor ...:\n<monitor
   // description="..." task_id="...">\n[1] line\n</monitor>". Still a running
   // monitor; must track and filter like single-event chatter.
-  const batchedMatch = text.match(
-    new RegExp(
-      `<monitor\\s[^>]*task_id=["']?(${XAI_UUID_RE})["']?[^>]*>\\s*([\\s\\S]*?)\\s*</monitor>`,
-      "i",
-    ),
+  const batchedRe = new RegExp(
+    `<monitor\\s[^>]*task_id=["']?(${XAI_UUID_RE})["']?[^>]*>\\s*([\\s\\S]*?)\\s*</monitor>`,
+    "gi",
   );
-  if (batchedMatch?.[1] !== undefined) {
+  for (const batchedMatch of text.matchAll(batchedRe)) {
+    if (batchedMatch[1] === undefined) continue;
     const lines = (batchedMatch[2] ?? "").trim();
-    return {
+    mutations.push({
       taskId: batchedMatch[1],
       status: "running",
       appendOutput: lines.length > 0 ? `${lines}\n` : "",
-    };
+    });
   }
 
-  const endedMatch = text.match(new RegExp(`Monitor\\s+["']?(${XAI_UUID_RE})["']?\\s+ended`, "i"));
-  if (endedMatch?.[1] !== undefined) {
+  const endedRe = new RegExp(`Monitor\\s+["']?(${XAI_UUID_RE})["']?\\s+ended`, "gi");
+  for (const endedMatch of text.matchAll(endedRe)) {
+    if (endedMatch[1] === undefined) continue;
+    // Only the "Monitor … ended …" clause is outcome text. Description/output
+    // after the header can contain words like "error" without meaning failure.
+    const outcomeClause = (endedMatch[0] ?? "").trim();
+    const afterHeader = text.slice((endedMatch.index ?? 0) + endedMatch[0].length);
+    const outcomeTail = afterHeader.split(/\n/)[0] ?? "";
+    const outcome = `${outcomeClause}${outcomeTail}`;
     const summary = text.replace(/<\/?system-reminder>/gi, "").trim();
-    return {
+    mutations.push({
       taskId: endedMatch[1],
       status:
-        /exited\s*\(\s*code\s*0\s*\)/i.test(text) || /ended cleanly/i.test(text)
+        /exited\s*\(\s*code\s*0\s*\)/i.test(outcome) || /ended cleanly/i.test(outcome)
           ? "completed"
-          : /exited|failed|error|signal/i.test(text)
+          : /exited|failed|error|signal/i.test(outcome)
             ? "failed"
             : "completed",
       appendOutput: summary.length > 0 ? `${summary}\n` : "Monitor ended.\n",
-    };
+    });
   }
 
-  return undefined;
+  return mutations;
 }
 
 /**
@@ -443,12 +477,28 @@ export function extractXAiAcpBackgroundToolMutation(
  * be the only terminal signal for the subagent row; a row stuck on running
  * holds deferred finalize (and the whole run) open until harness timeout.
  */
+function stripLeadingBalancedParenGroup(text: string): string {
+  const trimmed = text.replace(/^\s+/, "");
+  if (!trimmed.startsWith("(")) return trimmed;
+  let depth = 0;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const char = trimmed[index];
+    if (char === "(") depth += 1;
+    else if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return trimmed.slice(index + 1).replace(/^\s+/, "");
+    }
+  }
+  return trimmed;
+}
+
 export function extractXAiAcpSubagentEndNotice(text: string): XAiAcpSubagentEndNotice | undefined {
   const match = text.match(new RegExp(`Background subagent\\s+["']?(${XAI_UUID_RE})["']?`, "i"));
   if (match?.[1] === undefined) return undefined;
   // Skip the parenthesized descriptor (subagent type and title) so its words
-  // cannot masquerade as the outcome verb.
-  const tail = text.slice((match.index ?? 0) + match[0].length).replace(/^\s*\([\s\S]*?\)\s*/, "");
+  // cannot masquerade as the outcome verb. Balance parens so nested titles
+  // like `(general-purpose: "Check (backend) failed")` do not leak.
+  const tail = stripLeadingBalancedParenGroup(text.slice((match.index ?? 0) + match[0].length));
   if (/completed successfully/i.test(tail)) {
     return { childSessionId: match[1], status: "completed" };
   }
@@ -477,21 +527,33 @@ function taskIdsFromGetOutputTool(
   }
   push(rawInput?.task_id);
   push(rawInput?.taskId);
+  const resultId = resultTaskIdFromGetOutputTool(toolCall, xAiToolOutputText(toolCall));
+  if (resultId !== undefined) ids.push(resultId);
+  return [...new Set(ids)];
+}
+
+/** Identity of the task the get_output envelope actually reports (not the request list). */
+function resultTaskIdFromGetOutputTool(
+  toolCall: AcpToolCallState,
+  output: string | undefined,
+): string | undefined {
   const rawOutput = unknownRecord(toolCall.data.rawOutput);
   const result = unknownRecord(rawOutput?.Result) ?? unknownRecord(rawOutput?.result);
-  push(result?.task_id);
-  push(result?.taskId);
-  const output = xAiToolOutputText(toolCall);
-  if (output !== undefined) {
-    const taskHeader = firstUuidMatch(
-      output,
-      new RegExp(`===\\s*Task\\s+(${XAI_UUID_RE})\\s*===`, "i"),
-    );
-    if (taskHeader !== undefined) ids.push(taskHeader);
-    const metaId = firstUuidMatch(output, new RegExp(`subagent_id:\\s*(${XAI_UUID_RE})\\b`, "i"));
-    if (metaId !== undefined) ids.push(metaId);
+  const structured =
+    nonEmptyString(result?.task_id) ??
+    nonEmptyString(result?.taskId) ??
+    nonEmptyString(rawOutput?.task_id) ??
+    nonEmptyString(rawOutput?.taskId);
+  if (structured !== undefined && new RegExp(`^${XAI_UUID_RE}$`, "i").test(structured)) {
+    return structured;
   }
-  return [...new Set(ids)];
+  if (output === undefined) return undefined;
+  const taskHeader = firstUuidMatch(
+    output,
+    new RegExp(`===\\s*Task\\s+(${XAI_UUID_RE})\\s*===`, "i"),
+  );
+  if (taskHeader !== undefined) return taskHeader;
+  return firstUuidMatch(output, new RegExp(`subagent_id:\\s*(${XAI_UUID_RE})\\b`, "i"));
 }
 
 function resultFromGetOutputTool(
@@ -534,7 +596,7 @@ function statusFromGetOutputTool(
     return result.exit_code === 0 ? "completed" : "failed";
   }
   if (output !== undefined) {
-    if (/Status:\s*failed/i.test(output) || /Exit Code:\s*(?!0)\d+/i.test(output)) {
+    if (/Status:\s*failed/i.test(output) || /Exit Code:\s*-?(?!0\b)\d+/i.test(output)) {
       return "failed";
     }
     if (/Status:\s*completed/i.test(output) || /Status:\s*success/i.test(output)) {
@@ -563,7 +625,12 @@ export function extractXAiAcpSubagentUpdate(
 
   if (isXAiGetSubagentOutputTool(toolCall, rawInput)) {
     const taskIds = taskIdsFromGetOutputTool(toolCall, rawInput);
-    const childSessionId = taskIds[0] ?? extractXAiChildSessionId(output);
+    // Prefer the completed task identity from the result/header over the first
+    // requested task_ids entry (one call can poll multiple task_ids).
+    const childSessionId =
+      resultTaskIdFromGetOutputTool(toolCall, output) ??
+      taskIds[0] ??
+      extractXAiChildSessionId(output);
     if (childSessionId === null) return undefined;
     // Prefer the durable subagent row as the completion surface (Claude/Codex
     // style). Suppress the noisy TaskOutput tool card; monitor hydration is

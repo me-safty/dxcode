@@ -109,6 +109,33 @@ describe("AcpRuntimeModel", () => {
     ).toBe(true);
   });
 
+  it("ignores load-replay activity from other sessions while a load gate is active", () => {
+    expect(
+      sessionUpdateCountsAsLoadReplayActivity(
+        {
+          sessionId: "session-other",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "unrelated" },
+          },
+        } satisfies EffectAcpSchema.SessionNotification,
+        "session-loading",
+      ),
+    ).toBe(false);
+    expect(
+      sessionUpdateCountsAsLoadReplayActivity(
+        {
+          sessionId: "session-loading",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "replay" },
+          },
+        } satisfies EffectAcpSchema.SessionNotification,
+        "session-loading",
+      ),
+    ).toBe(true);
+  });
+
   it("builds a synthetic load response from initialize model state", () => {
     const response = syntheticLoadSessionResponseFromInitialize({
       protocolVersion: 1,

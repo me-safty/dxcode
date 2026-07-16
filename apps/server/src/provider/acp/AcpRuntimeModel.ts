@@ -462,7 +462,11 @@ export function sessionUpdateIsReplay(params: EffectAcpSchema.SessionNotificatio
 /** Replay chunks and substantive updates during session/load; not Grok keepalives. */
 export function sessionUpdateCountsAsLoadReplayActivity(
   params: EffectAcpSchema.SessionNotification,
+  gatedSessionId?: string,
 ): boolean {
+  if (gatedSessionId !== undefined && params.sessionId !== gatedSessionId) {
+    return false;
+  }
   if (sessionUpdateIsReplay(params)) return true;
   const update = params.update;
   switch (update.sessionUpdate) {
@@ -480,6 +484,8 @@ export function sessionUpdateCountsAsLoadReplayActivity(
 
 export interface SessionLoadGate {
   readonly active: boolean;
+  /** Only notifications for this session refresh load-replay idle activity. */
+  readonly sessionId: string;
   readonly lastActivityAtMillis: number | undefined;
   readonly idleGap: Duration.Duration;
   readonly initializeResult: EffectAcpSchema.InitializeResponse;
