@@ -11,10 +11,13 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   type ReactElement,
   type ReactNode,
 } from "react";
 import type { ColorValue } from "react-native";
+
+import { buildNativeStackOptionsSignature } from "./nativeStackOptionsSignature";
 
 export {
   nativeHeaderScrollEdgeEffects,
@@ -22,6 +25,7 @@ export {
   type NativeHeaderScrollEdgeEffects,
   type NativeTopScrollEdgeEffect,
 } from "./scrollEdgeEffects";
+export { buildNativeStackOptionsSignature } from "./nativeStackOptionsSignature";
 
 export type AppNativeStackNavigationOptions = Omit<
   NativeStackNavigationOptions,
@@ -67,14 +71,86 @@ export function NativeStackScreenOptions(props: {
   readonly name?: string;
 }) {
   const navigation = useNativeStackNavigation();
-  const normalizedOptions = useMemo(() => normalizeScreenOptions(props.options), [props.options]);
+  const optionsRef = useRef(props.options);
+  optionsRef.current = props.options;
+  const lastSignatureRef = useRef<string | null>(null);
+  const signature = buildNativeStackOptionsSignature(props.options);
+
+  // Stable factories so navigation keeps one function identity while always
+  // reading the latest items from optionsRef.
+  const leftItemsFactory = useMemo(
+    () => () => {
+      const factory = optionsRef.current?.unstable_headerLeftItems;
+      return typeof factory === "function" ? factory() : [];
+    },
+    [],
+  );
+  const rightItemsFactory = useMemo(
+    () => () => {
+      const factory = optionsRef.current?.unstable_headerRightItems;
+      return typeof factory === "function" ? factory() : [];
+    },
+    [],
+  );
+  const centerItemsFactory = useMemo(
+    () => () => {
+      const factory = optionsRef.current?.unstable_headerCenterItems;
+      return typeof factory === "function" ? factory() : [];
+    },
+    [],
+  );
+  const toolbarItemsFactory = useMemo(
+    () => () => {
+      const factory = optionsRef.current?.unstable_headerToolbarItems;
+      return typeof factory === "function" ? factory() : [];
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
-    if (!navigation || !normalizedOptions) {
+    if (!navigation || props.options === undefined) {
       return;
     }
-    navigation.setOptions(normalizedOptions);
-  }, [navigation, normalizedOptions]);
+    if (lastSignatureRef.current === signature) {
+      return;
+    }
+    lastSignatureRef.current = signature;
+
+    const normalized = normalizeScreenOptions(props.options);
+    if (!normalized) {
+      return;
+    }
+
+    const nextOptions = { ...normalized } as NativeStackNavigationOptions & {
+      unstable_headerCenterItems?: unknown;
+      unstable_headerLeftItems?: unknown;
+      unstable_headerRightItems?: unknown;
+      unstable_headerToolbarItems?: unknown;
+    };
+
+    if (typeof props.options.unstable_headerLeftItems === "function") {
+      nextOptions.unstable_headerLeftItems = leftItemsFactory;
+    }
+    if (typeof props.options.unstable_headerRightItems === "function") {
+      nextOptions.unstable_headerRightItems = rightItemsFactory;
+    }
+    if (typeof props.options.unstable_headerCenterItems === "function") {
+      nextOptions.unstable_headerCenterItems = centerItemsFactory;
+    }
+    if (typeof props.options.unstable_headerToolbarItems === "function") {
+      nextOptions.unstable_headerToolbarItems = toolbarItemsFactory;
+    }
+
+    navigation.setOptions(nextOptions);
+  }, [
+    centerItemsFactory,
+    leftItemsFactory,
+    navigation,
+    props.options,
+    rightItemsFactory,
+    signature,
+    toolbarItemsFactory,
+  ]);
 
   useEffect(() => {
     if (!navigation || !props.listeners) {

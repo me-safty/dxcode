@@ -16,6 +16,8 @@ import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { addBreadcrumb } from "../lib/breadcrumbs";
+import { toUploadChatImageAttachments } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
 import { randomHex } from "../lib/uuid";
@@ -223,7 +225,7 @@ export function useThreadOutboxDrain(): void {
             messageId: queuedMessage.messageId,
             role: "user",
             text: queuedMessage.text,
-            attachments: queuedMessage.attachments,
+            attachments: toUploadChatImageAttachments(queuedMessage.attachments),
           },
           modelSelection: settings.modelSelection,
           runtimeMode: settings.runtimeMode,
@@ -337,6 +339,13 @@ export function useThreadOutboxDrain(): void {
       }
 
       beginDispatchingQueuedMessage(nextQueuedMessage.messageId);
+      addBreadcrumb("outbox.dispatch", {
+        action: deliveryAction,
+        creation: creation !== undefined,
+        environmentId: nextQueuedMessage.environmentId,
+        messageId: nextQueuedMessage.messageId,
+        threadId: nextQueuedMessage.threadId,
+      });
       const removeQueuedMessage = (warning: string) =>
         removeThreadOutboxMessage(nextQueuedMessage).then(
           () => true,
@@ -362,6 +371,11 @@ export function useThreadOutboxDrain(): void {
               : Promise.resolve(false);
       void delivery
         .then((sent) => {
+          addBreadcrumb("outbox.result", {
+            messageId: nextQueuedMessage.messageId,
+            sent,
+            threadId: nextQueuedMessage.threadId,
+          });
           if (sent) {
             retryAttemptRef.current.delete(nextQueuedMessage.messageId);
             retryNotBeforeRef.current.delete(nextQueuedMessage.messageId);

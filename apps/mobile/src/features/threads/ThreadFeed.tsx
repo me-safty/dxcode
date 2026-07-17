@@ -11,7 +11,7 @@ import {
   type RunId,
 } from "@t3tools/contracts";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
-import { SymbolView } from "expo-symbols";
+import { SymbolView } from "../../components/AppSymbol";
 import { HeaderHeightContext } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -49,17 +49,16 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { TouchableOpacity } from "react-native-gesture-handler";
 import ImageViewing from "react-native-image-viewing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   FadeIn,
   FadeInUp,
-  FadeOut,
   LinearTransition,
   type SharedValue,
 } from "react-native-reanimated";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { useFontFamily } from "../../lib/useFontFamily";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
   hasNativeSelectableMarkdownText,
@@ -74,6 +73,7 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewInlineComment,
 } from "../review/reviewCommentSelection";
+import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
 import { resolveNativeReviewDiffView } from "../diffs/nativeReviewDiffSurface";
 import {
   buildNativeReviewDiffData,
@@ -99,6 +99,7 @@ import {
 } from "../../lib/threadActivity";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { ThreadWorkLog } from "./thread-work-log";
+import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { useAssetUrl } from "../../state/assets";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
@@ -121,6 +122,7 @@ function formatMessageTime(input: string): string {
 // Rows shift when content above them grows (streaming text, work-log folds);
 // animating the container position turns those jumps into slides.
 const FEED_ITEM_LAYOUT_TRANSITION = LinearTransition.duration(180);
+const CONTENT_FIT_EPSILON = 3;
 
 // Entering animations must only play for rows born just now — LegendList
 // remounts rows when they scroll back into view, and replaying an entrance for
@@ -144,6 +146,8 @@ export interface ThreadFeedProps {
   readonly freeze: SharedValue<boolean>;
   readonly anchorMessageId: MessageId | null;
   readonly contentInsetEndAdjustment: SharedValue<number>;
+  /** Effective resting end inset: measured composer overlay plus feed gap. */
+  readonly contentInsetEndEstimate: number;
   readonly contentTopInset?: number;
   readonly contentBottomInset?: number;
   readonly topAccessory?: ReactNode;
@@ -239,18 +243,26 @@ function MessageAttachmentImage(props: {
     attachmentId: props.attachmentId,
   });
 
-  if (uri === null) {
-    return (
-      <View className={`${props.className} items-center justify-center`}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
   return (
-    <TouchableOpacity activeOpacity={0.7} onPress={() => props.onPressImage(uri)}>
-      <Image source={{ uri }} className={props.className} resizeMode="cover" />
-    </TouchableOpacity>
+    <View className={`${props.className} items-center justify-center overflow-hidden`}>
+      {uri === null ? (
+        <ActivityIndicator />
+      ) : (
+        <Pressable
+          accessibilityLabel="Open attached image"
+          accessibilityRole="button"
+          onPress={() => props.onPressImage(uri)}
+          style={({ pressed }) => ({ height: "100%", opacity: pressed ? 0.7 : 1, width: "100%" })}
+        >
+          <Image
+            accessible={false}
+            source={{ uri }}
+            resizeMode="cover"
+            style={{ height: "100%", width: "100%" }}
+          />
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -291,6 +303,12 @@ const MARKDOWN_COLORS = {
   },
 } as const;
 
+const MARKDOWN_MONO_FONT = Platform.select({
+  ios: "ui-monospace",
+  android: "monospace",
+  default: "monospace",
+});
+
 interface MarkdownStyleSets {
   readonly user: MarkdownStyleSet;
   readonly assistant: MarkdownStyleSet;
@@ -323,10 +341,6 @@ const markdownLinkStyles = StyleSheet.create({
   favicon: {
     borderRadius: 3,
   },
-  file: {
-    fontFamily: "DMSans_700Bold",
-    fontWeight: "700",
-  },
 });
 
 const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
@@ -339,12 +353,12 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
 
   return (
     <NativeText
+      className="font-sans"
       onPress={() => {
         void Linking.openURL(props.href);
       }}
       style={{
         color: props.color,
-        fontFamily: "DMSans_400Regular",
         textDecorationLine: "none",
       }}
     >
@@ -366,6 +380,122 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
     </NativeText>
   );
 });
+
+function MarkdownCodeBlock(props: {
+  readonly backgroundColor: string;
+  readonly borderColor: string;
+  readonly content: string;
+  readonly copyTintColor: ColorValue;
+  readonly headerTextColor: string;
+  readonly fontSize: number;
+  readonly highlightCode: boolean;
+  readonly language?: string | null;
+  readonly lineHeight: number;
+  readonly textColor: string;
+  readonly theme: ReviewDiffTheme;
+}) {
+  const content = props.content.replace(/\n$/, "");
+  const languageLabel = props.language?.trim() || "text";
+  const highlighted = useMarkdownCodeHighlight({
+    code: content,
+    enabled: props.highlightCode && Boolean(props.language?.trim()),
+    language: props.language,
+    theme: props.theme,
+  });
+  let tokenOffset = 0;
+
+  return (
+    <View
+      className="my-3 min-w-0 max-w-full self-stretch overflow-hidden rounded-lg border"
+      style={{ backgroundColor: props.backgroundColor, borderColor: props.borderColor }}
+    >
+      <View
+        className="flex-row items-center justify-between gap-2 border-b py-1 pr-1.5 pl-3.5"
+        style={{ borderBottomColor: props.borderColor }}
+      >
+        <NativeText
+          className="flex-1 font-mono uppercase opacity-70"
+          numberOfLines={1}
+          style={{
+            color: props.headerTextColor,
+            fontSize: props.fontSize,
+            ...(Platform.OS === "android" ? { includeFontPadding: false } : null),
+          }}
+        >
+          {languageLabel}
+        </NativeText>
+        <CopyTextButton
+          accessibilityLabel="Copy code"
+          text={content}
+          tintColor={props.copyTintColor}
+          buttonSize={32}
+          iconSize={16}
+        />
+      </View>
+      <ScrollView
+        horizontal
+        bounces={false}
+        nestedScrollEnabled={Platform.OS === "android"}
+        showsHorizontalScrollIndicator={false}
+        contentContainerClassName="px-3.5 py-3"
+      >
+        <NativeText
+          selectable
+          className="font-mono"
+          style={{
+            color: props.textColor,
+            fontSize: props.fontSize,
+            lineHeight: props.lineHeight,
+            ...(Platform.OS === "android" ? { includeFontPadding: false } : null),
+          }}
+        >
+          {highlighted
+            ? highlighted.map((line, lineIndex) => {
+                const lineStartOffset = tokenOffset;
+                const lineText = line.map((token) => token.content).join("");
+                const renderedLine = (
+                  <NativeText key={`line:${lineStartOffset}:${lineText}`}>
+                    {line.map((token) => {
+                      const startOffset = tokenOffset;
+                      tokenOffset += token.content.length;
+                      const fontStyle =
+                        token.fontStyle !== null && (token.fontStyle & 1) === 1
+                          ? ("italic" as const)
+                          : ("normal" as const);
+                      const fontWeight =
+                        token.fontStyle !== null && (token.fontStyle & 2) === 2
+                          ? ("700" as const)
+                          : ("400" as const);
+
+                      return (
+                        <NativeText
+                          key={`${startOffset}:${token.content}:${token.color ?? ""}:${
+                            token.fontStyle ?? ""
+                          }`}
+                          style={{
+                            color: token.color ?? props.textColor,
+                            fontStyle,
+                            fontWeight,
+                          }}
+                        >
+                          {token.content}
+                        </NativeText>
+                      );
+                    })}
+                    {lineIndex + 1 < highlighted.length ? "\n" : ""}
+                  </NativeText>
+                );
+                if (lineIndex + 1 < highlighted.length) {
+                  tokenOffset += 1;
+                }
+                return renderedLine;
+              })
+            : content}
+        </NativeText>
+      </ScrollView>
+    </View>
+  );
+}
 
 function useReviewCommentColors(): ReviewCommentColors {
   const colorScheme = useColorScheme();
@@ -401,8 +531,13 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
     () => resolveNativeMarkdownTypography(appearance.baseFontSize),
     [appearance.baseFontSize],
   );
-  const colors = MARKDOWN_COLORS[colorScheme === "dark" ? "dark" : "light"];
+  const themeMode = colorScheme === "dark" ? "dark" : "light";
+  const colors = MARKDOWN_COLORS[themeMode];
+  const iconSubtleColor = String(useThemeColor("--color-icon-subtle"));
   const inlineSkillForeground = String(useThemeColor("--color-inline-skill-foreground"));
+  const userBubbleForegroundMuted = String(useThemeColor("--color-user-bubble-foreground-muted"));
+  const regularFontFamily = useFontFamily("regular");
+  const boldFontFamily = useFontFamily("bold");
 
   return useMemo(() => {
     const markdownBodyColor = colors.body;
@@ -428,6 +563,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         link: markdownLinkColor,
         blockquote: markdownBlockquoteBorder,
         border: markdownHrColor,
+        surface: "transparent",
         surfaceLight: markdownBlockquoteBg,
         accent: markdownLinkColor,
         tableBorder: markdownHrColor,
@@ -454,9 +590,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         h6: markdownFontSizes.h6,
       },
       fontFamilies: {
-        regular: "DMSans_400Regular",
-        heading: "DMSans_700Bold",
-        mono: "ui-monospace",
+        regular: regularFontFamily,
+        heading: boldFontFamily,
+        mono: MARKDOWN_MONO_FONT,
       },
       headingWeight: "700",
       borderRadius: {
@@ -477,7 +613,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownStrongColor,
-        fontFamily: "DMSans_700Bold",
+        fontFamily: boldFontFamily,
       },
       italic: { fontStyle: "italic" },
       link: {
@@ -493,7 +629,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         marginVertical: 10,
       },
       heading: {
-        fontFamily: "DMSans_700Bold",
+        fontFamily: boldFontFamily,
         color: markdownStrongColor,
         marginTop: 18,
         marginBottom: 8,
@@ -510,15 +646,18 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       inlineCodeTextColor: string,
       blockBackgroundColor: string,
       blockTextColor: string,
+      copyTintColor: ColorValue,
       preserveSoftBreaks: boolean,
+      highlightCode: boolean,
     ): CustomRenderers => ({
       link: ({ children, href = "" }) => {
         const presentation = resolveMarkdownLinkPresentation(href);
         if (presentation.kind === "file") {
           return (
             <NativeText
+              className="font-t3-bold"
               onPress={() => onLinkPress(href)}
-              style={[markdownLinkStyles.file, { color: inlineTextColor }]}
+              style={{ color: inlineTextColor }}
             >
               <Image
                 source={markdownFileIconSource(presentation.icon)}
@@ -542,6 +681,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         const linkHref = presentation.href;
         return (
           <NativeText
+            className="underline"
             onPress={
               linkHref
                 ? () => {
@@ -549,17 +689,14 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                   }
                 : undefined
             }
-            style={{
-              color: markdownLinkColor,
-              textDecorationLine: "underline",
-            }}
+            style={{ color: markdownLinkColor }}
           >
             {children}
           </NativeText>
         );
       },
       list: ({ node, Renderer, ordered = false, start = 1 }) => (
-        <View style={{ marginTop: 2, marginBottom: 8 }}>
+        <View className="mt-0.5 mb-2">
           {node.children?.map((child, index) => {
             const childKey = `${child.type}:${child.beg ?? "unknown"}:${child.end ?? "unknown"}`;
             if (child.type === "task_list_item") {
@@ -568,20 +705,13 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
               );
             }
             return (
-              <View
-                key={childKey}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "flex-start",
-                  marginBottom: 3,
-                }}
-              >
+              <View className="mb-[3px] flex-row items-start" key={childKey}>
                 <NativeText
+                  className="font-sans"
                   style={{
                     width: ordered ? 22 : 12,
                     marginRight: 5,
                     color: inlineTextColor,
-                    fontFamily: "DMSans_400Regular",
                     fontSize: markdownFontSizes.m,
                     lineHeight: markdownFontSizes.bodyLineHeight,
                     textAlign: ordered ? "right" : "center",
@@ -589,7 +719,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                 >
                   {ordered ? `${start + index}.` : "•"}
                 </NativeText>
-                <View style={{ flex: 1, minWidth: 0 }}>
+                <View className="min-w-0 flex-1">
                   <Renderer node={child} depth={1} inListItem parentIsText={false} />
                 </View>
               </View>
@@ -601,9 +731,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         const value = content ?? "";
         return (
           <NativeText
+            className="font-mono"
             style={{
               color: inlineCodeTextColor,
-              fontFamily: "ui-monospace",
               fontSize: markdownFontSizes.codeBlockFontSize,
               lineHeight: markdownFontSizes.bodyLineHeight,
             }}
@@ -617,58 +747,20 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
             soft_break: () => <NativeText>{"\n"}</NativeText>,
           }
         : {}),
-      code_block: ({ content, language }) => (
-        <View
-          style={{
-            backgroundColor: blockBackgroundColor,
-            borderRadius: 10,
-            borderWidth: 1,
-            borderColor: markdownHrColor,
-            marginVertical: 12,
-            overflow: "hidden",
-          }}
-        >
-          {language ? (
-            <View
-              style={{
-                borderBottomWidth: 1,
-                borderBottomColor: markdownHrColor,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-              }}
-            >
-              <NativeText
-                style={{
-                  color: markdownBodyColor,
-                  fontFamily: "ui-monospace",
-                  fontSize: markdownFontSizes.codeBlockFontSize,
-                  opacity: 0.7,
-                  textTransform: "uppercase",
-                }}
-              >
-                {language}
-              </NativeText>
-            </View>
-          ) : null}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            bounces={false}
-            contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12 }}
-          >
-            <NativeText
-              selectable
-              style={{
-                color: blockTextColor,
-                fontFamily: "ui-monospace",
-                fontSize: markdownFontSizes.codeBlockFontSize,
-                lineHeight: markdownFontSizes.codeBlockLineHeight,
-              }}
-            >
-              {content}
-            </NativeText>
-          </ScrollView>
-        </View>
+      code_block: ({ content = "", language }) => (
+        <MarkdownCodeBlock
+          backgroundColor={blockBackgroundColor}
+          borderColor={markdownHrColor}
+          content={content}
+          copyTintColor={copyTintColor}
+          fontSize={markdownFontSizes.codeBlockFontSize}
+          headerTextColor={blockTextColor}
+          highlightCode={highlightCode}
+          language={language}
+          lineHeight={markdownFontSizes.codeBlockLineHeight}
+          textColor={blockTextColor}
+          theme={themeMode}
+        />
       ),
     });
 
@@ -690,7 +782,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownUserBodyColor,
-        fontFamily: "DMSans_700Bold",
+        fontFamily: boldFontFamily,
       },
       heading: {
         ...baseStyles.heading,
@@ -726,7 +818,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           markdownUserInlineCodeText,
           markdownUserFenceBg,
           markdownUserFenceText,
+          userBubbleForegroundMuted,
           true,
+          false,
         ),
         nativeTextStyle: {
           color: markdownUserBodyColor,
@@ -744,9 +838,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans_400Regular",
-          headingFontFamily: "DMSans_700Bold",
-          boldFontFamily: "DMSans_700Bold",
+          fontFamily: regularFontFamily,
+          headingFontFamily: boldFontFamily,
+          boldFontFamily,
         },
       },
       assistant: {
@@ -757,7 +851,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           markdownInlineCodeText,
           markdownCodeBg,
           markdownCodeText,
+          iconSubtleColor,
           false,
+          true,
         ),
         nativeTextStyle: {
           color: markdownBodyColor,
@@ -775,13 +871,24 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans_400Regular",
-          headingFontFamily: "DMSans_700Bold",
-          boldFontFamily: "DMSans_700Bold",
+          fontFamily: regularFontFamily,
+          headingFontFamily: boldFontFamily,
+          boldFontFamily,
         },
       },
     };
-  }, [colors, inlineSkillForeground, markdownFontSizes, nativeMarkdownTypography, onLinkPress]);
+  }, [
+    boldFontFamily,
+    colors,
+    iconSubtleColor,
+    inlineSkillForeground,
+    markdownFontSizes,
+    nativeMarkdownTypography,
+    onLinkPress,
+    regularFontFamily,
+    themeMode,
+    userBubbleForegroundMuted,
+  ]);
 }
 
 function renderFeedEntry(
@@ -924,6 +1031,7 @@ function renderFeedEntry(
           hasNativeSelectableMarkdownText() ? (
             <SelectableMarkdownText
               markdown={message.text}
+              fillWidth
               skills={props.skills}
               textStyle={styles.nativeTextStyle}
               onLinkPress={props.onMarkdownLinkPress}
@@ -1113,11 +1221,10 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
 
   return (
     <View
-      className="w-full overflow-hidden rounded-[16px] border"
+      className="w-full overflow-hidden rounded-[16px] border border-continuous"
       style={{
         backgroundColor: props.colors.background,
         borderColor: props.colors.border,
-        borderCurve: "continuous",
       }}
     >
       <View
@@ -1125,8 +1232,8 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         style={{ borderColor: props.colors.border }}
       >
         <View
-          className="size-6 items-center justify-center rounded-[7px]"
-          style={{ backgroundColor: props.colors.mutedBackground, borderCurve: "continuous" }}
+          className="size-6 items-center justify-center rounded-[7px] border-continuous"
+          style={{ backgroundColor: props.colors.mutedBackground }}
         >
           <SymbolView
             name="doc.text"
@@ -1179,9 +1286,9 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         >
           <NativeText
             selectable
+            className="font-mono"
             style={{
               color: props.colors.text,
-              fontFamily: "ui-monospace",
               fontSize: codeSurface.fontSize,
               lineHeight: codeSurface.rowHeight,
             }}
@@ -1233,6 +1340,7 @@ function ThreadFeedPlaceholder(props: {
   readonly bottomInset: number;
   readonly detail: string;
   readonly horizontalPadding: number;
+  readonly loading?: boolean;
   readonly title: string;
   readonly topInset: number;
 }) {
@@ -1249,6 +1357,7 @@ function ThreadFeedPlaceholder(props: {
       }}
     >
       <View className="max-w-[320px] items-center gap-2">
+        {props.loading ? <ActivityIndicator size="small" /> : null}
         <Text className="text-center font-t3-bold text-lg text-foreground">{props.title}</Text>
         <Text className="text-center text-sm leading-normal text-foreground-secondary">
           {props.detail}
@@ -1263,6 +1372,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foldSettleFrameRef = useRef<number | null>(null);
   const foldSettleSecondFrameRef = useRef<number | null>(null);
+  const initialEndCorrectionFrameRef = useRef<number | null>(null);
+  const underflowCorrectionFrameRef = useRef<number | null>(null);
+  const initialEndCorrectionKeyRef = useRef<string | null>(null);
+  const previousContentUnderflowsViewportRef = useRef(false);
   const previousLatestTurnRef = useRef(props.latestRun);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const headerMaterialVisibleRef = useRef(false);
@@ -1271,6 +1384,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     props.layoutVariant === "split" ? 0 : windowWidth,
   );
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const [interactionState, setInteractionState] = useState<{
     readonly copiedRowId: string | null;
@@ -1395,6 +1509,51 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     setViewportHeight((current) => (Math.abs(current - nextHeight) > 1 ? nextHeight : current));
   }, []);
 
+  const handleContentSizeChange = useCallback((_width: number, height: number) => {
+    setContentHeight((current) => (Math.abs(current - height) > 1 ? height : current));
+  }, []);
+  // UIKit's automatic top inset reduces the visible list area without adding
+  // to contentHeight. Non-automatic layouts render their header spacer inside
+  // the list, so their contentHeight already accounts for it.
+  const usableViewportHeight = viewportHeight - (usesNativeAutomaticInsets ? anchorTopInset : 0);
+  const contentUnderflowsViewport =
+    contentHeight > 0 &&
+    viewportHeight > 0 &&
+    contentHeight + props.contentInsetEndEstimate < usableViewportHeight - CONTENT_FIT_EPSILON;
+
+  useEffect(() => {
+    if (underflowCorrectionFrameRef.current !== null) {
+      cancelAnimationFrame(underflowCorrectionFrameRef.current);
+      underflowCorrectionFrameRef.current = null;
+    }
+
+    const previouslyUnderflowed = previousContentUnderflowsViewportRef.current;
+    previousContentUnderflowsViewportRef.current = contentUnderflowsViewport;
+    if (contentUnderflowsViewport) {
+      underflowCorrectionFrameRef.current = requestAnimationFrame(() => {
+        underflowCorrectionFrameRef.current = null;
+        void props.listRef.current?.scrollToOffset({
+          animated: false,
+          offset: -anchorTopInset,
+        });
+      });
+      return;
+    }
+
+    // A disclosure transition owns its visible-content anchor, so consuming
+    // the underflow transition without an end scroll is intentional there.
+    if (previouslyUnderflowed && !disclosureToggleSettling) {
+      void props.listRef.current?.scrollToEnd({ animated: true });
+    }
+  }, [
+    anchorTopInset,
+    contentHeight,
+    contentUnderflowsViewport,
+    disclosureToggleSettling,
+    props.listRef,
+    viewportHeight,
+  ]);
+
   useEffect(() => {
     reportHeaderMaterialVisibility(false);
   }, [props.threadId, reportHeaderMaterialVisibility]);
@@ -1404,20 +1563,64 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     [expandedTurnIds, props.feed, props.latestRun],
   );
 
-  // The empty↔filled key below remounts the list, which resets its imperative
-  // content-inset override — and useKeyboardChatComposerInset (mounted above
+  // A hydrating thread reserves the filled identity so detail arrival does not
+  // replace the native list during the draft-to-thread transition. An already
+  // open empty thread still remounts when its first message arrives. That
+  // remount resets its imperative content-inset override — and
+  // useKeyboardChatComposerInset (mounted above
   // the remount boundary) deduplicates by height, so it never re-reports the
   // composer inset to the fresh instance. Without this, the remounted list's
   // initial scroll-to-end computes with a zero end inset and rests one
   // composer-height short of the end. Layout effect: it must land before the
   // list's first positioning tick or the one-shot initial scroll misses it.
-  const listMountKey = `${props.threadId}:${props.feed.length === 0 ? "empty" : "filled"}`;
+  const listMountState =
+    props.contentPresentation.kind === "loading"
+      ? "filled"
+      : props.feed.length === 0
+        ? "empty"
+        : "filled";
+  const listMountKey = `${props.threadId}:${listMountState}`;
   useLayoutEffect(() => {
     const bottom = props.contentInsetEndAdjustment.value;
     if (bottom > 0) {
       props.listRef.current?.reportContentInset({ bottom });
     }
   }, [listMountKey, props.contentInsetEndAdjustment, props.listRef]);
+
+  useEffect(() => {
+    if (initialEndCorrectionFrameRef.current !== null) {
+      cancelAnimationFrame(initialEndCorrectionFrameRef.current);
+      initialEndCorrectionFrameRef.current = null;
+    }
+
+    if (
+      initialEndCorrectionKeyRef.current === listMountKey ||
+      props.contentPresentation.kind !== "ready" ||
+      contentHeight <= 0 ||
+      viewportHeight <= 0
+    ) {
+      return;
+    }
+
+    initialEndCorrectionKeyRef.current = listMountKey;
+    if (contentUnderflowsViewport) {
+      return;
+    }
+
+    initialEndCorrectionFrameRef.current = requestAnimationFrame(() => {
+      initialEndCorrectionFrameRef.current = requestAnimationFrame(() => {
+        initialEndCorrectionFrameRef.current = null;
+        void props.listRef.current?.scrollToEnd({ animated: false });
+      });
+    });
+  }, [
+    contentHeight,
+    contentUnderflowsViewport,
+    listMountKey,
+    props.contentPresentation.kind,
+    props.listRef,
+    viewportHeight,
+  ]);
 
   const anchoredEndSpace = useMemo(
     () =>
@@ -1480,6 +1683,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       }
       if (foldSettleSecondFrameRef.current !== null) {
         cancelAnimationFrame(foldSettleSecondFrameRef.current);
+      }
+      if (underflowCorrectionFrameRef.current !== null) {
+        cancelAnimationFrame(underflowCorrectionFrameRef.current);
+      }
+      if (initialEndCorrectionFrameRef.current !== null) {
+        cancelAnimationFrame(initialEndCorrectionFrameRef.current);
       }
     };
   }, []);
@@ -1646,8 +1855,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
 
   return (
     <>
-      <View style={{ flex: 1 }} onLayout={handleViewportLayout}>
-        <View style={{ flex: 1 }}>
+      <View className="flex-1" onLayout={handleViewportLayout}>
+        <View className="flex-1">
           <KeyboardAwareLegendList
             ref={props.listRef}
             // The empty↔filled key remounts the list when messages first
@@ -1702,7 +1911,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             // anchor scrolls also lets it correct a scroll that landed on a
             // stale end target once the anchor row finishes measuring.
             maintainScrollAtEnd={
-              disclosureToggleSettling
+              disclosureToggleSettling || contentUnderflowsViewport
                 ? false
                 : {
                     animated: true,
@@ -1741,6 +1950,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             scrollToOverflowEnabled
             estimatedItemSize={180}
             initialScrollAtEnd
+            onContentSizeChange={handleContentSizeChange}
             onScroll={handleScroll}
             scrollEventThrottle={16}
             ListHeaderComponent={
@@ -1766,6 +1976,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             />
           </View>
         ) : null}
+        {props.contentPresentation.kind === "loading" ? (
+          <View pointerEvents="none" className="bg-screen" style={StyleSheet.absoluteFill}>
+            <ThreadFeedPlaceholder
+              title="Loading messages"
+              detail="Catching up this thread before showing the conversation."
+              topInset={topContentInset}
+              bottomInset={bottomContentInset}
+              horizontalPadding={horizontalPadding}
+              loading
+            />
+          </View>
+        ) : null}
       </View>
 
       <ImageViewing
@@ -1782,6 +2004,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         imageIndex={0}
         visible={expandedImage !== null}
         onRequestClose={() => setExpandedImage(null)}
+        presentationStyle="overFullScreen"
         swipeToCloseEnabled
         doubleTapToZoomEnabled
       />

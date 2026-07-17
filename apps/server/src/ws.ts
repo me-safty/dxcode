@@ -34,6 +34,7 @@ import {
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2GetThreadProjectionError,
   OrchestrationV2ThreadLaunchError,
+  type OrchestrationV2ThreadStreamItem,
   type OrchestrationProjectShell,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
@@ -593,6 +594,7 @@ const makeWsRpcLayer = (
             otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
           },
           settings,
+          threadResumeCompletionMarker: true,
         };
       });
 
@@ -602,7 +604,11 @@ const makeWsRpcLayer = (
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subscribeThread")(
-        function* (input: { readonly threadId: ThreadId; readonly afterSequence?: number }) {
+        function* (input: {
+          readonly threadId: ThreadId;
+          readonly afterSequence?: number;
+          readonly requestCompletionMarker?: boolean;
+        }) {
           yield* Effect.annotateCurrentSpan({
             "orchestration_v2.thread_id": input.threadId,
           });
@@ -637,6 +643,35 @@ const makeWsRpcLayer = (
           // published during the replay window is lost; overlapping events are
           // deduped by sequence on the client.
           if (input.afterSequence !== undefined) {
+            if (input.requestCompletionMarker === true) {
+              // Opt-in marker after catch-up so warm clients leave syncing without
+              // a full body retransmit, including when replay is empty.
+              return threadManagement
+                .streamResumeWithCatchUpComplete({
+                  threadId: input.threadId,
+                  afterSequence: input.afterSequence,
+                })
+                .pipe(
+                  Stream.map(
+                    (item): OrchestrationV2ThreadStreamItem =>
+                      item.kind === "catch-up-complete"
+                        ? { kind: "synchronized" }
+                        : {
+                            kind: "event",
+                            sequence: item.stored.sequence,
+                            event: item.stored.event,
+                          },
+                  ),
+                  Stream.mapError(
+                    (cause) =>
+                      new OrchestrationV2GetThreadProjectionError({
+                        threadId: input.threadId,
+                        message: `Failed while streaming orchestration V2 thread ${input.threadId}`,
+                        cause,
+                      }),
+                  ),
+                );
+            }
             return eventStreamFrom(input.afterSequence);
           }
 

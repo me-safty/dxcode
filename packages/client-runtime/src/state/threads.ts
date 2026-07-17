@@ -10,6 +10,7 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom } from "effect/unstable/reactivity";
@@ -74,6 +75,13 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     Option.match(cached, { onNone: () => 0, onSome: (snapshot) => snapshot.snapshotSequence }),
   );
   const persistence = yield* Queue.sliding<OrchestrationV2ThreadDetailSnapshot>(1);
+  // When the server advertises threadResumeCompletionMarker and we request it on
+  // resume, keep status synchronizing until the stream marker arrives (including
+  // through catch-up events). Legacy servers never set this path.
+  // markerMode stays true for the life of this thread state once we opt in;
+  // awaitingCompletion is re-armed on each reconnect generation.
+  const markerMode = yield* Ref.make(false);
+  const awaitingCompletion = yield* Ref.make(false);
 
   const persist = Effect.fn("EnvironmentThreadState.persist")(function* (
     snapshot: OrchestrationV2ThreadDetailSnapshot,
@@ -97,37 +105,65 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     Effect.forkScoped,
   );
 
-  const setSynchronizing = SubscriptionRef.update(state, (current) => ({
-    ...current,
-    status: "synchronizing" as const,
-    error: Option.none(),
-  }));
-  const setReady = SubscriptionRef.update(state, (current) =>
-    current.status === "live" || current.status === "deleted"
-      ? current
-      : {
+  const setSynchronizing = Effect.gen(function* () {
+    // Ordinary reconnect clears awaitingCompletion on disconnect; re-arm here so
+    // setReady / catch-up setThread keep synchronizing until the new marker.
+    if (yield* Ref.get(markerMode)) {
+      yield* Ref.set(awaitingCompletion, true);
+    }
+    yield* SubscriptionRef.update(state, (current) => ({
+      ...current,
+      status: "synchronizing" as const,
+      error: Option.none(),
+    }));
+  });
+  const setReady = Effect.gen(function* () {
+    const waiting = yield* Ref.get(awaitingCompletion);
+    yield* SubscriptionRef.update(state, (current) => {
+      if (current.status === "deleted") {
+        return current;
+      }
+      if (waiting) {
+        return {
           ...current,
           status: "synchronizing" as const,
           error: Option.none(),
-        },
-  );
-  const setDisconnected = SubscriptionRef.update(state, (current) => ({
-    ...current,
-    status: current.status === "deleted" ? current.status : statusWithoutLiveData(current.data),
-  }));
-  const setStreamError = (cause: Cause.Cause<unknown>) =>
-    SubscriptionRef.update(state, (current) => ({
+        };
+      }
+      return {
+        ...current,
+        status: Option.isSome(current.data) ? ("live" as const) : ("synchronizing" as const),
+        error: Option.none(),
+      };
+    });
+  });
+  const setDisconnected = Effect.gen(function* () {
+    yield* Ref.set(awaitingCompletion, false);
+    yield* SubscriptionRef.update(state, (current) => ({
       ...current,
       status: current.status === "deleted" ? current.status : statusWithoutLiveData(current.data),
-      error: Option.some(formatThreadError(cause)),
     }));
+  });
+  const setStreamError = (cause: Cause.Cause<unknown>) =>
+    Effect.gen(function* () {
+      // Resubscribe will re-enter marker wait when this stream is in marker mode.
+      if (yield* Ref.get(markerMode)) {
+        yield* Ref.set(awaitingCompletion, true);
+      }
+      yield* SubscriptionRef.update(state, (current) => ({
+        ...current,
+        status: current.status === "deleted" ? current.status : statusWithoutLiveData(current.data),
+        error: Option.some(formatThreadError(cause)),
+      }));
+    });
 
   const setThread = Effect.fn("EnvironmentThreadState.setThread")(function* (
     thread: OrchestrationV2ThreadProjection,
   ) {
+    const waiting = yield* Ref.get(awaitingCompletion);
     yield* SubscriptionRef.set(state, {
       data: Option.some(thread),
-      status: "live",
+      status: waiting ? ("synchronizing" as const) : ("live" as const),
       error: Option.none(),
     });
     // Persist the thread together with the sequence it reflects so the next warm
@@ -137,6 +173,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   });
 
   const setDeleted = Effect.fn("EnvironmentThreadState.setDeleted")(function* () {
+    yield* Ref.set(awaitingCompletion, false);
     yield* SubscriptionRef.set(state, {
       data: Option.none(),
       status: "deleted",
@@ -158,6 +195,16 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const applyItem = Effect.fn("EnvironmentThreadState.applyItem")(function* (
     item: OrchestrationV2ThreadStreamItem,
   ) {
+    if (item.kind === "synchronized") {
+      yield* Ref.set(awaitingCompletion, false);
+      yield* SubscriptionRef.update(state, (current) =>
+        Option.isSome(current.data) && current.status !== "deleted"
+          ? { ...current, status: "live" as const, error: Option.none() }
+          : current,
+      );
+      return;
+    }
+
     if (item.kind === "snapshot") {
       yield* SubscriptionRef.set(lastSequence, item.snapshotSequence);
       yield* setThread(item.projection);
@@ -229,6 +276,19 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               : Option.none<OrchestrationV2ThreadDetailSnapshot>();
           });
 
+      const session = yield* SubscriptionRef.get(supervisor.session);
+      const serverSupportsCompletionMarker = Option.isSome(session)
+        ? yield* session.value.initialConfig.pipe(
+            Effect.map((config) => config.threadResumeCompletionMarker === true),
+            Effect.orElseSucceed(() => false),
+          )
+        : false;
+      const requestCompletionMarker = serverSupportsCompletionMarker && Option.isSome(base);
+      if (requestCompletionMarker) {
+        yield* Ref.set(markerMode, true);
+        yield* Ref.set(awaitingCompletion, true);
+      }
+
       if (Option.isSome(base)) {
         yield* applyItem({
           kind: "snapshot",
@@ -239,11 +299,18 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 
       const subscribeInput = Option.match(base, {
         onNone: () => ({ threadId }),
-        onSome: (snapshot) => ({ threadId, afterSequence: snapshot.snapshotSequence }),
+        onSome: (snapshot) =>
+          requestCompletionMarker
+            ? {
+                threadId,
+                afterSequence: snapshot.snapshotSequence,
+                requestCompletionMarker: true as const,
+              }
+            : { threadId, afterSequence: snapshot.snapshotSequence },
       });
 
       yield* subscribe(ORCHESTRATION_V2_WS_METHODS.subscribeThread, subscribeInput, {
-        onExpectedFailure: setStreamError,
+        onExpectedFailure: (cause) => setStreamError(cause),
         retryExpectedFailureAfter: "250 millis",
       }).pipe(Stream.runForEach(applyItem));
     }),

@@ -1978,6 +1978,12 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
    * sequence on the client).
    */
   afterSequence: Schema.optionalKey(NonNegativeInt),
+  /**
+   * When true and `afterSequence` is set, the server emits `{ kind: "synchronized" }`
+   * after catch-up replay (including when empty). Only send when
+   * `ServerConfig.threadResumeCompletionMarker` is true.
+   */
+  requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
 
@@ -1988,6 +1994,11 @@ export const OrchestrationV2ThreadDetailSnapshot = Schema.Struct({
 export type OrchestrationV2ThreadDetailSnapshot = typeof OrchestrationV2ThreadDetailSnapshot.Type;
 
 export const OrchestrationV2ThreadStreamItem = Schema.Union([
+  // Confirms that a resumed detail subscription finished catch-up even when no
+  // events were emitted after the client's cached snapshot sequence.
+  Schema.Struct({
+    kind: Schema.Literal("synchronized"),
+  }),
   Schema.Struct({
     kind: Schema.Literal("snapshot"),
     snapshotSequence: NonNegativeInt,

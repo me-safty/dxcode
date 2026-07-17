@@ -159,6 +159,14 @@ export interface OrchestratorV2Shape {
     readonly threadId?: ThreadId;
     readonly afterSequence?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
+  readonly streamResumeWithCatchUpComplete: (input: {
+    readonly threadId: ThreadId;
+    readonly afterSequence: number;
+  }) => Stream.Stream<
+    | { readonly kind: "stored"; readonly stored: OrchestrationV2StoredEvent }
+    | { readonly kind: "catch-up-complete" },
+    OrchestratorV2Error
+  >;
   readonly streamDomainEvents: Stream.Stream<OrchestrationV2DomainEvent, OrchestratorV2Error>;
 }
 
@@ -5228,6 +5236,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       ),
+    streamResumeWithCatchUpComplete: (input) =>
+      eventSink
+        .streamWithCatchUpComplete({
+          threadId: input.threadId,
+          afterSequence: input.afterSequence,
+        })
+        .pipe(
+          Stream.mapError(
+            (cause) =>
+              new OrchestratorDomainEventStreamError({
+                cause,
+              }),
+          ),
+        ),
     streamDomainEvents: eventSink.stream().pipe(
       Stream.map((stored) => stored.event),
       Stream.mapError(
@@ -5309,6 +5331,12 @@ export const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
       }),
     ),
     streamStoredEventsFrom: () =>
+      Stream.fail(
+        new OrchestratorDomainEventStreamError({
+          cause: "Orchestration V2 live runtime is not configured.",
+        }),
+      ),
+    streamResumeWithCatchUpComplete: () =>
       Stream.fail(
         new OrchestratorDomainEventStreamError({
           cause: "Orchestration V2 live runtime is not configured.",

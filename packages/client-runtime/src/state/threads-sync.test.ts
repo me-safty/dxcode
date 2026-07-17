@@ -58,14 +58,25 @@ const BASE_PROJECTION: OrchestrationV2ThreadProjection = {
 
 type TestThreadInput = OrchestrationV2ThreadStreamItem | Error;
 
-function testSession(client: WsRpcProtocolClient): RpcSession.RpcSession {
+function testSession(
+  client: WsRpcProtocolClient,
+  options?: { readonly threadResumeCompletionMarker?: boolean },
+): RpcSession.RpcSession {
+  const initialConfig =
+    options?.threadResumeCompletionMarker === true
+      ? Effect.succeed({ threadResumeCompletionMarker: true } as never)
+      : Effect.succeed({} as never);
   return {
     client,
-    initialConfig: Effect.never,
+    initialConfig,
     ready: Effect.void,
     probe: Effect.void,
     closed: Effect.never,
   };
+}
+
+function synchronized(): OrchestrationV2ThreadStreamItem {
+  return { kind: "synchronized" };
 }
 
 function awaitThreadState(
@@ -82,6 +93,7 @@ function awaitThreadState(
 const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (options?: {
   readonly cached?: OrchestrationV2ThreadProjection;
   readonly httpSnapshot?: Option.Option<OrchestrationV2ThreadDetailSnapshot>;
+  readonly threadResumeCompletionMarker?: boolean;
 }) {
   const inputs = yield* Queue.unbounded<TestThreadInput>();
   const observed = yield* Queue.unbounded<EnvironmentThreadState>();
@@ -90,6 +102,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const subscriptionCount = yield* Ref.make(0);
   const loaderCalls = yield* Ref.make(0);
   const lastSubscribeAfterSequence = yield* Ref.make<number | undefined>(undefined);
+  const lastRequestCompletionMarker = yield* Ref.make<boolean | undefined>(undefined);
   const savedThreads = yield* Ref.make<ReadonlyArray<OrchestrationV2ThreadDetailSnapshot>>([]);
   const removedThreads = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
   const supervisorState = yield* SubscriptionRef.make<SupervisorConnectionState>(
@@ -102,16 +115,27 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
       ),
     );
   const client = {
-    [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input: { readonly afterSequence?: number }) =>
+    [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input: {
+      readonly afterSequence?: number;
+      readonly requestCompletionMarker?: boolean;
+    }) =>
       Stream.unwrap(
         Ref.updateAndGet(subscriptionCount, (count) => count + 1).pipe(
           Effect.andThen(Ref.set(lastSubscribeAfterSequence, input.afterSequence)),
+          Effect.andThen(Ref.set(lastRequestCompletionMarker, input.requestCompletionMarker)),
           Effect.as(streamFrom(inputs)),
         ),
       ),
   } as unknown as WsRpcProtocolClient;
   const supervisorSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
-    Option.some(testSession(client)),
+    Option.some(
+      testSession(
+        client,
+        options?.threadResumeCompletionMarker === true
+          ? { threadResumeCompletionMarker: true }
+          : undefined,
+      ),
+    ),
   );
   const prepared = yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(
     Option.some(PREPARED),
@@ -151,6 +175,10 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
       Ref.update(savedThreads, (current) => [...current, snapshot]),
     removeThread: (_environmentId, threadId) =>
       Ref.update(removedThreads, (current) => [...current, threadId]),
+    loadServerConfig: () => Effect.succeed(Option.none()),
+    saveServerConfig: () => Effect.void,
+    loadVcsRefs: () => Effect.succeed(Option.none()),
+    saveVcsRefs: () => Effect.void,
     clear: () => Effect.void,
   });
   const threadState = yield* makeEnvironmentThreadState(THREAD_ID).pipe(
@@ -168,6 +196,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   return {
     inputs,
     observed,
+    lastRequestCompletionMarker,
     latest,
     retryCount,
     subscriptionCount,
@@ -177,7 +206,17 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     supervisorSession,
     savedThreads,
     removedThreads,
-    replaceSession: SubscriptionRef.set(supervisorSession, Option.some(testSession(client))),
+    replaceSession: SubscriptionRef.set(
+      supervisorSession,
+      Option.some(
+        testSession(
+          client,
+          options?.threadResumeCompletionMarker === true
+            ? { threadResumeCompletionMarker: true }
+            : undefined,
+        ),
+      ),
+    ),
   };
 });
 
@@ -454,5 +493,114 @@ describe("EnvironmentThreads", () => {
 
       expect((yield* Ref.get(harness.latest)).status).toBe("live");
     }),
+  );
+
+  it.effect("waits for the stream marker when the server advertises completion markers", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        cached: BASE_PROJECTION,
+        threadResumeCompletionMarker: true,
+      });
+      yield* awaitThreadState(
+        harness.observed,
+        (value) => value.status === "synchronizing" && Option.isSome(value.data),
+      );
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((yield* Ref.get(harness.subscriptionCount)) >= 1) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      expect(yield* Ref.get(harness.lastRequestCompletionMarker)).toBe(true);
+
+      yield* Queue.offer(harness.inputs, synchronized());
+      yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+    }),
+  );
+
+  it.effect(
+    "waits for the stream marker after reconnect when the server advertises completion markers",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({
+          cached: BASE_PROJECTION,
+          threadResumeCompletionMarker: true,
+        });
+        yield* awaitThreadState(
+          harness.observed,
+          (value) => value.status === "synchronizing" && Option.isSome(value.data),
+        );
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if ((yield* Ref.get(harness.subscriptionCount)) >= 1) {
+            break;
+          }
+          yield* Effect.yieldNow;
+        }
+        expect(yield* Ref.get(harness.lastRequestCompletionMarker)).toBe(true);
+
+        yield* Queue.offer(harness.inputs, synchronized());
+        yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+
+        // Ordinary transport reconnect: disconnect clears awaitingCompletion; the
+        // synchronizing phase must re-arm marker wait before setReady runs.
+        yield* SubscriptionRef.set(harness.supervisorState, {
+          desired: true,
+          network: "online",
+          phase: "backoff",
+          stage: null,
+          attempt: 2,
+          generation: 1,
+          lastFailure: null,
+          retryAt: null,
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "cached");
+        yield* SubscriptionRef.set(harness.supervisorSession, Option.none());
+
+        yield* SubscriptionRef.set(harness.supervisorState, {
+          desired: true,
+          network: "online",
+          phase: "connecting",
+          stage: "synchronizing",
+          attempt: 2,
+          generation: 2,
+          lastFailure: null,
+          retryAt: null,
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "synchronizing");
+        yield* harness.replaceSession;
+
+        yield* SubscriptionRef.set(harness.supervisorState, {
+          desired: true,
+          network: "online",
+          phase: "connected",
+          stage: null,
+          attempt: 2,
+          generation: 2,
+          lastFailure: null,
+          retryAt: null,
+        });
+        for (let index = 0; index < 10; index += 1) {
+          yield* Effect.yieldNow;
+        }
+        expect((yield* Ref.get(harness.latest)).status).toBe("synchronizing");
+
+        yield* Queue.offer(
+          harness.inputs,
+          titleUpdated("Post-reconnect catch-up", CACHED_SNAPSHOT_SEQUENCE + 1),
+        );
+        yield* awaitThreadState(
+          harness.observed,
+          (value) =>
+            value.status === "synchronizing" &&
+            Option.isSome(value.data) &&
+            value.data.value.thread.title === "Post-reconnect catch-up",
+        );
+
+        yield* Queue.offer(harness.inputs, synchronized());
+        yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+        expect(Option.getOrThrow((yield* Ref.get(harness.latest)).data).thread.title).toBe(
+          "Post-reconnect catch-up",
+        );
+      }),
   );
 });

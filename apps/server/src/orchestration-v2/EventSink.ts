@@ -130,6 +130,19 @@ export interface EventSinkV2Shape {
     readonly threadId?: ThreadId;
     readonly afterSequence?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent, EventSinkV2Error>;
+  /**
+   * Like `stream`, but inserts a catch-up-complete signal after the finite
+   * replay window and before live events. Used by thread resume when clients
+   * request a completion marker.
+   */
+  readonly streamWithCatchUpComplete: (input: {
+    readonly threadId?: ThreadId;
+    readonly afterSequence: number;
+  }) => Stream.Stream<
+    | { readonly kind: "stored"; readonly stored: OrchestrationV2StoredEvent }
+    | { readonly kind: "catch-up-complete" },
+    EventSinkV2Error
+  >;
   readonly latestSequence: (input?: {
     readonly threadId?: ThreadId;
   }) => Effect.Effect<number, EventSinkV2Error>;
@@ -463,6 +476,43 @@ const baseLayer: Layer.Layer<
         }),
       );
 
+    const streamWithCatchUpComplete = (input: {
+      readonly threadId?: ThreadId;
+      readonly afterSequence: number;
+    }) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const subscription = yield* PubSub.subscribe(liveEvents);
+          const highWater = yield* eventStore.latestSequence();
+          const afterSequence = input.afterSequence;
+          const replay = catchUp({
+            afterSequence,
+            throughSequence: highWater,
+            ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+          }).pipe(Stream.map((stored) => ({ kind: "stored" as const, stored })));
+          const live = Stream.fromSubscription(subscription).pipe(
+            Stream.filter((stored) => stored.sequence > Math.max(highWater, afterSequence)),
+            Stream.filter(
+              (stored) => input.threadId === undefined || stored.event.threadId === input.threadId,
+            ),
+            Stream.map((stored) => ({ kind: "stored" as const, stored })),
+          );
+          return Stream.concat(
+            replay,
+            Stream.concat(Stream.succeed({ kind: "catch-up-complete" as const }), live),
+          );
+        }),
+      ).pipe(
+        Stream.mapError(
+          (cause) =>
+            new EventSinkStreamError({
+              ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+              afterSequence: input.afterSequence,
+              cause,
+            }),
+        ),
+      );
+
     return EventSinkV2.of({
       write: (input) =>
         writeEffect({ ...input, effects: [] }).pipe(
@@ -532,6 +582,7 @@ const baseLayer: Layer.Layer<
               }),
           ),
         ),
+      streamWithCatchUpComplete,
       latestSequence: (input) =>
         eventStore.latestSequence(input).pipe(
           Effect.mapError(

@@ -163,6 +163,7 @@ export interface ThreadManagementServiceShape {
   readonly getThreadEventSequence: OrchestratorV2["Service"]["getThreadEventSequence"];
   readonly streamStoredEvents: OrchestratorV2["Service"]["streamStoredEvents"];
   readonly streamStoredEventsFrom: OrchestratorV2["Service"]["streamStoredEventsFrom"];
+  readonly streamResumeWithCatchUpComplete: OrchestratorV2["Service"]["streamResumeWithCatchUpComplete"];
   readonly streamDomainEvents: OrchestratorV2["Service"]["streamDomainEvents"];
 }
 
@@ -462,6 +463,7 @@ const make = Effect.gen(function* () {
     getThreadEventSequence: orchestrator.getThreadEventSequence,
     streamStoredEvents: orchestrator.streamStoredEvents,
     streamStoredEventsFrom: orchestrator.streamStoredEventsFrom,
+    streamResumeWithCatchUpComplete: orchestrator.streamResumeWithCatchUpComplete,
     streamDomainEvents: orchestrator.streamDomainEvents,
   });
 });

@@ -10,18 +10,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as Option from "effect/Option";
 import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { Platform, Pressable, ScrollView, Text as RNText, View } from "react-native";
+import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
-import { useThemeColor } from "../../lib/useThemeColor";
 import { useEnvironmentQuery } from "../../state/query";
 import { dismissGitActionResult, useGitActionProgress } from "../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../state/vcs";
 
 import { EmptyState } from "../../components/EmptyState";
+import {
+  AndroidScreenHeader,
+  type AndroidHeaderAction,
+} from "../../components/AndroidScreenHeader";
 import { LoadingScreen } from "../../components/LoadingScreen";
+import { addBreadcrumb } from "../../lib/breadcrumbs";
 import { scopedThreadKey } from "../../lib/scopedEntities";
-import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { connectionTone } from "../connection/connectionTone";
 
 import {
@@ -30,7 +33,7 @@ import {
   useRemoteEnvironmentRuntime,
 } from "../../state/use-remote-environment-registry";
 import { useKnownTerminalSessions } from "../../state/use-terminal-session";
-import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
+import { useSelectedThreadDetailQuery } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import {
@@ -69,7 +72,6 @@ import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
-import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -77,6 +79,11 @@ interface ThreadInspectorSelection {
 }
 
 type NativeHeaderItems = ReadonlyArray<Record<string, unknown>>;
+
+const THREAD_DETAIL_STALL_RETRY_DELAYS_MS = [8_000, 12_000] as const;
+const THREAD_DETAIL_STALL_ERROR_DELAY_MS = 20_000;
+const THREAD_DETAIL_STALL_ERROR =
+  "The conversation did not finish loading. Close and reopen the thread to retry.";
 
 function InspectorPaneRoleActivation() {
   useAdaptiveWorkspacePaneRole("inspector");
@@ -144,7 +151,91 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
     selectedThread === null
       ? null
       : scopedThreadKey(selectedThread.environmentId, selectedThread.id);
-  const selectedThreadDetailState = useSelectedThreadDetailState();
+  const selectedThreadDetailQuery = useSelectedThreadDetailQuery();
+  const selectedThreadDetailState = selectedThreadDetailQuery.state;
+  const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
+  const detailRefreshAttemptsRef = useRef(new Map<string, number>());
+  const refreshSelectedThreadDetailRef = useRef(selectedThreadDetailQuery.refresh);
+  const [stalledDetailKey, setStalledDetailKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    refreshSelectedThreadDetailRef.current = selectedThreadDetailQuery.refresh;
+  }, [selectedThreadDetailQuery.refresh]);
+
+  useEffect(
+    () => () => {
+      if (routeThreadKey !== null) {
+        detailRefreshAttemptsRef.current.delete(routeThreadKey);
+      }
+    },
+    [routeThreadKey],
+  );
+
+  useEffect(() => {
+    if (routeThreadKey === null) {
+      return;
+    }
+
+    if (selectedThreadKey !== routeThreadKey) {
+      return;
+    }
+
+    if (selectedThreadDetail !== null || selectedThreadDetailState.status === "deleted") {
+      detailRefreshAttemptsRef.current.delete(routeThreadKey);
+      setStalledDetailKey((current) => (current === routeThreadKey ? null : current));
+      return;
+    }
+
+    if (routeConnectionState !== "connected") {
+      detailRefreshAttemptsRef.current.delete(routeThreadKey);
+      setStalledDetailKey((current) => (current === routeThreadKey ? null : current));
+      return;
+    }
+
+    if (stalledDetailKey === routeThreadKey) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRetry = () => {
+      const attempts = detailRefreshAttemptsRef.current.get(routeThreadKey) ?? 0;
+      const delayMs =
+        THREAD_DETAIL_STALL_RETRY_DELAYS_MS[attempts] ?? THREAD_DETAIL_STALL_ERROR_DELAY_MS;
+      timer = setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+        const currentAttempts = detailRefreshAttemptsRef.current.get(routeThreadKey) ?? 0;
+        if (currentAttempts !== attempts) {
+          return;
+        }
+        if (attempts >= THREAD_DETAIL_STALL_RETRY_DELAYS_MS.length) {
+          setStalledDetailKey(routeThreadKey);
+          return;
+        }
+        detailRefreshAttemptsRef.current.set(routeThreadKey, attempts + 1);
+        refreshSelectedThreadDetailRef.current();
+        scheduleRetry();
+      }, delayMs);
+    };
+
+    scheduleRetry();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    };
+  }, [
+    routeThreadKey,
+    routeConnectionState,
+    selectedThreadKey,
+    selectedThreadDetail,
+    selectedThreadDetailState.status,
+    stalledDetailKey,
+  ]);
 
   if (environmentId === null || threadIdRaw === null) {
     return <OpeningThreadLoadingScreen />;
@@ -155,7 +246,13 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
   // loading placeholder while messages fetch, and the composer's connection
   // pill reports connecting/reconnecting/syncing status.
   if (selectedThread !== null && selectedThreadKey === routeThreadKey) {
-    return <ThreadRouteContent {...props} selectedThreadDetailState={selectedThreadDetailState} />;
+    return (
+      <ThreadRouteContent
+        {...props}
+        detailLoadError={stalledDetailKey === routeThreadKey ? THREAD_DETAIL_STALL_ERROR : null}
+        selectedThreadDetailState={selectedThreadDetailState}
+      />
+    );
   }
 
   const stillHydrating =
@@ -172,7 +269,8 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
 
 function ThreadRouteContent(
   props: ThreadRouteScreenProps & {
-    readonly selectedThreadDetailState: ReturnType<typeof useSelectedThreadDetailState>;
+    readonly detailLoadError: string | null;
+    readonly selectedThreadDetailState: ReturnType<typeof useSelectedThreadDetailQuery>["state"];
   },
 ) {
   const {
@@ -278,7 +376,6 @@ function ThreadRouteContent(
   );
 
   /* ─── Native header theming ──────────────────────────────────────── */
-  const foregroundColor = String(useThemeColor("--color-foreground"));
   const usesNativeHeaderGlass = Platform.OS === "ios";
   const headerSubtitle = [
     selectedThreadProject?.title ?? null,
@@ -326,11 +423,28 @@ function ThreadRouteContent(
   const gitActionProgress = useGitActionProgress(gitActionProgressTarget);
 
   const handleOpenGitInspector = useCallback(() => {
+    if (!fileInspector.supported) {
+      if (selectedThread === null) {
+        return;
+      }
+      navigation.navigate("GitOverview", {
+        environmentId: String(selectedThread.environmentId),
+        threadId: String(selectedThread.id),
+      });
+      return;
+    }
     setInspectorSelection({ routeThreadIdentity, mode: "git" });
     showAuxiliaryPane("inspector");
-  }, [routeThreadIdentity, showAuxiliaryPane]);
+  }, [fileInspector.supported, navigation, routeThreadIdentity, selectedThread, showAuxiliaryPane]);
   const handleOpenFilesInspector = useCallback(() => {
-    if (!fileInspector.supported || selectedThread === null || selectedThreadCwd === null) {
+    if (selectedThread === null || selectedThreadCwd === null) {
+      return;
+    }
+    if (!fileInspector.supported) {
+      navigation.navigate("ThreadFiles", {
+        environmentId: String(selectedThread.environmentId),
+        threadId: String(selectedThread.id),
+      });
       return;
     }
     setInspectorSelection({
@@ -340,6 +454,7 @@ function ThreadRouteContent(
     showAuxiliaryPane("inspector");
   }, [
     fileInspector.supported,
+    navigation,
     props.renderInspector,
     routeThreadIdentity,
     selectedThread,
@@ -447,6 +562,11 @@ function ThreadRouteContent(
     if (!selectedThread || !runtime || !threadRuntimeIsActive(runtime)) {
       return;
     }
+    addBreadcrumb("thread.stop", {
+      environmentId: selectedThread.environmentId,
+      threadId: selectedThread.id,
+      runId: runtime.activeRunId ?? null,
+    });
     return interruptThreadTurn({
       environmentId: selectedThread.environmentId,
       input: {
@@ -637,6 +757,55 @@ function ThreadRouteContent(
     ],
     [panes.primarySidebarVisible, props.onReturnToThread, navigation, togglePrimarySidebar],
   );
+  const androidHeaderActions = useMemo<ReadonlyArray<AndroidHeaderAction>>(() => {
+    if (Platform.OS !== "android") return [];
+
+    const actions: AndroidHeaderAction[] = [];
+    if (props.onReturnToThread) {
+      actions.push({
+        accessibilityLabel: "Return to chat",
+        icon: "chevron.left",
+        onPress: props.onReturnToThread,
+      });
+    }
+    if (selectedThreadCwd !== null) {
+      actions.push({
+        accessibilityLabel: "Open files",
+        icon: "folder",
+        onPress: handleOpenFilesInspector,
+      });
+    }
+    if (selectedThreadProject?.workspaceRoot) {
+      actions.push({
+        accessibilityLabel: "Open terminal",
+        icon: "terminal",
+        onPress: () => handleOpenTerminal(null),
+      });
+    }
+    actions.push({
+      accessibilityLabel: "Open git controls",
+      icon: "point.topleft.down.curvedto.point.bottomright.up",
+      onPress: handleOpenGitInspector,
+    });
+    if (fileInspector.supported && selectedThreadCwd !== null) {
+      actions.push({
+        accessibilityLabel: "Toggle inspector",
+        icon: "sidebar.right",
+        onPress: handleToggleInspector,
+      });
+    }
+    return actions;
+  }, [
+    fileInspector.supported,
+    handleOpenFilesInspector,
+    handleOpenTerminal,
+    handleOpenGitInspector,
+    handleToggleInspector,
+    props.onReturnToThread,
+    selectedThreadCwd,
+    selectedThreadProject?.workspaceRoot,
+  ]);
+
   // Deep links / cold starts land with Thread as the ONLY route, where the
   // native back button does not render. Provide an explicit Home escape for
   // that case; when history exists the native back button is used instead.
@@ -654,6 +823,56 @@ function ThreadRouteContent(
     [navigation],
   );
 
+  // Keep hooks above early returns so hook order stays stable if route params
+  // or selectedThread go null on a re-render of this mounted instance.
+  const selectedThreadTitle = selectedThread?.title ?? "";
+  const threadScreenOptions = useMemo(
+    () => ({
+      // Android draws its own in-flow header (AndroidScreenHeader below);
+      // the native stack header stays iOS-only.
+      headerShown: Platform.OS !== "android",
+      headerTitle: selectedThreadTitle,
+      headerTitleStyle: usesNativeHeaderGlass
+        ? ({
+            fontSize: 17,
+            fontWeight: "800" as const,
+          } as const)
+        : undefined,
+      title: selectedThreadTitle,
+      headerBackVisible: !layout.usesSplitView,
+      // Compact uses the NATIVE back button when a previous route exists;
+      // deep links / cold starts get an explicit Home button instead.
+      // Split view always uses its custom left items.
+      unstable_headerLeftItems:
+        Platform.OS === "ios"
+          ? layout.usesSplitView
+            ? () => splitLeftHeaderItems
+            : canGoBack
+              ? undefined
+              : () => compactHomeHeaderItems
+          : undefined,
+      // Search lives in the persistent sidebar, so the split header keeps
+      // the git controls on the RIGHT (no center items — center space is
+      // reserved for future breadcrumbs/status).
+      unstable_headerRightItems:
+        Platform.OS === "ios"
+          ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
+          : undefined,
+      unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
+    }),
+    [
+      canGoBack,
+      compactHomeHeaderItems,
+      compactRightHeaderItems,
+      headerSubtitle,
+      layout.usesSplitView,
+      selectedThreadTitle,
+      splitLeftHeaderItems,
+      threadCenterHeaderItems,
+      usesNativeHeaderGlass,
+    ],
+  );
+
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
   }
@@ -662,10 +881,9 @@ function ThreadRouteContent(
     return <OpeningThreadLoadingScreen />;
   }
 
-  const selectedThreadKey = scopedThreadKey(selectedThread.environmentId, selectedThread.id);
   const contentPresentation = projectThreadContentPresentation({
     hasDetail: selectedThreadDetail !== null,
-    detailError: Option.getOrNull(selectedThreadDetailState.error),
+    detailError: Option.getOrNull(selectedThreadDetailState.error) ?? props.detailLoadError,
     detailDeleted: selectedThreadDetailState.status === "deleted",
     connectionState: routeConnectionState,
   });
@@ -726,40 +944,22 @@ function ThreadRouteContent(
   return (
     <>
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
-      <NativeStackScreenOptions
-        options={{
-          headerTitle: selectedThread.title,
-          headerTitleStyle: usesNativeHeaderGlass
-            ? {
-                fontSize: 17,
-                fontWeight: "800",
-              }
-            : undefined,
-          title: selectedThread.title,
-          headerBackVisible: !layout.usesSplitView,
-          // Compact uses the NATIVE back button when a previous route exists;
-          // deep links / cold starts get an explicit Home button instead.
-          // Split view always uses its custom left items.
-          unstable_headerLeftItems:
-            Platform.OS === "ios"
-              ? layout.usesSplitView
-                ? () => splitLeftHeaderItems
-                : canGoBack
-                  ? undefined
-                  : () => compactHomeHeaderItems
-              : undefined,
-          // Search lives in the persistent sidebar, so the split header keeps
-          // the git controls on the RIGHT (no center items — center space is
-          // reserved for future breadcrumbs/status).
-          unstable_headerRightItems:
-            Platform.OS === "ios"
-              ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
-              : undefined,
-          unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
-        }}
-      />
+      <NativeStackScreenOptions options={threadScreenOptions} />
 
-      {renderThreadRouteBody(!layout.usesSplitView && !usesNativeHeaderGlass)}
+      {Platform.OS === "android" ? (
+        <AndroidScreenHeader
+          title={selectedThread.title}
+          subtitle={headerSubtitle}
+          onBack={layout.usesSplitView ? undefined : () => navigation.goBack()}
+          actions={androidHeaderActions}
+        />
+      ) : null}
+
+      {/* Android surfaces the git/files/inspector actions in its in-flow
+          header above, so the fallback action toolbar stays iOS-only. */}
+      {renderThreadRouteBody(
+        Platform.OS !== "android" && !layout.usesSplitView && !usesNativeHeaderGlass,
+      )}
     </>
   );
 }
