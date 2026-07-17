@@ -321,6 +321,9 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.vcsSwitchRef, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsInit, AuthOrchestrationOperateScope],
   [WS_METHODS.reviewGetDiffPreview, AuthReviewWriteScope],
+  [WS_METHODS.reviewDiscardChanges, AuthOrchestrationOperateScope],
+  [WS_METHODS.reviewStagePaths, AuthOrchestrationOperateScope],
+  [WS_METHODS.reviewUnstagePaths, AuthOrchestrationOperateScope],
   [WS_METHODS.terminalOpen, AuthTerminalOperateScope],
   [WS_METHODS.terminalAttach, AuthTerminalOperateScope],
   [WS_METHODS.terminalWrite, AuthTerminalOperateScope],
@@ -1628,6 +1631,24 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.reviewGetDiffPreview, review.getDiffPreview(input), {
             "rpc.aggregate": "review",
           }),
+        [WS_METHODS.reviewDiscardChanges]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.reviewDiscardChanges,
+            review.discardChanges(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "review" },
+          ),
+        [WS_METHODS.reviewStagePaths]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.reviewStagePaths,
+            review.stagePaths(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "review" },
+          ),
+        [WS_METHODS.reviewUnstagePaths]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.reviewUnstagePaths,
+            review.unstagePaths(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "review" },
+          ),
         [WS_METHODS.terminalOpen]: (input) =>
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
             "rpc.aggregate": "terminal",

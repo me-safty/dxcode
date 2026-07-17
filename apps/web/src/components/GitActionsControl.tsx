@@ -90,6 +90,7 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
+import { useRefreshOnWindowFocus } from "~/hooks/useRefreshOnWindowFocus";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -135,8 +136,6 @@ interface RunGitActionWithToastInput {
   progressToastId?: GitActionToastId;
   filePaths?: string[];
 }
-
-const GIT_STATUS_WINDOW_REFRESH_DEBOUNCE_MS = 250;
 
 type RefreshVcsStatus = (target: {
   readonly environmentId: ScopedThreadRef["environmentId"];
@@ -1177,38 +1176,10 @@ export default function GitActionsControl({
     };
   }, [updateActiveProgressToast]);
 
-  useEffect(() => {
-    if (gitCwd === null) {
-      return;
-    }
-
-    let refreshTimeout: number | null = null;
-    const scheduleRefreshCurrentGitStatus = () => {
-      if (refreshTimeout !== null) {
-        window.clearTimeout(refreshTimeout);
-      }
-      refreshTimeout = window.setTimeout(() => {
-        refreshTimeout = null;
-        requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
-      }, GIT_STATUS_WINDOW_REFRESH_DEBOUNCE_MS);
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        scheduleRefreshCurrentGitStatus();
-      }
-    };
-
-    window.addEventListener("focus", scheduleRefreshCurrentGitStatus);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      if (refreshTimeout !== null) {
-        window.clearTimeout(refreshTimeout);
-      }
-      window.removeEventListener("focus", scheduleRefreshCurrentGitStatus);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
+  const refreshCurrentGitStatus = useCallback(() => {
+    requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
   }, [activeEnvironmentId, gitCwd, refreshVcsStatus]);
+  useRefreshOnWindowFocus(refreshCurrentGitStatus, gitCwd !== null);
 
   const openExistingPr = useCallback(async () => {
     const api = readLocalApi();

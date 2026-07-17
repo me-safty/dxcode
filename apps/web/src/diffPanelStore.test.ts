@@ -9,10 +9,10 @@ const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.
 describe("diffPanelStore", () => {
   beforeEach(() => useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} }));
 
-  it("defaults each thread to branch changes with automatic base selection", () => {
+  it("defaults each thread to all working tree changes", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "branch", baseRef: null });
+    ).toEqual({ kind: "working-tree", file: null });
   });
 
   it("clears incompatible selection fields when changing scopes", () => {
@@ -22,7 +22,7 @@ describe("diffPanelStore", () => {
 
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "unstaged" });
+    ).toEqual({ kind: "working-tree", file: null });
 
     useDiffPanelStore.getState().selectBranchBaseRef(THREAD_REF, " origin/main ");
     expect(
@@ -63,6 +63,77 @@ describe("diffPanelStore", () => {
       turnId: latestTurnId,
       filePath: "src/app.ts",
       revealRequestId: 1,
+    });
+  });
+
+  it("selects staged and unstaged versions of the same path independently", () => {
+    useDiffPanelStore.getState().selectWorkingTreeFile(THREAD_REF, "unstaged", "src/app.ts");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({
+      kind: "working-tree",
+      file: { area: "unstaged", path: "src/app.ts" },
+    });
+
+    useDiffPanelStore.getState().selectWorkingTreeFile(THREAD_REF, "staged", "src/app.ts");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({
+      kind: "working-tree",
+      file: { area: "staged", path: "src/app.ts" },
+    });
+  });
+
+  it("transfers the selected unstaged file after staging", () => {
+    useDiffPanelStore.getState().selectWorkingTreeFile(THREAD_REF, "unstaged", "src/app.ts");
+    useDiffPanelStore.getState().transferWorkingTreeFileToStaged(THREAD_REF, "src/app.ts");
+
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({
+      kind: "working-tree",
+      file: { area: "staged", path: "src/app.ts" },
+    });
+  });
+
+  it("transfers the selected staged file after unstaging", () => {
+    useDiffPanelStore.getState().selectWorkingTreeFile(THREAD_REF, "staged", "src/app.ts");
+    useDiffPanelStore.getState().transferWorkingTreeFileToUnstaged(THREAD_REF, "src/app.ts");
+
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({
+      kind: "working-tree",
+      file: { area: "unstaged", path: "src/app.ts" },
+    });
+  });
+
+  it("clears a working tree file selection when its entry disappears", () => {
+    useDiffPanelStore.getState().selectWorkingTreeFile(THREAD_REF, "unstaged", "src/app.ts");
+    useDiffPanelStore.getState().reconcileWorkingTreeSelection(THREAD_REF, [], []);
+
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({ kind: "working-tree", file: null });
+  });
+
+  it("moves a selection only after a refreshed manifest moves the file", () => {
+    useDiffPanelStore.getState().selectWorkingTreeFile(THREAD_REF, "unstaged", "src/app.ts");
+
+    useDiffPanelStore.getState().reconcileWorkingTreeSelection(THREAD_REF, [], ["src/app.ts"]);
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({
+      kind: "working-tree",
+      file: { area: "unstaged", path: "src/app.ts" },
+    });
+
+    useDiffPanelStore.getState().reconcileWorkingTreeSelection(THREAD_REF, ["src/app.ts"], []);
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({
+      kind: "working-tree",
+      file: { area: "staged", path: "src/app.ts" },
     });
   });
 });

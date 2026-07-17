@@ -18,7 +18,16 @@ import type {
   VcsStatusInput,
   VcsStatusResult,
 } from "./git.ts";
-import type { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.ts";
+import type {
+  ReviewDiscardChangesInput,
+  ReviewDiscardChangesResult,
+  ReviewDiffPreviewInput,
+  ReviewDiffPreviewResult,
+  ReviewStagePathsInput,
+  ReviewStagePathsResult,
+  ReviewUnstagePathsInput,
+  ReviewUnstagePathsResult,
+} from "./review.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type { AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
 import type {
@@ -1204,6 +1213,9 @@ export interface EnvironmentApi {
   };
   review: {
     getDiffPreview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;
+    discardChanges: (input: ReviewDiscardChangesInput) => Promise<ReviewDiscardChangesResult>;
+    stagePaths: (input: ReviewStagePathsInput) => Promise<ReviewStagePathsResult>;
+    unstagePaths: (input: ReviewUnstagePathsInput) => Promise<ReviewUnstagePathsResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

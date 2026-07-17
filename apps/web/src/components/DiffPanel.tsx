@@ -5,7 +5,12 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type {
+  ReviewChangeArea,
+  ReviewChangedFile,
+  ScopedThreadRef,
+  TurnId,
+} from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -13,11 +18,20 @@ import {
   ChevronRightIcon,
   Columns2Icon,
   PilcrowIcon,
+  RefreshCwIcon,
   Rows3Icon,
   SearchIcon,
   TextWrapIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
@@ -36,8 +50,15 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject, useThread } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings } from "../hooks/useSettings";
+import { useRefreshOnWindowFocus } from "../hooks/useRefreshOnWindowFocus";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import { ReviewChangesSidebar } from "./review/ReviewChangesSidebar";
+import {
+  applyOptimisticWorkingTreeTransfers,
+  type OptimisticWorkingTreeTransfer,
+  retainUnsettledWorkingTreeTransfers,
+} from "./review/optimisticWorkingTree";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
@@ -61,10 +82,12 @@ import {
 } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useEnvironmentQuery } from "../state/query";
+import { useAtomCommand } from "../state/use-atom-command";
 import { serverEnvironment } from "../state/server";
 import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
+import { toastManager } from "./ui/toast";
 
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
@@ -189,6 +212,15 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
   const [baseRefQuery, setBaseRefQuery] = useState("");
+  const [pendingPaths, setPendingPaths] = useState<ReadonlySet<string>>(() => new Set());
+  const [optimisticTransfers, setOptimisticTransfers] = useState<
+    ReadonlyArray<OptimisticWorkingTreeTransfer>
+  >([]);
+  const [mutationRefreshRequest, setMutationRefreshRequest] = useState(0);
+  const pendingPathsRef = useRef<{ key: string; paths: Set<string> }>({
+    key: "",
+    paths: new Set(),
+  });
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<CollapsedDiffFilesState>(() => ({
     scopeKey: null,
     fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
@@ -214,6 +246,14 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
       : null,
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
+  const pendingContextKey = `${activeThread?.environmentId ?? ""}\0${activeCwd ?? ""}`;
+
+  useLayoutEffect(() => {
+    pendingPathsRef.current = { key: pendingContextKey, paths: new Set() };
+    setPendingPaths(new Set());
+    setOptimisticTransfers([]);
+  }, [pendingContextKey]);
+
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   );
@@ -256,9 +296,14 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef]);
 
   const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
-  const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
+  const selectedGitScope = diffSelection.kind === "working-tree" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
-  const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
+  const selectedFilePath =
+    diffSelection.kind === "turn"
+      ? diffSelection.filePath
+      : diffSelection.kind === "working-tree"
+        ? (diffSelection.file?.path ?? null)
+        : null;
   const selectedFileRevealRequestId =
     diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
   const selectedTurn =
@@ -278,7 +323,11 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
       : selectedTurn?.turnId === latestTurn?.turnId
         ? "Latest turn"
         : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
-  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.turnId}` : selectedGitScope;
+  const reviewSectionId = selectedTurn
+    ? `turn:${selectedTurn.turnId}`
+    : diffSelection.kind === "working-tree" && diffSelection.file
+      ? `working-tree:${diffSelection.file.area}:${diffSelection.file.path}`
+      : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
@@ -312,38 +361,69 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     },
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
-  const primaryBranchDiffPreview = useEnvironmentQuery(
-    selectedTurnId === null && activeThread && activeCwd
+  const overviewDiffPreview = useEnvironmentQuery(
+    activeThread && activeCwd && diffSelection.kind !== "turn"
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
+            selection: { _tag: "all" },
           },
         })
       : null,
   );
-  const shouldRetryBranchDiffAtEnvironmentCwd =
-    selectedTurnId === null &&
-    primaryBranchDiffPreview.error?.includes("configured workspace root") === true &&
-    serverConfig?.cwd !== undefined &&
-    serverConfig.cwd !== activeCwd;
-  const fallbackBranchDiffPreview = useEnvironmentQuery(
-    shouldRetryBranchDiffAtEnvironmentCwd && activeThread && serverConfig
+  const selectedFileDiffPreview = useEnvironmentQuery(
+    activeThread &&
+      activeCwd &&
+      diffSelection.kind === "working-tree" &&
+      diffSelection.file &&
+      !pendingPaths.has(diffSelection.file.path)
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: serverConfig.cwd,
-            ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+            cwd: activeCwd,
             ignoreWhitespace: diffIgnoreWhitespace,
+            selection: {
+              _tag: "file",
+              area: diffSelection.file.area,
+              path: diffSelection.file.path,
+            },
           },
         })
       : null,
   );
-  const branchDiffPreview = shouldRetryBranchDiffAtEnvironmentCwd
-    ? fallbackBranchDiffPreview
-    : primaryBranchDiffPreview;
+  const branchDiffPreview =
+    diffSelection.kind === "working-tree" && diffSelection.file
+      ? selectedFileDiffPreview
+      : overviewDiffPreview;
+  const isDiffPreviewPending = overviewDiffPreview.isPending || selectedFileDiffPreview.isPending;
+  const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
+    label: "refresh diff status",
+    reportFailure: false,
+  });
+  const refreshDiffPreview = useCallback(() => {
+    overviewDiffPreview.refresh();
+    selectedFileDiffPreview.refresh();
+  }, [overviewDiffPreview, selectedFileDiffPreview]);
+  const refreshDiffPreviewAfterMutation = useEffectEvent(refreshDiffPreview);
+  const refreshDiffStatus = useCallback(() => {
+    refreshDiffPreview();
+    if (!activeThread || !activeCwd) return;
+    void refreshVcsStatus({
+      environmentId: activeThread.environmentId,
+      input: { cwd: activeCwd },
+    });
+  }, [activeCwd, activeThread, refreshDiffPreview, refreshVcsStatus]);
+
+  useRefreshOnWindowFocus(refreshDiffPreview, activeThread != null && activeCwd != null);
+
+  useEffect(() => {
+    if (mutationRefreshRequest === 0) return;
+    refreshDiffPreviewAfterMutation();
+  }, [mutationRefreshRequest]);
+
   const selectedGitSource = branchDiffPreview.data?.sources.find(
     (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
   );
@@ -396,6 +476,33 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     ...matchingBaseRefChoices.map(valueForBaseRefChoice),
   ];
   const gitDiff = selectedGitSource?.diff;
+  const refreshedWorkingTreeManifest = overviewDiffPreview.data?.workingTree;
+  const workingTreeManifest = useMemo(
+    () => applyOptimisticWorkingTreeTransfers(refreshedWorkingTreeManifest, optimisticTransfers),
+    [optimisticTransfers, refreshedWorkingTreeManifest],
+  );
+
+  useEffect(() => {
+    if (!refreshedWorkingTreeManifest || overviewDiffPreview.isPending) return;
+    setOptimisticTransfers((current) =>
+      retainUnsettledWorkingTreeTransfers(refreshedWorkingTreeManifest, current),
+    );
+  }, [overviewDiffPreview.isPending, refreshedWorkingTreeManifest]);
+
+  useEffect(() => {
+    if (
+      !routeThreadRef ||
+      !workingTreeManifest ||
+      overviewDiffPreview.isPending ||
+      diffSelection.kind !== "working-tree"
+    )
+      return;
+    useDiffPanelStore.getState().reconcileWorkingTreeSelection(
+      routeThreadRef,
+      workingTreeManifest.staged.map((file) => file.path),
+      workingTreeManifest.unstaged.map((file) => file.path),
+    );
+  }, [diffSelection.kind, overviewDiffPreview.isPending, routeThreadRef, workingTreeManifest]);
 
   const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff;
   const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true;
@@ -493,6 +600,150 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const selectGitScope = (scope: "branch" | "unstaged") => {
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectGitScope(routeThreadRef, scope);
+  };
+  const selectWorkingTreeAll = () => {
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectWorkingTreeAll(routeThreadRef);
+  };
+  const selectWorkingTreeFile = (area: ReviewChangeArea, filePath: string) => {
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectWorkingTreeFile(routeThreadRef, area, filePath);
+  };
+  const stagePaths = useAtomCommand(reviewEnvironment.stagePaths, {
+    label: "stage review files",
+    reportFailure: false,
+  });
+  const unstagePaths = useAtomCommand(reviewEnvironment.unstagePaths, {
+    label: "unstage review files",
+    reportFailure: false,
+  });
+  const discardChanges = useAtomCommand(reviewEnvironment.discardChanges, {
+    label: "discard review changes",
+    reportFailure: false,
+  });
+  const updateWorkingTreePaths = (
+    area: ReviewChangeArea,
+    changes: ReadonlyArray<ReviewChangedFile>,
+  ) => {
+    if (!activeThread || !activeCwd || changes.length === 0) return;
+    const filePaths = changes.map((change) => change.path);
+    const requestContextKey = pendingContextKey;
+    const pending = pendingPathsRef.current.paths;
+    if (filePaths.some((filePath) => pending.has(filePath))) return;
+    for (const filePath of filePaths) pending.add(filePath);
+    setPendingPaths(new Set(pending));
+    setOptimisticTransfers((current) => [
+      ...current.filter(
+        (transfer) =>
+          !filePaths.some((filePath) => transfer.from === area && transfer.path === filePath),
+      ),
+      ...filePaths.map((path) => ({ from: area, path })),
+    ]);
+    if (routeThreadRef) {
+      for (const filePath of filePaths) {
+        if (area === "unstaged") {
+          useDiffPanelStore.getState().transferWorkingTreeFileToStaged(routeThreadRef, filePath);
+        } else {
+          useDiffPanelStore.getState().transferWorkingTreeFileToUnstaged(routeThreadRef, filePath);
+        }
+      }
+    }
+    void (async () => {
+      const result = await (area === "unstaged"
+        ? stagePaths({
+            environmentId: activeThread.environmentId,
+            input: { cwd: activeCwd, threadId: activeThread.id, paths: filePaths },
+          })
+        : unstagePaths({
+            environmentId: activeThread.environmentId,
+            input: {
+              cwd: activeCwd,
+              threadId: activeThread.id,
+              changes: changes.map(({ path, previousPath }) => ({ path, previousPath })),
+            },
+          }));
+      const isCurrentContext = pendingPathsRef.current.key === requestContextKey;
+      if (isCurrentContext) {
+        for (const filePath of filePaths) pendingPathsRef.current.paths.delete(filePath);
+        setPendingPaths(new Set(pendingPathsRef.current.paths));
+      }
+      if (!isCurrentContext) return;
+      if (result._tag === "Failure") {
+        setOptimisticTransfers((current) =>
+          current.filter(
+            (transfer) =>
+              !filePaths.some((filePath) => transfer.from === area && transfer.path === filePath),
+          ),
+        );
+        if (routeThreadRef) {
+          for (const filePath of filePaths) {
+            if (area === "unstaged") {
+              useDiffPanelStore
+                .getState()
+                .transferWorkingTreeFileToUnstaged(routeThreadRef, filePath);
+            } else {
+              useDiffPanelStore
+                .getState()
+                .transferWorkingTreeFileToStaged(routeThreadRef, filePath);
+            }
+          }
+        }
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: area === "unstaged" ? "Unable to stage files" : "Unable to unstage files",
+            description:
+              error instanceof Error
+                ? error.message
+                : `Could not ${area === "unstaged" ? "stage" : "unstage"} selected files.`,
+          });
+        }
+      }
+      if (pendingPathsRef.current.paths.size === 0) {
+        setMutationRefreshRequest((current) => current + 1);
+      }
+    })();
+  };
+  const discardWorkingTreeChanges = (changes: ReadonlyArray<ReviewChangedFile>) => {
+    if (!activeThread || !activeCwd || changes.length === 0) return;
+    const filePaths = changes.map((change) => change.path);
+    const requestContextKey = pendingContextKey;
+    const pending = pendingPathsRef.current.paths;
+    if (filePaths.some((filePath) => pending.has(filePath))) return;
+    for (const filePath of filePaths) pending.add(filePath);
+    setPendingPaths(new Set(pending));
+    void (async () => {
+      const result = await discardChanges({
+        environmentId: activeThread.environmentId,
+        input: {
+          cwd: activeCwd,
+          threadId: activeThread.id,
+          changes: changes.map(({ path, kind }) => ({ path, kind })),
+        },
+      });
+      const isCurrentContext = pendingPathsRef.current.key === requestContextKey;
+      if (isCurrentContext) {
+        for (const filePath of filePaths) pendingPathsRef.current.paths.delete(filePath);
+        setPendingPaths(new Set(pendingPathsRef.current.paths));
+      }
+      if (!isCurrentContext) return;
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Unable to discard changes",
+            description:
+              error instanceof Error ? error.message : "Could not discard selected changes.",
+          });
+        }
+        return;
+      }
+      if (pendingPathsRef.current.paths.size === 0) {
+        setMutationRefreshRequest((current) => current + 1);
+      }
+    })();
   };
   const selectBranchBaseRef = (baseRef: string | null) => {
     if (!routeThreadRef) return;
@@ -673,6 +924,22 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                aria-label="Refresh changed files"
+                variant="outline"
+                size="xs"
+                disabled={isDiffPreviewPending}
+                onPressedChange={refreshDiffStatus}
+              />
+            }
+          >
+            <RefreshCwIcon className={cn("size-3", isDiffPreviewPending && "animate-spin")} />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Refresh changed files</TooltipPopup>
+        </Tooltip>
         <ToggleGroup
           className="shrink-0"
           variant="outline"
@@ -753,124 +1020,143 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
           No completed turns yet.
         </div>
       ) : (
-        <>
-          <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            {isSelectedPatchTruncated && (
-              <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-                This diff was truncated because it exceeded the preview limit. The changes shown are
-                incomplete.
-              </p>
+        <div className="@container flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col @min-[520px]:flex-row">
+            {diffSelection.kind === "working-tree" && (
+              <ReviewChangesSidebar
+                staged={workingTreeManifest?.staged ?? []}
+                unstaged={workingTreeManifest?.unstaged ?? []}
+                truncated={workingTreeManifest?.truncated ?? false}
+                selection={diffSelection.file}
+                pendingPaths={pendingPaths}
+                theme={resolvedTheme}
+                onSelectAll={selectWorkingTreeAll}
+                onSelectFile={selectWorkingTreeFile}
+                onStageChanges={(changes) => updateWorkingTreePaths("unstaged", changes)}
+                onUnstageChanges={(changes) => updateWorkingTreePaths("staged", changes)}
+                onDiscardChanges={discardWorkingTreeChanges}
+              />
             )}
-            {selectedPatchError && !renderablePatch && (
-              <div className="px-3">
-                <p className="mb-2 text-[11px] text-red-500/80">{selectedPatchError}</p>
-              </div>
-            )}
-            {!renderablePatch ? (
-              isLoadingSelectedPatch ? (
-                <DiffPanelLoadingState
-                  label={
-                    selectedTurn
-                      ? "Loading checkpoint diff..."
-                      : selectedGitScope === "unstaged"
-                        ? "Loading working tree diff..."
-                        : "Loading branch diff..."
-                  }
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
-                  <p>
-                    {hasNoNetChanges
-                      ? "No net changes in this selection."
-                      : "No patch available for this selection."}
-                  </p>
+            <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              {isSelectedPatchTruncated && (
+                <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+                  This diff was truncated because it exceeded the preview limit. The changes shown
+                  are incomplete.
+                </p>
+              )}
+              {selectedPatchError && !renderablePatch && (
+                <div className="px-3">
+                  <p className="mb-2 text-[11px] text-red-500/80">{selectedPatchError}</p>
                 </div>
-              )
-            ) : renderablePatch.kind === "files" ? (
-              <div
-                className="min-h-0 flex-1"
-                onClickCapture={(event) => {
-                  const composedPath = event.nativeEvent.composedPath?.() ?? [];
-                  const title = composedPath.find(
-                    (node): node is HTMLElement =>
-                      node instanceof HTMLElement && node.hasAttribute("data-title"),
-                  );
-                  const filePath = title?.textContent?.trim();
-                  if (filePath) openDiffFile(filePath);
-                }}
-              >
-                <AnnotatableCodeView
-                  viewerRef={codeViewRef}
-                  key={collapseScopeKey ?? reviewSectionId}
-                  className="diff-render-surface h-full min-h-0 overflow-auto"
-                  files={codeViewFiles}
-                  sectionId={reviewSectionId}
-                  sectionTitle={reviewSectionTitle}
-                  composerDraftTarget={composerDraftTarget}
-                  renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
-                    const filePath = resolveFileDiffPath(fileDiff);
-                    return (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              className={cn(
-                                "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                                getDiffCollapseIconClassName(fileDiff),
-                              )}
-                              aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
-                              aria-expanded={!collapsed}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                toggleDiffFileCollapsed(fileKey);
-                              }}
-                            />
-                          }
-                        >
-                          {collapsed ? (
-                            <ChevronRightIcon className="size-4" />
-                          ) : (
-                            <ChevronDownIcon className="size-4" />
-                          )}
-                        </TooltipTrigger>
-                        <TooltipPopup side="top">
-                          {collapsed ? "Expand diff" : "Collapse diff"}
-                        </TooltipPopup>
-                      </Tooltip>
+              )}
+              {!renderablePatch ? (
+                isLoadingSelectedPatch ? (
+                  <DiffPanelLoadingState
+                    label={
+                      selectedTurn
+                        ? "Loading checkpoint diff..."
+                        : selectedGitScope === "unstaged"
+                          ? "Loading working tree diff..."
+                          : "Loading branch diff..."
+                    }
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
+                    <p>
+                      {hasNoNetChanges
+                        ? "No net changes in this selection."
+                        : "No patch available for this selection."}
+                    </p>
+                  </div>
+                )
+              ) : renderablePatch.kind === "files" ? (
+                <div
+                  className="min-h-0 flex-1"
+                  onClickCapture={(event) => {
+                    const composedPath = event.nativeEvent.composedPath?.() ?? [];
+                    const title = composedPath.find(
+                      (node): node is HTMLElement =>
+                        node instanceof HTMLElement && node.hasAttribute("data-title"),
                     );
+                    const filePath = title?.textContent?.trim();
+                    if (filePath) openDiffFile(filePath);
                   }}
-                  options={{
-                    diffStyle: diffRenderMode === "split" ? "split" : "unified",
-                    lineDiffType: "none",
-                    overflow: wordWrap ? "wrap" : "scroll",
-                    theme: resolveDiffThemeName(resolvedTheme),
-                    themeType: resolvedTheme as DiffThemeType,
-                    unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
-                    stickyHeaders: true,
-                    layout: { paddingTop: 8, paddingBottom: 8, gap: 8 },
-                  }}
-                />
-              </div>
-            ) : (
-              <div className="min-h-0 flex-1 overflow-auto p-2">
-                <div className="space-y-2">
-                  <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
-                  <pre
-                    className={cn(
-                      "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
-                      wordWrap
-                        ? "overflow-auto whitespace-pre-wrap wrap-break-word"
-                        : "overflow-auto",
-                    )}
-                  >
-                    {renderablePatch.text}
-                  </pre>
+                >
+                  <AnnotatableCodeView
+                    viewerRef={codeViewRef}
+                    key={collapseScopeKey ?? reviewSectionId}
+                    className="diff-render-surface h-full min-h-0 overflow-auto"
+                    files={codeViewFiles}
+                    sectionId={reviewSectionId}
+                    sectionTitle={reviewSectionTitle}
+                    composerDraftTarget={composerDraftTarget}
+                    renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
+                      const filePath = resolveFileDiffPath(fileDiff);
+                      return (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <button
+                                type="button"
+                                className={cn(
+                                  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                  getDiffCollapseIconClassName(fileDiff),
+                                )}
+                                aria-label={
+                                  collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
+                                }
+                                aria-expanded={!collapsed}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleDiffFileCollapsed(fileKey);
+                                }}
+                              />
+                            }
+                          >
+                            {collapsed ? (
+                              <ChevronRightIcon className="size-4" />
+                            ) : (
+                              <ChevronDownIcon className="size-4" />
+                            )}
+                          </TooltipTrigger>
+                          <TooltipPopup side="top">
+                            {collapsed ? "Expand diff" : "Collapse diff"}
+                          </TooltipPopup>
+                        </Tooltip>
+                      );
+                    }}
+                    options={{
+                      diffStyle: diffRenderMode === "split" ? "split" : "unified",
+                      lineDiffType: "none",
+                      overflow: wordWrap ? "wrap" : "scroll",
+                      theme: resolveDiffThemeName(resolvedTheme),
+                      themeType: resolvedTheme as DiffThemeType,
+                      unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
+                      stickyHeaders: true,
+                      layout: { paddingTop: 0, paddingBottom: 8, gap: 8 },
+                    }}
+                  />
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="min-h-0 flex-1 overflow-auto p-2">
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
+                    <pre
+                      className={cn(
+                        "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
+                        wordWrap
+                          ? "overflow-auto whitespace-pre-wrap wrap-break-word"
+                          : "overflow-auto",
+                      )}
+                    >
+                      {renderablePatch.text}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </DiffPanelShell>
   );

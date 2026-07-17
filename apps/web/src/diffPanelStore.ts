@@ -7,15 +7,27 @@ import { resolveStorage } from "./lib/storage";
 
 export type DiffPanelSelection =
   | { kind: "branch"; baseRef: string | null }
-  | { kind: "unstaged" }
+  | {
+      kind: "working-tree";
+      file: { area: "staged" | "unstaged"; path: string } | null;
+    }
   | { kind: "turn"; turnId: TurnId; filePath: string | null; revealRequestId: number };
 
-const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
+const DEFAULT_SELECTION: DiffPanelSelection = { kind: "working-tree", file: null };
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
   branchBaseRefByThreadKey: Record<string, string | null>;
   selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;
+  selectWorkingTreeFile: (ref: ScopedThreadRef, area: "staged" | "unstaged", path: string) => void;
+  selectWorkingTreeAll: (ref: ScopedThreadRef) => void;
+  transferWorkingTreeFileToStaged: (ref: ScopedThreadRef, path: string) => void;
+  transferWorkingTreeFileToUnstaged: (ref: ScopedThreadRef, path: string) => void;
+  reconcileWorkingTreeSelection: (
+    ref: ScopedThreadRef,
+    stagedPaths: ReadonlyArray<string>,
+    unstagedPaths: ReadonlyArray<string>,
+  ) => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: TurnId, filePath?: string) => void;
   reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<TurnId>) => void;
@@ -46,12 +58,83 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
               [threadKey]:
                 scope === "branch"
                   ? { kind: "branch", baseRef: previousBaseRef }
-                  : { kind: "unstaged" },
+                  : { kind: "working-tree", file: null },
             },
             branchBaseRefByThreadKey:
               previous?.kind === "branch"
                 ? { ...state.branchBaseRefByThreadKey, [threadKey]: previous.baseRef }
                 : state.branchBaseRefByThreadKey,
+          };
+        }),
+      selectWorkingTreeFile: (ref, area, path) =>
+        set((state) => ({
+          byThreadKey: {
+            ...state.byThreadKey,
+            [scopedThreadKey(ref)]: { kind: "working-tree", file: { area, path } },
+          },
+        })),
+      selectWorkingTreeAll: (ref) =>
+        set((state) => ({
+          byThreadKey: {
+            ...state.byThreadKey,
+            [scopedThreadKey(ref)]: { kind: "working-tree", file: null },
+          },
+        })),
+      transferWorkingTreeFileToStaged: (ref, path) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const previous = state.byThreadKey[threadKey];
+          if (
+            previous?.kind !== "working-tree" ||
+            previous.file?.area !== "unstaged" ||
+            previous.file.path !== path
+          ) {
+            return state;
+          }
+          return {
+            byThreadKey: {
+              ...state.byThreadKey,
+              [threadKey]: { kind: "working-tree", file: { area: "staged", path } },
+            },
+          };
+        }),
+      transferWorkingTreeFileToUnstaged: (ref, path) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const previous = state.byThreadKey[threadKey];
+          if (
+            previous?.kind !== "working-tree" ||
+            previous.file?.area !== "staged" ||
+            previous.file.path !== path
+          ) {
+            return state;
+          }
+          return {
+            byThreadKey: {
+              ...state.byThreadKey,
+              [threadKey]: { kind: "working-tree", file: { area: "unstaged", path } },
+            },
+          };
+        }),
+      reconcileWorkingTreeSelection: (ref, stagedPaths, unstagedPaths) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const previous = state.byThreadKey[threadKey];
+          if (previous?.kind !== "working-tree" || previous.file === null) return state;
+          const paths = previous.file.area === "staged" ? stagedPaths : unstagedPaths;
+          if (paths.includes(previous.file.path)) return state;
+          const oppositePaths = previous.file.area === "staged" ? unstagedPaths : stagedPaths;
+          const nextFile = oppositePaths.includes(previous.file.path)
+            ? {
+                area: previous.file.area === "staged" ? ("unstaged" as const) : ("staged" as const),
+                path: previous.file.path,
+              }
+            : null;
+          return {
+            byThreadKey: {
+              ...state.byThreadKey,
+              [threadKey]: { kind: "working-tree", file: nextFile },
+            },
           };
         }),
       selectBranchBaseRef: (ref, baseRef) =>
@@ -118,7 +201,28 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
     }),
     {
       name: "t3code:diff-panel-state:v1",
-      version: 1,
+      version: 2,
+      migrate: (persistedState, version) => {
+        if (version >= 2 || typeof persistedState !== "object" || persistedState === null) {
+          return persistedState as DiffPanelStoreState;
+        }
+        const previous = persistedState as {
+          byThreadKey?: Record<string, DiffPanelSelection | { kind: "unstaged" }>;
+          branchBaseRefByThreadKey?: Record<string, string | null>;
+        };
+        const byThreadKey = Object.fromEntries(
+          Object.entries(previous.byThreadKey ?? {}).map(([key, selection]) => [
+            key,
+            selection.kind === "unstaged"
+              ? ({ kind: "working-tree", file: null } satisfies DiffPanelSelection)
+              : selection,
+          ]),
+        );
+        return {
+          byThreadKey,
+          branchBaseRefByThreadKey: previous.branchBaseRefByThreadKey ?? {},
+        } as unknown as DiffPanelStoreState;
+      },
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
