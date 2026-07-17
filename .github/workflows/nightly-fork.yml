@@ -87,13 +87,21 @@ jobs:
       - name: Build server bundle
         run: vp run --filter t3 build:bundle
 
-      - name: Package
+      - name: Package self-contained bundle
         shell: bash
         run: |
           set -euo pipefail
           echo "${{ steps.version.outputs.version }}" > apps/server/dist/VERSION
-          tar -czf t3-server.tgz -C apps/server dist
-          ls -lh t3-server.tgz
+          # `vp pack` externalises dependencies (and 5 of them use pnpm's
+          # `catalog:` protocol), so dist/ alone cannot run. `pnpm deploy` copies
+          # the package plus its *production* deps — including the native ones
+          # (node-pty, sqlite) — into one portable tree. Safe because every node
+          # is linux-x64, matching this runner; a non-linux node would need its
+          # own build.
+          corepack enable                       # packageManager pins pnpm@11.10.0
+          pnpm deploy --filter t3 --prod --legacy deploy-out
+          tar -czf t3-server.tgz -C deploy-out .
+          du -h t3-server.tgz
 
       - name: Publish rolling nightly release
         shell: bash
@@ -103,15 +111,19 @@ jobs:
           gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
           gh release create nightly t3-server.tgz \
             --title "Fork nightly ${{ steps.version.outputs.version }}" \
-            --notes "Server bundle built from \`${GITHUB_SHA}\`.
+            --notes "Self-contained linux-x64 server bundle built from \`${GITHUB_SHA}\`.
 
           Version: \`${{ steps.version.outputs.version }}\`
 
+          Contains \`dist/\` + production \`node_modules/\` (native deps included), so a node
+          needs only Node 22.16+ — no install step.
+
           Install/update on a node:
           \`\`\`bash
+          mkdir -p ~/.local/share/t3-nightly
           curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/t3-server.tgz \\
             | tar xz -C ~/.local/share/t3-nightly
-          \`\`\`
-          Then run: \`node ~/.local/share/t3-nightly/dist/bin.mjs serve --host \"\$(tailscale ip -4 | head -1)\" --port 3773\`" \
+          node ~/.local/share/t3-nightly/dist/bin.mjs serve --host \"\$(tailscale ip -4 | head -1)\" --port 3773
+          \`\`\`" \
             --prerelease \
             --target "${GITHUB_SHA}"
