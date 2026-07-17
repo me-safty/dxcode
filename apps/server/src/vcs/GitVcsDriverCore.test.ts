@@ -244,6 +244,33 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("lists current branch commits and opens a selected commit patch", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/commit-review"]);
+        yield* writeTextFile(cwd, "feature.ts", "export const feature = true;\n");
+        yield* git(cwd, ["add", "feature.ts"]);
+        yield* git(cwd, ["commit", "-m", "feat: add commit review"]);
+        const sha = yield* git(cwd, ["rev-parse", "HEAD"]);
+
+        const overview = yield* driver.getReviewDiffPreview({ cwd, baseRef: initialBranch });
+        assert.deepStrictEqual(
+          overview.commits.map((commit) => ({ sha: commit.sha, title: commit.title })),
+          [{ sha, title: "feat: add commit review" }],
+        );
+
+        const selected = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          selection: { _tag: "commit", sha },
+        });
+        assert.strictEqual(selected.sources[0]?.id, `commit:${sha}`);
+        assert.include(selected.sources[0]?.diff ?? "", "+export const feature = true;");
+      }),
+    );
+
     it.effect("separates staged and unstaged patches for a partially staged file", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

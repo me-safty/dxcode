@@ -298,6 +298,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedGitScope = diffSelection.kind === "working-tree" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
+  const selectedCommitSha = diffSelection.kind === "commit" ? diffSelection.sha : null;
   const selectedFilePath =
     diffSelection.kind === "turn"
       ? diffSelection.filePath
@@ -315,19 +316,13 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
   const latestTurn = orderedTurnDiffSummaries[0];
-  const selectedScopeLabel =
-    selectedTurnId === null
-      ? selectedGitScope === "unstaged"
-        ? "Working tree"
-        : "Branch changes"
-      : selectedTurn?.turnId === latestTurn?.turnId
-        ? "Latest turn"
-        : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
   const reviewSectionId = selectedTurn
     ? `turn:${selectedTurn.turnId}`
     : diffSelection.kind === "working-tree" && diffSelection.file
       ? `working-tree:${diffSelection.file.area}:${diffSelection.file.path}`
-      : selectedGitScope;
+      : diffSelection.kind === "commit"
+        ? `commit:${diffSelection.sha}`
+        : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
@@ -335,11 +330,6 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     collapsedDiffFiles.scopeKey === collapseScopeKey
       ? collapsedDiffFiles.fileKeys
       : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
-  const reviewSectionTitle = selectedTurn
-    ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
-    : selectedGitScope === "unstaged"
-      ? "Working tree"
-      : "Branch changes";
   const selectedCheckpointRange = useMemo(
     () =>
       typeof selectedCheckpointTurnCount === "number"
@@ -369,7 +359,9 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
-            selection: { _tag: "all" },
+            selection: selectedCommitSha
+              ? { _tag: "commit", sha: selectedCommitSha }
+              : { _tag: "all" },
           },
         })
       : null,
@@ -425,8 +417,35 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   }, [mutationRefreshRequest]);
 
   const selectedGitSource = branchDiffPreview.data?.sources.find(
-    (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
+    (source) =>
+      source.kind ===
+      (selectedCommitSha
+        ? "branch-range"
+        : selectedGitScope === "unstaged"
+          ? "working-tree"
+          : "branch-range"),
   );
+  const selectedCommit =
+    selectedCommitSha === null
+      ? undefined
+      : overviewDiffPreview.data?.commits.find((commit) => commit.sha === selectedCommitSha);
+  const selectedScopeLabel =
+    selectedTurnId === null
+      ? selectedCommitSha
+        ? (selectedCommit?.title ?? `Commit ${selectedCommitSha.slice(0, 8)}`)
+        : selectedGitScope === "unstaged"
+          ? "Working tree"
+          : "Branch changes"
+      : selectedTurn?.turnId === latestTurn?.turnId
+        ? "Latest turn"
+        : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
+  const reviewSectionTitle = selectedTurn
+    ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
+    : selectedCommitSha
+      ? (selectedCommit?.title ?? `Commit ${selectedCommitSha.slice(0, 8)}`)
+      : selectedGitScope === "unstaged"
+        ? "Working tree"
+        : "Branch changes";
   const localBranchRefs = useEnvironmentQuery(
     selectedTurnId === null &&
       selectedGitScope === "branch" &&
@@ -601,6 +620,10 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectGitScope(routeThreadRef, scope);
   };
+  const selectCommit = (sha: string) => {
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectCommit(routeThreadRef, sha);
+  };
   const selectWorkingTreeAll = () => {
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectWorkingTreeAll(routeThreadRef);
@@ -764,16 +787,34 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
           <DropdownMenuContent align="start" className="w-60">
             <DropdownMenuItem onClick={() => selectGitScope("unstaged")}>
               <span>Working tree</span>
-              {selectedTurnId === null && selectedGitScope === "unstaged" && (
-                <CheckIcon className="ml-auto" />
-              )}
+              {diffSelection.kind === "working-tree" && <CheckIcon className="ml-auto" />}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => selectGitScope("branch")}>
               <span>Branch changes</span>
-              {selectedTurnId === null && selectedGitScope === "branch" && (
-                <CheckIcon className="ml-auto" />
-              )}
+              {diffSelection.kind === "branch" && <CheckIcon className="ml-auto" />}
             </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>Commit</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-96 w-96 overflow-y-auto">
+                {overviewDiffPreview.data?.commits.length ? (
+                  overviewDiffPreview.data.commits.map((commit) => (
+                    <DropdownMenuItem key={commit.sha} onClick={() => selectCommit(commit.sha)}>
+                      <span className="min-w-0 flex-1 truncate" title={commit.title}>
+                        {commit.title}
+                      </span>
+                      <span className="ml-3 shrink-0 text-xs tabular-nums text-muted-foreground">
+                        {formatShortTimestamp(commit.committedAt, settings.timestampFormat)}
+                      </span>
+                      {commit.sha === selectedCommitSha && <CheckIcon className="ml-1 shrink-0" />}
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <DropdownMenuItem disabled>
+                    {overviewDiffPreview.isPending ? "Loading commits…" : "No branch commits"}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuItem
               onClick={() => {
                 if (latestTurn) selectTurn(latestTurn.turnId);

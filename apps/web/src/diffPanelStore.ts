@@ -7,6 +7,7 @@ import { resolveStorage } from "./lib/storage";
 
 export type DiffPanelSelection =
   | { kind: "branch"; baseRef: string | null }
+  | { kind: "commit"; sha: string }
   | {
       kind: "working-tree";
       file: { area: "staged" | "unstaged"; path: string } | null;
@@ -29,6 +30,7 @@ interface DiffPanelStoreState {
     unstagedPaths: ReadonlyArray<string>,
   ) => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
+  selectCommit: (ref: ScopedThreadRef, sha: string) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: TurnId, filePath?: string) => void;
   reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<TurnId>) => void;
   removeThread: (ref: ScopedThreadRef) => void;
@@ -152,6 +154,13 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             },
           };
         }),
+      selectCommit: (ref, sha) =>
+        set((state) => ({
+          byThreadKey: {
+            ...state.byThreadKey,
+            [scopedThreadKey(ref)]: { kind: "commit", sha },
+          },
+        })),
       selectTurn: (ref, turnId, filePath) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -201,7 +210,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
     }),
     {
       name: "t3code:diff-panel-state:v1",
-      version: 2,
+      version: 3,
       migrate: (persistedState, version) => {
         if (version >= 2 || typeof persistedState !== "object" || persistedState === null) {
           return persistedState as DiffPanelStoreState;

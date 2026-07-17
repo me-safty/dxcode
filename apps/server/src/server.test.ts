@@ -4995,6 +4995,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                     truncated: false,
                   },
                 ],
+                commits: [],
                 workingTree: { staged: [], unstaged: [], truncated: false },
               }),
             discardChanges: (input) =>

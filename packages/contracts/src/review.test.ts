@@ -29,6 +29,13 @@ describe("Review contracts", () => {
     ).toEqual({ _tag: "file", area: "staged", path: "src/app.ts" });
   });
 
+  it("decodes commit selections", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    expect(
+      decodePreviewInput({ cwd: "/repo", selection: { _tag: "commit", sha } }).selection,
+    ).toEqual({ _tag: "commit", sha });
+  });
+
   it("allows the same path in both working tree sections", () => {
     const file = {
       path: "src/app.ts",
@@ -41,6 +48,7 @@ describe("Review contracts", () => {
       cwd: "/repo",
       generatedAt: DateTime.nowUnsafe(),
       sources: [],
+      commits: [],
       workingTree: { staged: [file], unstaged: [file], truncated: false },
     });
 

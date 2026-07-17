@@ -24,6 +24,7 @@ import {
   type ReviewDiscardChangesInput,
   type ReviewChangedFile,
   type ReviewChangeKind,
+  type ReviewCommit,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewSource,
   type ReviewUnstagePathsInput,
@@ -49,6 +50,7 @@ const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
+const REVIEW_COMMIT_LIST_MAX_OUTPUT_BYTES = 80_000;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
@@ -1998,6 +2000,27 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     manifest: ReturnType<typeof parseReviewStatus> & { truncated: boolean },
   ) {
     const selection = input.selection ?? { _tag: "all" as const };
+    if (selection._tag === "commit") {
+      const result = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.commit",
+        input.cwd,
+        [
+          "show",
+          "--format=",
+          "--patch",
+          "--minimal",
+          ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+          selection.sha,
+          "--",
+        ],
+        { maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES, appendTruncationMarker: true },
+      );
+      return {
+        diff: result.stdout,
+        truncated: result.stdoutTruncated,
+        title: selection.sha.slice(0, 8),
+      };
+    }
     if (selection._tag === "all") {
       const head = yield* executeGit(
         "GitVcsDriver.getReviewDiffPreview.head",
@@ -2115,6 +2138,38 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const readReviewCommits = Effect.fn("readReviewCommits")(function* (
+    cwd: string,
+    baseRef: string | null,
+  ) {
+    const result = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.commits",
+      cwd,
+      [
+        "log",
+        "-z",
+        "--format=%H%x00%s%x00%cI",
+        "--max-count=50",
+        ...(baseRef ? [`${baseRef}..HEAD`] : ["HEAD"]),
+      ],
+      {
+        allowNonZeroExit: true,
+        maxOutputBytes: REVIEW_COMMIT_LIST_MAX_OUTPUT_BYTES,
+      },
+    );
+    if (result.exitCode !== 0) return [];
+    const fields = result.stdout.split("\0").filter((field) => field.length > 0);
+    const commits: ReviewCommit[] = [];
+    for (let index = 0; index + 2 < fields.length; index += 3) {
+      const sha = fields[index];
+      const title = fields[index + 1];
+      const committedAt = fields[index + 2];
+      if (!sha || !title || !committedAt || !/^[0-9a-f]{40}$/i.test(sha)) continue;
+      commits.push({ sha, title, committedAt });
+    }
+    return commits;
+  });
+
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
     input: ReviewDiffPreviewInput,
   ) {
@@ -2124,10 +2179,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         cwd: input.cwd,
         generatedAt: yield* DateTime.now,
         sources: [],
+        commits: [],
         workingTree: { staged: [], unstaged: [], truncated: false },
       };
     }
 
+    const branch = details.branch;
+    const baseRef =
+      input.baseRef ??
+      (branch
+        ? yield* resolveBaseBranchForNoUpstream(input.cwd, branch).pipe(
+            Effect.orElseSucceed(() => null),
+          )
+        : null);
+    const commits =
+      input.selection?._tag === "file" ? [] : yield* readReviewCommits(input.cwd, baseRef);
     const workingTree = yield* readReviewWorkingTreeManifest(input.cwd);
     const selectedDiff = yield* readSelectedReviewDiff(input, workingTree);
     const hashDiff = (diff: string) =>
@@ -2144,34 +2210,30 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             }),
         ),
       );
-    const workingTreeSource: ReviewDiffPreviewSource = {
-      id: "working-tree",
-      kind: "working-tree",
-      title: selectedDiff.title,
-      baseRef: "HEAD",
-      headRef: null,
+    const selection = input.selection ?? { _tag: "all" as const };
+    const selectedSource: ReviewDiffPreviewSource = {
+      id: selection._tag === "commit" ? `commit:${selection.sha}` : "working-tree",
+      kind: selection._tag === "commit" ? "branch-range" : "working-tree",
+      title:
+        selection._tag === "commit"
+          ? (commits.find((commit) => commit.sha === selection.sha)?.title ?? selectedDiff.title)
+          : selectedDiff.title,
+      baseRef: selection._tag === "commit" ? null : "HEAD",
+      headRef: selection._tag === "commit" ? selection.sha : null,
       diff: selectedDiff.diff,
       diffHash: yield* hashDiff(selectedDiff.diff),
       truncated: selectedDiff.truncated,
     };
 
-    if (input.selection?._tag === "file") {
+    if (selection._tag === "file" || selection._tag === "commit") {
       return {
         cwd: input.cwd,
         generatedAt: yield* DateTime.now,
-        sources: [workingTreeSource],
+        sources: [selectedSource],
+        commits,
         workingTree,
       };
     }
-
-    const branch = details.branch;
-    const baseRef =
-      input.baseRef ??
-      (branch
-        ? yield* resolveBaseBranchForNoUpstream(input.cwd, branch).pipe(
-            Effect.orElseSucceed(() => null),
-          )
-        : null);
 
     const baseResult =
       baseRef && branch
@@ -2203,7 +2265,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const baseDiffHash = yield* hashDiff(baseDiff);
 
     const sources: ReviewDiffPreviewSource[] = [
-      workingTreeSource,
+      selectedSource,
       {
         id: "branch-range",
         kind: "branch-range",
@@ -2220,6 +2282,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       cwd: input.cwd,
       generatedAt: yield* DateTime.now,
       sources,
+      commits,
       workingTree,
     };
   });

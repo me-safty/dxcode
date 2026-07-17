@@ -33,11 +33,17 @@ export const ReviewWorkingTreeManifest = Schema.Struct({
 });
 export type ReviewWorkingTreeManifest = typeof ReviewWorkingTreeManifest.Type;
 
+export const ReviewCommitSha = TrimmedNonEmptyString.check(Schema.isPattern(/^[0-9a-f]{40}$/i));
+export type ReviewCommitSha = typeof ReviewCommitSha.Type;
+
 export const ReviewDiffSelection = Schema.Union([
   Schema.TaggedStruct("all", {}),
   Schema.TaggedStruct("file", {
     area: ReviewChangeArea,
     path: TrimmedNonEmptyString,
+  }),
+  Schema.TaggedStruct("commit", {
+    sha: ReviewCommitSha,
   }),
 ]);
 export type ReviewDiffSelection = typeof ReviewDiffSelection.Type;
@@ -65,10 +71,18 @@ export const ReviewDiffPreviewSource = Schema.Struct({
 });
 export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 
+export const ReviewCommit = Schema.Struct({
+  sha: ReviewCommitSha,
+  title: TrimmedNonEmptyString,
+  committedAt: TrimmedNonEmptyString,
+});
+export type ReviewCommit = typeof ReviewCommit.Type;
+
 export const ReviewDiffPreviewResult = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   generatedAt: Schema.DateTimeUtc,
   sources: Schema.Array(ReviewDiffPreviewSource),
+  commits: Schema.Array(ReviewCommit),
   workingTree: ReviewWorkingTreeManifest,
 });
 export type ReviewDiffPreviewResult = typeof ReviewDiffPreviewResult.Type;

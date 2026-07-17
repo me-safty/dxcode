@@ -50,6 +50,15 @@ describe("diffPanelStore", () => {
     ).toEqual({ kind: "branch", baseRef: "origin/main" });
   });
 
+  it("selects a branch commit by sha", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    useDiffPanelStore.getState().selectCommit(THREAD_REF, sha);
+
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({ kind: "commit", sha });
+  });
+
   it("reconciles a missing turn selection to the latest available turn", () => {
     const missingTurnId = TurnId.make("turn-missing");
     const latestTurnId = TurnId.make("turn-latest");

@@ -64,6 +64,7 @@ function makeLayer(input: {
               cwd: request.cwd,
               generatedAt: DateTime.nowUnsafe(),
               sources: [],
+              commits: [],
               workingTree: { staged: [], unstaged: [], truncated: false },
             };
           }),

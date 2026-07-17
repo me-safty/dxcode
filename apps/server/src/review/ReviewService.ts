@@ -171,6 +171,7 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         generatedAt: yield* DateTime.now,
         sources: [],
+        commits: [],
         workingTree: { staged: [], unstaged: [], truncated: false },
       };
     }
