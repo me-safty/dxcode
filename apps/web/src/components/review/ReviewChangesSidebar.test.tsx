@@ -21,11 +21,27 @@ const unstaged: ReadonlyArray<ReviewChangedFile> = [
   },
 ];
 
-function renderSidebar(truncated = false) {
+const statusFiles: ReadonlyArray<ReviewChangedFile> = [
+  "modified",
+  "added",
+  "deleted",
+  "renamed",
+  "copied",
+  "untracked",
+  "conflicted",
+].map((kind, index) => ({
+  path: `src/status-${index}.ts`,
+  previousPath: null,
+  kind: kind as ReviewChangedFile["kind"],
+  insertions: 0,
+  deletions: 0,
+}));
+
+function renderSidebar(truncated = false, files: ReadonlyArray<ReviewChangedFile> = unstaged) {
   return renderToStaticMarkup(
     <ReviewChangesSidebar
       staged={[]}
-      unstaged={unstaged}
+      unstaged={files}
       truncated={truncated}
       selection={null}
       pendingPaths={new Set()}
@@ -59,5 +75,23 @@ describe("ReviewChangesSidebar", () => {
     const html = renderSidebar(true);
 
     expect(html).toContain('aria-label="Discard all unstaged changes" disabled=""');
+  });
+
+  it("shows a colored Git status letter after each file icon", () => {
+    const html = renderSidebar(false, statusFiles);
+
+    for (const [label, letter] of [
+      ["modified", "M"],
+      ["added", "A"],
+      ["deleted", "D"],
+      ["renamed", "R"],
+      ["copied", "C"],
+      ["untracked", "U"],
+      ["conflicted", "!"],
+    ]) {
+      expect(html).toContain(`aria-label="Git status: ${label}"`);
+      expect(html).toContain(`title="${label}"`);
+      expect(html).toContain(`>${letter}</span>`);
+    }
   });
 });

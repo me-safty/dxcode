@@ -362,6 +362,7 @@ export const ObservabilitySettings = Schema.Struct({
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
+export const DEFAULT_GIT_BRANCH_PREFIX = "";
 
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -378,6 +379,12 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  gitCommitInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  gitPullRequestInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  gitBranchPrefix: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_GIT_BRANCH_PREFIX)),
+  ),
+  gitNoVerify: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -509,6 +516,10 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
+  gitCommitInstructions: Schema.optionalKey(TrimmedString),
+  gitPullRequestInstructions: Schema.optionalKey(TrimmedString),
+  gitBranchPrefix: Schema.optionalKey(TrimmedString),
+  gitNoVerify: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({

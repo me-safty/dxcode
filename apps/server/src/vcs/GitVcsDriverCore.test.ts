@@ -858,6 +858,27 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.notInclude(status, "a.txt");
       }),
     );
+
+    it.effect("skips commit hooks when noVerify is enabled", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const hookPath = pathService.join(cwd, ".git", "hooks", "pre-commit");
+        yield* writeTextFile(cwd, ".git/hooks/pre-commit", "#!/bin/sh\nexit 1\n");
+        yield* fileSystem.chmod(hookPath, 0o755);
+        yield* writeTextFile(cwd, "hooked.txt", "hooked\n");
+        yield* driver.prepareCommitContext(cwd);
+
+        yield* driver.commit(cwd, "Blocked by hook", "").pipe(Effect.flip);
+        const commit = yield* driver.commit(cwd, "Skip hook", "", { noVerify: true });
+
+        assert.match(commit.commitSha, /^[a-f0-9]{40}$/);
+        assert.equal(yield* git(cwd, ["log", "-1", "--pretty=%s"]), "Skip hook");
+      }),
+    );
   });
 
   describe("remote operations", () => {
@@ -967,6 +988,27 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           status: "skipped_up_to_date",
           branch: "feature/push",
         });
+      }),
+    );
+
+    it.effect("skips push hooks when noVerify is enabled", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-remote-");
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const hookPath = pathService.join(cwd, ".git", "hooks", "pre-push");
+        yield* writeTextFile(cwd, ".git/hooks/pre-push", "#!/bin/sh\nexit 1\n");
+        yield* fileSystem.chmod(hookPath, 0o755);
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+
+        yield* driver.pushCurrentBranch(cwd, null).pipe(Effect.flip);
+        const pushed = yield* driver.pushCurrentBranch(cwd, null, { noVerify: true });
+
+        assert.equal(pushed.status, "pushed");
       }),
     );
 

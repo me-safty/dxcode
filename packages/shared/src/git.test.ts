@@ -7,8 +7,27 @@ import {
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
+  resolveAutoFeatureBranchName,
+  sanitizePrefixedBranchName,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
+
+describe("generated branch prefixes", () => {
+  it("supports generated branches without a prefix", () => {
+    expect(sanitizePrefixedBranchName("feature/fix-toolbar", "")).toBe("fix-toolbar");
+    expect(resolveAutoFeatureBranchName([], undefined, "")).toBe("update");
+  });
+
+  it("replaces the legacy feature prefix", () => {
+    expect(sanitizePrefixedBranchName("feature/fix-toolbar", "codex")).toBe("codex/fix-toolbar");
+  });
+
+  it("keeps custom-prefixed names and resolves collisions", () => {
+    expect(resolveAutoFeatureBranchName(["codex/fix-toolbar"], "codex/fix-toolbar", "codex")).toBe(
+      "codex/fix-toolbar-2",
+    );
+  });
+});
 
 describe("normalizeGitRemoteUrl", () => {
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {

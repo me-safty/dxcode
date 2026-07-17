@@ -43,6 +43,7 @@ import {
 
 import { GitManagerError, GitPullRequestMaterializationError } from "@t3tools/contracts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import type { TextGenerationPolicy } from "../textGeneration/TextGenerationPolicy.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -1145,6 +1146,7 @@ export const make = Effect.gen(function* () {
       includeBranch?: boolean;
       filePaths?: readonly string[];
       modelSelection: ModelSelection;
+      policy: TextGenerationPolicy;
     }) {
       const context = yield* gitCore.prepareCommitContext(input.cwd, input.filePaths);
       if (!context) {
@@ -1171,6 +1173,7 @@ export const make = Effect.gen(function* () {
           stagedPatch: limitContext(context.stagedPatch, 50_000),
           ...(input.includeBranch ? { includeBranch: true } : {}),
           modelSelection: input.modelSelection,
+          policy: input.policy,
         })
         .pipe(Effect.map((result) => sanitizeCommitMessage(result)));
 
@@ -1185,6 +1188,8 @@ export const make = Effect.gen(function* () {
 
   const runCommitStep = Effect.fn("runCommitStep")(function* (
     modelSelection: ModelSelection,
+    policy: TextGenerationPolicy,
+    noVerify: boolean,
     cwd: string,
     action: "commit" | "commit_push" | "commit_push_pr",
     branch: string | null,
@@ -1220,6 +1225,7 @@ export const make = Effect.gen(function* () {
         ...(commitMessage ? { commitMessage } : {}),
         ...(filePaths ? { filePaths } : {}),
         modelSelection,
+        policy,
       });
     }
     if (!suggestion) {
@@ -1278,6 +1284,7 @@ export const make = Effect.gen(function* () {
         : null;
     const { commitSha } = yield* gitCore.commit(cwd, suggestion.subject, suggestion.body, {
       timeoutMs: COMMIT_TIMEOUT_MS,
+      noVerify,
       ...(commitProgress ? { progress: commitProgress } : {}),
     });
     if (currentHookName !== null) {
@@ -1298,6 +1305,7 @@ export const make = Effect.gen(function* () {
 
   const runPrStep = Effect.fn("runPrStep")(function* (
     modelSelection: ModelSelection,
+    policy: TextGenerationPolicy,
     cwd: string,
     fallbackBranch: string | null,
     emit: GitActionProgressEmitter,
@@ -1355,6 +1363,7 @@ export const make = Effect.gen(function* () {
       diffSummary: limitContext(rangeContext.diffSummary, 20_000),
       diffPatch: limitContext(rangeContext.diffPatch, 60_000),
       modelSelection,
+      policy,
     });
 
     const bodyFile = path.join(
@@ -1631,6 +1640,8 @@ export const make = Effect.gen(function* () {
 
   const runFeatureBranchStep = Effect.fn("runFeatureBranchStep")(function* (
     modelSelection: ModelSelection,
+    policy: TextGenerationPolicy,
+    branchPrefix: string,
     cwd: string,
     branch: string | null,
     commitMessage?: string,
@@ -1643,6 +1654,7 @@ export const make = Effect.gen(function* () {
       ...(filePaths ? { filePaths } : {}),
       includeBranch: true,
       modelSelection,
+      policy,
     });
     if (!suggestion) {
       return yield* new GitManagerError({
@@ -1654,7 +1666,11 @@ export const make = Effect.gen(function* () {
 
     const preferredBranch = suggestion.branch ?? sanitizeFeatureBranchName(suggestion.subject);
     const existingBranchNames = yield* gitCore.listLocalBranchNames(cwd);
-    const resolvedBranch = resolveAutoFeatureBranchName(existingBranchNames, preferredBranch);
+    const resolvedBranch = resolveAutoFeatureBranchName(
+      existingBranchNames,
+      preferredBranch,
+      branchPrefix,
+    );
 
     yield* gitCore.createRef({ cwd, refName: resolvedBranch });
     yield* Effect.scoped(gitCore.switchRef({ cwd, refName: resolvedBranch }));
@@ -1731,8 +1747,7 @@ export const make = Effect.gen(function* () {
         let commitMessageForStep = input.commitMessage;
         let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
-        const modelSelection = yield* serverSettingsService.getSettings.pipe(
-          Effect.map((settings) => settings.textGenerationModelSelection),
+        const gitSettings = yield* serverSettingsService.getSettings.pipe(
           Effect.mapError(
             (cause) =>
               new GitManagerError({
@@ -1743,6 +1758,13 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+        const modelSelection = gitSettings.textGenerationModelSelection;
+        const textGenerationPolicy: TextGenerationPolicy = {
+          kind: "custom",
+          commitInstructions: gitSettings.gitCommitInstructions,
+          changeRequestInstructions: gitSettings.gitPullRequestInstructions,
+          inferRepositoryConventions: false,
+        };
 
         if (input.featureBranch) {
           yield* Ref.set(currentPhase, Option.some("branch"));
@@ -1753,6 +1775,8 @@ export const make = Effect.gen(function* () {
           });
           const result = yield* runFeatureBranchStep(
             modelSelection,
+            textGenerationPolicy,
+            gitSettings.gitBranchPrefix,
             input.cwd,
             initialStatus.branch,
             input.commitMessage,
@@ -1779,6 +1803,8 @@ export const make = Effect.gen(function* () {
               Effect.flatMap(() =>
                 runCommitStep(
                   modelSelection,
+                  textGenerationPolicy,
+                  gitSettings.gitNoVerify,
                   input.cwd,
                   commitAction,
                   currentBranch,
@@ -1801,7 +1827,11 @@ export const make = Effect.gen(function* () {
               })
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("push"))),
-                Effect.flatMap(() => gitCore.pushCurrentBranch(input.cwd, currentBranch)),
+                Effect.flatMap(() =>
+                  gitCore.pushCurrentBranch(input.cwd, currentBranch, {
+                    noVerify: gitSettings.gitNoVerify,
+                  }),
+                ),
               )
           : { status: "skipped_not_requested" as const };
 
@@ -1815,7 +1845,13 @@ export const make = Effect.gen(function* () {
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
                 Effect.flatMap(() =>
-                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit),
+                  runPrStep(
+                    modelSelection,
+                    textGenerationPolicy,
+                    input.cwd,
+                    currentBranch,
+                    progress.emit,
+                  ),
                 ),
               )
           : { status: "skipped_not_requested" as const };

@@ -352,7 +352,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
   const overviewDiffPreview = useEnvironmentQuery(
-    activeThread && activeCwd && diffSelection.kind !== "turn"
+    activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {

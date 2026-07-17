@@ -40,11 +40,19 @@ export function sanitizeBranchFragment(raw: string): string {
  * Preserves an existing `feature/` prefix or slash-separated namespace.
  */
 export function sanitizeFeatureBranchName(raw: string): string {
+  return sanitizePrefixedBranchName(raw, "feature");
+}
+
+export function sanitizePrefixedBranchName(raw: string, prefix: string): string {
   const sanitized = sanitizeBranchFragment(raw);
-  if (sanitized.includes("/")) {
-    return sanitized.startsWith("feature/") ? sanitized : `feature/${sanitized}`;
+  if (prefix.trim().length === 0) {
+    return sanitized.replace(/^feature\//, "");
   }
-  return `feature/${sanitized}`;
+  const sanitizedPrefix = sanitizeBranchFragment(prefix).replaceAll("/", "-");
+  if (sanitized.startsWith(`${sanitizedPrefix}/`)) return sanitized;
+  const withoutLegacyPrefix =
+    sanitizedPrefix === "feature" ? sanitized : sanitized.replace(/^feature\//, "");
+  return `${sanitizedPrefix}/${withoutLegacyPrefix}`;
 }
 
 const AUTO_FEATURE_BRANCH_FALLBACK = "feature/update";
@@ -56,10 +64,12 @@ const AUTO_FEATURE_BRANCH_FALLBACK = "feature/update";
 export function resolveAutoFeatureBranchName(
   existingBranchNames: readonly string[],
   preferredBranch?: string,
+  prefix = "feature",
 ): string {
   const preferred = preferredBranch?.trim();
-  const resolvedBase = sanitizeFeatureBranchName(
+  const resolvedBase = sanitizePrefixedBranchName(
     preferred && preferred.length > 0 ? preferred : AUTO_FEATURE_BRANCH_FALLBACK,
+    prefix,
   );
   const existingNames = new Set(existingBranchNames.map((refName) => refName.toLowerCase()));
 

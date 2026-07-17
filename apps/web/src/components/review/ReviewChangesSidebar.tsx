@@ -1,4 +1,4 @@
-import type { ReviewChangeArea, ReviewChangedFile } from "@t3tools/contracts";
+import type { ReviewChangeArea, ReviewChangedFile, ReviewChangeKind } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
   FileDiffIcon,
@@ -48,6 +48,36 @@ function splitFilePath(path: string) {
   return separator < 0
     ? { name: path, parent: "" }
     : { name: path.slice(separator + 1), parent: path.slice(0, separator) };
+}
+
+const REVIEW_STATUS: Record<
+  ReviewChangeKind,
+  { readonly letter: string; readonly label: string; readonly className: string }
+> = {
+  modified: { letter: "M", label: "modified", className: "text-sky-500" },
+  added: { letter: "A", label: "added", className: "text-emerald-500" },
+  deleted: { letter: "D", label: "deleted", className: "text-destructive" },
+  renamed: { letter: "R", label: "renamed", className: "text-amber-500" },
+  copied: { letter: "C", label: "copied", className: "text-violet-500" },
+  untracked: { letter: "U", label: "untracked", className: "text-teal-500" },
+  conflicted: { letter: "!", label: "conflicted", className: "text-orange-500" },
+};
+
+function ReviewStatusIndicator({ kind }: { readonly kind: ReviewChangeKind }) {
+  const status = REVIEW_STATUS[kind];
+  return (
+    <span
+      role="img"
+      aria-label={`Git status: ${status.label}`}
+      title={status.label}
+      className={cn(
+        "w-3 shrink-0 text-center font-mono text-[10px] font-semibold leading-none",
+        status.className,
+      )}
+    >
+      {status.letter}
+    </span>
+  );
 }
 
 function ReviewActionIcon({ area, pending }: { area: ReviewChangeArea; pending: boolean }) {
@@ -165,6 +195,7 @@ export function ReviewChangesSidebar(props: ReviewChangesSidebarProps) {
                         theme={props.theme}
                         className="size-3.5"
                       />
+                      <ReviewStatusIndicator kind={file.kind} />
                       <span className="min-w-0 flex-1 truncate text-[11px]">
                         <span className="font-medium">{pathParts.name}</span>
                         {pathParts.parent && (
@@ -173,7 +204,11 @@ export function ReviewChangesSidebar(props: ReviewChangesSidebarProps) {
                       </span>
                       {(file.insertions > 0 || file.deletions > 0) && (
                         <span className="shrink-0 font-mono text-[9px] tabular-nums">
-                          <DiffStatLabel additions={file.insertions} deletions={file.deletions} />
+                          <DiffStatLabel
+                            additions={file.insertions}
+                            deletions={file.deletions}
+                            layout="inline"
+                          />
                         </span>
                       )}
                     </button>

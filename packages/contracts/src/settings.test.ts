@@ -99,6 +99,36 @@ describe("ServerSettings worktree defaults", () => {
   });
 });
 
+describe("ServerSettings Git defaults", () => {
+  it("keeps legacy configs compatible", () => {
+    const settings = decodeServerSettings({});
+    expect(settings.gitCommitInstructions).toBe("");
+    expect(settings.gitPullRequestInstructions).toBe("");
+    expect(settings.gitBranchPrefix).toBe("");
+    expect(settings.gitNoVerify).toBe(false);
+  });
+
+  it("accepts Git preference updates", () => {
+    expect(
+      decodeServerSettingsPatch({
+        gitCommitInstructions: "  Use Conventional Commits.  ",
+        gitPullRequestInstructions: "  Keep body short.  ",
+        gitBranchPrefix: "  codex  ",
+        gitNoVerify: true,
+      }),
+    ).toMatchObject({
+      gitCommitInstructions: "Use Conventional Commits.",
+      gitPullRequestInstructions: "Keep body short.",
+      gitBranchPrefix: "codex",
+      gitNoVerify: true,
+    });
+  });
+
+  it("accepts an empty branch prefix", () => {
+    expect(decodeServerSettingsPatch({ gitBranchPrefix: "" }).gitBranchPrefix).toBe("");
+  });
+});
+
 describe("ServerSettingsPatch.providerInstances", () => {
   it("treats providerInstances as an optional whole-map replacement", () => {
     const patch = decodeServerSettingsPatch({});
