@@ -20,6 +20,19 @@ push to main ──► GitHub Actions (nightly-fork.yml)
 **A restart is an update.** There is no separate update command — same contract the old
 `npx t3@nightly` line gave us, just sourced from our fork.
 
+**When builds happen.** On every push to `main` that touches something other than docs
+(`paths-ignore: docs/**, **/*.md`), or on demand with
+`gh workflow run nightly-fork.yml --repo jetblk/t3code`. **There is no cron** — despite the
+name, `nightly` is a _channel_ (like an npm dist-tag), not a cadence. Merging an upstream
+sync into `main` is what produces a new build.
+
+**Each build publishes two releases:**
+
+| Release                  | Purpose                                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `nightly` (rolling)      | The stable URL nodes curl. Recreated every build, so its tag tracks the newest commit and the asset name never changes. |
+| `v<version>` (immutable) | Never deleted. The pin/rollback target — point a node's `ExecStartPre` at this URL to freeze it on a known-good build.  |
+
 The repo is public, so nodes download the release **unauthenticated**. No tokens, no
 registry, no `~/.npmrc`.
 
@@ -121,7 +134,9 @@ works on every node.
 | Logs (service)               | `journalctl --user -u t3code.service -f`                                                                                                                              |
 | Logs (server traces)         | `~/.t3/userdata/logs/server.trace.ndjson*`                                                                                                                            |
 | Roll back to upstream        | `cp ~/.config/systemd/user/t3code.service.npx-bak ~/.config/systemd/user/t3code.service && systemctl --user daemon-reload && systemctl --user restart t3code.service` |
-| Pin a build (no auto-update) | Comment out the `curl` `ExecStartPre`; the node then keeps running whatever is in `~/.local/share/t3-nightly`.                                                        |
+| Pin / roll back to a build   | Point the unit's `curl` at an immutable tag: `/download/v<version>/t3-server.tgz` instead of `/download/nightly/`. `gh release list --repo jetblk/t3code` lists them. |
+| Freeze entirely (no updates) | Comment out the `curl` `ExecStartPre`; the node then keeps running whatever is in `~/.local/share/t3-nightly`.                                                        |
+| Build without a code change  | `gh workflow run nightly-fork.yml --repo jetblk/t3code`                                                                                                               |
 
 ## Gotchas
 

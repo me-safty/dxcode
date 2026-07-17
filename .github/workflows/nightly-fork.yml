@@ -14,6 +14,12 @@ name: Fork nightly
 on:
   push:
     branches: [main]
+    # Docs-only pushes produce a byte-identical server, so don't burn a build
+    # (and a version bump) on them. A push touching both docs and code still
+    # builds — paths-ignore only skips when *every* changed file matches.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
 
 # Only the built-in token is needed — releases are published to this repo.
@@ -122,27 +128,53 @@ jobs:
           tar -czf t3-server.tgz -C deploy-out .
           du -h t3-server.tgz
 
-      - name: Publish rolling nightly release
+      # Two releases per build, on purpose:
+      #   v<version>  immutable, never deleted — the pin/rollback target.
+      #   nightly     rolling pointer, recreated each run — the stable URL nodes
+      #               curl, so they never need to know the current version.
+      # The asset is uploaded twice (GitHub can't alias an asset across
+      # releases); that's the price of keeping both a fixed URL and a history.
+      - name: Publish releases
         shell: bash
         run: |
           set -euo pipefail
-          # Recreate the rolling tag so it always points at the built commit.
-          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
-          gh release create nightly t3-server.tgz \
-            --title "Fork nightly ${{ steps.version.outputs.version }}" \
-            --notes "Self-contained linux-x64 server bundle built from \`${GITHUB_SHA}\`.
+          ver="${{ steps.version.outputs.version }}"
 
-          Version: \`${{ steps.version.outputs.version }}\`
+          cat > notes.md <<EOF
+          Self-contained linux-x64 server bundle built from \`${GITHUB_SHA}\`.
 
-          Contains \`dist/\` + production \`node_modules/\` (native deps included), so a node
-          needs only Node 22.16+ — no install step.
+          Version: \`${ver}\`
 
-          Install/update on a node:
+          Contains \`dist/\` (incl. the \`dist/client\` web UI) + production \`node_modules/\`
+          with native deps, so a node needs only Node 22.16+ — no install step.
+
+          **Nodes track the rolling \`nightly\` release**, so a \`systemctl --user restart
+          t3code.service\` always pulls the newest build:
+
           \`\`\`bash
-          mkdir -p ~/.local/share/t3-nightly
           curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/t3-server.tgz \\
             | tar xz -C ~/.local/share/t3-nightly
-          node ~/.local/share/t3-nightly/dist/bin.mjs serve --host \"\$(tailscale ip -4 | head -1)\" --port 3773
-          \`\`\`" \
+          \`\`\`
+
+          **To pin or roll back** a node to this exact build, point its \`ExecStartPre\` at
+          this immutable tag instead:
+
+          \`\`\`
+          https://github.com/${GITHUB_REPOSITORY}/releases/download/v${ver}/t3-server.tgz
+          \`\`\`
+          EOF
+
+          # 1. Immutable versioned release (rollback target).
+          gh release create "v${ver}" t3-server.tgz \
+            --title "Fork nightly ${ver}" \
+            --notes-file notes.md \
+            --prerelease \
+            --target "${GITHUB_SHA}"
+
+          # 2. Rolling pointer. Recreated so the tag tracks the built commit.
+          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
+          gh release create nightly t3-server.tgz \
+            --title "Fork nightly ${ver} (rolling)" \
+            --notes-file notes.md \
             --prerelease \
             --target "${GITHUB_SHA}"
