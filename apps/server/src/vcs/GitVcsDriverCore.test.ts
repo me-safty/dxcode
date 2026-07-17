@@ -78,6 +78,22 @@ const initRepoWithCommit = (
   });
 
 it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
+  describe("process environment", () => {
+    it.effect("preserves the caller locale for general Git subprocesses", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+
+        const locale = yield* git(
+          cwd,
+          ["-c", 'alias.print-locale=!printf "%s" "$LC_ALL"', "print-locale"],
+          { LC_ALL: "zh_CN.UTF-8" },
+        );
+
+        assert.equal(locale, "zh_CN.UTF-8");
+      }),
+    );
+  });
+
   describe("structured errors", () => {
     it.effect("preserves structured spawn context and the platform cause", () =>
       Effect.gen(function* () {

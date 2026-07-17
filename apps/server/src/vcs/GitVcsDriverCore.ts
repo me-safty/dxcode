@@ -370,6 +370,8 @@ function isNonRepositoryGitStderr(stderr: string): boolean {
   return stderr.toLowerCase().includes("not a git repository");
 }
 
+const NON_REPOSITORY_DETECTION_ENV = { LC_ALL: "C" } as const;
+
 interface Trace2Monitor {
   readonly env: NodeJS.ProcessEnv;
   readonly flush: Effect.Effect<void, never>;
@@ -1310,6 +1312,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ["status", "--porcelain=2", "--branch"],
       {
         allowNonZeroExit: true,
+        env: NON_REPOSITORY_DETECTION_ENV,
       },
     ).pipe(
       Effect.catchTags({
@@ -1992,6 +1995,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         {
           timeoutMs: 10_000,
           allowNonZeroExit: true,
+          env: NON_REPOSITORY_DETECTION_ENV,
         },
       ).pipe(
         Effect.catchTags({
