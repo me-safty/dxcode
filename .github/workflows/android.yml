@@ -1,7 +1,8 @@
 name: Mobile APK Build
 
-# Build standalone APK for Android
-# Supports manual trigger and automatic builds on tags
+# Build standalone APK for Android and publish it to a GitHub Release.
+# Manual builds update the rolling `android-latest` release (overwriting the
+# previous APK). Pushes of `android-*` tags publish a release for that tag.
 on:
   workflow_dispatch:
     inputs:
@@ -44,3 +45,120 @@ jobs:
       build_version: ${{ github.ref_name }}
       runs_on: ubuntu-latest
     secrets: inherit
+
+  publish-release:
+    name: Publish APK to GitHub Release
+    needs: build-apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - id: app_token
+        name: Mint release app token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: t3code-apk-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Resolve release metadata
+        id: meta
+        env:
+          VARIANT: ${{ inputs.variant || 'production' }}
+          BUILD_TYPE: ${{ inputs.build-type || 'release' }}
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          apk_files=(release-assets/*.apk)
+          if (( ${#apk_files[@]} == 0 )); then
+            echo "No APK files found in release-assets/" >&2
+            ls -la release-assets/ >&2 || true
+            exit 1
+          fi
+          if (( ${#apk_files[@]} > 1 )); then
+            echo "Expected exactly one APK artifact, found ${#apk_files[@]}:" >&2
+            printf '  %s\n' "${apk_files[@]}" >&2
+            exit 1
+          fi
+
+          source_apk="${apk_files[0]}"
+          mkdir -p release-publish
+
+          # Stable download names so each build overwrites the previous APK
+          # instead of accumulating versioned assets on the rolling release.
+          stable_name="t3code-android-${VARIANT}-${BUILD_TYPE}.apk"
+          cp "$source_apk" "release-publish/${stable_name}"
+
+          # Canonical name for the default production release APK.
+          if [[ "$VARIANT" == "production" && "$BUILD_TYPE" == "release" ]]; then
+            cp "$source_apk" "release-publish/t3code-android.apk"
+          fi
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # Also keep the original versioned filename on tag releases.
+            cp "$source_apk" "release-publish/$(basename "$source_apk")"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "name=Android APK ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=android-latest" >> "$GITHUB_OUTPUT"
+            echo "name=Android APK (latest)" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "variant=${VARIANT}" >> "$GITHUB_OUTPUT"
+          echo "build_type=${BUILD_TYPE}" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          ls -lh release-publish/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.meta.outputs.name }}
+          body: |
+            Automated Android APK build.
+
+            | | |
+            |---|---|
+            | **Variant** | `${{ steps.meta.outputs.variant }}` |
+            | **Build type** | `${{ steps.meta.outputs.build_type }}` |
+            | **Commit** | `${{ steps.meta.outputs.sha_short }}` |
+            | **Workflow run** | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |
+
+            This release is updated on every Mobile APK Build. Download `t3code-android.apk` (production/release) or the variant-specific APK below.
+          prerelease: true
+          make_latest: false
+          files: |
+            release-publish/*.apk
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          token: ${{ steps.app_token.outputs.token }}
+
+      - name: Generate publish summary
+        if: always()
+        run: |
+          {
+            echo "## APK Release Publish"
+            echo ""
+            echo "- **Tag**: \`${{ steps.meta.outputs.tag }}\`"
+            echo "- **Variant**: ${{ steps.meta.outputs.variant }}"
+            echo "- **Build type**: ${{ steps.meta.outputs.build_type }}"
+            echo "- **Status**: ${{ job.status }}"
+            if [ "${{ job.status }}" = "success" ]; then
+              echo ""
+              echo "✅ APK published to GitHub Release"
+              echo "📦 https://github.com/${{ github.repository }}/releases/tag/${{ steps.meta.outputs.tag }}"
+            else
+              echo ""
+              echo "❌ Failed to publish APK to GitHub Release"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
