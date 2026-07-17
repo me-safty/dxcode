@@ -45,6 +45,9 @@ jobs:
           run-install: |
             args:
               - --filter=t3...
+              # scripts/update-release-package-versions.ts imports
+              # @effect/platform-node, which only @t3tools/scripts pulls in.
+              - --filter=@t3tools/scripts...
 
       - id: version
         name: Resolve fork version
