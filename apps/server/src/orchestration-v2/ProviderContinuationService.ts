@@ -32,6 +32,10 @@ export const workerLive = Layer.effectDiscard(
             threadId: request.threadId,
             providerThreadId: request.providerThreadId,
           });
+          // Still run the guard so adapters can clear sticky continuationRequested.
+          if (request.dispatchIfCurrent !== undefined) {
+            yield* request.dispatchIfCurrent(Effect.void);
+          }
           return;
         }
         const messageId = yield* ids.allocate.message({
@@ -39,7 +43,7 @@ export const workerLive = Layer.effectDiscard(
           ordinal: projection.messages.length + 1,
         });
         const commandId = CommandId.make(`provider-continuation:${messageId}`);
-        yield* threads.dispatch({
+        const dispatch = threads.dispatch({
           type: "message.dispatch",
           commandId,
           threadId: request.threadId,
@@ -50,6 +54,11 @@ export const workerLive = Layer.effectDiscard(
           createdBy: "agent",
           creationSource: "provider",
         });
+        if (request.dispatchIfCurrent === undefined) {
+          yield* dispatch;
+          return;
+        }
+        yield* request.dispatchIfCurrent(dispatch);
       },
     );
 
