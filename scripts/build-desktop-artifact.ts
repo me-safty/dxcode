@@ -107,6 +107,19 @@ const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
   },
 };
 
+const DEB_DEPENDENCIES = [
+  "libgtk-3-0",
+  "libnotify4",
+  "libnss3",
+  "libxss1",
+  "libxtst6",
+  "xdg-utils",
+  "libatspi2.0-0",
+  "libuuid1",
+  "libsecret-1-0",
+  "libasound2t64 | libasound2",
+] as const;
+
 interface BuildCliInput {
   readonly platform: Option.Option<typeof BuildPlatform.Type>;
   readonly target: Option.Option<string>;
@@ -565,6 +578,9 @@ interface StagePackageJson {
   readonly packageManager: string;
   readonly description: string;
   readonly author: string;
+  readonly homepage: string;
+  readonly license: string;
+  readonly desktopName: string;
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
@@ -1438,12 +1454,22 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       executableName: "t3code",
       icon: "icons",
       category: "Development",
+      maintainer: "T3 Tools <support@t3.gg>",
+      vendor: "T3 Tools",
+      synopsis: "A desktop GUI for AI coding agents",
+      syncDesktopName: true,
       desktop: {
         entry: {
           StartupWMClass: "t3code",
         },
       },
     };
+
+    if (target === "deb") {
+      buildConfig.deb = {
+        depends: [...DEB_DEPENDENCIES],
+      };
+    }
   }
 
   if (platform === "win") {
@@ -1748,8 +1774,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     t3codeCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: "A desktop GUI for AI coding agents such as Codex, Claude, Cursor, and OpenCode.",
+    author: "T3 Tools <support@t3.gg>",
+    homepage: "https://github.com/pingdotgg/t3code",
+    license: "MIT",
+    desktopName: "t3code.desktop",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,

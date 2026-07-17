@@ -492,6 +492,43 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
+  it.effect("includes distribution metadata in Linux package builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "linux",
+        "deb",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      const linux = config.linux as Record<string, unknown>;
+      assert.deepStrictEqual(linux.target, ["deb"]);
+      assert.equal(linux.executableName, "t3code");
+      assert.equal(linux.category, "Development");
+      assert.equal(linux.maintainer, "T3 Tools <support@t3.gg>");
+      assert.equal(linux.vendor, "T3 Tools");
+      assert.equal(linux.synopsis, "A desktop GUI for AI coding agents");
+      assert.equal(linux.syncDesktopName, true);
+
+      const deb = config.deb as Record<string, unknown>;
+      assert.deepStrictEqual(deb.depends, [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libasound2t64 | libasound2",
+      ]);
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-darwin-arm64": "0.9.4",
