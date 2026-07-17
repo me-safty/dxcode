@@ -9,7 +9,9 @@ push to main ──► GitHub Actions (nightly-fork.yml)
                    stamp version → typecheck + usage tests
                    → build web client + server bundle → dist/client
                    → pnpm deploy (bundle + prod node_modules)
-                 └► rolling `nightly` GitHub Release  (t3-server.tgz, ~125 MB)
+                 └► GitHub Releases (t3-server.tgz, ~125 MB):
+                      • `nightly`     rolling — what nodes pull
+                      • `v<version>`  immutable — pin/rollback target
                               │
         systemctl --user restart t3code.service  (on any node)
                               │
