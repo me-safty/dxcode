@@ -12,6 +12,96 @@ T3 Code is a minimal web GUI for using coding agents like Codex and Claude.
 
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
+## Repository Hierarchy
+
+This repository is the separate DX Code product repository, not the canonical T3 Code repository and not
+necessarily a GitHub fork. Git remotes and branches define the relationship:
+
+- `origin`: the DX Code repository (`me-safty/dxcode`). DX branches and releases belong here.
+- `upstream`: canonical T3 Code (`pingdotgg/t3code`). Treat it as read-only.
+- Optional contribution fork: use only for pull requests back to canonical T3 Code.
+
+Do not use or create a `master` workflow. Use these branch roles:
+
+- `upstream/main`: untouched canonical T3 history and source for production T3 builds.
+- `dx/main`: long-lived DX integration and release branch.
+- `feature/*`: short-lived DX features based on `dx/main`.
+- `sync/upstream-YYYY-MM-DD`: temporary upstream merge branches based on `dx/main`.
+
+Never add DX product work to `upstream/main`, a local mirror of it, or an upstream-sync commit. Generic
+changes intended for canonical T3 must start from `upstream/main` and use the optional contribution fork.
+
+## Feature Workflow
+
+Start new DX features from current `dx/main`, never from an old feature branch unless the work is explicitly
+stacked:
+
+```bash
+git fetch origin upstream
+git switch dx/main
+git pull --ff-only origin dx/main
+git switch -c feature/<name>
+```
+
+Keep product features behind domain seams such as `apps/web/src/features/<name>/`. Do not put product
+behavior in desktop flavor modules. Flavor modules own only app identity, protocols, branding, state paths,
+packaging, and update policy.
+
+Review fixes belong on the same `feature/*` branch. Push new commits to update its PR. Before integration,
+merge current `dx/main` into the feature and run required checks. PRs for DX features target `dx/main`.
+After merge, create unrelated work from `dx/main`, not the completed feature branch.
+
+For unpublished personal branches, rebasing is acceptable. For shared branches, prefer merges. Preserve real
+merge ancestry for all upstream synchronization work.
+
+## Upstream Synchronization
+
+Never merge `upstream/main` directly into `dx/main`. Detect and stage upstream changes using the repository
+automation:
+
+```bash
+git fetch upstream
+bun run sync:upstream -- --dry-run --no-fetch
+bun run sync:upstream -- --no-fetch
+```
+
+The non-dry run creates a `sync/upstream-*` branch and isolated worktree. Resolve conflicts and validate only
+there. Keep conflict fixes limited to reconciliation; do not add unrelated DX features. Then push the sync
+branch and open a PR into `dx/main`. The automation intentionally does not promote, push, or delete work.
+
+After the sync PR reaches `dx/main`, update active feature branches with:
+
+```bash
+git switch feature/<name>
+git merge dx/main
+```
+
+See `docs/operations/upstream-sync.md` and `docs/adr/0001-desktop-distribution-flavors.md` before changing
+this model.
+
+## Worktree Ownership
+
+Keep the primary durable workspace on `dx/main`. Give each feature and upstream sync its own worktree. Use
+durable sibling directories for ongoing work; `/private/tmp` worktrees are disposable and may vanish after a
+restart.
+
+```bash
+git worktree add ../t3code-worktrees/<name> -b feature/<name> dx/main
+```
+
+Do not edit another active worktree's branch or remove a worktree containing uncommitted changes. After a
+feature is integrated, remove its clean worktree and delete its merged branch.
+
+## Desktop Build Sources
+
+- Production T3 Code: build from a clean `upstream/main` worktree with `bun run dist:desktop:dmg`.
+- Live development: run from the active feature worktree with `bun run dev:desktop`.
+- Packaged DX Code: build only from `dx/main` with `bun run dist:desktop:dx:dmg`.
+
+The three instances must retain distinct bundle IDs, URL schemes, Electron user-data names, and server state
+roots. Production uses `~/.t3/userdata`, live development uses `~/.t3/dev`, and DX uses `~/.t3/dx`. Never
+introduce a migration or fallback that lets development or DX silently reuse production state.
+
 ## Core Priorities
 
 1. Performance first.
