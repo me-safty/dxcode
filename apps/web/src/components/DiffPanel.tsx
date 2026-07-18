@@ -17,6 +17,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   Columns2Icon,
+  CopyIcon,
   PilcrowIcon,
   RefreshCwIcon,
   Rows3Icon,
@@ -51,6 +52,7 @@ import { useProject, useThread } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings } from "../hooks/useSettings";
 import { useRefreshOnWindowFocus } from "../hooks/useRefreshOnWindowFocus";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { ReviewChangesSidebar } from "./review/ReviewChangesSidebar";
@@ -88,6 +90,7 @@ import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 import { toastManager } from "./ui/toast";
+import { Button } from "./ui/button";
 
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
@@ -217,6 +220,17 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     ReadonlyArray<OptimisticWorkingTreeTransfer>
   >([]);
   const [mutationRefreshRequest, setMutationRefreshRequest] = useState(0);
+  const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } =
+    useCopyToClipboard({
+      target: "commit hash",
+      onError: (error) => {
+        toastManager.add({
+          type: "error",
+          title: "Unable to copy commit hash",
+          description: error.message,
+        });
+      },
+    });
   const pendingPathsRef = useRef<{ key: string; paths: Set<string> }>({
     key: "",
     paths: new Set(),
@@ -850,6 +864,29 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
             </DropdownMenuSub>
           </DropdownMenuContent>
         </DropdownMenu>
+        {selectedCommitSha && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label={isCommitHashCopied ? "Copied commit hash" : "Copy commit hash"}
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={() => copyCommitHash(selectedCommitSha)}
+                />
+              }
+            >
+              {isCommitHashCopied ? (
+                <CheckIcon className="size-3 text-success" />
+              ) : (
+                <CopyIcon className="size-3" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {isCommitHashCopied ? "Copied commit hash" : "Copy commit hash"}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         {selectedTurnId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
           <div
             className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
