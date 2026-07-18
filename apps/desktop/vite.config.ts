@@ -1,13 +1,19 @@
 import { defineConfig } from "vite-plus";
+import { isDesktopPackagedFlavorId } from "@t3tools/shared/desktopFlavor";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
 const repoEnv = loadRepoEnv();
 const shouldLaunchElectronAfterPack = process.env.T3CODE_DESKTOP_DEV === "1";
+const requestedDesktopFlavor = process.env.T3CODE_DESKTOP_FLAVOR?.trim() || "production";
+if (!isDesktopPackagedFlavorId(requestedDesktopFlavor)) {
+  throw new Error(`Unsupported T3CODE_DESKTOP_FLAVOR: ${requestedDesktopFlavor}`);
+}
 const publicConfigDefine = {
   __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
     repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
   ),
+  __T3CODE_DESKTOP_FLAVOR__: JSON.stringify(requestedDesktopFlavor),
 };
 
 export default defineConfig({

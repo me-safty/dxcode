@@ -266,6 +266,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           port: 4888,
           host: "127.0.0.2",
           t3Home: baseDir,
+          stateDirName: "dx",
+          isolateStateRoot: true,
           noBrowser: true,
           desktopBootstrapToken: "desktop-token",
           tailscaleServeEnabled: false,
@@ -274,7 +276,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         }),
       );
-      const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
+      const derivedPaths = yield* deriveServerPaths(baseDir, undefined, "dx", true);
 
       const resolved = yield* resolveServerConfig(
         {
@@ -315,7 +317,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         mode: "desktop",
         port: 4888,
         cwd: process.cwd(),
-        baseDir,
+        baseDir: derivedPaths.stateDir,
         ...derivedPaths,
         host: "127.0.0.2",
         staticDir: resolved.staticDir,
@@ -328,7 +330,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       });
-      assert.equal(join(baseDir, "userdata"), resolved.stateDir);
+      assert.equal(join(baseDir, "dx"), resolved.stateDir);
+      assert.equal(join(baseDir, "dx", "caches"), resolved.providerStatusCacheDir);
+      assert.equal(join(baseDir, "dx", "worktrees"), resolved.worktreesDir);
     }),
   );
 

@@ -271,7 +271,13 @@ export const resolveServerConfig = (
     const rawCwd = Option.getOrElse(normalizedFlags.cwd, () => process.cwd());
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
     yield* fs.makeDirectory(cwd, { recursive: true });
-    const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl);
+    const derivedPaths = yield* ServerConfig.deriveServerPaths(
+      baseDir,
+      devUrl,
+      bootstrap?.stateDirName,
+      bootstrap?.isolateStateRoot,
+    );
+    const effectiveBaseDir = bootstrap?.isolateStateRoot ? derivedPaths.stateDir : baseDir;
     yield* ServerConfig.ensureServerDirectories(derivedPaths);
     const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
       derivedPaths.settingsPath,
@@ -353,7 +359,7 @@ export const resolveServerConfig = (
       mode,
       port,
       cwd,
-      baseDir,
+      baseDir: effectiveBaseDir,
       ...derivedPaths,
       serverTracePath,
       host,

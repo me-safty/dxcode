@@ -56,6 +56,7 @@ function makeEnvironmentLayer(
     readonly devServerUrl?: string;
     readonly platform?: NodeJS.Platform;
     readonly resourcesPath?: string;
+    readonly packagedFlavorId?: DesktopEnvironment.MakeDesktopEnvironmentInput["packagedFlavorId"];
   },
 ) {
   return DesktopEnvironment.layer({
@@ -68,6 +69,9 @@ function makeEnvironmentLayer(
     isPackaged: options?.isPackaged ?? true,
     resourcesPath: options?.resourcesPath ?? "/missing/resources",
     runningUnderArm64Translation: false,
+    ...(options?.packagedFlavorId === undefined
+      ? {}
+      : { packagedFlavorId: options.packagedFlavorId }),
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -101,6 +105,7 @@ const withHarness = <A, E, R>(
     | FileSystem.FileSystem
     | DesktopBackendConfiguration.DesktopBackendConfiguration
   >,
+  environmentOptions?: Parameters<typeof makeEnvironmentLayer>[1],
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -114,7 +119,7 @@ const withHarness = <A, E, R>(
           Layer.provideMerge(serverExposureLayer),
           Layer.provideMerge(DesktopAppSettings.layerTest()),
           Layer.provideMerge(DesktopWslEnvironment.layerTest()),
-          Layer.provideMerge(makeEnvironmentLayer(baseDir)),
+          Layer.provideMerge(makeEnvironmentLayer(baseDir, environmentOptions)),
         ),
       ),
     );
@@ -144,11 +149,28 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(first.bootstrap.port, 4888);
         assert.equal(first.bootstrap.host, "0.0.0.0");
         assert.equal(first.bootstrap.t3Home, environment.baseDir);
+        assert.equal(first.bootstrap.stateDirName, environment.stateDirName);
         assert.equal(first.bootstrap.tailscaleServeEnabled, true);
         assert.equal(first.bootstrap.tailscaleServePort, 8443);
         assert.match(first.bootstrap.desktopBootstrapToken, /^[0-9a-f]{48}$/i);
         assert.equal(second.bootstrap.desktopBootstrapToken, first.bootstrap.desktopBootstrapToken);
       }),
+    ),
+  );
+
+  it.effect("passes isolated DX state through the backend bootstrap", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const primary = yield* configuration.resolvePrimary;
+
+        assert.equal(environment.flavorId, "dx");
+        assert.equal(primary.bootstrap.t3Home, environment.baseDir);
+        assert.equal(primary.bootstrap.stateDirName, "dx");
+        assert.equal(primary.bootstrap.isolateStateRoot, true);
+      }),
+      { packagedFlavorId: "dx" },
     ),
   );
 
@@ -161,6 +183,7 @@ describe("DesktopBackendConfiguration", () => {
         const wsl = yield* configuration.resolveWsl({ port: 5000, distro: null });
 
         assert.equal(wsl.bootstrap.desktopBootstrapToken, primary.bootstrap.desktopBootstrapToken);
+        assert.equal(wsl.bootstrap.stateDirName, "userdata");
       }),
     ),
   );
