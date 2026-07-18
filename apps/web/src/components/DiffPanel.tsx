@@ -5,13 +5,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type {
-  ReviewChangeArea,
-  ReviewChangedFile,
-  ScopedThreadRef,
-  TurnId,
-  VcsStatusResult,
-} from "@t3tools/contracts";
+import type { ScopedThreadRef, TurnId, VcsStatusResult } from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -25,15 +19,7 @@ import {
   SearchIcon,
   TextWrapIcon,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
@@ -52,15 +38,15 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject, useThread } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings } from "../hooks/useSettings";
-import { useRefreshOnWindowFocus } from "../hooks/useRefreshOnWindowFocus";
+import { useRefreshOnWindowFocus } from "../features/git-review-controls/useRefreshOnWindowFocus";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
-import { ReviewChangesSidebar } from "./review/ReviewChangesSidebar";
+import { ReviewChangesSidebar } from "../features/git-review-controls/ReviewChangesSidebar";
 import {
   applyOptimisticWorkingTreeTransfers,
-  type OptimisticWorkingTreeTransfer,
   retainUnsettledWorkingTreeTransfers,
-} from "./review/optimisticWorkingTree";
+} from "../features/git-review-controls/optimisticWorkingTree";
+import { useWorkingTreeReviewMutations } from "../features/git-review-controls/useWorkingTreeReviewMutations";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
@@ -83,7 +69,7 @@ import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 import { toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
-import { DiffScopeMenuItems } from "./diffs/DiffScopeMenuItems";
+import { DiffScopeMenuItems } from "../features/git-review-controls/DiffScopeMenuItems";
 
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
@@ -218,12 +204,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
   const [baseRefQuery, setBaseRefQuery] = useState("");
-  const [pendingPaths, setPendingPaths] = useState<ReadonlySet<string>>(() => new Set());
-  const [optimisticTransfers, setOptimisticTransfers] = useState<
-    ReadonlyArray<OptimisticWorkingTreeTransfer>
-  >([]);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
-  const [mutationRefreshRequest, setMutationRefreshRequest] = useState(0);
   const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } = useCopyToClipboard({
     target: "commit hash",
     onError: (error) => {
@@ -233,10 +214,6 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         description: error.message,
       });
     },
-  });
-  const pendingPathsRef = useRef<{ key: string; paths: Set<string> }>({
-    key: "",
-    paths: new Set(),
   });
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<CollapsedDiffFilesState>(() => ({
     scopeKey: null,
@@ -263,13 +240,12 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
       : null,
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
-  const pendingContextKey = `${activeThread?.environmentId ?? ""}\0${activeCwd ?? ""}`;
-
-  useLayoutEffect(() => {
-    pendingPathsRef.current = { key: pendingContextKey, paths: new Set() };
-    setPendingPaths(new Set());
-    setOptimisticTransfers([]);
-  }, [pendingContextKey]);
+  const workingTreeMutations = useWorkingTreeReviewMutations({
+    environmentId: activeThread?.environmentId ?? null,
+    threadId: activeThread?.id ?? null,
+    cwd: activeCwd,
+    threadRef: routeThreadRef ?? null,
+  });
 
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
@@ -393,7 +369,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
       activeCwd &&
       diffSelection.kind === "working-tree" &&
       diffSelection.file &&
-      !pendingPaths.has(diffSelection.file.path)
+      !workingTreeMutations.pendingPaths.has(diffSelection.file.path)
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
@@ -455,9 +431,9 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   useRefreshOnWindowFocus(refreshDiffPreview, activeThread != null && activeCwd != null);
 
   useEffect(() => {
-    if (mutationRefreshRequest === 0) return;
+    if (workingTreeMutations.mutationRevision === 0) return;
     refreshDiffPreviewAfterMutation();
-  }, [mutationRefreshRequest]);
+  }, [workingTreeMutations.mutationRevision]);
 
   const selectedGitSource = branchDiffPreview.data?.sources.find(
     (source) =>
@@ -540,13 +516,17 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const gitDiff = selectedGitSource?.diff;
   const refreshedWorkingTreeManifest = overviewDiffPreview.data?.workingTree;
   const workingTreeManifest = useMemo(
-    () => applyOptimisticWorkingTreeTransfers(refreshedWorkingTreeManifest, optimisticTransfers),
-    [optimisticTransfers, refreshedWorkingTreeManifest],
+    () =>
+      applyOptimisticWorkingTreeTransfers(
+        refreshedWorkingTreeManifest,
+        workingTreeMutations.optimisticTransfers,
+      ),
+    [refreshedWorkingTreeManifest, workingTreeMutations.optimisticTransfers],
   );
 
   useEffect(() => {
     if (!refreshedWorkingTreeManifest || overviewDiffPreview.isPending) return;
-    setOptimisticTransfers((current) =>
+    workingTreeMutations.setOptimisticTransfers((current) =>
       retainUnsettledWorkingTreeTransfers(refreshedWorkingTreeManifest, current),
     );
   }, [overviewDiffPreview.isPending, refreshedWorkingTreeManifest]);
@@ -666,150 +646,6 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const selectCommit = (sha: string) => {
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectCommit(routeThreadRef, sha);
-  };
-  const selectWorkingTreeAll = () => {
-    if (!routeThreadRef) return;
-    useDiffPanelStore.getState().selectWorkingTreeAll(routeThreadRef);
-  };
-  const selectWorkingTreeFile = (area: ReviewChangeArea, filePath: string) => {
-    if (!routeThreadRef) return;
-    useDiffPanelStore.getState().selectWorkingTreeFile(routeThreadRef, area, filePath);
-  };
-  const stagePaths = useAtomCommand(reviewEnvironment.stagePaths, {
-    label: "stage review files",
-    reportFailure: false,
-  });
-  const unstagePaths = useAtomCommand(reviewEnvironment.unstagePaths, {
-    label: "unstage review files",
-    reportFailure: false,
-  });
-  const discardChanges = useAtomCommand(reviewEnvironment.discardChanges, {
-    label: "discard review changes",
-    reportFailure: false,
-  });
-  const updateWorkingTreePaths = (
-    area: ReviewChangeArea,
-    changes: ReadonlyArray<ReviewChangedFile>,
-  ) => {
-    if (!activeThread || !activeCwd || changes.length === 0) return;
-    const filePaths = changes.map((change) => change.path);
-    const requestContextKey = pendingContextKey;
-    const pending = pendingPathsRef.current.paths;
-    if (filePaths.some((filePath) => pending.has(filePath))) return;
-    for (const filePath of filePaths) pending.add(filePath);
-    setPendingPaths(new Set(pending));
-    setOptimisticTransfers((current) => [
-      ...current.filter(
-        (transfer) =>
-          !filePaths.some((filePath) => transfer.from === area && transfer.path === filePath),
-      ),
-      ...filePaths.map((path) => ({ from: area, path })),
-    ]);
-    if (routeThreadRef) {
-      for (const filePath of filePaths) {
-        if (area === "unstaged") {
-          useDiffPanelStore.getState().transferWorkingTreeFileToStaged(routeThreadRef, filePath);
-        } else {
-          useDiffPanelStore.getState().transferWorkingTreeFileToUnstaged(routeThreadRef, filePath);
-        }
-      }
-    }
-    void (async () => {
-      const result = await (area === "unstaged"
-        ? stagePaths({
-            environmentId: activeThread.environmentId,
-            input: { cwd: activeCwd, threadId: activeThread.id, paths: filePaths },
-          })
-        : unstagePaths({
-            environmentId: activeThread.environmentId,
-            input: {
-              cwd: activeCwd,
-              threadId: activeThread.id,
-              changes: changes.map(({ path, previousPath }) => ({ path, previousPath })),
-            },
-          }));
-      const isCurrentContext = pendingPathsRef.current.key === requestContextKey;
-      if (isCurrentContext) {
-        for (const filePath of filePaths) pendingPathsRef.current.paths.delete(filePath);
-        setPendingPaths(new Set(pendingPathsRef.current.paths));
-      }
-      if (!isCurrentContext) return;
-      if (result._tag === "Failure") {
-        setOptimisticTransfers((current) =>
-          current.filter(
-            (transfer) =>
-              !filePaths.some((filePath) => transfer.from === area && transfer.path === filePath),
-          ),
-        );
-        if (routeThreadRef) {
-          for (const filePath of filePaths) {
-            if (area === "unstaged") {
-              useDiffPanelStore
-                .getState()
-                .transferWorkingTreeFileToUnstaged(routeThreadRef, filePath);
-            } else {
-              useDiffPanelStore
-                .getState()
-                .transferWorkingTreeFileToStaged(routeThreadRef, filePath);
-            }
-          }
-        }
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add({
-            type: "error",
-            title: area === "unstaged" ? "Unable to stage files" : "Unable to unstage files",
-            description:
-              error instanceof Error
-                ? error.message
-                : `Could not ${area === "unstaged" ? "stage" : "unstage"} selected files.`,
-          });
-        }
-      }
-      if (pendingPathsRef.current.paths.size === 0) {
-        setMutationRefreshRequest((current) => current + 1);
-      }
-    })();
-  };
-  const discardWorkingTreeChanges = (changes: ReadonlyArray<ReviewChangedFile>) => {
-    if (!activeThread || !activeCwd || changes.length === 0) return;
-    const filePaths = changes.map((change) => change.path);
-    const requestContextKey = pendingContextKey;
-    const pending = pendingPathsRef.current.paths;
-    if (filePaths.some((filePath) => pending.has(filePath))) return;
-    for (const filePath of filePaths) pending.add(filePath);
-    setPendingPaths(new Set(pending));
-    void (async () => {
-      const result = await discardChanges({
-        environmentId: activeThread.environmentId,
-        input: {
-          cwd: activeCwd,
-          threadId: activeThread.id,
-          changes: changes.map(({ path, kind }) => ({ path, kind })),
-        },
-      });
-      const isCurrentContext = pendingPathsRef.current.key === requestContextKey;
-      if (isCurrentContext) {
-        for (const filePath of filePaths) pendingPathsRef.current.paths.delete(filePath);
-        setPendingPaths(new Set(pendingPathsRef.current.paths));
-      }
-      if (!isCurrentContext) return;
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add({
-            type: "error",
-            title: "Unable to discard changes",
-            description:
-              error instanceof Error ? error.message : "Could not discard selected changes.",
-          });
-        }
-        return;
-      }
-      if (pendingPathsRef.current.paths.size === 0) {
-        setMutationRefreshRequest((current) => current + 1);
-      }
-    })();
   };
   const selectBranchBaseRef = (baseRef: string | null) => {
     if (!routeThreadRef) return;
@@ -1083,13 +919,13 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                 unstaged={workingTreeManifest?.unstaged ?? []}
                 truncated={workingTreeManifest?.truncated ?? false}
                 selection={diffSelection.file}
-                pendingPaths={pendingPaths}
+                pendingPaths={workingTreeMutations.pendingPaths}
                 theme={resolvedTheme}
-                onSelectAll={selectWorkingTreeAll}
-                onSelectFile={selectWorkingTreeFile}
-                onStageChanges={(changes) => updateWorkingTreePaths("unstaged", changes)}
-                onUnstageChanges={(changes) => updateWorkingTreePaths("staged", changes)}
-                onDiscardChanges={discardWorkingTreeChanges}
+                onSelectAll={workingTreeMutations.selectAll}
+                onSelectFile={workingTreeMutations.selectFile}
+                onStageChanges={(changes) => workingTreeMutations.transfer("unstaged", changes)}
+                onUnstageChanges={(changes) => workingTreeMutations.transfer("staged", changes)}
+                onDiscardChanges={workingTreeMutations.discard}
               />
             )}
             <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

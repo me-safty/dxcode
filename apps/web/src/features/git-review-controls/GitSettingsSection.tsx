@@ -5,24 +5,25 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as Equal from "effect/Equal";
 
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
-import {
-  getCustomModelOptionsByInstance,
-  resolveAppModelSelectionState,
-} from "../../modelSelection";
+import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
+import { getCustomModelOptionsByInstance, resolveAppModelSelectionState } from "~/modelSelection";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
-} from "../../providerInstances";
-import { primaryServerProvidersAtom } from "../../state/server";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
-import { Button } from "../ui/button";
-import { DraftInput } from "../ui/draft-input";
-import { Switch } from "../ui/switch";
-import { Textarea } from "../ui/textarea";
-import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+} from "~/providerInstances";
+import { primaryServerProvidersAtom } from "~/state/server";
+import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
+import { TraitsPicker } from "~/components/chat/TraitsPicker";
+import { Button } from "~/components/ui/button";
+import { DraftInput } from "~/components/ui/draft-input";
+import { Switch } from "~/components/ui/switch";
+import { Textarea } from "~/components/ui/textarea";
+import {
+  SettingResetButton,
+  SettingsRow,
+  SettingsSection,
+} from "~/components/settings/settingsLayout";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 

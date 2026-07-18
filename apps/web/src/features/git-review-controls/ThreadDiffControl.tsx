@@ -7,7 +7,7 @@ import { useClientSettings } from "~/hooks/useSettings";
 import { useEnvironmentQuery } from "~/state/query";
 import { reviewEnvironment } from "~/state/review";
 import type { TurnDiffSummary } from "~/types";
-import { DiffScopeMenuItems, orderDiffTurns } from "~/components/diffs/DiffScopeMenuItems";
+import { DiffScopeMenuItems, orderDiffTurns } from "./DiffScopeMenuItems";
 import { Button } from "~/components/ui/button";
 import { ButtonGroup } from "~/components/ui/group";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "~/components/ui/menu";

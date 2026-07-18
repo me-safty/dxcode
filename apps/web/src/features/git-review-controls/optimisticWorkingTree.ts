@@ -1,5 +1,7 @@
 import type { ReviewChangeArea, ReviewWorkingTreeManifest } from "@t3tools/contracts";
 
+/** Optimistic projection for staged/unstaged review mutations. */
+
 export interface OptimisticWorkingTreeTransfer {
   readonly from: ReviewChangeArea;
   readonly path: string;

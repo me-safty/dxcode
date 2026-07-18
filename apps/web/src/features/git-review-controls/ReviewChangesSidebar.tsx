@@ -10,9 +10,9 @@ import {
 import { useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { PierreEntryIcon } from "../chat/PierreEntryIcon";
-import { DiffStatLabel, hasNonZeroStat } from "../chat/DiffStatLabel";
-import { Button } from "../ui/button";
+import { PierreEntryIcon } from "~/components/chat/PierreEntryIcon";
+import { DiffStatLabel, hasNonZeroStat } from "~/components/chat/DiffStatLabel";
+import { Button } from "~/components/ui/button";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -21,8 +21,8 @@ import {
   AlertDialogHeader,
   AlertDialogPopup,
   AlertDialogTitle,
-} from "../ui/alert-dialog";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+} from "~/components/ui/alert-dialog";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 interface ReviewFileSelection {
   readonly area: ReviewChangeArea;

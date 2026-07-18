@@ -13,7 +13,7 @@ import {
   DropdownMenuSubTrigger,
 } from "~/components/ui/menu";
 
-interface DiffScopeMenuItemsProps {
+export interface DiffScopeMenuItemsProps {
   readonly selection: DiffPanelSelection;
   readonly commits: ReadonlyArray<ReviewCommit>;
   readonly commitsPending: boolean;

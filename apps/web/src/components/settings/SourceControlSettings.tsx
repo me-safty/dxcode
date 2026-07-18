@@ -49,7 +49,7 @@ import {
 } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
-import { GitSettingsSection } from "./GitSettingsSection";
+import { GitSettingsSection } from "~/features/git-review-controls/GitSettingsSection";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],

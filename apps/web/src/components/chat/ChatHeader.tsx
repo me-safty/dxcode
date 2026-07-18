@@ -18,7 +18,7 @@ import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
 import type { TurnDiffSummary } from "~/types";
-import { ThreadDiffControl } from "./ThreadDiffControl";
+import { ThreadDiffControl } from "~/features/git-review-controls/ThreadDiffControl";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;

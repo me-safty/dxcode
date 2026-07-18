@@ -93,7 +93,7 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
-import { useRefreshOnWindowFocus } from "~/hooks/useRefreshOnWindowFocus";
+import { useRefreshOnWindowFocus } from "~/features/git-review-controls/useRefreshOnWindowFocus";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { reviewEnvironment } from "~/state/review";
 
