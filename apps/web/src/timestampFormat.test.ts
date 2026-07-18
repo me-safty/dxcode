@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  formatCommitTimestamp,
   formatElapsedDurationLabel,
   formatExpiresInLabel,
+  formatRelativeTimeLabel,
   formatRelativeTimeUntilLabel,
-  formatShortTimestamp,
   getTimestampFormatOptions,
 } from "./timestampFormat";
 
@@ -36,7 +35,7 @@ describe("getTimestampFormatOptions", () => {
   });
 });
 
-describe("formatCommitTimestamp", () => {
+describe("formatRelativeTimeLabel", () => {
   const localDate = (dayOffset: number, hour = 9, minute = 30) =>
     new Date(2026, 3, 7 + dayOffset, hour, minute).toISOString();
 
@@ -49,30 +48,24 @@ describe("formatCommitTimestamp", () => {
     vi.useRealTimers();
   });
 
-  it("shows the configured wall-clock time for commits made today", () => {
-    const committedAt = localDate(0);
-    expect(formatCommitTimestamp(committedAt, "24-hour")).toBe(
-      formatShortTimestamp(committedAt, "24-hour"),
-    );
+  it("uses compact relative time for activity from today", () => {
+    expect(formatRelativeTimeLabel(localDate(0, 11, 59))).toBe("1m ago");
+    expect(formatRelativeTimeLabel(localDate(0, 9, 30))).toBe("2h ago");
   });
 
-  it("uses calendar-day labels for recent commits", () => {
-    expect(formatCommitTimestamp(localDate(-1), "locale")).toBe("yesterday");
-    expect(formatCommitTimestamp(localDate(-2), "locale")).toBe("2 days ago");
-    expect(formatCommitTimestamp(localDate(-6), "locale")).toBe("6 days ago");
+  it("uses calendar-day labels for recent activity", () => {
+    expect(formatRelativeTimeLabel(localDate(-1))).toBe("yesterday");
+    expect(formatRelativeTimeLabel(localDate(-2))).toBe("2 days ago");
+    expect(formatRelativeTimeLabel(localDate(-6))).toBe("6 days ago");
   });
 
-  it("groups older commits into weeks, months, and years", () => {
-    expect(formatCommitTimestamp(localDate(-7), "locale")).toBe("last week");
-    expect(formatCommitTimestamp(localDate(-14), "locale")).toBe("2 weeks ago");
-    expect(formatCommitTimestamp(localDate(-28), "locale")).toBe("last month");
-    expect(formatCommitTimestamp(localDate(-60), "locale")).toBe("2 months ago");
-    expect(formatCommitTimestamp(localDate(-365), "locale")).toBe("last year");
-    expect(formatCommitTimestamp(localDate(-730), "locale")).toBe("2 years ago");
-  });
-
-  it("returns an empty label for an invalid commit date", () => {
-    expect(formatCommitTimestamp("not-a-date", "locale")).toBe("");
+  it("groups older activity into weeks, months, and years", () => {
+    expect(formatRelativeTimeLabel(localDate(-7))).toBe("last week");
+    expect(formatRelativeTimeLabel(localDate(-14))).toBe("2 weeks ago");
+    expect(formatRelativeTimeLabel(localDate(-28))).toBe("last month");
+    expect(formatRelativeTimeLabel(localDate(-60))).toBe("2 months ago");
+    expect(formatRelativeTimeLabel(localDate(-365))).toBe("last year");
+    expect(formatRelativeTimeLabel(localDate(-730))).toBe("2 years ago");
   });
 });
 

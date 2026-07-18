@@ -17,6 +17,8 @@ import ProjectScriptsControl, {
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
+import type { TurnDiffSummary } from "~/types";
+import { ThreadDiffControl } from "./ThreadDiffControl";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -31,6 +33,10 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
+  diffAvailable: boolean;
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
+  inferredTurnCountByTurnId: Readonly<Record<string, number>>;
+  onOpenDiff: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -65,6 +71,10 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  diffAvailable,
+  turnDiffSummaries,
+  inferredTurnCountByTurnId,
+  onOpenDiff,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -119,6 +129,14 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
+        <ThreadDiffControl
+          threadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
+          cwd={gitCwd}
+          available={diffAvailable}
+          turnDiffSummaries={turnDiffSummaries}
+          inferredTurnCountByTurnId={inferredTurnCountByTurnId}
+          onOpenDiff={onOpenDiff}
+        />
         {activeProjectName && (
           <GitActionsControl
             gitCwd={gitCwd}

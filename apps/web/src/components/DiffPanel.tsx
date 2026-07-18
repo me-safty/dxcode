@@ -73,15 +73,7 @@ import {
   ComboboxPopup,
   ComboboxTrigger,
 } from "./ui/combobox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "./ui/menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -91,10 +83,21 @@ import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 import { toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
+import { DiffScopeMenuItems } from "./diffs/DiffScopeMenuItems";
 
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
+
+function useRetainedQueryData<A>(key: string, data: A | null): A | null {
+  const retainedRef = useRef<{ readonly key: string; readonly data: A } | null>(null);
+
+  useEffect(() => {
+    if (data !== null) retainedRef.current = { key, data };
+  }, [data, key]);
+
+  return data ?? (retainedRef.current?.key === key ? retainedRef.current.data : null);
+}
 
 interface CollapsedDiffFilesState {
   readonly scopeKey: string | null;
@@ -799,69 +802,17 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
             <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-60">
-            <DropdownMenuItem onClick={() => selectGitScope("unstaged")}>
-              <span>Working tree</span>
-              {diffSelection.kind === "working-tree" && <CheckIcon className="ml-auto" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => selectGitScope("branch")}>
-              <span>Branch changes</span>
-              {diffSelection.kind === "branch" && <CheckIcon className="ml-auto" />}
-            </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Commit</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-96 w-96 overflow-y-auto">
-                {overviewDiffPreview.data?.commits.length ? (
-                  overviewDiffPreview.data.commits.map((commit) => (
-                    <DropdownMenuItem key={commit.sha} onClick={() => selectCommit(commit.sha)}>
-                      <span className="min-w-0 flex-1 truncate" title={commit.title}>
-                        {commit.title}
-                      </span>
-                      <span className="ml-3 shrink-0 text-xs tabular-nums text-muted-foreground">
-                        {formatCommitTimestamp(commit.committedAt, settings.timestampFormat)}
-                      </span>
-                      {commit.sha === selectedCommitSha && <CheckIcon className="ml-1 shrink-0" />}
-                    </DropdownMenuItem>
-                  ))
-                ) : (
-                  <DropdownMenuItem disabled>
-                    {overviewDiffPreview.isPending ? "Loading commits…" : "No branch commits"}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuItem
-              onClick={() => {
-                if (latestTurn) selectTurn(latestTurn.turnId);
-              }}
-            >
-              <span>Latest turn</span>
-              {selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId && (
-                <CheckIcon className="ml-auto" />
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-64">
-                {orderedTurnDiffSummaries.map((summary) => {
-                  const turnCount =
-                    summary.checkpointTurnCount ??
-                    inferredCheckpointTurnCountByTurnId[summary.turnId] ??
-                    "?";
-                  return (
-                    <DropdownMenuItem
-                      key={summary.turnId}
-                      onClick={() => selectTurn(summary.turnId)}
-                    >
-                      <span>Turn {turnCount}</span>
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
-                      </span>
-                      {summary.turnId === selectedTurn?.turnId && <CheckIcon className="ml-1" />}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            <DiffScopeMenuItems
+              selection={diffSelection}
+              commits={overviewDiffPreview.data?.commits ?? []}
+              commitsPending={overviewDiffPreview.isPending}
+              turns={turnDiffSummaries}
+              inferredTurnCountByTurnId={inferredCheckpointTurnCountByTurnId}
+              onSelectWorkingTree={() => selectGitScope("unstaged")}
+              onSelectBranch={() => selectGitScope("branch")}
+              onSelectCommit={selectCommit}
+              onSelectTurn={selectTurn}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
         {selectedCommitSha && (

@@ -5049,6 +5049,10 @@ function ChatViewContent(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
+            diffAvailable={isServerThread && isGitRepo}
+            turnDiffSummaries={turnDiffSummaries}
+            inferredTurnCountByTurnId={inferredCheckpointTurnCountByTurnId}
+            onOpenDiff={addDiffSurface}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}

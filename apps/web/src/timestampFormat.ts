@@ -89,53 +89,46 @@ function localCalendarDay(date: Date): number {
 }
 
 /**
- * Compact timestamp for a commit list. Today's commits show their wall-clock time;
- * older commits use calendar-aware relative labels such as "yesterday" and "last week".
- */
-export function formatCommitTimestamp(
-  isoDate: string,
-  timestampFormat: TimestampFormat,
-  nowMs: number = Date.now(),
-): string {
-  const committedAt = new Date(isoDate);
-  if (Number.isNaN(committedAt.getTime())) return "";
-
-  const today = new Date(nowMs);
-  const daysAgo = localCalendarDay(today) - localCalendarDay(committedAt);
-  if (daysAgo <= 0) return formatShortTimestamp(isoDate, timestampFormat);
-  if (daysAgo === 1) return "yesterday";
-  if (daysAgo < 7) return `${daysAgo} days ago`;
-
-  if (daysAgo < 28) {
-    const weeksAgo = Math.floor(daysAgo / 7);
-    return weeksAgo === 1 ? "last week" : `${weeksAgo} weeks ago`;
-  }
-
-  if (daysAgo < 365) {
-    const monthsAgo = Math.max(1, Math.floor(daysAgo / 30));
-    return monthsAgo === 1 ? "last month" : `${monthsAgo} months ago`;
-  }
-
-  const yearsAgo = Math.floor(daysAgo / 365);
-  return yearsAgo === 1 ? "last year" : `${yearsAgo} years ago`;
-}
-
-/**
  * Format a relative time string from an ISO date.
  * Returns `{ value: "20s", suffix: "ago" }` or `{ value: "just now", suffix: null }`
  * so callers can style the numeric portion independently.
  */
 export function formatRelativeTime(isoDate: string): { value: string; suffix: string | null } {
-  const diffMs = Date.now() - new Date(isoDate).getTime();
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return { value: "just now", suffix: null };
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
   if (diffMs < 0) return { value: "just now", suffix: null };
+
+  const daysAgo = localCalendarDay(now) - localCalendarDay(date);
+  if (daysAgo === 1) return { value: "yesterday", suffix: null };
+  if (daysAgo > 1 && daysAgo < 7) return { value: `${daysAgo} days`, suffix: "ago" };
+  if (daysAgo >= 7 && daysAgo < 28) {
+    const weeksAgo = Math.floor(daysAgo / 7);
+    return weeksAgo === 1
+      ? { value: "last week", suffix: null }
+      : { value: `${weeksAgo} weeks`, suffix: "ago" };
+  }
+  if (daysAgo >= 28 && daysAgo < 365) {
+    const monthsAgo = Math.max(1, Math.floor(daysAgo / 30));
+    return monthsAgo === 1
+      ? { value: "last month", suffix: null }
+      : { value: `${monthsAgo} months`, suffix: "ago" };
+  }
+  if (daysAgo >= 365) {
+    const yearsAgo = Math.floor(daysAgo / 365);
+    return yearsAgo === 1
+      ? { value: "last year", suffix: null }
+      : { value: `${yearsAgo} years`, suffix: "ago" };
+  }
+
   const seconds = Math.floor(diffMs / 1000);
   if (seconds < 60) return { value: "just now", suffix: null };
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return { value: `${minutes}m`, suffix: "ago" };
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return { value: `${hours}h`, suffix: "ago" };
-  const days = Math.floor(hours / 24);
-  return { value: `${days}d`, suffix: "ago" };
+  return { value: `${hours}h`, suffix: "ago" };
 }
 
 export function formatRelativeTimeLabel(isoDate: string) {
