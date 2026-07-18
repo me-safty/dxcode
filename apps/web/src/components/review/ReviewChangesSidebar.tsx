@@ -11,7 +11,7 @@ import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { PierreEntryIcon } from "../chat/PierreEntryIcon";
-import { DiffStatLabel } from "../chat/DiffStatLabel";
+import { DiffStatLabel, hasNonZeroStat } from "../chat/DiffStatLabel";
 import { Button } from "../ui/button";
 import {
   AlertDialog,
@@ -95,6 +95,14 @@ export function ReviewChangesSidebar(props: ReviewChangesSidebarProps) {
     staged: false,
     unstaged: false,
   });
+  const allChanges = [...props.staged, ...props.unstaged];
+  const totalStat = allChanges.reduce(
+    (total, file) => ({
+      additions: total.additions + file.insertions,
+      deletions: total.deletions + file.deletions,
+    }),
+    { additions: 0, deletions: 0 },
+  );
 
   const renderSection = (area: ReviewChangeArea, files: ReadonlyArray<ReviewChangedFile>) => {
     const isCollapsed = collapsed[area];
@@ -282,8 +290,16 @@ export function ReviewChangesSidebar(props: ReviewChangesSidebarProps) {
           >
             <FileDiffIcon className="size-3.5 shrink-0 text-primary" />
             <span className="min-w-0 flex-1 truncate">View all changes</span>
+            {hasNonZeroStat(totalStat) && (
+              <DiffStatLabel
+                additions={totalStat.additions}
+                deletions={totalStat.deletions}
+                className="shrink-0 text-[10px]"
+                layout="inline"
+              />
+            )}
             <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none tabular-nums text-muted-foreground">
-              {props.staged.length + props.unstaged.length}
+              {allChanges.length}
             </span>
           </button>
         </div>

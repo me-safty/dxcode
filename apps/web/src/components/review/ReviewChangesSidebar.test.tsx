@@ -62,6 +62,15 @@ describe("ReviewChangesSidebar", () => {
     expect(html).toContain("View all changes");
     expect(html).toContain('aria-current="true"');
     expect(html).toContain("lucide-file-diff");
+    expect(html).toContain(">+6</span>");
+    expect(html).toContain(">-1</span>");
+  });
+
+  it("hides the aggregate line changes when both totals are zero", () => {
+    const html = renderSidebar(false, statusFiles);
+
+    expect(html).not.toContain(">+0</span>");
+    expect(html).not.toContain(">-0</span>");
   });
 
   it("shows a bulk discard action for unstaged files", () => {
