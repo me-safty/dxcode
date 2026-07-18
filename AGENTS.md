@@ -54,31 +54,6 @@ After merge, create unrelated work from `dx/main`, not the completed feature bra
 For unpublished personal branches, rebasing is acceptable. For shared branches, prefer merges. Preserve real
 merge ancestry for all upstream synchronization work.
 
-## Upstream Synchronization
-
-Never merge `upstream/main` directly into `dx/main`. Detect and stage upstream changes using the repository
-automation:
-
-```bash
-git fetch upstream
-bun run sync:upstream -- --dry-run --no-fetch
-bun run sync:upstream -- --no-fetch
-```
-
-The non-dry run creates a `sync/upstream-*` branch and isolated worktree. Resolve conflicts and validate only
-there. Keep conflict fixes limited to reconciliation; do not add unrelated DX features. Then push the sync
-branch and open a PR into `dx/main`. The automation intentionally does not promote, push, or delete work.
-
-After the sync PR reaches `dx/main`, update active feature branches with:
-
-```bash
-git switch feature/<name>
-git merge dx/main
-```
-
-See `docs/operations/upstream-sync.md` and `docs/adr/0001-desktop-distribution-flavors.md` before changing
-this model.
-
 ## Worktree Ownership
 
 Keep the primary durable workspace on `dx/main`. Give each feature and upstream sync its own worktree. Use
