@@ -26,14 +26,99 @@ import {
 } from "~/components/settings/settingsLayout";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+type GenerationModelSetting = "textGenerationModelSelection" | "reviewStackModelSelection";
+
+function GenerationModelSettingsRow(props: {
+  setting: GenerationModelSetting;
+  title: string;
+  description: string;
+}) {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const selection = resolveAppModelSelectionState(
+    settings,
+    serverProviders,
+    settings[props.setting],
+  );
+  const entries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
+  );
+  const entry = entries.find((candidate) => candidate.instanceId === selection.instanceId);
+  const provider: ProviderDriverKind = entry?.driverKind ?? DEFAULT_DRIVER_KIND;
+  const modelOptionsByInstance = getCustomModelOptionsByInstance(
+    settings,
+    serverProviders,
+    selection.instanceId,
+    selection.model,
+  );
+  const defaultSelection = DEFAULT_UNIFIED_SETTINGS[props.setting];
+  const isDirty = !Equal.equals(settings[props.setting] ?? null, defaultSelection ?? null);
+  const patch = (value: typeof selection) =>
+    props.setting === "textGenerationModelSelection"
+      ? { textGenerationModelSelection: value }
+      : { reviewStackModelSelection: value };
+  const saveSelection = (value: typeof selection) => {
+    updateSettings({
+      ...patch(resolveAppModelSelectionState(settings, serverProviders, value)),
+    });
+  };
+
+  return (
+    <SettingsRow
+      title={props.title}
+      description={props.description}
+      resetAction={
+        isDirty ? (
+          <SettingResetButton
+            label={props.title.toLowerCase()}
+            onClick={() => updateSettings({ ...patch(defaultSelection) })}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <ProviderModelPicker
+            activeInstanceId={selection.instanceId}
+            model={selection.model}
+            lockedProvider={null}
+            instanceEntries={entries}
+            modelOptionsByInstance={modelOptionsByInstance}
+            triggerVariant="outline"
+            triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+            onInstanceModelChange={(instanceId, model) =>
+              saveSelection(createModelSelection(instanceId, model))
+            }
+          />
+          <TraitsPicker
+            provider={provider}
+            models={entry?.models ?? []}
+            model={selection.model}
+            prompt=""
+            onPromptChange={() => {}}
+            modelOptions={selection.options}
+            allowPromptInjectedEffort={false}
+            triggerVariant="outline"
+            triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+            onModelOptionsChange={(options) =>
+              saveSelection(createModelSelection(selection.instanceId, selection.model, options))
+            }
+          />
+        </div>
+      }
+    />
+  );
+}
 
 export function GitSettingsSection() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const [commitInstructions, setCommitInstructions] = useState(settings.gitCommitInstructions);
   const [pullRequestInstructions, setPullRequestInstructions] = useState(
     settings.gitPullRequestInstructions,
+  );
+  const [reviewStackInstructions, setReviewStackInstructions] = useState(
+    settings.reviewStackInstructions,
   );
   useEffect(() => {
     setCommitInstructions(settings.gitCommitInstructions);
@@ -41,98 +126,52 @@ export function GitSettingsSection() {
   useEffect(() => {
     setPullRequestInstructions(settings.gitPullRequestInstructions);
   }, [settings.gitPullRequestInstructions]);
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
-  const textGenInstanceId = textGenerationModelSelection.instanceId;
-  const textGenModel = textGenerationModelSelection.model;
-  const textGenModelOptions = textGenerationModelSelection.options;
-  const gitModelInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
-  );
-  const textGenInstanceEntry = gitModelInstanceEntries.find(
-    (entry) => entry.instanceId === textGenInstanceId,
-  );
-  const textGenProvider: ProviderDriverKind =
-    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
-  const gitModelOptionsByInstance = getCustomModelOptionsByInstance(
-    settings,
-    serverProviders,
-    textGenInstanceId,
-    textGenModel,
-  );
-  const isGitWritingModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
+  useEffect(() => {
+    setReviewStackInstructions(settings.reviewStackInstructions);
+  }, [settings.reviewStackInstructions]);
 
   return (
     <SettingsSection title="Git preferences">
-      <SettingsRow
+      <GenerationModelSettingsRow
+        setting="textGenerationModelSelection"
         title="Text generation model"
         description="Used for generated commit messages, pull request content, and branch names."
-        resetAction={
-          isGitWritingModelDirty ? (
-            <SettingResetButton
-              label="text generation model"
-              onClick={() =>
-                updateSettings({
-                  textGenerationModelSelection:
-                    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <ProviderModelPicker
-              activeInstanceId={textGenInstanceId}
-              model={textGenModel}
-              lockedProvider={null}
-              instanceEntries={gitModelInstanceEntries}
-              modelOptionsByInstance={gitModelOptionsByInstance}
-              triggerVariant="outline"
-              triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-              onInstanceModelChange={(instanceId, model) => {
-                updateSettings({
-                  textGenerationModelSelection: resolveAppModelSelectionState(
-                    {
-                      ...settings,
-                      textGenerationModelSelection: createModelSelection(instanceId, model),
-                    },
-                    serverProviders,
-                  ),
-                });
-              }}
-            />
-            <TraitsPicker
-              provider={textGenProvider}
-              models={textGenInstanceEntry?.models ?? []}
-              model={textGenModel}
-              prompt=""
-              onPromptChange={() => {}}
-              modelOptions={textGenModelOptions}
-              allowPromptInjectedEffort={false}
-              triggerVariant="outline"
-              triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-              onModelOptionsChange={(nextOptions) => {
-                updateSettings({
-                  textGenerationModelSelection: resolveAppModelSelectionState(
-                    {
-                      ...settings,
-                      textGenerationModelSelection: createModelSelection(
-                        textGenInstanceId,
-                        textGenModel,
-                        nextOptions,
-                      ),
-                    },
-                    serverProviders,
-                  ),
-                });
-              }}
-            />
-          </div>
-        }
       />
+
+      <GenerationModelSettingsRow
+        setting="reviewStackModelSelection"
+        title="Review stack model"
+        description="Used only for generated review stack snapshots."
+      />
+
+      <SettingsRow
+        title="Review stack instructions"
+        description="Added to review stack generation prompts."
+        className="pb-4"
+      >
+        <div className="space-y-2 pb-4">
+          <Textarea
+            value={reviewStackInstructions}
+            onChange={(event) => setReviewStackInstructions(event.target.value)}
+            placeholder="Example: Prioritize concurrency and failure recovery."
+            aria-label="Review stack generation instructions"
+            className="mt-3"
+          />
+          <div className="flex justify-end">
+            <Button
+              size="xs"
+              disabled={reviewStackInstructions.trim() === settings.reviewStackInstructions}
+              onClick={() => {
+                const next = reviewStackInstructions.trim();
+                setReviewStackInstructions(next);
+                updateSettings({ reviewStackInstructions: next });
+              }}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      </SettingsRow>
 
       <SettingsRow
         title="Commit instructions"

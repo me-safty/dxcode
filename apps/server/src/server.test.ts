@@ -104,6 +104,7 @@ import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
+import * as ReviewStackService from "./reviewStack/Service.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -629,7 +630,18 @@ const buildAppUnderTest = (options?: {
       Layer.provide(gitManagerLayer),
       Layer.provide(gitVcsDriverLayer),
       Layer.provide(gitWorkflowLayer),
-      Layer.provide(reviewLayer),
+      Layer.provide(
+        Layer.mergeAll(
+          reviewLayer,
+          Layer.mock(ReviewStackService.ReviewStackService)({
+            ensure: () => Effect.die("unused review stack ensure"),
+            listSnapshots: () => Effect.succeed([]),
+            getSnapshot: () => Effect.die("unused review stack snapshot"),
+            cancel: () => Effect.die("unused review stack cancel"),
+            events: Stream.empty,
+          }),
+        ),
+      ),
       Layer.provide(vcsProvisioningLayer),
       Layer.provide(
         Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({

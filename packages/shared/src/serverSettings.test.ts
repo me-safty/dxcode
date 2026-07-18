@@ -161,6 +161,25 @@ describe("serverSettings helpers", () => {
     });
   });
 
+  it("updates review selection independently", () => {
+    const next = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      reviewStackModelSelection: {
+        instanceId: ProviderInstanceId.make("opencode"),
+        model: "openai/gpt-5",
+        options: [{ id: "variant", value: "high" }],
+      },
+    });
+
+    expect(next.reviewStackModelSelection).toEqual({
+      instanceId: "opencode",
+      model: "openai/gpt-5",
+      options: [{ id: "variant", value: "high" }],
+    });
+    expect(next.textGenerationModelSelection).toEqual(
+      DEFAULT_SERVER_SETTINGS.textGenerationModelSelection,
+    );
+  });
+
   it("replaces providerInstances maps so omitted instance fields are cleared", () => {
     const codexId = ProviderInstanceId.make("codex");
     const current = {

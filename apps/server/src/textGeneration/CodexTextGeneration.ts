@@ -3,7 +3,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -20,6 +19,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildReviewStackPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -72,9 +72,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     operation: string,
     prefix: string,
     content: string,
-  ): Effect.Effect<string, TextGenerationError, Scope.Scope> =>
+  ): Effect.Effect<string, TextGenerationError> =>
     fileSystem
-      .makeTempFileScoped({
+      .makeTempFile({
         prefix: `t3code-${prefix}-${process.pid}-`,
       })
       .pipe(
@@ -83,7 +83,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           (cause) =>
             new TextGenerationError({
               operation,
-              detail: `Failed to write temp file`,
+              detail: `Failed to write temp file: ${String(cause)}`,
               cause,
             }),
         ),
@@ -92,12 +92,18 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   const safeUnlink = (filePath: string): Effect.Effect<void, never> =>
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
+  const safeRemoveTempFile = (filePath: string): Effect.Effect<void, never> =>
+    fileSystem
+      .remove(path.dirname(filePath), { recursive: true })
+      .pipe(Effect.catch(() => Effect.void));
+
   const encodeJsonForOperation = (
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateReviewStack",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -116,7 +122,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateReviewStack",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -158,7 +165,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateReviewStack";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -248,10 +256,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     });
 
     const cleanup = Effect.all(
-      [schemaPath, outputPath, ...cleanupPaths].map((filePath) => safeUnlink(filePath)),
-      {
-        concurrency: "unbounded",
-      },
+      [
+        safeRemoveTempFile(schemaPath),
+        safeRemoveTempFile(outputPath),
+        ...cleanupPaths.map((filePath) => safeUnlink(filePath)),
+      ],
+      { concurrency: "unbounded" },
     ).pipe(Effect.asVoid);
 
     return yield* Effect.gen(function* () {
@@ -397,10 +407,23 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateReviewStack: TextGeneration.TextGeneration["Service"]["generateReviewStack"] =
+    Effect.fn("CodexTextGeneration.generateReviewStack")(function* (input) {
+      const { prompt, outputSchema } = buildReviewStackPrompt(input);
+      return yield* runCodexJson({
+        operation: "generateReviewStack",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateReviewStack,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

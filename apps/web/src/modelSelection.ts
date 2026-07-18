@@ -276,11 +276,13 @@ export function getCustomModelOptionsByInstance(
 export function resolveAppModelSelectionState(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
+  selectionOverride?: ModelSelection,
 ): ModelSelection {
-  const selection = settings.textGenerationModelSelection ?? {
-    instanceId: DEFAULT_TEXT_GENERATION_INSTANCE_ID,
-    model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
-  };
+  const selection = selectionOverride ??
+    settings.textGenerationModelSelection ?? {
+      instanceId: DEFAULT_TEXT_GENERATION_INSTANCE_ID,
+      model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+    };
   const entries = deriveProviderInstanceEntries(providers);
   const selectedEntry = entries.find(
     (entry) => entry.instanceId === selection.instanceId && entry.enabled && entry.isAvailable,

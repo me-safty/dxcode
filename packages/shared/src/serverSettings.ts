@@ -48,6 +48,19 @@ function shouldReplaceTextGenerationModelSelection(
   return Boolean(patch && (patch.instanceId !== undefined || patch.model !== undefined));
 }
 
+function mergeModelSelection(
+  current: ServerSettings["textGenerationModelSelection"],
+  patch: ServerSettingsPatch["textGenerationModelSelection"] | undefined,
+) {
+  if (!patch) return current;
+  const instanceId = patch.instanceId ?? current.instanceId;
+  const model = patch.model ?? current.model;
+  const options = shouldReplaceTextGenerationModelSelection(patch)
+    ? patch.options
+    : mergeModelSelectionOptionsById({ current: current.options, patch: patch.options });
+  return createModelSelection(instanceId, model, options);
+}
+
 function mergeModelSelectionOptionsById(input: {
   current: ReadonlyArray<{ readonly id: string; readonly value: string | boolean }> | undefined;
   patch: ReadonlyArray<{ readonly id: string; readonly value: string | boolean }> | undefined;
@@ -76,6 +89,7 @@ export function applyServerSettingsPatch(
   patch: ServerSettingsPatch,
 ): ServerSettings {
   const selectionPatch = patch.textGenerationModelSelection;
+  const reviewSelectionPatch = patch.reviewStackModelSelection;
   const { automaticGitFetchInterval, ...patchForMerge } = patch;
   const next = deepMerge(current, patchForMerge);
   const nextWithReplacements = {
@@ -85,21 +99,19 @@ export function applyServerSettingsPatch(
       : {}),
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
   };
-  if (!selectionPatch) {
+  if (!selectionPatch && !reviewSelectionPatch) {
     return nextWithReplacements;
   }
 
-  const instanceId = selectionPatch.instanceId ?? current.textGenerationModelSelection.instanceId;
-  const model = selectionPatch.model ?? current.textGenerationModelSelection.model;
-  const options = shouldReplaceTextGenerationModelSelection(selectionPatch)
-    ? selectionPatch.options
-    : mergeModelSelectionOptionsById({
-        current: current.textGenerationModelSelection.options,
-        patch: selectionPatch.options,
-      });
-
   return {
     ...nextWithReplacements,
-    textGenerationModelSelection: createModelSelection(instanceId, model, options),
+    textGenerationModelSelection: mergeModelSelection(
+      current.textGenerationModelSelection,
+      selectionPatch,
+    ),
+    reviewStackModelSelection: mergeModelSelection(
+      current.reviewStackModelSelection,
+      reviewSelectionPatch,
+    ),
   };
 }

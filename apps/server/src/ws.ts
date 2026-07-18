@@ -92,6 +92,7 @@ import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
+import * as ReviewStackService from "./reviewStack/Service.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -324,6 +325,11 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.reviewDiscardChanges, AuthOrchestrationOperateScope],
   [WS_METHODS.reviewStagePaths, AuthOrchestrationOperateScope],
   [WS_METHODS.reviewUnstagePaths, AuthOrchestrationOperateScope],
+  [WS_METHODS.reviewStackEnsure, AuthReviewWriteScope],
+  [WS_METHODS.reviewStackListSnapshots, AuthOrchestrationReadScope],
+  [WS_METHODS.reviewStackGetSnapshot, AuthOrchestrationReadScope],
+  [WS_METHODS.reviewStackCancel, AuthReviewWriteScope],
+  [WS_METHODS.reviewStackSubscribeEvents, AuthOrchestrationReadScope],
   [WS_METHODS.terminalOpen, AuthTerminalOperateScope],
   [WS_METHODS.terminalAttach, AuthTerminalOperateScope],
   [WS_METHODS.terminalWrite, AuthTerminalOperateScope],
@@ -405,6 +411,7 @@ const makeWsRpcLayer = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
+      const reviewStack = yield* ReviewStackService.ReviewStackService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
@@ -1649,6 +1656,26 @@ const makeWsRpcLayer = (
             review.unstagePaths(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "review" },
           ),
+        [WS_METHODS.reviewStackEnsure]: (input) =>
+          observeRpcEffect(WS_METHODS.reviewStackEnsure, reviewStack.ensure(input), {
+            "rpc.aggregate": "reviewStack",
+          }),
+        [WS_METHODS.reviewStackListSnapshots]: (input) =>
+          observeRpcEffect(WS_METHODS.reviewStackListSnapshots, reviewStack.listSnapshots(input), {
+            "rpc.aggregate": "reviewStack",
+          }),
+        [WS_METHODS.reviewStackGetSnapshot]: (input) =>
+          observeRpcEffect(WS_METHODS.reviewStackGetSnapshot, reviewStack.getSnapshot(input), {
+            "rpc.aggregate": "reviewStack",
+          }),
+        [WS_METHODS.reviewStackCancel]: (input) =>
+          observeRpcEffect(WS_METHODS.reviewStackCancel, reviewStack.cancel(input), {
+            "rpc.aggregate": "reviewStack",
+          }),
+        [WS_METHODS.reviewStackSubscribeEvents]: () =>
+          observeRpcStream(WS_METHODS.reviewStackSubscribeEvents, reviewStack.events, {
+            "rpc.aggregate": "reviewStack",
+          }),
         [WS_METHODS.terminalOpen]: (input) =>
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
             "rpc.aggregate": "terminal",

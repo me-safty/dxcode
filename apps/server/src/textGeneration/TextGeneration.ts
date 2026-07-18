@@ -1,7 +1,13 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
+import type {
+  ChatAttachment,
+  ModelSelection,
+  ProviderInstanceId,
+  ReviewStackAnchor,
+  ReviewStackDocument,
+} from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
@@ -70,6 +76,14 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface ReviewStackGenerationInput {
+  cwd: string;
+  sourceDiff: string;
+  anchorCatalog: ReadonlyArray<ReviewStackAnchor>;
+  instructions: string;
+  modelSelection: ModelSelection;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -77,6 +91,7 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  generateReviewStack(input: ReviewStackGenerationInput): Promise<ReviewStackDocument>;
 }
 
 /**
@@ -112,6 +127,10 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    readonly generateReviewStack: (
+      input: ReviewStackGenerationInput,
+    ) => Effect.Effect<ReviewStackDocument, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -122,7 +141,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateReviewStack";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -161,6 +181,10 @@ export const makeTextGenerationFromRegistry = (
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      ),
+    generateReviewStack: (input) =>
+      resolveInstance(registry, "generateReviewStack", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateReviewStack(input)),
       ),
   });
 

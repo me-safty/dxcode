@@ -23,6 +23,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildReviewStackPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -85,7 +86,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateReviewStack",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -110,16 +112,19 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     prompt,
     outputSchemaJson,
     modelSelection,
+    disableTools = false,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateReviewStack";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    disableTools?: boolean;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const jsonSchemaStr = yield* encodeJsonForOperation(
       operation,
@@ -169,7 +174,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           resolveClaudeApiModelId(modelSelection),
           ...(cliEffort ? ["--effort", cliEffort] : []),
           ...(settingsJson ? ["--settings", settingsJson] : []),
-          "--dangerously-skip-permissions",
+          ...(disableTools ? ["--tools", ""] : ["--dangerously-skip-permissions"]),
         ],
         { env: claudeEnvironment },
       );
@@ -281,6 +286,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         prompt,
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
+        disableTools: true,
       });
 
       return {
@@ -357,10 +363,24 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const generateReviewStack: TextGeneration.TextGeneration["Service"]["generateReviewStack"] =
+    Effect.fn("ClaudeTextGeneration.generateReviewStack")(function* (input) {
+      const { prompt, outputSchema } = buildReviewStackPrompt(input);
+      return yield* runClaudeJson({
+        operation: "generateReviewStack",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+        disableTools: true,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateReviewStack,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -21,6 +21,7 @@ const makeStubTextGeneration = (
     generatePrContent: () => Effect.die("generatePrContent stub not configured for this test"),
     generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
     generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
+    generateReviewStack: () => Effect.die("generateReviewStack stub not configured for this test"),
     ...overrides,
   });
 
@@ -60,6 +61,36 @@ const makeStubRegistry = (
 };
 
 describe("makeTextGenerationFromRegistry", () => {
+  it.effect("dispatches review stack model and options unchanged", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("claude_review");
+      const selections: TextGeneration.ReviewStackGenerationInput["modelSelection"][] = [];
+      const instance = makeStubInstance(
+        instanceId,
+        makeStubTextGeneration({
+          generateReviewStack: (input) => {
+            selections.push(input.modelSelection);
+            return Effect.succeed({ summary: "Review", layers: [] });
+          },
+        }),
+      );
+      const tg = TextGeneration.makeTextGenerationFromRegistry(makeStubRegistry([instance]));
+      const modelSelection = createModelSelection(instanceId, "claude-opus", [
+        { id: "effort", value: "high" },
+      ]);
+
+      yield* tg.generateReviewStack({
+        cwd: process.cwd(),
+        sourceDiff: "",
+        anchorCatalog: [],
+        instructions: "Focus failures.",
+        modelSelection,
+      });
+
+      expect(selections).toEqual([modelSelection]);
+    }),
+  );
+
   it.effect("delegates to the matching instance's textGeneration closure", () =>
     Effect.gen(function* () {
       const personalId = ProviderInstanceId.make("codex_personal");

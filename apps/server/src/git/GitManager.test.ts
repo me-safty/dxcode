@@ -94,6 +94,7 @@ interface FakeGitTextGeneration {
     message: string;
     modelSelection: ModelSelection;
   }) => Effect.Effect<{ title: string }, TextGenerationError>;
+  generateReviewStack: TextGeneration.TextGeneration["Service"]["generateReviewStack"];
 }
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
@@ -315,6 +316,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateReviewStack: () => Effect.succeed({ summary: "Review", layers: [] }),
     ...overrides,
   };
 
@@ -363,6 +365,7 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateReviewStack: (input) => implementation.generateReviewStack(input),
   };
 }
 

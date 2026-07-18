@@ -5,7 +5,12 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, TurnId, VcsStatusResult } from "@t3tools/contracts";
+import type {
+  ReviewStackTarget,
+  ScopedThreadRef,
+  TurnId,
+  VcsStatusResult,
+} from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -70,6 +75,7 @@ import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices
 import { toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import { DiffScopeMenuItems } from "../features/git-review-controls/DiffScopeMenuItems";
+import { ReviewStackPanel } from "./ReviewStackPanel";
 
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
@@ -203,6 +209,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
+  const [innerTab, setInnerTab] = useState<"diff" | "review-stack">("diff");
   const [baseRefQuery, setBaseRefQuery] = useState("");
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } = useCopyToClipboard({
@@ -308,6 +315,44 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const selectedCheckpointTurnCount =
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
+  const reviewStackTarget = useMemo<ReviewStackTarget | null>(() => {
+    if (diffSelection.kind === "working-tree") return { _tag: "working-tree" };
+    if (diffSelection.kind === "branch") return { _tag: "branch", baseRef: selectedBaseRef };
+    if (diffSelection.kind === "commit") return { _tag: "commit", sha: diffSelection.sha };
+    if (selectedCheckpointTurnCount === undefined) return null;
+    return {
+      _tag: "turn",
+      turnId: diffSelection.turnId,
+      fromTurnCount: Math.max(0, selectedCheckpointTurnCount - 1),
+      toTurnCount: selectedCheckpointTurnCount,
+    };
+  }, [diffSelection, selectedBaseRef, selectedCheckpointTurnCount]);
+  const reviewStackHistory = useEnvironmentQuery(
+    activeThread && reviewStackTarget
+      ? reviewEnvironment.reviewStackListSnapshots({
+          environmentId: activeThread.environmentId,
+          input: {
+            threadId: activeThread.id,
+            target: reviewStackTarget,
+            ignoreWhitespace: diffIgnoreWhitespace,
+          },
+        })
+      : null,
+  );
+  const reviewStackEvents = useEnvironmentQuery(
+    activeThread
+      ? reviewEnvironment.reviewStackEvents({
+          environmentId: activeThread.environmentId,
+          input: {},
+        })
+      : null,
+  );
+  useEffect(() => {
+    if (reviewStackEvents.data?.threadId === activeThread?.id) reviewStackHistory.refresh();
+  }, [activeThread?.id, reviewStackEvents.data]);
+  const reviewStackBadgeStatus =
+    reviewStackHistory.data?.find(({ status }) => status === "queued" || status === "running")
+      ?.status ?? (reviewStackHistory.data?.[0]?.status === "failed" ? "failed" : null);
   const latestTurn = orderedTurnDiffSummaries[0];
   const reviewSectionId = selectedTurn
     ? `turn:${selectedTurn.turnId}`
@@ -444,6 +489,14 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
           ? "working-tree"
           : "branch-range"),
   );
+  const reviewStackGitSource =
+    diffSelection.kind === "commit"
+      ? overviewDiffPreview.data?.sources[0]
+      : overviewDiffPreview.data?.sources.find((source) =>
+          diffSelection.kind === "branch"
+            ? source.kind === "branch-range"
+            : source.kind === "working-tree",
+        );
   const selectedCommit =
     selectedCommitSha === null
       ? undefined
@@ -912,141 +965,219 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         </div>
       ) : (
         <div className="@container flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col @min-[520px]:flex-row">
-            {diffSelection.kind === "working-tree" && (
-              <ReviewChangesSidebar
-                staged={workingTreeManifest?.staged ?? []}
-                unstaged={workingTreeManifest?.unstaged ?? []}
-                truncated={workingTreeManifest?.truncated ?? false}
-                selection={diffSelection.file}
-                pendingPaths={workingTreeMutations.pendingPaths}
-                theme={resolvedTheme}
-                onSelectAll={workingTreeMutations.selectAll}
-                onSelectFile={workingTreeMutations.selectFile}
-                onStageChanges={(changes) => workingTreeMutations.transfer("unstaged", changes)}
-                onUnstageChanges={(changes) => workingTreeMutations.transfer("staged", changes)}
-                onDiscardChanges={workingTreeMutations.discard}
-              />
-            )}
-            <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              {isSelectedPatchTruncated && (
-                <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-                  This diff was truncated because it exceeded the preview limit. The changes shown
-                  are incomplete.
-                </p>
+          <div
+            className="flex h-9 shrink-0 items-end gap-1 border-b border-border/70 px-3"
+            role="tablist"
+            aria-label="Diff views"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={innerTab === "diff"}
+              className={cn(
+                "h-8 border-b-2 px-2 text-xs",
+                innerTab === "diff"
+                  ? "border-primary font-medium text-foreground"
+                  : "border-transparent text-muted-foreground",
               )}
-              {selectedPatchError && !renderablePatch && (
-                <div className="px-3">
-                  <p className="mb-2 text-[11px] text-red-500/80">{selectedPatchError}</p>
-                </div>
+              onClick={() => setInnerTab("diff")}
+            >
+              Diff
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={innerTab === "review-stack"}
+              className={cn(
+                "h-8 border-b-2 px-2 text-xs",
+                innerTab === "review-stack"
+                  ? "border-primary font-medium text-foreground"
+                  : "border-transparent text-muted-foreground",
               )}
-              {!renderablePatch ? (
-                isLoadingSelectedPatch ? (
-                  <DiffPanelLoadingState
-                    label={
-                      selectedTurn
-                        ? "Loading checkpoint diff..."
-                        : selectedGitScope === "unstaged"
-                          ? "Loading working tree diff..."
-                          : "Loading branch diff..."
-                    }
+              onClick={() => setInnerTab("review-stack")}
+            >
+              Review stack
+              {reviewStackBadgeStatus && (
+                <span
+                  className={cn(
+                    "ml-1 inline-block size-1.5 rounded-full",
+                    reviewStackBadgeStatus === "failed" ? "bg-destructive" : "bg-primary",
+                  )}
+                  aria-label={
+                    reviewStackBadgeStatus === "failed"
+                      ? "Review stack failed"
+                      : "Review stack running"
+                  }
+                />
+              )}
+            </button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    role="tab"
+                    disabled
+                    className="h-8 cursor-not-allowed border-b-2 border-transparent px-2 text-xs text-muted-foreground/50"
                   />
-                ) : (
-                  <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
-                    <p>
-                      {hasNoNetChanges
-                        ? "No net changes in this selection."
-                        : "No patch available for this selection."}
-                    </p>
-                  </div>
-                )
-              ) : renderablePatch.kind === "files" ? (
-                <div
-                  className="min-h-0 flex-1"
-                  onClickCapture={(event) => {
-                    const composedPath = event.nativeEvent.composedPath?.() ?? [];
-                    const title = composedPath.find(
-                      (node): node is HTMLElement =>
-                        node instanceof HTMLElement && node.hasAttribute("data-title"),
-                    );
-                    const filePath = title?.textContent?.trim();
-                    if (filePath) openDiffFile(filePath);
-                  }}
-                >
-                  <AnnotatableCodeView
-                    viewerRef={codeViewRef}
-                    key={collapseScopeKey ?? reviewSectionId}
-                    className="diff-render-surface h-full min-h-0 overflow-auto"
-                    files={codeViewFiles}
-                    sectionId={reviewSectionId}
-                    sectionTitle={reviewSectionTitle}
-                    composerDraftTarget={composerDraftTarget}
-                    renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
-                      const filePath = resolveFileDiffPath(fileDiff);
-                      return (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                className={cn(
-                                  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                                  getDiffCollapseIconClassName(fileDiff),
-                                )}
-                                aria-label={
-                                  collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
-                                }
-                                aria-expanded={!collapsed}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  toggleDiffFileCollapsed(fileKey);
-                                }}
-                              />
-                            }
-                          >
-                            {collapsed ? (
-                              <ChevronRightIcon className="size-4" />
-                            ) : (
-                              <ChevronDownIcon className="size-4" />
-                            )}
-                          </TooltipTrigger>
-                          <TooltipPopup side="top">
-                            {collapsed ? "Expand diff" : "Collapse diff"}
-                          </TooltipPopup>
-                        </Tooltip>
-                      );
-                    }}
-                    options={{
-                      diffStyle: diffRenderMode === "split" ? "split" : "unified",
-                      lineDiffType: "none",
-                      overflow: wordWrap ? "wrap" : "scroll",
-                      theme: resolveDiffThemeName(resolvedTheme),
-                      themeType: resolvedTheme as DiffThemeType,
-                      unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
-                      stickyHeaders: true,
-                      layout: { paddingTop: 0, paddingBottom: 8, gap: 8 },
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="min-h-0 flex-1 overflow-auto p-2">
-                  <div className="space-y-2">
-                    <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
-                    <pre
-                      className={cn(
-                        "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
-                        wordWrap
-                          ? "overflow-auto whitespace-pre-wrap wrap-break-word"
-                          : "overflow-auto",
-                      )}
-                    >
-                      {renderablePatch.text}
-                    </pre>
-                  </div>
-                </div>
-              )}
-            </div>
+                }
+              >
+                Full review · Soon
+              </TooltipTrigger>
+              <TooltipPopup side="top">Coming soon</TooltipPopup>
+            </Tooltip>
           </div>
+          {innerTab === "review-stack" && activeThread && reviewStackTarget ? (
+            <ReviewStackPanel
+              environmentId={activeThread.environmentId}
+              threadId={activeThread.id}
+              target={reviewStackTarget}
+              ignoreWhitespace={diffIgnoreWhitespace}
+              currentSourceHash={selectedTurn ? null : (reviewStackGitSource?.diffHash ?? null)}
+              theme={resolvedTheme as DiffThemeType}
+              diffStyle={diffRenderMode}
+              wordWrap={wordWrap}
+              onOpenFile={openDiffFile}
+            />
+          ) : (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col @min-[520px]:flex-row">
+              {diffSelection.kind === "working-tree" && (
+                <ReviewChangesSidebar
+                  staged={workingTreeManifest?.staged ?? []}
+                  unstaged={workingTreeManifest?.unstaged ?? []}
+                  truncated={workingTreeManifest?.truncated ?? false}
+                  selection={diffSelection.file}
+                  pendingPaths={workingTreeMutations.pendingPaths}
+                  theme={resolvedTheme}
+                  onSelectAll={workingTreeMutations.selectAll}
+                  onSelectFile={workingTreeMutations.selectFile}
+                  onStageChanges={(changes) => workingTreeMutations.transfer("unstaged", changes)}
+                  onUnstageChanges={(changes) => workingTreeMutations.transfer("staged", changes)}
+                  onDiscardChanges={workingTreeMutations.discard}
+                />
+              )}
+              <div className="diff-panel-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                {isSelectedPatchTruncated && (
+                  <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+                    This diff was truncated because it exceeded the preview limit. The changes shown
+                    are incomplete.
+                  </p>
+                )}
+                {selectedPatchError && !renderablePatch && (
+                  <div className="px-3">
+                    <p className="mb-2 text-[11px] text-red-500/80">{selectedPatchError}</p>
+                  </div>
+                )}
+                {!renderablePatch ? (
+                  isLoadingSelectedPatch ? (
+                    <DiffPanelLoadingState
+                      label={
+                        selectedTurn
+                          ? "Loading checkpoint diff..."
+                          : selectedGitScope === "unstaged"
+                            ? "Loading working tree diff..."
+                            : "Loading branch diff..."
+                      }
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
+                      <p>
+                        {hasNoNetChanges
+                          ? "No net changes in this selection."
+                          : "No patch available for this selection."}
+                      </p>
+                    </div>
+                  )
+                ) : renderablePatch.kind === "files" ? (
+                  <div
+                    className="min-h-0 flex-1"
+                    onClickCapture={(event) => {
+                      const composedPath = event.nativeEvent.composedPath?.() ?? [];
+                      const title = composedPath.find(
+                        (node): node is HTMLElement =>
+                          node instanceof HTMLElement && node.hasAttribute("data-title"),
+                      );
+                      const filePath = title?.textContent?.trim();
+                      if (filePath) openDiffFile(filePath);
+                    }}
+                  >
+                    <AnnotatableCodeView
+                      viewerRef={codeViewRef}
+                      key={collapseScopeKey ?? reviewSectionId}
+                      className="diff-render-surface h-full min-h-0 overflow-auto"
+                      files={codeViewFiles}
+                      sectionId={reviewSectionId}
+                      sectionTitle={reviewSectionTitle}
+                      composerDraftTarget={composerDraftTarget}
+                      renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
+                        const filePath = resolveFileDiffPath(fileDiff);
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                    getDiffCollapseIconClassName(fileDiff),
+                                  )}
+                                  aria-label={
+                                    collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
+                                  }
+                                  aria-expanded={!collapsed}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleDiffFileCollapsed(fileKey);
+                                  }}
+                                />
+                              }
+                            >
+                              {collapsed ? (
+                                <ChevronRightIcon className="size-4" />
+                              ) : (
+                                <ChevronDownIcon className="size-4" />
+                              )}
+                            </TooltipTrigger>
+                            <TooltipPopup side="top">
+                              {collapsed ? "Expand diff" : "Collapse diff"}
+                            </TooltipPopup>
+                          </Tooltip>
+                        );
+                      }}
+                      options={{
+                        diffStyle: diffRenderMode === "split" ? "split" : "unified",
+                        lineDiffType: "none",
+                        overflow: wordWrap ? "wrap" : "scroll",
+                        theme: resolveDiffThemeName(resolvedTheme),
+                        themeType: resolvedTheme as DiffThemeType,
+                        unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
+                        stickyHeaders: true,
+                        layout: { paddingTop: 0, paddingBottom: 8, gap: 8 },
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-auto p-2">
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-muted-foreground/75">
+                        {renderablePatch.reason}
+                      </p>
+                      <pre
+                        className={cn(
+                          "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
+                          wordWrap
+                            ? "overflow-auto whitespace-pre-wrap wrap-break-word"
+                            : "overflow-auto",
+                        )}
+                      >
+                        {renderablePatch.text}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </DiffPanelShell>
