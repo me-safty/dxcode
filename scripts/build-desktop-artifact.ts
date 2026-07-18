@@ -15,7 +15,12 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
+import {
+  BRAND_ASSET_PATHS,
+  resolveWebAssetBrandForChannel,
+  type WebAssetBrand,
+} from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
@@ -1376,6 +1381,10 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
+export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
+  return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
+}
+
 export function resolveDesktopBuildIconAssets(
   version: string,
   flavorId: DesktopPackagedFlavorId = "production",
@@ -1756,6 +1765,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     });
   }
 
+  const webAssetBrand = resolveDesktopWebAssetBrand(appVersion);
+  yield* applyWebBrandAssets(webAssetBrand, "apps/server/dist/client");
+  yield* Effect.log(`[desktop-artifact] Applied ${webAssetBrand} web client branding.`);
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry));
 
   yield* fs.makeDirectory(path.join(stageAppDir, "apps/desktop"), { recursive: true });
