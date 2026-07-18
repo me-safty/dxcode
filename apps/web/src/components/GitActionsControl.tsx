@@ -47,6 +47,7 @@ import {
   resolveLiveThreadBranchUpdate,
   resolveThreadBranchMetadataPatch,
   resolveQuickAction,
+  resolveRemainingThreadPatch,
   resolveThreadCommitFilePaths,
   shouldLoadThreadCommitDiff,
   resolveThreadBranchUpdate,
@@ -1149,14 +1150,13 @@ export default function GitActionsControl({
   const workingTreeDiffSource = threadCommitWorkingTreeDiff.data?.sources.find(
     (source) => source.id === "working-tree",
   );
+  const remainingThreadPatch = useMemo(
+    () => resolveRemainingThreadPatch(fullThreadDiff.data?.diff, workingTreeDiffSource?.diff),
+    [fullThreadDiff.data?.diff, workingTreeDiffSource?.diff],
+  );
   const threadCommitFilePaths = useMemo(
-    () =>
-      resolveThreadCommitFilePaths(
-        fullThreadDiff.data?.diff,
-        workingTreeDiffSource?.diff,
-        allFiles,
-      ),
-    [allFiles, fullThreadDiff.data?.diff, workingTreeDiffSource?.diff],
+    () => resolveThreadCommitFilePaths(remainingThreadPatch, allFiles),
+    [allFiles, remainingThreadPatch],
   );
   const threadCommitFilePathSet = useMemo(
     () => new Set(threadCommitFilePaths),
@@ -1577,7 +1577,7 @@ export default function GitActionsControl({
     const commitMessage = dialogCommitMessage.trim();
     const filePaths = selectedFiles.map((file) => file.path);
     const commitPatch =
-      commitDialogScope === "thread" ? (fullThreadDiff.data?.diff ?? undefined) : undefined;
+      commitDialogScope === "thread" ? (remainingThreadPatch ?? undefined) : undefined;
     const limitToSelectedFiles = commitDialogScope !== "thread" && !allSelected;
 
     setIsCommitDialogOpen(false);
@@ -1692,7 +1692,7 @@ export default function GitActionsControl({
     const commitMessage = dialogCommitMessage.trim();
     const filePaths = selectedFiles.map((file) => file.path);
     const commitPatch =
-      commitDialogScope === "thread" ? (fullThreadDiff.data?.diff ?? undefined) : undefined;
+      commitDialogScope === "thread" ? (remainingThreadPatch ?? undefined) : undefined;
     const limitToSelectedFiles = commitDialogScope !== "thread" && !allSelected;
     setIsCommitDialogOpen(false);
     setCommitDialogScope("working-tree");
