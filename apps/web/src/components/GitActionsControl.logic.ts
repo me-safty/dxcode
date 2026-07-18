@@ -39,25 +39,59 @@ export interface DefaultBranchActionDialogCopy {
 }
 
 /**
- * Resolve the currently dirty files that belong to the net checkpoint diff for
- * a thread. The intersection is important because the checkpoint range can
- * include changes that have already been committed, while Git status is
- * authoritative for what can be committed now.
+ * Resolve dirty files that still share changed lines with the net thread diff.
+ * File-path intersection alone is insufficient: a thread hunk can already be
+ * committed while an unrelated hunk remains dirty in the same file.
  */
 export function resolveThreadCommitFilePaths(
-  unifiedDiff: string | null | undefined,
+  threadDiff: string | null | undefined,
+  workingTreeDiff: string | null | undefined,
   workingTreeFiles: VcsStatusResult["workingTree"]["files"],
 ): string[] {
-  const normalizedDiff = unifiedDiff?.trim();
-  if (!normalizedDiff) return [];
+  const normalizedThreadDiff = threadDiff?.trim();
+  const normalizedWorkingTreeDiff = workingTreeDiff?.trim();
+  if (!normalizedThreadDiff || !normalizedWorkingTreeDiff) return [];
 
   try {
-    const threadPaths = new Set(
-      parsePatchFiles(normalizedDiff).flatMap((patch) => patch.files.map((file) => file.name)),
-    );
+    const changedLinesByPath = (diff: string) => {
+      const lines = new Map<string, Set<string>>();
+      for (const file of parsePatchFiles(diff).flatMap((patch) => patch.files)) {
+        const changedLines = lines.get(file.name) ?? new Set<string>();
+        for (const hunk of file.hunks) {
+          for (const content of hunk.hunkContent) {
+            if (content.type !== "change") continue;
+            for (const line of file.deletionLines.slice(
+              content.deletionLineIndex,
+              content.deletionLineIndex + content.deletions,
+            )) {
+              changedLines.add(`-${line}`);
+            }
+            for (const line of file.additionLines.slice(
+              content.additionLineIndex,
+              content.additionLineIndex + content.additions,
+            )) {
+              changedLines.add(`+${line}`);
+            }
+          }
+        }
+        if (changedLines.size > 0) lines.set(file.name, changedLines);
+      }
+      return lines;
+    };
+
+    const threadLinesByPath = changedLinesByPath(normalizedThreadDiff);
+    const workingTreeLinesByPath = changedLinesByPath(normalizedWorkingTreeDiff);
     return workingTreeFiles
       .map((file) => file.path)
-      .filter((path) => threadPaths.has(path))
+      .filter((path) => {
+        const threadLines = threadLinesByPath.get(path);
+        const workingTreeLines = workingTreeLinesByPath.get(path);
+        return (
+          threadLines !== undefined &&
+          workingTreeLines !== undefined &&
+          [...threadLines].some((line) => workingTreeLines.has(line))
+        );
+      })
       .toSorted((left, right) => left.localeCompare(right));
   } catch {
     return [];

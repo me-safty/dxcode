@@ -94,6 +94,7 @@ import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
 import { useRefreshOnWindowFocus } from "~/hooks/useRefreshOnWindowFocus";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
+import { reviewEnvironment } from "~/state/review";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -1133,9 +1134,29 @@ export default function GitActionsControl({
         latestReadyCheckpointTurnCount > 0,
     },
   );
+  const shouldLoadThreadCommit = shouldLoadThreadCommitDiff(
+    isGitMenuOpen,
+    commitDialogScope === "thread",
+  );
+  const threadCommitWorkingTreeDiff = useEnvironmentQuery(
+    shouldLoadThreadCommit && activeEnvironmentId !== null && gitCwd !== null
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeEnvironmentId,
+          input: { cwd: gitCwd, selection: { _tag: "all" } },
+        })
+      : null,
+  );
+  const workingTreeDiffSource = threadCommitWorkingTreeDiff.data?.sources.find(
+    (source) => source.id === "working-tree",
+  );
   const threadCommitFilePaths = useMemo(
-    () => resolveThreadCommitFilePaths(fullThreadDiff.data?.diff, allFiles),
-    [allFiles, fullThreadDiff.data?.diff],
+    () =>
+      resolveThreadCommitFilePaths(
+        fullThreadDiff.data?.diff,
+        workingTreeDiffSource?.diff,
+        allFiles,
+      ),
+    [allFiles, fullThreadDiff.data?.diff, workingTreeDiffSource?.diff],
   );
   const threadCommitFilePathSet = useMemo(
     () => new Set(threadCommitFilePaths),
@@ -1164,8 +1185,15 @@ export default function GitActionsControl({
     if (latestReadyCheckpointTurnCount === 0) {
       return "No completed thread changes are available to commit.";
     }
-    if (fullThreadDiff.isPending || !fullThreadDiff.data) return "Loading thread changes...";
     if (fullThreadDiff.error) return fullThreadDiff.error;
+    if (fullThreadDiff.isPending || !fullThreadDiff.data) return "Loading thread changes...";
+    if (threadCommitWorkingTreeDiff.error) return threadCommitWorkingTreeDiff.error;
+    if (threadCommitWorkingTreeDiff.isPending || !threadCommitWorkingTreeDiff.data) {
+      return "Loading remaining worktree changes...";
+    }
+    if (workingTreeDiffSource?.truncated) {
+      return "The worktree diff is too large to safely resolve remaining thread hunks.";
+    }
     if (threadCommitFilePaths.length === 0) {
       return "This thread has no remaining uncommitted file changes.";
     }
@@ -1431,6 +1459,7 @@ export default function GitActionsControl({
       });
 
       activeGitActionProgressRef.current = null;
+      threadCommitWorkingTreeDiff.refresh();
       if (result._tag === "Failure") {
         if (isAtomCommandInterrupted(result)) {
           toastManager.close(resolvedProgressToastId);

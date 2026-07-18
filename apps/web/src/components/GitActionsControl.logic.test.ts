@@ -15,8 +15,8 @@ import {
 } from "./GitActionsControl.logic";
 
 describe("resolveThreadCommitFilePaths", () => {
-  it("keeps only dirty files present in the net thread diff", () => {
-    const diff = [
+  it("keeps only dirty files with remaining thread lines", () => {
+    const threadDiff = [
       "diff --git a/src/thread.ts b/src/thread.ts",
       "--- a/src/thread.ts",
       "+++ b/src/thread.ts",
@@ -30,9 +30,23 @@ describe("resolveThreadCommitFilePaths", () => {
       "-before",
       "+after",
     ].join("\n");
+    const workingTreeDiff = [
+      "diff --git a/src/thread.ts b/src/thread.ts",
+      "--- a/src/thread.ts",
+      "+++ b/src/thread.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "diff --git a/src/unrelated.ts b/src/unrelated.ts",
+      "--- a/src/unrelated.ts",
+      "+++ b/src/unrelated.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+    ].join("\n");
 
     assert.deepEqual(
-      resolveThreadCommitFilePaths(diff, [
+      resolveThreadCommitFilePaths(threadDiff, workingTreeDiff, [
         { path: "src/unrelated.ts", insertions: 1, deletions: 0 },
         { path: "src/thread.ts", insertions: 1, deletions: 1 },
       ]),
@@ -40,10 +54,36 @@ describe("resolveThreadCommitFilePaths", () => {
     );
   });
 
+  it("excludes a file when only an unrelated hunk remains after the thread hunk was committed", () => {
+    const threadDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -1 +1 @@",
+      "-before thread",
+      "+after thread",
+    ].join("\n");
+    const workingTreeDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -20 +20 @@",
+      "-before unrelated",
+      "+after unrelated",
+    ].join("\n");
+
+    assert.deepEqual(
+      resolveThreadCommitFilePaths(threadDiff, workingTreeDiff, [
+        { path: "src/shared.ts", insertions: 1, deletions: 1 },
+      ]),
+      [],
+    );
+  });
+
   it("returns an empty selection for a missing or malformed diff", () => {
     const files = [{ path: "src/thread.ts", insertions: 1, deletions: 0 }];
-    assert.deepEqual(resolveThreadCommitFilePaths(null, files), []);
-    assert.deepEqual(resolveThreadCommitFilePaths("not a unified diff", files), []);
+    assert.deepEqual(resolveThreadCommitFilePaths(null, "", files), []);
+    assert.deepEqual(resolveThreadCommitFilePaths("not a unified diff", "also invalid", files), []);
   });
 });
 
