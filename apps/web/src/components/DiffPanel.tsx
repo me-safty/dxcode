@@ -53,7 +53,7 @@ import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings } from "../hooks/useSettings";
 import { useRefreshOnWindowFocus } from "../hooks/useRefreshOnWindowFocus";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import { formatShortTimestamp } from "../timestampFormat";
+import { formatCommitTimestamp, formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { ReviewChangesSidebar } from "./review/ReviewChangesSidebar";
 import {
@@ -817,7 +817,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                         {commit.title}
                       </span>
                       <span className="ml-3 shrink-0 text-xs tabular-nums text-muted-foreground">
-                        {formatShortTimestamp(commit.committedAt, settings.timestampFormat)}
+                        {formatCommitTimestamp(commit.committedAt, settings.timestampFormat)}
                       </span>
                       {commit.sha === selectedCommitSha && <CheckIcon className="ml-1 shrink-0" />}
                     </DropdownMenuItem>

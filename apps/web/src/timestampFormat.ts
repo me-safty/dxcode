@@ -82,6 +82,44 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
   return getTimestampFormatter(timestampFormat, false).format(new Date(isoDate));
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1_000;
+
+function localCalendarDay(date: Date): number {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / MS_PER_DAY;
+}
+
+/**
+ * Compact timestamp for a commit list. Today's commits show their wall-clock time;
+ * older commits use calendar-aware relative labels such as "yesterday" and "last week".
+ */
+export function formatCommitTimestamp(
+  isoDate: string,
+  timestampFormat: TimestampFormat,
+  nowMs: number = Date.now(),
+): string {
+  const committedAt = new Date(isoDate);
+  if (Number.isNaN(committedAt.getTime())) return "";
+
+  const today = new Date(nowMs);
+  const daysAgo = localCalendarDay(today) - localCalendarDay(committedAt);
+  if (daysAgo <= 0) return formatShortTimestamp(isoDate, timestampFormat);
+  if (daysAgo === 1) return "yesterday";
+  if (daysAgo < 7) return `${daysAgo} days ago`;
+
+  if (daysAgo < 28) {
+    const weeksAgo = Math.floor(daysAgo / 7);
+    return weeksAgo === 1 ? "last week" : `${weeksAgo} weeks ago`;
+  }
+
+  if (daysAgo < 365) {
+    const monthsAgo = Math.max(1, Math.floor(daysAgo / 30));
+    return monthsAgo === 1 ? "last month" : `${monthsAgo} months ago`;
+  }
+
+  const yearsAgo = Math.floor(daysAgo / 365);
+  return yearsAgo === 1 ? "last year" : `${yearsAgo} years ago`;
+}
+
 /**
  * Format a relative time string from an ISO date.
  * Returns `{ value: "20s", suffix: "ago" }` or `{ value: "just now", suffix: null }`
