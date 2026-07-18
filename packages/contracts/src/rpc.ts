@@ -40,9 +40,18 @@ import {
   VcsStatusStreamEvent,
 } from "./git.ts";
 import {
+  ReviewDiscardChangesError,
+  ReviewDiscardChangesInput,
+  ReviewDiscardChangesResult,
   ReviewDiffPreviewError,
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
+  ReviewStagePathsError,
+  ReviewStagePathsInput,
+  ReviewStagePathsResult,
+  ReviewUnstagePathsError,
+  ReviewUnstagePathsInput,
+  ReviewUnstagePathsResult,
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -178,6 +187,9 @@ export const WS_METHODS = {
 
   // Review methods
   reviewGetDiffPreview: "review.getDiffPreview",
+  reviewDiscardChanges: "review.discardChanges",
+  reviewStagePaths: "review.stagePaths",
+  reviewUnstagePaths: "review.unstagePaths",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -478,6 +490,24 @@ export const WsReviewGetDiffPreviewRpc = Rpc.make(WS_METHODS.reviewGetDiffPrevie
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
+export const WsReviewDiscardChangesRpc = Rpc.make(WS_METHODS.reviewDiscardChanges, {
+  payload: ReviewDiscardChangesInput,
+  success: ReviewDiscardChangesResult,
+  error: Schema.Union([ReviewDiscardChangesError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewStagePathsRpc = Rpc.make(WS_METHODS.reviewStagePaths, {
+  payload: ReviewStagePathsInput,
+  success: ReviewStagePathsResult,
+  error: Schema.Union([ReviewStagePathsError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewUnstagePathsRpc = Rpc.make(WS_METHODS.reviewUnstagePaths, {
+  payload: ReviewUnstagePathsInput,
+  success: ReviewUnstagePathsResult,
+  error: Schema.Union([ReviewUnstagePathsError, EnvironmentAuthorizationError]),
+});
+
 export const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
   payload: TerminalOpenInput,
   success: TerminalSessionSnapshot,
@@ -719,6 +749,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsSwitchRefRpc,
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,
+  WsReviewDiscardChangesRpc,
+  WsReviewStagePathsRpc,
+  WsReviewUnstagePathsRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalWriteRpc,

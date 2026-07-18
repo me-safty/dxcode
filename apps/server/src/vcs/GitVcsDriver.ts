@@ -11,6 +11,8 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   GitCommandError,
+  type ReviewDiscardChangesInput,
+  type ReviewDiscardChangesResult,
   VcsProcessExitError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
@@ -20,6 +22,10 @@ import {
   type VcsCreateWorktreeResult,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
+  type ReviewStagePathsInput,
+  type ReviewStagePathsResult,
+  type ReviewUnstagePathsInput,
+  type ReviewUnstagePathsResult,
   type VcsInitInput,
   type VcsListRefsInput,
   type VcsListRefsResult,
@@ -111,6 +117,7 @@ export interface GitCommitProgress {
 export interface GitCommitOptions {
   readonly timeoutMs?: number;
   readonly progress?: GitCommitProgress;
+  readonly noVerify?: boolean;
 }
 
 export interface GitPushResult {
@@ -202,6 +209,7 @@ export class GitVcsDriver extends Context.Service<
     readonly prepareCommitContext: (
       cwd: string,
       filePaths?: readonly string[],
+      commitPatch?: string,
     ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
     readonly commit: (
       cwd: string,
@@ -212,7 +220,7 @@ export class GitVcsDriver extends Context.Service<
     readonly pushCurrentBranch: (
       cwd: string,
       fallbackBranch: string | null,
-      options?: { readonly remoteName?: string | null },
+      options?: { readonly remoteName?: string | null; readonly noVerify?: boolean },
     ) => Effect.Effect<GitPushResult, GitCommandError>;
     readonly readRangeContext: (
       cwd: string,
@@ -221,6 +229,15 @@ export class GitVcsDriver extends Context.Service<
     readonly getReviewDiffPreview: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, GitCommandError>;
+    readonly discardReviewChanges: (
+      input: Omit<ReviewDiscardChangesInput, "threadId">,
+    ) => Effect.Effect<ReviewDiscardChangesResult, GitCommandError>;
+    readonly stageReviewPaths: (
+      input: Omit<ReviewStagePathsInput, "threadId">,
+    ) => Effect.Effect<ReviewStagePathsResult, GitCommandError>;
+    readonly unstageReviewPaths: (
+      input: Omit<ReviewUnstagePathsInput, "threadId">,
+    ) => Effect.Effect<ReviewUnstagePathsResult, GitCommandError>;
     readonly readConfigValue: (
       cwd: string,
       key: string,
@@ -809,6 +826,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         args: [
           "diff",
           "--patch",
+          "--binary",
           "--no-color",
           "--no-ext-diff",
           "--no-textconv",

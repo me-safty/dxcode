@@ -20,6 +20,7 @@ import type {
 } from "@t3tools/contracts";
 
 import { GitCommandError, TextGenerationError } from "@t3tools/contracts";
+import { EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH } from "@t3tools/shared/git";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -608,6 +609,7 @@ function runStackedAction(
     commitMessage?: string;
     featureBranch?: boolean;
     filePaths?: readonly string[];
+    commitPatch?: string;
   },
   options?: Parameters<GitManager.GitManager["Service"]["runStackedAction"]>[1],
 ) {
@@ -1439,6 +1441,132 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("commits only exact patch hunks and leaves same-file edits uncommitted", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const readmePath = NodePath.join(repoDir, "README.md");
+
+      NodeFS.writeFileSync(readmePath, "hello\nthread change\n");
+      const commitPatch = yield* runGit(repoDir, ["diff", "--binary", "--", "README.md"]).pipe(
+        Effect.map((result) => result.stdout),
+      );
+      NodeFS.writeFileSync(readmePath, "hello\nthread change\nunrelated change\n");
+
+      const { manager } = yield* makeManager();
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        commitMessage: "feat: commit exact thread patch",
+        commitPatch,
+        filePaths: [EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH],
+      });
+
+      expect(result.commit.status).toBe("created");
+      expect(
+        yield* runGit(repoDir, ["show", "HEAD:README.md"]).pipe(
+          Effect.map((gitResult) => gitResult.stdout),
+        ),
+      ).toBe("hello\nthread change\n");
+      expect(NodeFS.readFileSync(readmePath, "utf8")).toBe(
+        "hello\nthread change\nunrelated change\n",
+      );
+      expect(
+        yield* runGit(repoDir, ["diff", "--", "README.md"]).pipe(
+          Effect.map((gitResult) => gitResult.stdout),
+        ),
+      ).toContain("+unrelated change");
+
+      const repeated = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        commitMessage: "feat: do not recommit the same thread patch",
+        commitPatch,
+      });
+      expect(repeated.commit.status).toBe("skipped_no_changes");
+      expect(NodeFS.readFileSync(readmePath, "utf8")).toBe(
+        "hello\nthread change\nunrelated change\n",
+      );
+    }),
+  );
+
+  it.effect("rejects an exact patch without disturbing existing staged changes", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const readmePath = NodePath.join(repoDir, "README.md");
+      const stagedPath = NodePath.join(repoDir, "staged.txt");
+
+      NodeFS.writeFileSync(readmePath, "hello\nthread change\n");
+      const commitPatch = yield* runGit(repoDir, ["diff", "--binary", "--", "README.md"]).pipe(
+        Effect.map((result) => result.stdout),
+      );
+      NodeFS.writeFileSync(stagedPath, "keep staged\n");
+      yield* runGit(repoDir, ["add", "staged.txt"]);
+
+      const { manager } = yield* makeManager();
+      const error = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        commitMessage: "feat: should not commit",
+        commitPatch,
+      }).pipe(Effect.flip);
+
+      expect(error.message).toContain("Unstage existing changes");
+      expect(
+        yield* runGit(repoDir, ["diff", "--cached", "--name-only"]).pipe(
+          Effect.map((gitResult) => gitResult.stdout.trim()),
+        ),
+      ).toBe("staged.txt");
+      expect(
+        yield* runGit(repoDir, ["log", "-1", "--pretty=%s"]).pipe(
+          Effect.map((gitResult) => gitResult.stdout.trim()),
+        ),
+      ).toBe("Initial commit");
+    }),
+  );
+
+  it.effect("fails safely when an exact patch conflicts with newer committed work", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const readmePath = NodePath.join(repoDir, "README.md");
+
+      NodeFS.writeFileSync(readmePath, "thread version\n");
+      const commitPatch = yield* runGit(repoDir, ["diff", "--binary", "--", "README.md"]).pipe(
+        Effect.map((result) => result.stdout),
+      );
+
+      NodeFS.writeFileSync(readmePath, "new committed version\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+      yield* runGit(repoDir, ["commit", "-m", "Newer committed work"]);
+      NodeFS.writeFileSync(readmePath, "new committed version\nunrelated working change\n");
+
+      const { manager } = yield* makeManager();
+      const error = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        commitMessage: "feat: conflicting thread patch",
+        commitPatch,
+      }).pipe(Effect.flip);
+
+      expect(error.message).toContain("exact thread patch no longer applies cleanly");
+      expect(
+        yield* runGit(repoDir, ["diff", "--cached", "--name-only"]).pipe(
+          Effect.map((gitResult) => gitResult.stdout.trim()),
+        ),
+      ).toBe("");
+      expect(NodeFS.readFileSync(readmePath, "utf8")).toBe(
+        "new committed version\nunrelated working change\n",
+      );
+      expect(
+        yield* runGit(repoDir, ["log", "-1", "--pretty=%s"]).pipe(
+          Effect.map((gitResult) => gitResult.stdout.trim()),
+        ),
+      ).toBe("Newer committed work");
+    }),
+  );
+
   it.effect("creates feature branch, commits, and pushes with featureBranch option", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -1469,7 +1597,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       });
 
       expect(result.branch.status).toBe("created");
-      expect(result.branch.name).toBe("feature/implement-stacked-git-actions");
+      expect(result.branch.name).toBe("implement-stacked-git-actions");
       expect(result.commit.status).toBe("created");
       expect(result.push.status).toBe("pushed");
       expect(result.toast).toMatchObject({
@@ -1483,13 +1611,13 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         },
       });
       expect(result.toast.title).toMatch(
-        /^Pushed [0-9a-f]{7} to origin\/feature\/implement-stacked-git-actions$/,
+        /^Pushed [0-9a-f]{7} to origin\/implement-stacked-git-actions$/,
       );
       expect(
         yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
           Effect.map((result) => result.stdout.trim()),
         ),
-      ).toBe("feature/implement-stacked-git-actions");
+      ).toBe("implement-stacked-git-actions");
 
       const mainSha = yield* runGit(repoDir, ["rev-parse", "main"]).pipe(
         Effect.map((r) => r.stdout.trim()),
@@ -1530,7 +1658,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       });
 
       expect(result.branch.status).toBe("created");
-      expect(result.branch.name).toBe("feature/feat-custom-summary-line");
+      expect(result.branch.name).toBe("feat-custom-summary-line");
       expect(result.commit.status).toBe("created");
       expect(result.commit.subject).toBe("feat: custom summary line");
       expect(generatedCount).toBe(0);

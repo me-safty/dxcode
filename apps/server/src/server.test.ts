@@ -3129,12 +3129,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(pairingResponse.status, 200);
       assert.equal(wsTicketResponse.status, 200);
       const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
-      const rpcError = yield* Effect.flip(
-        Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({}))),
+      const [rpcError, stageError] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all([
+            client[WS_METHODS.serverGetConfig]({}).pipe(Effect.flip),
+            client[WS_METHODS.reviewStagePaths]({
+              cwd: "/tmp/repo",
+              threadId: ThreadId.make("thread-auth-test"),
+              paths: ["a.ts"],
+            }).pipe(Effect.flip),
+          ]),
+        ),
       );
       assert.equal(rpcError._tag, "EnvironmentAuthorizationError");
       if (rpcError._tag === "EnvironmentAuthorizationError") {
         assert.equal(rpcError.requiredScope, "orchestration:read");
+      }
+      assert.equal(stageError._tag, "EnvironmentAuthorizationError");
+      if (stageError._tag === "EnvironmentAuthorizationError") {
+        assert.equal(stageError.requiredScope, "orchestration:operate");
       }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -4982,7 +4995,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                     truncated: false,
                   },
                 ],
+                commits: [],
+                workingTree: { staged: [], unstaged: [], truncated: false },
               }),
+            discardChanges: (input) =>
+              Effect.succeed({
+                discardedPaths: input.changes.map((change) => change.path),
+              }),
+            stagePaths: (input) => Effect.succeed({ stagedPaths: [...input.paths] }),
+            unstagePaths: (input) =>
+              Effect.succeed({ unstagedPaths: input.changes.map((change) => change.path) }),
           },
         },
       });
@@ -5097,6 +5119,39 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.equal(diffPreview.sources[0]?.diff, "dirty-diff");
+
+      const discarded = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.reviewDiscardChanges]({
+            cwd: "/tmp/repo",
+            threadId: ThreadId.make("thread-review-test"),
+            changes: [{ path: "src/a.ts", kind: "modified" }],
+          }),
+        ),
+      );
+      assert.deepStrictEqual(discarded.discardedPaths, ["src/a.ts"]);
+
+      const staged = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.reviewStagePaths]({
+            cwd: "/tmp/repo",
+            threadId: ThreadId.make("thread-review-test"),
+            paths: ["src/a.ts"],
+          }),
+        ),
+      );
+      assert.deepStrictEqual(staged.stagedPaths, ["src/a.ts"]);
+
+      const unstaged = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.reviewUnstagePaths]({
+            cwd: "/tmp/repo",
+            threadId: ThreadId.make("thread-review-test"),
+            changes: [{ path: "src/a.ts", previousPath: null }],
+          }),
+        ),
+      );
+      assert.deepStrictEqual(unstaged.unstagedPaths, ["src/a.ts"]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

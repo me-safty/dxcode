@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -21,10 +22,14 @@ import type {
   VcsStatusStreamEvent,
 } from "@t3tools/contracts";
 import { mergeGitStatusParts } from "@t3tools/shared/git";
+import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as VcsRepositoryWatcher from "./VcsRepositoryWatcher.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
+const LOCAL_STATUS_INITIAL_DEBOUNCE = Duration.millis(250);
+const LOCAL_STATUS_MIN_REFRESH_INTERVAL = Duration.seconds(1);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_MAX_DELAY = Duration.minutes(15);
 const MAX_FAILURE_DIAGNOSTIC_VALUES = 8;
@@ -133,6 +138,11 @@ interface ActiveRemotePoller {
   readonly subscriberCount: number;
 }
 
+interface ActiveLocalWatcher {
+  readonly fiber: Fiber.Fiber<void, never>;
+  readonly subscriberCount: number;
+}
+
 interface StreamStatusOptions {
   readonly automaticRemoteRefreshInterval?: Effect.Effect<Duration.Duration, never>;
 }
@@ -181,6 +191,7 @@ const normalizeCwd = (cwd: string) =>
 export const make = Effect.gen(function* () {
   const workflow = yield* GitWorkflowService.GitWorkflowService;
   const fs = yield* FileSystem.FileSystem;
+  const repositoryWatcher = yield* VcsRepositoryWatcher.make;
   const changesPubSub = yield* Effect.acquireRelease(
     PubSub.unbounded<VcsStatusChange>(),
     (pubsub) => PubSub.shutdown(pubsub),
@@ -190,6 +201,7 @@ export const make = Effect.gen(function* () {
   );
   const cacheRef = yield* Ref.make(new Map<string, CachedVcsStatus>());
   const pollersRef = yield* SynchronizedRef.make(new Map<string, ActiveRemotePoller>());
+  const localWatchersRef = yield* SynchronizedRef.make(new Map<string, ActiveLocalWatcher>());
 
   const getCachedStatus = Effect.fn("VcsStatusBroadcaster.getCachedStatus")(function* (
     cwd: string,
@@ -198,7 +210,11 @@ export const make = Effect.gen(function* () {
   });
 
   const updateCachedLocalStatus = Effect.fn("VcsStatusBroadcaster.updateCachedLocalStatus")(
-    function* (cwd: string, local: VcsStatusLocalResult, options?: { publish?: boolean }) {
+    function* (
+      cwd: string,
+      local: VcsStatusLocalResult,
+      options?: { publish?: boolean; publishUnchanged?: boolean },
+    ) {
       const nextLocal = {
         fingerprint: fingerprintStatusPart(local),
         value: local,
@@ -213,7 +229,7 @@ export const make = Effect.gen(function* () {
         return [previous.local?.fingerprint !== nextLocal.fingerprint, nextCache] as const;
       });
 
-      if (options?.publish && shouldPublish) {
+      if (options?.publish && (shouldPublish || options.publishUnchanged)) {
         yield* PubSub.publish(changesPubSub, {
           cwd,
           event: {
@@ -337,12 +353,109 @@ export const make = Effect.gen(function* () {
   });
 
   const refreshLocalStatusCore = Effect.fn("VcsStatusBroadcaster.refreshLocalStatusCore")(
-    function* (cwd: string) {
+    function* (cwd: string, options?: { readonly publishUnchanged?: boolean }) {
       yield* workflow.invalidateLocalStatus(cwd);
       const local = yield* workflow.localStatus({ cwd });
-      return yield* updateCachedLocalStatus(cwd, local, { publish: true });
+      return yield* updateCachedLocalStatus(cwd, local, {
+        publish: true,
+        ...(options?.publishUnchanged !== undefined
+          ? { publishUnchanged: options.publishUnchanged }
+          : {}),
+      });
     },
   );
+
+  const lastLocalRefreshAtRef = yield* Ref.make(new Map<string, number>());
+  const localRefreshWorker = yield* makeKeyedCoalescingWorker<
+    string,
+    VcsRepositoryWatcher.VcsRepositoryChange,
+    never,
+    never
+  >({
+    merge: (current, next) =>
+      current.source === "native" || next.source === "native" ? { source: "native" } : next,
+    process: Effect.fn("VcsStatusBroadcaster.localRefreshWorker")(function* (cwd, _change) {
+      const now = yield* Clock.currentTimeMillis;
+      const lastRefreshAt = yield* Ref.get(lastLocalRefreshAtRef).pipe(
+        Effect.map((refreshes) => refreshes.get(cwd)),
+      );
+      const minimumDelay = Duration.toMillis(LOCAL_STATUS_INITIAL_DEBOUNCE);
+      const rateLimitDelay =
+        lastRefreshAt === undefined
+          ? 0
+          : Math.max(
+              0,
+              Duration.toMillis(LOCAL_STATUS_MIN_REFRESH_INTERVAL) - (now - lastRefreshAt),
+            );
+      yield* Effect.sleep(Duration.millis(Math.max(minimumDelay, rateLimitDelay)));
+      yield* refreshLocalStatusCore(cwd, { publishUnchanged: true }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("VCS local status refresh failed").pipe(
+            Effect.annotateLogs({ cwd, detail: error.message }),
+          ),
+        ),
+      );
+      const refreshedAt = yield* Clock.currentTimeMillis;
+      yield* Ref.update(lastLocalRefreshAtRef, (refreshes) => {
+        const next = new Map(refreshes);
+        next.set(cwd, refreshedAt);
+        return next;
+      });
+    }),
+  });
+
+  const makeLocalWatchLoop = (cwd: string) =>
+    Stream.runForEach(repositoryWatcher.changes(cwd), (change) =>
+      localRefreshWorker.enqueue(cwd, change),
+    );
+
+  const retainLocalWatcher = Effect.fn("VcsStatusBroadcaster.retainLocalWatcher")(function* (
+    cwd: string,
+  ) {
+    yield* SynchronizedRef.modifyEffect(localWatchersRef, (activeWatchers) => {
+      const existing = activeWatchers.get(cwd);
+      if (existing) {
+        const nextWatchers = new Map(activeWatchers);
+        nextWatchers.set(cwd, { ...existing, subscriberCount: existing.subscriberCount + 1 });
+        return Effect.succeed([undefined, nextWatchers] as const);
+      }
+
+      return makeLocalWatchLoop(cwd).pipe(
+        Effect.forkIn(broadcasterScope),
+        Effect.map((fiber) => {
+          const nextWatchers = new Map(activeWatchers);
+          nextWatchers.set(cwd, { fiber, subscriberCount: 1 });
+          return [undefined, nextWatchers] as const;
+        }),
+      );
+    });
+  });
+
+  const releaseLocalWatcher = Effect.fn("VcsStatusBroadcaster.releaseLocalWatcher")(function* (
+    cwd: string,
+  ) {
+    const watcherToInterrupt = yield* SynchronizedRef.modify(localWatchersRef, (activeWatchers) => {
+      const existing = activeWatchers.get(cwd);
+      if (!existing) return [null, activeWatchers] as const;
+      if (existing.subscriberCount > 1) {
+        const nextWatchers = new Map(activeWatchers);
+        nextWatchers.set(cwd, { ...existing, subscriberCount: existing.subscriberCount - 1 });
+        return [null, nextWatchers] as const;
+      }
+      const nextWatchers = new Map(activeWatchers);
+      nextWatchers.delete(cwd);
+      return [existing.fiber, nextWatchers] as const;
+    });
+
+    if (watcherToInterrupt) {
+      yield* Fiber.interrupt(watcherToInterrupt).pipe(Effect.ignore);
+      yield* Ref.update(lastLocalRefreshAtRef, (refreshes) => {
+        const next = new Map(refreshes);
+        next.delete(cwd);
+        return next;
+      });
+    }
+  });
 
   const refreshLocalStatus: VcsStatusBroadcaster["Service"]["refreshLocalStatus"] = Effect.fn(
     "VcsStatusBroadcaster.refreshLocalStatus",
@@ -515,8 +628,12 @@ export const make = Effect.gen(function* () {
             Effect.succeed(DEFAULT_VCS_STATUS_REFRESH_INTERVAL),
           cachedStatus?.remote === null || cachedStatus?.remote === undefined,
         );
+        yield* retainLocalWatcher(cwd);
 
-        const release = releaseRemotePoller(cwd).pipe(Effect.ignore, Effect.asVoid);
+        const release = Effect.all([releaseLocalWatcher(cwd), releaseRemotePoller(cwd)], {
+          concurrency: "unbounded",
+          discard: true,
+        }).pipe(Effect.ignore, Effect.asVoid);
 
         return Stream.concat(
           Stream.make({

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   formatElapsedDurationLabel,
   formatExpiresInLabel,
+  formatRelativeTimeLabel,
   formatRelativeTimeUntilLabel,
   getTimestampFormatOptions,
 } from "./timestampFormat";
@@ -31,6 +32,40 @@ describe("getTimestampFormatOptions", () => {
       minute: "2-digit",
       hour12: false,
     });
+  });
+});
+
+describe("formatRelativeTimeLabel", () => {
+  const localDate = (dayOffset: number, hour = 9, minute = 30) =>
+    new Date(2026, 3, 7 + dayOffset, hour, minute).toISOString();
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 7, 12));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses compact relative time for activity from today", () => {
+    expect(formatRelativeTimeLabel(localDate(0, 11, 59))).toBe("1m ago");
+    expect(formatRelativeTimeLabel(localDate(0, 9, 30))).toBe("2h ago");
+  });
+
+  it("uses calendar-day labels for recent activity", () => {
+    expect(formatRelativeTimeLabel(localDate(-1))).toBe("yesterday");
+    expect(formatRelativeTimeLabel(localDate(-2))).toBe("2 days ago");
+    expect(formatRelativeTimeLabel(localDate(-6))).toBe("6 days ago");
+  });
+
+  it("groups older activity into weeks, months, and years", () => {
+    expect(formatRelativeTimeLabel(localDate(-7))).toBe("last week");
+    expect(formatRelativeTimeLabel(localDate(-14))).toBe("2 weeks ago");
+    expect(formatRelativeTimeLabel(localDate(-28))).toBe("last month");
+    expect(formatRelativeTimeLabel(localDate(-60))).toBe("2 months ago");
+    expect(formatRelativeTimeLabel(localDate(-365))).toBe("last year");
+    expect(formatRelativeTimeLabel(localDate(-730))).toBe("2 years ago");
   });
 });
 

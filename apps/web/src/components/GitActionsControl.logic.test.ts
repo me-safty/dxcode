@@ -8,9 +8,131 @@ import {
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
   resolveQuickAction,
+  resolveRemainingThreadPatch,
+  resolveThreadCommitFilePaths,
+  shouldLoadThreadCommitDiff,
   resolveThreadBranchUpdate,
   resolveThreadBranchMetadataPatch,
 } from "./GitActionsControl.logic";
+
+describe("resolveRemainingThreadPatch", () => {
+  it("keeps only dirty files and hunks with remaining thread lines", () => {
+    const threadDiff = [
+      "diff --git a/src/thread.ts b/src/thread.ts",
+      "--- a/src/thread.ts",
+      "+++ b/src/thread.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "diff --git a/src/reverted.ts b/src/reverted.ts",
+      "--- a/src/reverted.ts",
+      "+++ b/src/reverted.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+    ].join("\n");
+    const workingTreeDiff = [
+      "diff --git a/src/thread.ts b/src/thread.ts",
+      "--- a/src/thread.ts",
+      "+++ b/src/thread.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "diff --git a/src/unrelated.ts b/src/unrelated.ts",
+      "--- a/src/unrelated.ts",
+      "+++ b/src/unrelated.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+    ].join("\n");
+
+    const remainingPatch = resolveRemainingThreadPatch(threadDiff, workingTreeDiff);
+    assert.include(remainingPatch, "diff --git a/src/thread.ts b/src/thread.ts");
+    assert.notInclude(remainingPatch, "src/unrelated.ts");
+    assert.deepEqual(
+      resolveThreadCommitFilePaths(remainingPatch, [
+        { path: "src/unrelated.ts", insertions: 1, deletions: 0 },
+        { path: "src/thread.ts", insertions: 1, deletions: 1 },
+      ]),
+      ["src/thread.ts"],
+    );
+  });
+
+  it("excludes a file when only an unrelated hunk remains after the thread hunk was committed", () => {
+    const threadDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -1 +1 @@",
+      "-before thread",
+      "+after thread",
+    ].join("\n");
+    const workingTreeDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -20 +20 @@",
+      "-before unrelated",
+      "+after unrelated",
+    ].join("\n");
+
+    const remainingPatch = resolveRemainingThreadPatch(threadDiff, workingTreeDiff);
+    assert.isNull(remainingPatch);
+    assert.deepEqual(
+      resolveThreadCommitFilePaths(remainingPatch, [
+        { path: "src/shared.ts", insertions: 1, deletions: 1 },
+      ]),
+      [],
+    );
+  });
+
+  it("rebuilds a cumulative thread patch from only its still-dirty hunk", () => {
+    const threadDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -1 +1 @@",
+      "-old committed",
+      "+new committed",
+      "@@ -20 +20 @@",
+      "-old remaining",
+      "+new remaining",
+    ].join("\n");
+    const workingTreeDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -20 +20 @@",
+      "-old remaining",
+      "+new remaining",
+      "@@ -40 +40 @@",
+      "-old unrelated",
+      "+new unrelated",
+    ].join("\n");
+
+    const remainingPatch = resolveRemainingThreadPatch(threadDiff, workingTreeDiff);
+    assert.include(remainingPatch, "index 1111111..2222222 100644");
+    assert.include(remainingPatch, "+new remaining");
+    assert.notInclude(remainingPatch, "+new committed");
+    assert.notInclude(remainingPatch, "+new unrelated");
+  });
+
+  it("returns an empty selection for a missing or malformed diff", () => {
+    const files = [{ path: "src/thread.ts", insertions: 1, deletions: 0 }];
+    assert.isNull(resolveRemainingThreadPatch(null, ""));
+    assert.isNull(resolveRemainingThreadPatch("not a unified diff", "also invalid"));
+    assert.deepEqual(resolveThreadCommitFilePaths(null, files), []);
+  });
+});
+
+describe("shouldLoadThreadCommitDiff", () => {
+  it("keeps the diff alive after the menu closes into the thread commit dialog", () => {
+    assert.isTrue(shouldLoadThreadCommitDiff(false, true));
+    assert.isTrue(shouldLoadThreadCommitDiff(true, false));
+    assert.isFalse(shouldLoadThreadCommitDiff(false, false));
+  });
+});
 
 function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
   return {

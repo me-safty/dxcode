@@ -82,22 +82,53 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
   return getTimestampFormatter(timestampFormat, false).format(new Date(isoDate));
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1_000;
+
+function localCalendarDay(date: Date): number {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / MS_PER_DAY;
+}
+
 /**
  * Format a relative time string from an ISO date.
  * Returns `{ value: "20s", suffix: "ago" }` or `{ value: "just now", suffix: null }`
  * so callers can style the numeric portion independently.
  */
 export function formatRelativeTime(isoDate: string): { value: string; suffix: string | null } {
-  const diffMs = Date.now() - new Date(isoDate).getTime();
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return { value: "just now", suffix: null };
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
   if (diffMs < 0) return { value: "just now", suffix: null };
+
+  const daysAgo = localCalendarDay(now) - localCalendarDay(date);
+  if (daysAgo === 1) return { value: "yesterday", suffix: null };
+  if (daysAgo > 1 && daysAgo < 7) return { value: `${daysAgo} days`, suffix: "ago" };
+  if (daysAgo >= 7 && daysAgo < 28) {
+    const weeksAgo = Math.floor(daysAgo / 7);
+    return weeksAgo === 1
+      ? { value: "last week", suffix: null }
+      : { value: `${weeksAgo} weeks`, suffix: "ago" };
+  }
+  if (daysAgo >= 28 && daysAgo < 365) {
+    const monthsAgo = Math.max(1, Math.floor(daysAgo / 30));
+    return monthsAgo === 1
+      ? { value: "last month", suffix: null }
+      : { value: `${monthsAgo} months`, suffix: "ago" };
+  }
+  if (daysAgo >= 365) {
+    const yearsAgo = Math.floor(daysAgo / 365);
+    return yearsAgo === 1
+      ? { value: "last year", suffix: null }
+      : { value: `${yearsAgo} years`, suffix: "ago" };
+  }
+
   const seconds = Math.floor(diffMs / 1000);
   if (seconds < 60) return { value: "just now", suffix: null };
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return { value: `${minutes}m`, suffix: "ago" };
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return { value: `${hours}h`, suffix: "ago" };
-  const days = Math.floor(hours / 24);
-  return { value: `${days}d`, suffix: "ago" };
+  return { value: `${hours}h`, suffix: "ago" };
 }
 
 export function formatRelativeTimeLabel(isoDate: string) {

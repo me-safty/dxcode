@@ -369,6 +369,29 @@ describe("VcsStatusBroadcaster", () => {
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
 
+  it.effect("refreshes unchanged local status from repository polling", () => {
+    const state = {
+      currentLocalStatus: baseLocalStatus,
+      currentRemoteStatus: baseRemoteStatus,
+      localStatusCalls: 0,
+      remoteStatusCalls: 0,
+      localInvalidationCalls: 0,
+      remoteInvalidationCalls: 0,
+    };
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+      yield* broadcaster
+        .streamStatus({ cwd: "/not-a-repository" })
+        .pipe(Stream.runDrain, TestClock.withLive, Effect.forkScoped);
+      yield* Effect.sleep(Duration.millis(50)).pipe(TestClock.withLive);
+      yield* TestClock.adjust(Duration.seconds(1));
+
+      assert.equal(state.localStatusCalls, 2);
+      assert.equal(state.localInvalidationCalls, 1);
+    }).pipe(Effect.provide(makeTestLayer(state)));
+  });
+
   it.effect("loads remote status once when periodic refreshes are disabled", () => {
     const state = {
       currentLocalStatus: baseLocalStatus,

@@ -47,6 +47,9 @@ import {
   resolveLiveThreadBranchUpdate,
   resolveThreadBranchMetadataPatch,
   resolveQuickAction,
+  resolveRemainingThreadPatch,
+  resolveThreadCommitFilePaths,
+  shouldLoadThreadCommitDiff,
   resolveThreadBranchUpdate,
 } from "./GitActionsControl.logic";
 import { AnimatedHeight } from "./AnimatedHeight";
@@ -63,7 +66,7 @@ import {
 } from "~/components/ui/dialog";
 import { Group, GroupSeparator } from "~/components/ui/group";
 import { Input } from "~/components/ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "~/components/ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
@@ -90,6 +93,9 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
+import { useRefreshOnWindowFocus } from "~/features/git-review-controls/useRefreshOnWindowFocus";
+import { useCheckpointDiff } from "~/lib/checkpointDiffState";
+import { reviewEnvironment } from "~/state/review";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -104,6 +110,7 @@ interface PendingDefaultBranchAction {
   commitMessage?: string;
   onConfirmed?: () => void;
   filePaths?: string[];
+  commitPatch?: string;
 }
 
 type PublishProviderKind = Extract<
@@ -134,9 +141,8 @@ interface RunGitActionWithToastInput {
   featureBranch?: boolean;
   progressToastId?: GitActionToastId;
   filePaths?: string[];
+  commitPatch?: string;
 }
-
-const GIT_STATUS_WINDOW_REFRESH_DEBOUNCE_MS = 250;
 
 type RefreshVcsStatus = (target: {
   readonly environmentId: ScopedThreadRef["environmentId"];
@@ -996,6 +1002,10 @@ export default function GitActionsControl({
   );
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
+  const [isGitMenuOpen, setIsGitMenuOpen] = useState(false);
+  const [commitDialogScope, setCommitDialogScope] = useState<"working-tree" | "thread">(
+    "working-tree",
+  );
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
@@ -1100,7 +1110,63 @@ export default function GitActionsControl({
   const gitStatusForActions = gitStatus;
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
-  const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
+  const latestReadyCheckpointTurnCount = useMemo(
+    () =>
+      activeServerThread?.checkpoints.reduce(
+        (latest, checkpoint) =>
+          checkpoint.status === "ready" ? Math.max(latest, checkpoint.checkpointTurnCount) : latest,
+        0,
+      ) ?? 0,
+    [activeServerThread?.checkpoints],
+  );
+  const fullThreadDiff = useCheckpointDiff(
+    {
+      environmentId: activeEnvironmentId,
+      threadId: activeThreadRef?.threadId ?? null,
+      fromTurnCount: latestReadyCheckpointTurnCount > 0 ? 0 : null,
+      toTurnCount: latestReadyCheckpointTurnCount > 0 ? latestReadyCheckpointTurnCount : null,
+      ignoreWhitespace: false,
+      cacheScope: "commit-thread-changes",
+    },
+    {
+      enabled:
+        shouldLoadThreadCommitDiff(isGitMenuOpen, commitDialogScope === "thread") &&
+        activeServerThread !== null &&
+        latestReadyCheckpointTurnCount > 0,
+    },
+  );
+  const shouldLoadThreadCommit = shouldLoadThreadCommitDiff(
+    isGitMenuOpen,
+    commitDialogScope === "thread",
+  );
+  const threadCommitWorkingTreeDiff = useEnvironmentQuery(
+    shouldLoadThreadCommit && activeEnvironmentId !== null && gitCwd !== null
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeEnvironmentId,
+          input: { cwd: gitCwd, selection: { _tag: "all" } },
+        })
+      : null,
+  );
+  const workingTreeDiffSource = threadCommitWorkingTreeDiff.data?.sources.find(
+    (source) => source.id === "working-tree",
+  );
+  const remainingThreadPatch = useMemo(
+    () => resolveRemainingThreadPatch(fullThreadDiff.data?.diff, workingTreeDiffSource?.diff),
+    [fullThreadDiff.data?.diff, workingTreeDiffSource?.diff],
+  );
+  const threadCommitFilePaths = useMemo(
+    () => resolveThreadCommitFilePaths(remainingThreadPatch, allFiles),
+    [allFiles, remainingThreadPatch],
+  );
+  const threadCommitFilePathSet = useMemo(
+    () => new Set(threadCommitFilePaths),
+    [threadCommitFilePaths],
+  );
+  const dialogFiles =
+    commitDialogScope === "thread"
+      ? allFiles.filter((file) => threadCommitFilePathSet.has(file.path))
+      : allFiles;
+  const selectedFiles = dialogFiles.filter((f) => !excludedFiles.has(f.path));
   const allSelected = excludedFiles.size === 0;
   const noneSelected = selectedFiles.length === 0;
 
@@ -1111,6 +1177,28 @@ export default function GitActionsControl({
     sourceControlScope,
     RUNNING_SOURCE_CONTROL_ACTIONS,
   );
+  const threadCommitUnavailableReason = (() => {
+    if (isGitActionRunning) return "Git action in progress.";
+    if (activeServerThread?.latestTurn?.state === "running") {
+      return "Wait for the current turn to finish before committing its changes.";
+    }
+    if (latestReadyCheckpointTurnCount === 0) {
+      return "No completed thread changes are available to commit.";
+    }
+    if (fullThreadDiff.error) return fullThreadDiff.error;
+    if (fullThreadDiff.isPending || !fullThreadDiff.data) return "Loading thread changes...";
+    if (threadCommitWorkingTreeDiff.error) return threadCommitWorkingTreeDiff.error;
+    if (threadCommitWorkingTreeDiff.isPending || !threadCommitWorkingTreeDiff.data) {
+      return "Loading remaining worktree changes...";
+    }
+    if (workingTreeDiffSource?.truncated) {
+      return "The worktree diff is too large to safely resolve remaining thread hunks.";
+    }
+    if (threadCommitFilePaths.length === 0) {
+      return "This thread has no remaining uncommitted file changes.";
+    }
+    return null;
+  })();
   const isSelectingWorktreeBase =
     !activeServerThread &&
     activeDraftThread?.envMode === "worktree" &&
@@ -1177,38 +1265,10 @@ export default function GitActionsControl({
     };
   }, [updateActiveProgressToast]);
 
-  useEffect(() => {
-    if (gitCwd === null) {
-      return;
-    }
-
-    let refreshTimeout: number | null = null;
-    const scheduleRefreshCurrentGitStatus = () => {
-      if (refreshTimeout !== null) {
-        window.clearTimeout(refreshTimeout);
-      }
-      refreshTimeout = window.setTimeout(() => {
-        refreshTimeout = null;
-        requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
-      }, GIT_STATUS_WINDOW_REFRESH_DEBOUNCE_MS);
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        scheduleRefreshCurrentGitStatus();
-      }
-    };
-
-    window.addEventListener("focus", scheduleRefreshCurrentGitStatus);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      if (refreshTimeout !== null) {
-        window.clearTimeout(refreshTimeout);
-      }
-      window.removeEventListener("focus", scheduleRefreshCurrentGitStatus);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
+  const refreshCurrentGitStatus = useCallback(() => {
+    requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
   }, [activeEnvironmentId, gitCwd, refreshVcsStatus]);
+  useRefreshOnWindowFocus(refreshCurrentGitStatus, gitCwd !== null);
 
   const openExistingPr = useCallback(async () => {
     const api = readLocalApi();
@@ -1252,6 +1312,7 @@ export default function GitActionsControl({
       featureBranch = false,
       progressToastId,
       filePaths,
+      commitPatch,
     }: RunGitActionWithToastInput) => {
       const actionStatus = statusOverride ?? gitStatusForActions;
       const actionBranch = actionStatus?.refName ?? null;
@@ -1281,6 +1342,7 @@ export default function GitActionsControl({
           ...(commitMessage ? { commitMessage } : {}),
           ...(onConfirmed ? { onConfirmed } : {}),
           ...(filePaths ? { filePaths } : {}),
+          ...(commitPatch ? { commitPatch } : {}),
         });
         return;
       }
@@ -1392,10 +1454,12 @@ export default function GitActionsControl({
         ...(commitMessage ? { commitMessage } : {}),
         ...(featureBranch ? { featureBranch } : {}),
         ...(filePaths ? { filePaths } : {}),
+        ...(commitPatch ? { commitPatch } : {}),
         onProgress: applyProgressEvent,
       });
 
       activeGitActionProgressRef.current = null;
+      threadCommitWorkingTreeDiff.refresh();
       if (result._tag === "Failure") {
         if (isAtomCommandInterrupted(result)) {
           toastManager.close(resolvedProgressToastId);
@@ -1479,26 +1543,30 @@ export default function GitActionsControl({
 
   const continuePendingDefaultBranchAction = () => {
     if (!pendingDefaultBranchAction) return;
-    const { action, commitMessage, onConfirmed, filePaths } = pendingDefaultBranchAction;
+    const { action, commitMessage, onConfirmed, filePaths, commitPatch } =
+      pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
     void runGitActionWithToast({
       action,
       ...(commitMessage ? { commitMessage } : {}),
       ...(onConfirmed ? { onConfirmed } : {}),
       ...(filePaths ? { filePaths } : {}),
+      ...(commitPatch ? { commitPatch } : {}),
       skipDefaultBranchPrompt: true,
     });
   };
 
   const checkoutFeatureBranchAndContinuePendingAction = () => {
     if (!pendingDefaultBranchAction) return;
-    const { action, commitMessage, onConfirmed, filePaths } = pendingDefaultBranchAction;
+    const { action, commitMessage, onConfirmed, filePaths, commitPatch } =
+      pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
     void runGitActionWithToast({
       action,
       ...(commitMessage ? { commitMessage } : {}),
       ...(onConfirmed ? { onConfirmed } : {}),
       ...(filePaths ? { filePaths } : {}),
+      ...(commitPatch ? { commitPatch } : {}),
       featureBranch: true,
       skipDefaultBranchPrompt: true,
     });
@@ -1507,8 +1575,13 @@ export default function GitActionsControl({
   const runDialogActionOnNewBranch = () => {
     if (!isCommitDialogOpen) return;
     const commitMessage = dialogCommitMessage.trim();
+    const filePaths = selectedFiles.map((file) => file.path);
+    const commitPatch =
+      commitDialogScope === "thread" ? (remainingThreadPatch ?? undefined) : undefined;
+    const limitToSelectedFiles = commitDialogScope !== "thread" && !allSelected;
 
     setIsCommitDialogOpen(false);
+    setCommitDialogScope("working-tree");
     setDialogCommitMessage("");
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
@@ -1516,7 +1589,8 @@ export default function GitActionsControl({
     void runGitActionWithToast({
       action: "commit",
       ...(commitMessage ? { commitMessage } : {}),
-      ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
+      ...(limitToSelectedFiles ? { filePaths } : {}),
+      ...(commitPatch ? { commitPatch } : {}),
       featureBranch: true,
       skipDefaultBranchPrompt: true,
     });
@@ -1601,20 +1675,35 @@ export default function GitActionsControl({
     }
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
+    setCommitDialogScope("working-tree");
+    setIsCommitDialogOpen(true);
+  };
+
+  const openThreadCommitDialog = () => {
+    if (threadCommitUnavailableReason) return;
+    setExcludedFiles(new Set());
+    setIsEditingFiles(false);
+    setCommitDialogScope("thread");
     setIsCommitDialogOpen(true);
   };
 
   const runDialogAction = () => {
     if (!isCommitDialogOpen) return;
     const commitMessage = dialogCommitMessage.trim();
+    const filePaths = selectedFiles.map((file) => file.path);
+    const commitPatch =
+      commitDialogScope === "thread" ? (remainingThreadPatch ?? undefined) : undefined;
+    const limitToSelectedFiles = commitDialogScope !== "thread" && !allSelected;
     setIsCommitDialogOpen(false);
+    setCommitDialogScope("working-tree");
     setDialogCommitMessage("");
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
     void runGitActionWithToast({
       action: "commit",
       ...(commitMessage ? { commitMessage } : {}),
-      ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
+      ...(limitToSelectedFiles ? { filePaths } : {}),
+      ...(commitPatch ? { commitPatch } : {}),
     });
   };
 
@@ -1725,6 +1814,7 @@ export default function GitActionsControl({
           <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu
             onOpenChange={(open) => {
+              setIsGitMenuOpen(open);
               if (open) {
                 requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
               }
@@ -1737,6 +1827,29 @@ export default function GitActionsControl({
               <ChevronDownIcon aria-hidden="true" className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end" className="w-full">
+              {threadCommitUnavailableReason ? (
+                <Popover>
+                  <PopoverTrigger
+                    openOnHover
+                    nativeButton={false}
+                    render={<span className="block w-max cursor-not-allowed" />}
+                  >
+                    <MenuItem className="w-full" disabled>
+                      <GitCommitIcon />
+                      Commit thread
+                    </MenuItem>
+                  </PopoverTrigger>
+                  <PopoverPopup tooltipStyle side="left" align="center">
+                    {threadCommitUnavailableReason}
+                  </PopoverPopup>
+                </Popover>
+              ) : (
+                <MenuItem onClick={openThreadCommitDialog}>
+                  <GitCommitIcon />
+                  Commit thread
+                </MenuItem>
+              )}
+              <MenuSeparator />
               {gitActionMenuItems.map((item) => {
                 const disabledReason = getMenuActionDisabledReason({
                   item,
@@ -1819,6 +1932,7 @@ export default function GitActionsControl({
         onOpenChange={(open) => {
           if (!open) {
             setIsCommitDialogOpen(false);
+            setCommitDialogScope("working-tree");
             setDialogCommitMessage("");
             setExcludedFiles(new Set());
             setIsEditingFiles(false);
@@ -1827,8 +1941,14 @@ export default function GitActionsControl({
       >
         <DialogPopup>
           <DialogHeader>
-            <DialogTitle>{COMMIT_DIALOG_TITLE}</DialogTitle>
-            <DialogDescription>{COMMIT_DIALOG_DESCRIPTION}</DialogDescription>
+            <DialogTitle>
+              {commitDialogScope === "thread" ? "Commit thread changes" : COMMIT_DIALOG_TITLE}
+            </DialogTitle>
+            <DialogDescription>
+              {commitDialogScope === "thread"
+                ? "Commit only the exact patch recorded by this thread, leaving unrelated hunks uncommitted. Leave the message blank to auto-generate one."
+                : COMMIT_DIALOG_DESCRIPTION}
+            </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-4">
             <div className="space-y-3 rounded-lg border border-input bg-muted/40 p-3 text-xs">
@@ -1848,13 +1968,13 @@ export default function GitActionsControl({
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {isEditingFiles && allFiles.length > 0 && (
+                    {commitDialogScope !== "thread" && isEditingFiles && dialogFiles.length > 0 && (
                       <Checkbox
                         checked={allSelected}
                         indeterminate={!allSelected && !noneSelected}
                         onCheckedChange={() => {
                           setExcludedFiles(
-                            allSelected ? new Set(allFiles.map((f) => f.path)) : new Set(),
+                            allSelected ? new Set(dialogFiles.map((f) => f.path)) : new Set(),
                           );
                         }}
                       />
@@ -1862,11 +1982,11 @@ export default function GitActionsControl({
                     <span className="text-muted-foreground">Files</span>
                     {!allSelected && !isEditingFiles && (
                       <span className="text-muted-foreground">
-                        ({selectedFiles.length} of {allFiles.length})
+                        ({selectedFiles.length} of {dialogFiles.length})
                       </span>
                     )}
                   </div>
-                  {allFiles.length > 0 && (
+                  {commitDialogScope !== "thread" && dialogFiles.length > 0 && (
                     <Button
                       variant="ghost"
                       size="xs"
@@ -1876,13 +1996,13 @@ export default function GitActionsControl({
                     </Button>
                   )}
                 </div>
-                {!gitStatusForActions || allFiles.length === 0 ? (
+                {!gitStatusForActions || dialogFiles.length === 0 ? (
                   <p className="font-medium">none</p>
                 ) : (
                   <div className="space-y-2">
                     <ScrollArea className="h-44 rounded-md border border-input bg-background">
                       <div className="space-y-1 p-1">
-                        {allFiles.map((file) => {
+                        {dialogFiles.map((file) => {
                           const isExcluded = excludedFiles.has(file.path);
                           return (
                             <div
@@ -1961,6 +2081,7 @@ export default function GitActionsControl({
               size="sm"
               onClick={() => {
                 setIsCommitDialogOpen(false);
+                setCommitDialogScope("working-tree");
                 setDialogCommitMessage("");
                 setExcludedFiles(new Set());
                 setIsEditingFiles(false);

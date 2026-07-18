@@ -10,9 +10,7 @@ import {
 } from "@t3tools/client-runtime/state/vcs";
 import type {
   EnvironmentId,
-  GitActionProgressEvent,
   GitResolvePullRequestResult,
-  GitStackedAction,
   SourceControlCloneProtocol,
   SourceControlRepositoryVisibility,
   ThreadId,
@@ -28,6 +26,10 @@ import { useEnvironmentQuery } from "./query";
 import { sourceControlEnvironment } from "./sourceControl";
 import { useAtomCommand } from "./use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "./vcs";
+import {
+  buildRunVcsStackedActionInput,
+  type WebGitStackedActionInput,
+} from "./sourceControlActions.logic";
 
 export type SourceControlActionKind =
   | "init"
@@ -212,14 +214,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
   );
 
   const action = useCallback(
-    async (input: {
-      actionId: string;
-      action: GitStackedAction;
-      commitMessage?: string;
-      featureBranch?: boolean;
-      filePaths?: string[];
-      onProgress?: (event: GitActionProgressEvent) => void;
-    }) => {
+    async (input: WebGitStackedActionInput) => {
       if (resolveScope(scope) === null) {
         return AsyncResult.failure<never, VcsActionUnavailableError>(
           Cause.fail(
@@ -231,14 +226,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
           ),
         );
       }
-      return runStackedAction({
-        actionId: input.actionId,
-        action: input.action,
-        ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
-        ...(input.featureBranch ? { featureBranch: true } : {}),
-        ...(input.filePaths?.length ? { filePaths: input.filePaths } : {}),
-        ...(input.onProgress ? { onProgress: input.onProgress } : {}),
-      });
+      return runStackedAction(buildRunVcsStackedActionInput(input));
     },
     [runStackedAction, scope],
   );

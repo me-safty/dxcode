@@ -4,11 +4,40 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyGitStatusStreamEvent,
   buildTemporaryWorktreeBranchName,
+  EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH,
+  isExactCommitPatchLegacyGuard,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
+  resolveAutoFeatureBranchName,
+  sanitizePrefixedBranchName,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
+
+describe("exact commit patch legacy guard", () => {
+  it("matches only the reserved fail-closed path", () => {
+    expect(isExactCommitPatchLegacyGuard([EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH])).toBe(true);
+    expect(isExactCommitPatchLegacyGuard([])).toBe(false);
+    expect(isExactCommitPatchLegacyGuard(["README.md"])).toBe(false);
+  });
+});
+
+describe("generated branch prefixes", () => {
+  it("supports generated branches without a prefix", () => {
+    expect(sanitizePrefixedBranchName("feature/fix-toolbar", "")).toBe("fix-toolbar");
+    expect(resolveAutoFeatureBranchName([], undefined, "")).toBe("update");
+  });
+
+  it("replaces the legacy feature prefix", () => {
+    expect(sanitizePrefixedBranchName("feature/fix-toolbar", "codex")).toBe("codex/fix-toolbar");
+  });
+
+  it("keeps custom-prefixed names and resolves collisions", () => {
+    expect(resolveAutoFeatureBranchName(["codex/fix-toolbar"], "codex/fix-toolbar", "codex")).toBe(
+      "codex/fix-toolbar-2",
+    );
+  });
+});
 
 describe("normalizeGitRemoteUrl", () => {
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {

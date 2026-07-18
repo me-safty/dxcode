@@ -49,6 +49,7 @@ import {
 } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { GitSettingsSection } from "~/features/git-review-controls/GitSettingsSection";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -478,6 +479,7 @@ export function SourceControlSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <GitSettingsSection />
       {isInitialScanPending ? (
         <>
           <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />

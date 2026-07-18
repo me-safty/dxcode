@@ -21,11 +21,19 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   GitCommandError,
+  type ReviewDiscardChangesInput,
+  type ReviewChangedFile,
+  type ReviewChangeKind,
+  type ReviewCommit,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewSource,
+  type ReviewUnstagePathsInput,
   type VcsRef,
 } from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  isExactCommitPatchLegacyGuard,
+} from "@t3tools/shared/git";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
@@ -45,6 +53,7 @@ const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
+const REVIEW_COMMIT_LIST_MAX_OUTPUT_BYTES = 80_000;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
@@ -59,7 +68,11 @@ const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
   SSH_ASKPASS: "",
   SSH_ASKPASS_REQUIRE: "never",
 } satisfies NodeJS.ProcessEnv);
+const LOCAL_STATUS_ENV = Object.freeze({
+  GIT_OPTIONAL_LOCKS: "0",
+} satisfies NodeJS.ProcessEnv);
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
+const UNMERGED_STATUS_CODES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
 const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetails>({
   isRepo: false,
@@ -159,6 +172,96 @@ function parsePorcelainPath(line: string): string | null {
   const parts = line.trim().split(/\s+/g);
   const filePath = parts.at(-1) ?? "";
   return filePath.length > 0 ? filePath : null;
+}
+
+function reviewChangeKind(code: string, untracked = false): ReviewChangeKind {
+  if (untracked) return "untracked";
+  switch (code) {
+    case "A":
+      return "added";
+    case "D":
+      return "deleted";
+    case "R":
+      return "renamed";
+    case "C":
+      return "copied";
+    case "U":
+      return "conflicted";
+    default:
+      return "modified";
+  }
+}
+
+function isUnmergedStatus(x: string, y: string): boolean {
+  return UNMERGED_STATUS_CODES.has(`${x}${y}`);
+}
+
+function parseReviewNumstatEntries(
+  stdout: string,
+): Array<{ path: string; insertions: number; deletions: number }> {
+  const records = stdout.split("\0");
+  if (records.at(-1) === "") records.pop();
+  const entries: Array<{ path: string; insertions: number; deletions: number }> = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    const [addedRaw, deletedRaw, path = ""] = record.split("\t", 3);
+    if (addedRaw === undefined || deletedRaw === undefined) continue;
+    const renamedPath = path.length === 0 ? records[index + 2] : undefined;
+    if (path.length === 0) index += 2;
+    const resolvedPath = renamedPath ?? path;
+    if (!resolvedPath) continue;
+    const added = Number.parseInt(addedRaw, 10);
+    const deleted = Number.parseInt(deletedRaw, 10);
+    entries.push({
+      path: resolvedPath,
+      insertions: Number.isFinite(added) ? added : 0,
+      deletions: Number.isFinite(deleted) ? deleted : 0,
+    });
+  }
+  return entries;
+}
+
+function parseReviewStatus(
+  stdout: string,
+  truncated: boolean,
+): { staged: ReviewChangedFile[]; unstaged: ReviewChangedFile[] } {
+  const records = stdout.split("\0");
+  if (records.at(-1) === "") records.pop();
+  if (truncated) records.pop();
+
+  const staged: ReviewChangedFile[] = [];
+  const unstaged: ReviewChangedFile[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record || record.length < 4) continue;
+    const x = record[0] ?? " ";
+    const y = record[1] ?? " ";
+    const unmerged = isUnmergedStatus(x, y);
+    const pathValue = record.slice(3);
+    if (!pathValue) continue;
+
+    const hasRenamePath = x === "R" || x === "C" || y === "R" || y === "C";
+    const previousPath = hasRenamePath ? (records[index + 1] ?? null) : null;
+    if (hasRenamePath && previousPath !== null) index += 1;
+    const makeFile = (code: string, untracked = false): ReviewChangedFile => ({
+      path: pathValue,
+      previousPath: code === "R" || code === "C" ? previousPath : null,
+      kind: unmerged ? "conflicted" : reviewChangeKind(code, untracked),
+      insertions: 0,
+      deletions: 0,
+    });
+
+    if (x === "?" && y === "?") {
+      unstaged.push(makeFile("?", true));
+      continue;
+    }
+    if (x !== " " && x !== "!") staged.push(makeFile(x));
+    if (y !== " " && y !== "!") unstaged.push(makeFile(y));
+  }
+
+  const compare = (left: ReviewChangedFile, right: ReviewChangedFile) =>
+    left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "base" });
+  return { staged: staged.toSorted(compare), unstaged: unstaged.toSorted(compare) };
 }
 
 function parseBranchLine(line: string): { name: string; current: boolean } | null {
@@ -1310,6 +1413,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ["status", "--porcelain=2", "--branch"],
       {
         allowNonZeroExit: true,
+        env: LOCAL_STATUS_ENV,
       },
     ).pipe(
       Effect.catchTags({
@@ -1516,8 +1620,63 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
 
   const prepareCommitContext: GitVcsDriver.GitVcsDriver["Service"]["prepareCommitContext"] =
-    Effect.fn("prepareCommitContext")(function* (cwd, filePaths) {
-      if (filePaths && filePaths.length > 0) {
+    Effect.fn("prepareCommitContext")(function* (cwd, filePaths, commitPatch) {
+      if (
+        commitPatch &&
+        filePaths &&
+        filePaths.length > 0 &&
+        !isExactCommitPatchLegacyGuard(filePaths)
+      ) {
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: "GitVcsDriver.prepareCommitContext",
+            cwd,
+            args: ["apply", "--cached"],
+          }),
+          detail: "A commit cannot use both a patch and file path selection.",
+        });
+      }
+
+      if (commitPatch) {
+        const stagedCheck = yield* executeGit(
+          "GitVcsDriver.prepareCommitContext.checkStaged",
+          cwd,
+          ["diff", "--cached", "--quiet"],
+          { allowNonZeroExit: true },
+        );
+        if (stagedCheck.exitCode !== 0) {
+          return yield* new GitCommandError({
+            ...gitCommandContext({
+              operation: "GitVcsDriver.prepareCommitContext.checkStaged",
+              cwd,
+              args: ["diff", "--cached", "--quiet"],
+            }),
+            detail:
+              stagedCheck.exitCode === 1
+                ? "Unstage existing changes before committing exact thread changes."
+                : "Failed to inspect the Git staging area before applying thread changes.",
+            ...(stagedCheck.exitCode === null ? {} : { exitCode: stagedCheck.exitCode }),
+          });
+        }
+
+        yield* executeGit(
+          "GitVcsDriver.prepareCommitContext.applyPatch",
+          cwd,
+          ["apply", "--cached", "--3way", "--whitespace=nowarn", "-"],
+          {
+            stdin: commitPatch,
+            fallbackErrorDetail:
+              "The exact thread patch no longer applies cleanly. Review overlapping workspace changes and try again.",
+          },
+        ).pipe(
+          Effect.catch((error) =>
+            runGit("GitVcsDriver.prepareCommitContext.resetFailedPatch", cwd, ["reset"]).pipe(
+              Effect.catch(() => Effect.void),
+              Effect.andThen(Effect.fail(error)),
+            ),
+          ),
+        );
+      } else if (filePaths && filePaths.length > 0) {
         yield* runGit("GitVcsDriver.prepareCommitContext.reset", cwd, ["reset"]).pipe(
           Effect.catchTags({
             GitCommandError: () => Effect.void,
@@ -1565,6 +1724,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     options?: GitVcsDriver.GitCommitOptions,
   ) {
     const args = ["commit", "-m", subject];
+    if (options?.noVerify) {
+      args.push("--no-verify");
+    }
     const trimmedBody = body.trim();
     if (trimmedBody.length > 0) {
       args.push("-m", trimmedBody);
@@ -1594,6 +1756,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const pushCurrentBranch: GitVcsDriver.GitVcsDriver["Service"]["pushCurrentBranch"] = Effect.fn(
     "pushCurrentBranch",
   )(function* (cwd, fallbackBranch, options) {
+    const pushArgs = options?.noVerify ? ["push", "--no-verify"] : ["push"];
     const details = yield* statusDetails(cwd);
     const branch = details.branch ?? fallbackBranch;
     if (!branch) {
@@ -1611,7 +1774,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (requestedRemoteName) {
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
       yield* runGit("GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote", cwd, [
-        "push",
+        ...pushArgs,
         "-u",
         requestedRemoteName,
         `HEAD:refs/heads/${publishBranch}`,
@@ -1674,7 +1837,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
       yield* runGit("GitVcsDriver.pushCurrentBranch.pushWithUpstream", cwd, [
-        "push",
+        ...pushArgs,
         "-u",
         publishRemoteName,
         `HEAD:refs/heads/${publishBranch}`,
@@ -1692,7 +1855,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     if (currentUpstream) {
       yield* runGit("GitVcsDriver.pushCurrentBranch.pushUpstream", cwd, [
-        "push",
+        ...pushArgs,
         currentUpstream.remoteName,
         `HEAD:refs/heads/${currentUpstream.branchName}`,
       ]);
@@ -1704,7 +1867,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    yield* runGit("GitVcsDriver.pushCurrentBranch.push", cwd, ["push"]);
+    yield* runGit("GitVcsDriver.pushCurrentBranch.push", cwd, pushArgs);
     return {
       status: "pushed" as const,
       branch,
@@ -1807,7 +1970,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
-  const readUntrackedReviewDiffs = Effect.fn("readUntrackedReviewDiffs")(function* (cwd: string) {
+  const readUntrackedReviewDiffs = Effect.fn("readUntrackedReviewDiffs")(function* (
+    cwd: string,
+    ignoreWhitespace = false,
+  ) {
     const untrackedResult = yield* executeGit(
       "GitVcsDriver.readUntrackedReviewDiffs.list",
       cwd,
@@ -1828,7 +1994,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         executeGit(
           "GitVcsDriver.readUntrackedReviewDiffs.diff",
           cwd,
-          ["diff", "--no-index", "--patch", "--minimal", "--", "/dev/null", relativePath],
+          [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--minimal",
+            ...(ignoreWhitespace ? ["--ignore-all-space"] : []),
+            "--",
+            "/dev/null",
+            relativePath,
+          ],
           {
             allowNonZeroExit: true,
             maxOutputBytes: REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES,
@@ -1846,6 +2021,221 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  const readReviewWorkingTreeManifest = Effect.fn("readReviewWorkingTreeManifest")(function* (
+    cwd: string,
+  ) {
+    const [result, unstagedNumstat, stagedNumstat] = yield* Effect.all(
+      [
+        executeGit(
+          "GitVcsDriver.readReviewWorkingTreeManifest",
+          cwd,
+          ["status", "--porcelain=1", "-z", "--untracked-files=all"],
+          { maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES },
+        ),
+        runGitStdout("GitVcsDriver.readReviewWorkingTreeManifest.unstagedNumstat", cwd, [
+          "diff",
+          "--numstat",
+          "-z",
+        ]),
+        runGitStdout("GitVcsDriver.readReviewWorkingTreeManifest.stagedNumstat", cwd, [
+          "diff",
+          "--cached",
+          "--numstat",
+          "-z",
+        ]),
+      ],
+      { concurrency: "unbounded" },
+    );
+    const files = parseReviewStatus(result.stdout, result.stdoutTruncated);
+    const addStats = (entries: ReviewChangedFile[], stdout: string) => {
+      const byPath = new Map(parseReviewNumstatEntries(stdout).map((entry) => [entry.path, entry]));
+      return entries.map((file) => {
+        const stat = byPath.get(file.path);
+        return stat ? { ...file, insertions: stat.insertions, deletions: stat.deletions } : file;
+      });
+    };
+    return {
+      staged: addStats(files.staged, stagedNumstat),
+      unstaged: addStats(files.unstaged, unstagedNumstat),
+      truncated: result.stdoutTruncated,
+    };
+  });
+
+  const readSelectedReviewDiff = Effect.fn("readSelectedReviewDiff")(function* (
+    input: ReviewDiffPreviewInput,
+    manifest: ReturnType<typeof parseReviewStatus> & { truncated: boolean },
+  ) {
+    const selection = input.selection ?? { _tag: "all" as const };
+    if (selection._tag === "commit") {
+      const result = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.commit",
+        input.cwd,
+        [
+          "show",
+          "--format=",
+          "--patch",
+          "--minimal",
+          ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+          selection.sha,
+          "--",
+        ],
+        { maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES, appendTruncationMarker: true },
+      );
+      return {
+        diff: result.stdout,
+        truncated: result.stdoutTruncated,
+        title: selection.sha.slice(0, 8),
+      };
+    }
+    if (selection._tag === "all") {
+      const head = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.head",
+        input.cwd,
+        ["rev-parse", "--verify", "HEAD"],
+        { allowNonZeroExit: true },
+      );
+      const tracked = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.dirtyTracked",
+        input.cwd,
+        [
+          "diff",
+          ...(head.exitCode === 0 ? [] : ["--cached"]),
+          "--patch",
+          "--minimal",
+          ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+          ...(head.exitCode === 0 ? ["HEAD"] : []),
+          "--",
+        ],
+        { maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES, appendTruncationMarker: true },
+      ).pipe(
+        Effect.orElseSucceed(() => ({
+          exitCode: 0,
+          stdout: "",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        })),
+      );
+      const unstagedWithoutHead =
+        head.exitCode === 0
+          ? null
+          : yield* executeGit(
+              "GitVcsDriver.getReviewDiffPreview.dirtyUnstagedWithoutHead",
+              input.cwd,
+              [
+                "diff",
+                "--patch",
+                "--minimal",
+                ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+                "--",
+              ],
+              { maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES, appendTruncationMarker: true },
+            ).pipe(
+              Effect.orElseSucceed(() => ({
+                exitCode: 0,
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              })),
+            );
+      const untracked = yield* readUntrackedReviewDiffs(input.cwd, input.ignoreWhitespace).pipe(
+        Effect.orElseSucceed(() => ({ diff: "", truncated: false })),
+      );
+      return {
+        diff: [
+          tracked.stdout.trimEnd(),
+          unstagedWithoutHead?.stdout.trimEnd(),
+          untracked.diff.trimEnd(),
+        ]
+          .filter((diff): diff is string => diff !== undefined && diff.length > 0)
+          .join("\n"),
+        truncated:
+          tracked.stdoutTruncated ||
+          unstagedWithoutHead?.stdoutTruncated === true ||
+          untracked.truncated,
+        title: "Dirty worktree",
+      };
+    }
+
+    const files = selection.area === "staged" ? manifest.staged : manifest.unstaged;
+    const selectedFile = files.find((file) => file.path === selection.path);
+    if (!selectedFile) {
+      return { diff: "", truncated: false, title: selection.path };
+    }
+    const paths = [selectedFile.previousPath, selectedFile.path].filter(
+      (value): value is string => value !== null,
+    );
+    const isUntracked = selection.area === "unstaged" && selectedFile.kind === "untracked";
+    const result = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.selectedFile",
+      input.cwd,
+      isUntracked
+        ? [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--minimal",
+            ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+            "--",
+            "/dev/null",
+            selectedFile.path,
+          ]
+        : [
+            "--literal-pathspecs",
+            "diff",
+            ...(selection.area === "staged" ? ["--cached"] : []),
+            "--patch",
+            "--minimal",
+            ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+            "--",
+            ...paths,
+          ],
+      {
+        allowNonZeroExit: isUntracked,
+        maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
+        appendTruncationMarker: true,
+      },
+    );
+    return {
+      diff: result.stdout,
+      truncated: result.stdoutTruncated,
+      title: `${selection.area === "staged" ? "Staged" : "Unstaged"}: ${selection.path}`,
+    };
+  });
+
+  const readReviewCommits = Effect.fn("readReviewCommits")(function* (
+    cwd: string,
+    baseRef: string | null,
+  ) {
+    const result = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.commits",
+      cwd,
+      [
+        "log",
+        "-z",
+        "--format=%H%x00%s%x00%cI",
+        "--max-count=50",
+        ...(baseRef ? [`${baseRef}..HEAD`] : ["HEAD"]),
+      ],
+      {
+        allowNonZeroExit: true,
+        maxOutputBytes: REVIEW_COMMIT_LIST_MAX_OUTPUT_BYTES,
+      },
+    );
+    if (result.exitCode !== 0) return [];
+    const fields = result.stdout.split("\0").filter((field) => field.length > 0);
+    const commits: ReviewCommit[] = [];
+    for (let index = 0; index + 2 < fields.length; index += 3) {
+      const sha = fields[index];
+      const title = fields[index + 1];
+      const committedAt = fields[index + 2];
+      if (!sha || !title || !committedAt || !/^[0-9a-f]{40}$/i.test(sha)) continue;
+      commits.push({ sha, title, committedAt });
+    }
+    return commits;
+  });
+
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
     input: ReviewDiffPreviewInput,
   ) {
@@ -1855,6 +2245,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         cwd: input.cwd,
         generatedAt: yield* DateTime.now,
         sources: [],
+        commits: [],
+        workingTree: { staged: [], unstaged: [], truncated: false },
       };
     }
 
@@ -1866,37 +2258,48 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             Effect.orElseSucceed(() => null),
           )
         : null);
+    const commits =
+      input.selection?._tag === "file" ? [] : yield* readReviewCommits(input.cwd, baseRef);
+    const workingTree = yield* readReviewWorkingTreeManifest(input.cwd);
+    const selectedDiff = yield* readSelectedReviewDiff(input, workingTree);
+    const hashDiff = (diff: string) =>
+      crypto.digest("SHA-256", new TextEncoder().encode(diff)).pipe(
+        Effect.map(Encoding.encodeHex),
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.getReviewDiffPreview.hash",
+              command: "crypto.digest SHA-256",
+              cwd: input.cwd,
+              detail: "Failed to hash review diff.",
+              cause,
+            }),
+        ),
+      );
+    const selection = input.selection ?? { _tag: "all" as const };
+    const selectedSource: ReviewDiffPreviewSource = {
+      id: selection._tag === "commit" ? `commit:${selection.sha}` : "working-tree",
+      kind: selection._tag === "commit" ? "branch-range" : "working-tree",
+      title:
+        selection._tag === "commit"
+          ? (commits.find((commit) => commit.sha === selection.sha)?.title ?? selectedDiff.title)
+          : selectedDiff.title,
+      baseRef: selection._tag === "commit" ? null : "HEAD",
+      headRef: selection._tag === "commit" ? selection.sha : null,
+      diff: selectedDiff.diff,
+      diffHash: yield* hashDiff(selectedDiff.diff),
+      truncated: selectedDiff.truncated,
+    };
 
-    const dirtyTrackedResult = yield* executeGit(
-      "GitVcsDriver.getReviewDiffPreview.dirtyTracked",
-      input.cwd,
-      [
-        "diff",
-        "--patch",
-        "--minimal",
-        ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
-        "HEAD",
-        "--",
-      ],
-      {
-        maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
-        appendTruncationMarker: true,
-      },
-    ).pipe(
-      Effect.orElseSucceed(() => ({
-        exitCode: 0,
-        stdout: "",
-        stderr: "",
-        stdoutTruncated: false,
-        stderrTruncated: false,
-      })),
-    );
-    const dirtyUntracked = yield* readUntrackedReviewDiffs(input.cwd).pipe(
-      Effect.orElseSucceed(() => ({ diff: "", truncated: false })),
-    );
-    const dirtyDiff = [dirtyTrackedResult.stdout.trimEnd(), dirtyUntracked.diff.trimEnd()]
-      .filter((diff) => diff.length > 0)
-      .join("\n");
+    if (selection._tag === "file" || selection._tag === "commit") {
+      return {
+        cwd: input.cwd,
+        generatedAt: yield* DateTime.now,
+        sources: [selectedSource],
+        commits,
+        workingTree,
+      };
+    }
 
     const baseResult =
       baseRef && branch
@@ -1925,36 +2328,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           )
         : null;
     const baseDiff = baseResult?.stdout ?? "";
-    const hashDiff = (diff: string) =>
-      crypto.digest("SHA-256", new TextEncoder().encode(diff)).pipe(
-        Effect.map(Encoding.encodeHex),
-        Effect.mapError(
-          (cause) =>
-            new GitCommandError({
-              operation: "GitVcsDriver.getReviewDiffPreview.hash",
-              command: "crypto.digest SHA-256",
-              cwd: input.cwd,
-              detail: "Failed to hash review diff.",
-              cause,
-            }),
-        ),
-      );
-    const [dirtyDiffHash, baseDiffHash] = yield* Effect.all([
-      hashDiff(dirtyDiff),
-      hashDiff(baseDiff),
-    ]);
+    const baseDiffHash = yield* hashDiff(baseDiff);
 
     const sources: ReviewDiffPreviewSource[] = [
-      {
-        id: "working-tree",
-        kind: "working-tree",
-        title: "Dirty worktree",
-        baseRef: "HEAD",
-        headRef: null,
-        diff: dirtyDiff,
-        diffHash: dirtyDiffHash,
-        truncated: dirtyTrackedResult.stdoutTruncated || dirtyUntracked.truncated,
-      },
+      selectedSource,
       {
         id: "branch-range",
         kind: "branch-range",
@@ -1971,7 +2348,40 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       cwd: input.cwd,
       generatedAt: yield* DateTime.now,
       sources,
+      commits,
+      workingTree,
     };
+  });
+
+  const stageReviewPaths: GitVcsDriver.GitVcsDriver["Service"]["stageReviewPaths"] = Effect.fn(
+    "stageReviewPaths",
+  )(function* (input) {
+    yield* executeGit(
+      "GitVcsDriver.stageReviewPaths",
+      input.cwd,
+      ["--literal-pathspecs", "add", "--", ...input.paths],
+      { timeoutMs: 15_000, fallbackErrorDetail: "git add failed" },
+    );
+    return { stagedPaths: [...input.paths] };
+  });
+
+  const unstageReviewPaths: GitVcsDriver.GitVcsDriver["Service"]["unstageReviewPaths"] = Effect.fn(
+    "unstageReviewPaths",
+  )(function* (input: Omit<ReviewUnstagePathsInput, "threadId">) {
+    const paths = [
+      ...new Set(
+        input.changes.flatMap((change) =>
+          change.previousPath === null ? [change.path] : [change.path, change.previousPath],
+        ),
+      ),
+    ];
+    yield* executeGit(
+      "GitVcsDriver.unstageReviewPaths",
+      input.cwd,
+      ["--literal-pathspecs", "reset", "--quiet", "--", ...paths],
+      { timeoutMs: 15_000, fallbackErrorDetail: "git reset failed" },
+    );
+    return { unstagedPaths: input.changes.map((change) => change.path) };
   });
 
   const readConfigValue: GitVcsDriver.GitVcsDriver["Service"]["readConfigValue"] = (cwd, key) =>
@@ -2241,6 +2651,36 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     },
   );
+
+  const discardReviewChanges: GitVcsDriver.GitVcsDriver["Service"]["discardReviewChanges"] =
+    Effect.fn("discardReviewChanges")(function* (
+      input: Omit<ReviewDiscardChangesInput, "threadId">,
+    ) {
+      const trackedPaths = input.changes
+        .filter((change) => change.kind !== "untracked")
+        .map((change) => change.path);
+      const untrackedPaths = input.changes
+        .filter((change) => change.kind === "untracked")
+        .map((change) => change.path);
+
+      if (trackedPaths.length > 0) {
+        yield* executeGit(
+          "GitVcsDriver.discardReviewChanges",
+          input.cwd,
+          ["--literal-pathspecs", "restore", "--worktree", "--", ...trackedPaths],
+          { timeoutMs: 15_000, fallbackErrorDetail: "git restore failed" },
+        );
+      }
+      if (untrackedPaths.length > 0) {
+        yield* executeGit(
+          "GitVcsDriver.discardReviewChanges",
+          input.cwd,
+          ["--literal-pathspecs", "clean", "--force", "--", ...untrackedPaths],
+          { timeoutMs: 15_000, fallbackErrorDetail: "git clean failed" },
+        );
+      }
+      return { discardedPaths: input.changes.map((change) => change.path) };
+    });
 
   const createWorktree: GitVcsDriver.GitVcsDriver["Service"]["createWorktree"] = Effect.fn(
     "createWorktree",
@@ -2541,6 +2981,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     pullCurrentBranch,
     readRangeContext,
     getReviewDiffPreview,
+    discardReviewChanges,
+    stageReviewPaths,
+    unstageReviewPaths,
     readConfigValue,
     listRefs,
     createWorktree,

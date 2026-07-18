@@ -49,6 +49,22 @@ describe("buildCommitMessagePrompt", () => {
 
     expect(result.prompt).toContain("Branch: (detached)");
   });
+
+  it("includes custom commit instructions", () => {
+    const result = buildCommitMessagePrompt({
+      branch: "main",
+      stagedSummary: "M a.ts",
+      stagedPatch: "diff",
+      includeBranch: false,
+      policy: {
+        kind: "custom",
+        commitInstructions: "Use feat: or fix: prefixes.",
+        inferRepositoryConventions: false,
+      },
+    });
+
+    expect(result.prompt).toContain("Additional instructions:\nUse feat: or fix: prefixes.");
+  });
 });
 
 describe("buildPrContentPrompt", () => {
@@ -69,6 +85,23 @@ describe("buildPrContentPrompt", () => {
     expect(result.prompt).toContain("3 files changed");
     expect(result.prompt).toContain("Diff patch:");
     expect(result.prompt).toContain("export function login()");
+  });
+
+  it("includes custom pull request instructions", () => {
+    const result = buildPrContentPrompt({
+      baseBranch: "main",
+      headBranch: "feature/auth",
+      commitSummary: "feat: auth",
+      diffSummary: "1 file changed",
+      diffPatch: "diff",
+      policy: {
+        kind: "custom",
+        changeRequestInstructions: "Use only the title in the body.",
+        inferRepositoryConventions: false,
+      },
+    });
+
+    expect(result.prompt).toContain("Additional instructions:\nUse only the title in the body.");
   });
 });
 

@@ -31,6 +31,12 @@ describe("ClientSettings word wrap", () => {
   });
 });
 
+describe("ClientSettings project actions", () => {
+  it("shares actions across worktrees by default", () => {
+    expect(decodeClientSettings({}).shareProjectActionsAcrossWorktrees).toBe(true);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});
@@ -96,6 +102,36 @@ describe("ServerSettings worktree defaults", () => {
     expect(
       decodeServerSettingsPatch({ newWorktreesStartFromOrigin: true }).newWorktreesStartFromOrigin,
     ).toBe(true);
+  });
+});
+
+describe("ServerSettings Git defaults", () => {
+  it("keeps legacy configs compatible", () => {
+    const settings = decodeServerSettings({});
+    expect(settings.gitCommitInstructions).toBe("");
+    expect(settings.gitPullRequestInstructions).toBe("");
+    expect(settings.gitBranchPrefix).toBe("");
+    expect(settings.gitNoVerify).toBe(false);
+  });
+
+  it("accepts Git preference updates", () => {
+    expect(
+      decodeServerSettingsPatch({
+        gitCommitInstructions: "  Use Conventional Commits.  ",
+        gitPullRequestInstructions: "  Keep body short.  ",
+        gitBranchPrefix: "  codex  ",
+        gitNoVerify: true,
+      }),
+    ).toMatchObject({
+      gitCommitInstructions: "Use Conventional Commits.",
+      gitPullRequestInstructions: "Keep body short.",
+      gitBranchPrefix: "codex",
+      gitNoVerify: true,
+    });
+  });
+
+  it("accepts an empty branch prefix", () => {
+    expect(decodeServerSettingsPatch({ gitBranchPrefix: "" }).gitBranchPrefix).toBe("");
   });
 });
 

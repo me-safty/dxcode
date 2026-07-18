@@ -3,6 +3,7 @@ import type {
   GitStackedAction,
   VcsStatusResult,
 } from "@t3tools/contracts";
+import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
@@ -35,6 +36,117 @@ export interface DefaultBranchActionDialogCopy {
   title: string;
   description: string;
   continueLabel: string;
+}
+
+/**
+ * Resolve dirty files that still share changed lines with the net thread diff.
+ * File-path intersection alone is insufficient: a thread hunk can already be
+ * committed while an unrelated hunk remains dirty in the same file.
+ */
+function splitGitFileSections(diff: string): string[] {
+  const starts = [...diff.matchAll(/^diff --git /gm)].map((match) => match.index);
+  return starts.map((start, index) => diff.slice(start, starts[index + 1] ?? diff.length));
+}
+
+function changedLineTokens(diff: string): Set<string> {
+  return new Set(
+    diff
+      .split("\n")
+      .filter(
+        (line) =>
+          (line.startsWith("+") && !line.startsWith("+++")) ||
+          (line.startsWith("-") && !line.startsWith("---")),
+      ),
+  );
+}
+
+function parseSectionPath(section: string): string | null {
+  try {
+    return parsePatchFiles(section)[0]?.files[0]?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rebuild the historical thread patch from the live worktree hunks that still
+ * contain thread changes. Using the live patch headers makes the result apply
+ * cleanly after earlier thread turns have already been committed.
+ */
+export function resolveRemainingThreadPatch(
+  threadDiff: string | null | undefined,
+  workingTreeDiff: string | null | undefined,
+): string | null {
+  const normalizedThreadDiff = threadDiff?.trim();
+  const normalizedWorkingTreeDiff = workingTreeDiff?.trim();
+  if (!normalizedThreadDiff || !normalizedWorkingTreeDiff) return null;
+
+  try {
+    const threadLinesByPath = new Map<string, Set<string>>();
+    const threadPaths = new Set<string>();
+    for (const section of splitGitFileSections(normalizedThreadDiff)) {
+      const path = parseSectionPath(section);
+      if (!path) continue;
+      threadPaths.add(path);
+      const lines = threadLinesByPath.get(path) ?? new Set<string>();
+      for (const line of changedLineTokens(section)) lines.add(line);
+      threadLinesByPath.set(path, lines);
+    }
+
+    const remainingSections: string[] = [];
+    for (const section of splitGitFileSections(normalizedWorkingTreeDiff)) {
+      const path = parseSectionPath(section);
+      if (!path || !threadPaths.has(path)) continue;
+      const threadLines = threadLinesByPath.get(path) ?? new Set<string>();
+      const hunkStarts = [...section.matchAll(/^@@ /gm)].map((match) => match.index);
+
+      if (hunkStarts.length === 0) {
+        // Binary and pure-rename patches do not have textual hunks.
+        remainingSections.push(section);
+        continue;
+      }
+
+      const header = section.slice(0, hunkStarts[0]);
+      const matchingHunks = hunkStarts
+        .map((start, index) => section.slice(start, hunkStarts[index + 1] ?? section.length))
+        .filter((hunk) => [...changedLineTokens(hunk)].some((line) => threadLines.has(line)));
+      if (matchingHunks.length > 0) {
+        remainingSections.push(`${header}${matchingHunks.join("")}`);
+      }
+    }
+
+    const remainingPatch = remainingSections.join("").trim();
+    return remainingPatch.length > 0 ? `${remainingPatch}\n` : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveThreadCommitFilePaths(
+  remainingThreadPatch: string | null | undefined,
+  workingTreeFiles: VcsStatusResult["workingTree"]["files"],
+): string[] {
+  const normalizedPatch = remainingThreadPatch?.trim();
+  if (!normalizedPatch) return [];
+
+  try {
+    const remainingPaths = new Set(
+      parsePatchFiles(normalizedPatch).flatMap((patch) => patch.files.map((file) => file.name)),
+    );
+    return workingTreeFiles
+      .map((file) => file.path)
+      .filter((path) => remainingPaths.has(path))
+      .toSorted((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+export function shouldLoadThreadCommitDiff(
+  isGitMenuOpen: boolean,
+  isThreadCommitDialogOpen: boolean,
+): boolean {
+  return isGitMenuOpen || isThreadCommitDialogOpen;
 }
 
 export type DefaultBranchConfirmableAction =

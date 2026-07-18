@@ -1,19 +1,32 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as PlatformError from "effect/PlatformError";
+import * as Option from "effect/Option";
+import {
+  ProjectId,
+  ThreadId,
+  type OrchestrationProjectShell,
+  type OrchestrationThreadShell,
+} from "@t3tools/contracts";
 
-import { ServerConfig } from "../config.ts";
+import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsDriver from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ReviewService from "./ReviewService.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+
+const TEST_THREAD_ID = ThreadId.make("thread-review-service-test");
+const TEST_PROJECT_ID = ProjectId.make("project-review-service-test");
 
 function makeLayer(input: {
-  readonly workspaceRoot: string;
-  readonly baseDir: string;
   readonly detectCalls?: Array<{ readonly cwd: string }>;
+  readonly repositoryRoot?: string;
+  readonly authorizedCwd?: string;
+  readonly gitCalls?: Array<{ readonly operation: string; readonly cwd: string }>;
 }) {
   return ReviewService.layer.pipe(
     Layer.provide(
@@ -23,77 +36,247 @@ function makeLayer(input: {
         detect: (request) =>
           Effect.sync(() => {
             input.detectCalls?.push({ cwd: request.cwd });
-            return null;
+            return input.repositoryRoot
+              ? ({
+                  kind: "git",
+                  repository: {
+                    kind: "git",
+                    rootPath: input.repositoryRoot,
+                    metadataPath: null,
+                    freshness: {
+                      source: "live-local",
+                      observedAt: DateTime.nowUnsafe(),
+                      expiresAt: Option.none(),
+                    },
+                  },
+                  driver: {} as VcsDriver.VcsDriver["Service"],
+                } satisfies VcsDriverRegistry.VcsDriverHandle)
+              : null;
           }),
       }),
     ),
-    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-    Layer.provide(ServerConfig.layerTest(input.workspaceRoot, input.baseDir)),
+    Layer.provide(
+      Layer.mock(GitVcsDriver.GitVcsDriver)({
+        getReviewDiffPreview: (request) =>
+          Effect.sync(() => {
+            input.gitCalls?.push({ operation: "preview", cwd: request.cwd });
+            return {
+              cwd: request.cwd,
+              generatedAt: DateTime.nowUnsafe(),
+              sources: [],
+              commits: [],
+              workingTree: { staged: [], unstaged: [], truncated: false },
+            };
+          }),
+        discardReviewChanges: (request) =>
+          Effect.sync(() => {
+            input.gitCalls?.push({ operation: "discard", cwd: request.cwd });
+            return { discardedPaths: request.changes.map((change) => change.path) };
+          }),
+        stageReviewPaths: (request) =>
+          Effect.sync(() => {
+            input.gitCalls?.push({ operation: "stage", cwd: request.cwd });
+            return { stagedPaths: [...request.paths] };
+          }),
+        unstageReviewPaths: (request) =>
+          Effect.sync(() => {
+            input.gitCalls?.push({ operation: "unstage", cwd: request.cwd });
+            return { unstagedPaths: request.changes.map((change) => change.path) };
+          }),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+        getThreadShellById: () =>
+          Effect.succeed(
+            input.authorizedCwd
+              ? Option.some({
+                  id: TEST_THREAD_ID,
+                  projectId: TEST_PROJECT_ID,
+                  worktreePath: input.authorizedCwd,
+                } as OrchestrationThreadShell)
+              : Option.none(),
+          ),
+        getProjectShellById: () =>
+          Effect.succeed(
+            input.authorizedCwd
+              ? Option.some({
+                  id: TEST_PROJECT_ID,
+                  workspaceRoot: input.authorizedCwd,
+                } as OrchestrationProjectShell)
+              : Option.none(),
+          ),
+      }),
+    ),
+    Layer.provide(WorkspacePaths.layer),
     Layer.provideMerge(NodeServices.layer),
   );
 }
 
 describe("ReviewService", () => {
-  it.effect("rejects diff preview cwd outside the configured workspace roots", () =>
+  it.effect("runs Git review operations from the detected repository root", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
-      const detectCalls: Array<{ readonly cwd: string }> = [];
+      const repositoryRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-root-" });
+      const nestedCwd = `${repositoryRoot}/packages/app`;
+      yield* fs.makeDirectory(nestedCwd, { recursive: true });
+      const gitCalls: Array<{ readonly operation: string; readonly cwd: string }> = [];
 
-      const error = yield* Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
-        return yield* review.getDiffPreview({ cwd: outsideRoot }).pipe(Effect.flip);
-      }).pipe(Effect.provide(makeLayer({ workspaceRoot, baseDir, detectCalls })));
+        yield* review.getDiffPreview({ cwd: nestedCwd });
+        yield* review.discardChanges({
+          cwd: nestedCwd,
+          threadId: TEST_THREAD_ID,
+          changes: [{ path: "src/app.ts", kind: "modified" }],
+        });
+        yield* review.stagePaths({
+          cwd: nestedCwd,
+          threadId: TEST_THREAD_ID,
+          paths: ["src/app.ts"],
+        });
+        yield* review.unstagePaths({
+          cwd: nestedCwd,
+          threadId: TEST_THREAD_ID,
+          changes: [{ path: "src/app.ts", previousPath: null }],
+        });
+      }).pipe(Effect.provide(makeLayer({ repositoryRoot, authorizedCwd: nestedCwd, gitCalls })));
 
-      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
-      assert.strictEqual(error.operation, "ReviewService.getDiffPreview");
-      assert.match(
-        "detail" in error ? error.detail : "",
-        /must stay within the configured workspace root/,
-      );
-      assert.deepStrictEqual(detectCalls, []);
+      assert.deepStrictEqual(gitCalls, [
+        { operation: "preview", cwd: repositoryRoot },
+        { operation: "discard", cwd: repositoryRoot },
+        { operation: "stage", cwd: repositoryRoot },
+        { operation: "unstage", cwd: repositoryRoot },
+      ]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("allows diff preview cwd inside the configured workspace root", () =>
+  it.effect("uses the requested project cwd instead of the server cwd", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
       const detectCalls: Array<{ readonly cwd: string }> = [];
 
       const result = yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
-        return yield* review.getDiffPreview({ cwd: workspaceRoot });
-      }).pipe(Effect.provide(makeLayer({ workspaceRoot, baseDir, detectCalls })));
+        return yield* review.getDiffPreview({ cwd: projectRoot });
+      }).pipe(Effect.provide(makeLayer({ detectCalls })));
 
-      assert.strictEqual(result.cwd, workspaceRoot);
+      assert.strictEqual(result.cwd, projectRoot);
       assert.deepStrictEqual(result.sources, []);
-      assert.deepStrictEqual(detectCalls, [{ cwd: workspaceRoot }]);
+      assert.deepStrictEqual(detectCalls, [{ cwd: projectRoot }]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("preserves unexpected path-resolution failures", () =>
+  it.effect("rejects staging paths that escape the repository", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
-      const invalidCwd = `${workspaceRoot}\0invalid`;
       const detectCalls: Array<{ readonly cwd: string }> = [];
 
       const error = yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
-        return yield* review.getDiffPreview({ cwd: invalidCwd }).pipe(Effect.flip);
-      }).pipe(Effect.provide(makeLayer({ workspaceRoot, baseDir, detectCalls })));
+        return yield* review
+          .stagePaths({
+            cwd: workspaceRoot,
+            threadId: TEST_THREAD_ID,
+            paths: ["../outside.ts"],
+          })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(makeLayer({ authorizedCwd: workspaceRoot, detectCalls })));
 
       assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
-      if (error._tag !== "VcsRepositoryDetectionError") return;
-      assert.strictEqual(error.operation, "ReviewService.assertWorkspaceBoundCwd.canonicalizePath");
-      assert.strictEqual(error.cwd, invalidCwd);
-      assert.match(error.detail, /Failed to resolve a path/);
-      assert.instanceOf(error.cause, PlatformError.PlatformError);
+      assert.strictEqual(error.operation, "ReviewService.stagePaths");
+      assert.deepStrictEqual(detectCalls, []);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects paths containing null bytes before spawning Git", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review
+          .stagePaths({ cwd: workspaceRoot, threadId: TEST_THREAD_ID, paths: ["bad\0path.ts"] })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(makeLayer({ authorizedCwd: workspaceRoot, detectCalls })));
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+      assert.deepStrictEqual(detectCalls, []);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects discarding paths that escape the repository", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review
+          .discardChanges({
+            cwd: workspaceRoot,
+            threadId: TEST_THREAD_ID,
+            changes: [{ path: "../outside.ts", kind: "modified" }],
+          })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(makeLayer({ authorizedCwd: workspaceRoot, detectCalls })));
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+      assert.strictEqual(error.operation, "ReviewService.discardChanges");
+      assert.deepStrictEqual(detectCalls, []);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects unstaging paths that escape the repository", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review
+          .unstagePaths({
+            cwd: workspaceRoot,
+            threadId: TEST_THREAD_ID,
+            changes: [{ path: "../outside.ts", previousPath: null }],
+          })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(makeLayer({ authorizedCwd: workspaceRoot, detectCalls })));
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+      assert.strictEqual(error.operation, "ReviewService.unstagePaths");
+      assert.deepStrictEqual(detectCalls, []);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects mutation cwd outside the thread workspace", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const authorizedCwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-authorized-" });
+      const requestedCwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-unauthorized-" });
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review
+          .stagePaths({
+            cwd: requestedCwd,
+            threadId: TEST_THREAD_ID,
+            paths: ["src/app.ts"],
+          })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(makeLayer({ authorizedCwd, detectCalls })));
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+      if (error._tag === "VcsRepositoryDetectionError") {
+        assert.include(error.detail, "not authorized");
+      }
       assert.deepStrictEqual(detectCalls, []);
     }).pipe(Effect.provide(NodeServices.layer)),
   );

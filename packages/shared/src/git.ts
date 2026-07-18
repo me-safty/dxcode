@@ -11,6 +11,18 @@ import * as Result from "effect/Result";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 
 export const WORKTREE_BRANCH_PREFIX = "t3code";
+/**
+ * A deliberately unstageable path sent alongside exact-patch commits.
+ *
+ * Servers that predate exact patch support discard the unknown patch field but
+ * retain filePaths. This path then makes the legacy `git add` fail closed
+ * instead of falling back to committing the entire worktree.
+ */
+export const EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH = ".git/t3code-exact-commit-patch-v1";
+
+export function isExactCommitPatchLegacyGuard(filePaths: readonly string[]): boolean {
+  return filePaths.length === 1 && filePaths[0] === EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH;
+}
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 
 /**
@@ -40,11 +52,19 @@ export function sanitizeBranchFragment(raw: string): string {
  * Preserves an existing `feature/` prefix or slash-separated namespace.
  */
 export function sanitizeFeatureBranchName(raw: string): string {
+  return sanitizePrefixedBranchName(raw, "feature");
+}
+
+export function sanitizePrefixedBranchName(raw: string, prefix: string): string {
   const sanitized = sanitizeBranchFragment(raw);
-  if (sanitized.includes("/")) {
-    return sanitized.startsWith("feature/") ? sanitized : `feature/${sanitized}`;
+  if (prefix.trim().length === 0) {
+    return sanitized.replace(/^feature\//, "");
   }
-  return `feature/${sanitized}`;
+  const sanitizedPrefix = sanitizeBranchFragment(prefix).replaceAll("/", "-");
+  if (sanitized.startsWith(`${sanitizedPrefix}/`)) return sanitized;
+  const withoutLegacyPrefix =
+    sanitizedPrefix === "feature" ? sanitized : sanitized.replace(/^feature\//, "");
+  return `${sanitizedPrefix}/${withoutLegacyPrefix}`;
 }
 
 const AUTO_FEATURE_BRANCH_FALLBACK = "feature/update";
@@ -56,10 +76,12 @@ const AUTO_FEATURE_BRANCH_FALLBACK = "feature/update";
 export function resolveAutoFeatureBranchName(
   existingBranchNames: readonly string[],
   preferredBranch?: string,
+  prefix = "feature",
 ): string {
   const preferred = preferredBranch?.trim();
-  const resolvedBase = sanitizeFeatureBranchName(
+  const resolvedBase = sanitizePrefixedBranchName(
     preferred && preferred.length > 0 ? preferred : AUTO_FEATURE_BRANCH_FALLBACK,
+    prefix,
   );
   const existingNames = new Set(existingBranchNames.map((refName) => refName.toLowerCase()));
 

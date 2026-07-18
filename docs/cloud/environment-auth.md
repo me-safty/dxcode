@@ -12,7 +12,7 @@ OAuth-style scope strings:
 | Scope                   | Permission                                                               |
 | ----------------------- | ------------------------------------------------------------------------ |
 | `orchestration:read`    | Read snapshots, status, events, configuration, and filesystem/VCS state. |
-| `orchestration:operate` | Dispatch user operations and mutate environment-side workspace state.    |
+| `orchestration:operate` | Dispatch operations and mutate workspace state, including the Git index. |
 | `terminal:operate`      | Create, attach, input, resize, clear, restart, and terminate terminals.  |
 | `review:write`          | Read review diff previews used to compose review feedback.               |
 | `access:read`           | Inspect pairing links and client sessions.                               |
