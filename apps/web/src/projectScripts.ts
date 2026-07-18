@@ -4,6 +4,7 @@ import {
   type KeybindingCommand,
   type ProjectScript,
 } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import * as Schema from "effect/Schema";
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
 
@@ -59,4 +60,55 @@ export function nextProjectScriptId(name: string, existingIds: Iterable<string>)
 export function primaryProjectScript(scripts: ReadonlyArray<ProjectScript>): ProjectScript | null {
   const regular = scripts.find((script) => !script.runOnWorktreeCreate);
   return regular ?? scripts[0] ?? null;
+}
+
+export function projectsSharingActions(
+  project: EnvironmentProject,
+  projects: ReadonlyArray<EnvironmentProject>,
+  sharingEnabled: boolean,
+): EnvironmentProject[] {
+  const repositoryKey = project.repositoryIdentity?.canonicalKey;
+  if (!sharingEnabled || !repositoryKey) return [project];
+  const related = projects.filter(
+    (candidate) =>
+      candidate.environmentId === project.environmentId &&
+      candidate.repositoryIdentity?.canonicalKey === repositoryKey,
+  );
+  return related.length > 0 ? related : [project];
+}
+
+export function sharedProjectScripts(
+  project: EnvironmentProject,
+  projects: ReadonlyArray<EnvironmentProject>,
+  sharingEnabled: boolean,
+): ReadonlyArray<ProjectScript> {
+  const related = projectsSharingActions(project, projects, sharingEnabled);
+  return related.find((candidate) => candidate.scripts.length > 0)?.scripts ?? project.scripts;
+}
+
+export type ProjectScriptsUpdateTarget = Pick<
+  EnvironmentProject,
+  "environmentId" | "id" | "scripts"
+>;
+
+export async function updateProjectScriptsWithRollback<Result>(input: {
+  readonly projects: ReadonlyArray<ProjectScriptsUpdateTarget>;
+  readonly nextScripts: ReadonlyArray<ProjectScript>;
+  readonly update: (
+    project: ProjectScriptsUpdateTarget,
+    scripts: ReadonlyArray<ProjectScript>,
+  ) => Promise<Result>;
+  readonly isFailure: (result: Result) => boolean;
+}): Promise<ReadonlyArray<Result>> {
+  const updateResults = await Promise.all(
+    input.projects.map((project) => input.update(project, input.nextScripts)),
+  );
+  if (!updateResults.some(input.isFailure)) return updateResults;
+
+  await Promise.all(
+    input.projects.flatMap((project, index) =>
+      input.isFailure(updateResults[index]!) ? [] : [input.update(project, project.scripts)],
+    ),
+  );
+  return updateResults;
 }

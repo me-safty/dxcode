@@ -380,6 +380,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open task panel"]
         : []),
+      ...(settings.shareProjectActionsAcrossWorktrees !==
+      DEFAULT_UNIFIED_SETTINGS.shareProjectActionsAcrossWorktrees
+        ? ["Shared project actions"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -406,6 +410,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ],
     [
       settings.autoOpenPlanSidebar,
+      settings.shareProjectActionsAcrossWorktrees,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
@@ -438,6 +443,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
+      shareProjectActionsAcrossWorktrees:
+        DEFAULT_UNIFIED_SETTINGS.shareProjectActionsAcrossWorktrees,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
@@ -672,6 +679,34 @@ export function GeneralSettingsPanel() {
                 updateSettings({ autoOpenPlanSidebar: Boolean(checked) })
               }
               aria-label="Open the task panel automatically"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Share project actions"
+          description="Use the same actions for projects from the same repository, including separate worktrees."
+          resetAction={
+            settings.shareProjectActionsAcrossWorktrees !==
+            DEFAULT_UNIFIED_SETTINGS.shareProjectActionsAcrossWorktrees ? (
+              <SettingResetButton
+                label="shared project actions"
+                onClick={() =>
+                  updateSettings({
+                    shareProjectActionsAcrossWorktrees:
+                      DEFAULT_UNIFIED_SETTINGS.shareProjectActionsAcrossWorktrees,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.shareProjectActionsAcrossWorktrees}
+              onCheckedChange={(checked) =>
+                updateSettings({ shareProjectActionsAcrossWorktrees: Boolean(checked) })
+              }
+              aria-label="Share project actions across worktrees"
             />
           }
         />

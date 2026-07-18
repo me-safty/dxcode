@@ -10,6 +10,7 @@ import type {
   ReviewChangedFile,
   ScopedThreadRef,
   TurnId,
+  VcsStatusResult,
 } from "@t3tools/contracts";
 import {
   ArrowRightIcon,
@@ -53,7 +54,6 @@ import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings } from "../hooks/useSettings";
 import { useRefreshOnWindowFocus } from "../hooks/useRefreshOnWindowFocus";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import { formatCommitTimestamp, formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { ReviewChangesSidebar } from "./review/ReviewChangesSidebar";
 import {
@@ -222,18 +222,18 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const [optimisticTransfers, setOptimisticTransfers] = useState<
     ReadonlyArray<OptimisticWorkingTreeTransfer>
   >([]);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [mutationRefreshRequest, setMutationRefreshRequest] = useState(0);
-  const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } =
-    useCopyToClipboard({
-      target: "commit hash",
-      onError: (error) => {
-        toastManager.add({
-          type: "error",
-          title: "Unable to copy commit hash",
-          description: error.message,
-        });
-      },
-    });
+  const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } = useCopyToClipboard({
+    target: "commit hash",
+    onError: (error) => {
+      toastManager.add({
+        type: "error",
+        title: "Unable to copy commit hash",
+        description: error.message,
+      });
+    },
+  });
   const pendingPathsRef = useRef<{ key: string; paths: Set<string> }>({
     key: "",
     paths: new Set(),
@@ -368,7 +368,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     },
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
-  const overviewDiffPreview = useEnvironmentQuery(
+  const overviewDiffPreviewQuery = useEnvironmentQuery(
     activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
@@ -383,7 +383,12 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         })
       : null,
   );
-  const selectedFileDiffPreview = useEnvironmentQuery(
+  const overviewDiffPreviewKey = `${activeThread?.environmentId ?? ""}\0${activeCwd ?? ""}\0${selectedBaseRef ?? ""}\0${selectedCommitSha ?? ""}\0${diffIgnoreWhitespace}`;
+  const overviewDiffPreview = {
+    ...overviewDiffPreviewQuery,
+    data: useRetainedQueryData(overviewDiffPreviewKey, overviewDiffPreviewQuery.data),
+  };
+  const selectedFileDiffPreviewQuery = useEnvironmentQuery(
     activeThread &&
       activeCwd &&
       diffSelection.kind === "working-tree" &&
@@ -403,11 +408,15 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         })
       : null,
   );
+  const selectedFileDiffPreviewKey = `${overviewDiffPreviewKey}\0${diffSelection.kind === "working-tree" ? (diffSelection.file?.area ?? "") : ""}\0${diffSelection.kind === "working-tree" ? (diffSelection.file?.path ?? "") : ""}`;
+  const selectedFileDiffPreview = {
+    ...selectedFileDiffPreviewQuery,
+    data: useRetainedQueryData(selectedFileDiffPreviewKey, selectedFileDiffPreviewQuery.data),
+  };
   const branchDiffPreview =
     diffSelection.kind === "working-tree" && diffSelection.file
       ? selectedFileDiffPreview
       : overviewDiffPreview;
-  const isDiffPreviewPending = overviewDiffPreview.isPending || selectedFileDiffPreview.isPending;
   const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
     label: "refresh diff status",
     reportFailure: false,
@@ -417,13 +426,30 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     selectedFileDiffPreview.refresh();
   }, [overviewDiffPreview, selectedFileDiffPreview]);
   const refreshDiffPreviewAfterMutation = useEffectEvent(refreshDiffPreview);
+  const refreshDiffPreviewAfterStatus = useEffectEvent(refreshDiffPreview);
+  const previousWorkingTreeSignalRef = useRef<{
+    readonly cwd: string | null | undefined;
+    readonly signal: VcsStatusResult["workingTree"] | undefined;
+  }>({ cwd: activeCwd, signal: gitStatusQuery.data?.workingTree });
+
+  useEffect(() => {
+    const signal = gitStatusQuery.data?.workingTree;
+    const previous = previousWorkingTreeSignalRef.current;
+    previousWorkingTreeSignalRef.current = { cwd: activeCwd, signal };
+    if (activeCwd == null || previous.cwd !== activeCwd || previous.signal === undefined) return;
+    if (signal !== undefined && signal !== previous.signal) {
+      refreshDiffPreviewAfterStatus();
+    }
+  }, [activeCwd, gitStatusQuery.data?.workingTree]);
+
   const refreshDiffStatus = useCallback(() => {
     refreshDiffPreview();
     if (!activeThread || !activeCwd) return;
+    setIsManualRefreshing(true);
     void refreshVcsStatus({
       environmentId: activeThread.environmentId,
       input: { cwd: activeCwd },
-    });
+    }).finally(() => setIsManualRefreshing(false));
   }, [activeCwd, activeThread, refreshDiffPreview, refreshVcsStatus]);
 
   useRefreshOnWindowFocus(refreshDiffPreview, activeThread != null && activeCwd != null);
@@ -544,7 +570,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true;
   const isLoadingSelectedPatch = selectedTurn
     ? activeCheckpointDiff.isPending
-    : branchDiffPreview.isPending;
+    : branchDiffPreview.isPending && branchDiffPreview.data === null;
   const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
@@ -960,12 +986,12 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
                 aria-label="Refresh changed files"
                 variant="outline"
                 size="xs"
-                disabled={isDiffPreviewPending}
+                disabled={isManualRefreshing}
                 onPressedChange={refreshDiffStatus}
               />
             }
           >
-            <RefreshCwIcon className={cn("size-3", isDiffPreviewPending && "animate-spin")} />
+            <RefreshCwIcon className={cn("size-3", isManualRefreshing && "animate-spin")} />
           </TooltipTrigger>
           <TooltipPopup side="top">Refresh changed files</TooltipPopup>
         </Tooltip>
