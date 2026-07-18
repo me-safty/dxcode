@@ -91,21 +91,24 @@ export const layer = (config: ServerConfig["Service"]) => Layer.succeed(ServerCo
 export const deriveServerPaths = Effect.fn(function* (
   baseDir: ServerConfig["Service"]["baseDir"],
   devUrl: ServerConfig["Service"]["devUrl"],
+  stateDirName?: string,
+  isolateStateRoot = false,
 ): Effect.fn.Return<ServerDerivedPaths, never, Path.Path> {
   const { join } = yield* Path.Path;
-  const stateDir = join(baseDir, devUrl !== undefined ? "dev" : "userdata");
+  const stateDir = join(baseDir, stateDirName ?? (devUrl !== undefined ? "dev" : "userdata"));
+  const mutableRootDir = isolateStateRoot ? stateDir : baseDir;
   const dbPath = join(stateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
   const logsDir = join(stateDir, "logs");
   const providerLogsDir = join(logsDir, "provider");
-  const providerStatusCacheDir = join(baseDir, "caches");
+  const providerStatusCacheDir = join(mutableRootDir, "caches");
   return {
     stateDir,
     dbPath,
     keybindingsConfigPath: join(stateDir, "keybindings.json"),
     settingsPath: join(stateDir, "settings.json"),
     providerStatusCacheDir,
-    worktreesDir: join(baseDir, "worktrees"),
+    worktreesDir: join(mutableRootDir, "worktrees"),
     attachmentsDir,
     logsDir,
     serverLogPath: join(logsDir, "server.log"),

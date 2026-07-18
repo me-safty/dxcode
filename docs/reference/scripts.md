@@ -10,8 +10,11 @@
 - `bun run build` — Builds contracts, web app, and server through Turbo.
 - `bun run typecheck` — Strict TypeScript checks for all packages.
 - `bun run test` — Runs workspace tests.
+- `bun run sync:upstream -- --dry-run` — Detects upstream commits; without dry-run creates an
+  isolated sync branch/worktree and never promotes it automatically.
 - `bun run dist:desktop:artifact -- --platform <mac|linux|win> --target <target> --arch <arch>` — Builds a desktop artifact for a specific platform/target/arch.
 - `bun run dist:desktop:dmg` — Builds a shareable macOS `.dmg` into `./release`.
+- `bun run dist:desktop:dx:dmg` — Builds isolated `DX Code` macOS artifacts into `./release-dx`.
 - `bun run dist:desktop:dmg:x64` — Builds an Intel macOS `.dmg`.
 - `bun run dist:desktop:linux` — Builds a Linux AppImage into `./release`.
 - `bun run dist:desktop:win` — Builds a Windows NSIS installer into `./release`.
@@ -24,6 +27,8 @@
 - Desktop packaging includes `apps/server/dist` (the `t3` backend) and starts it on loopback with an auth token for WebSocket/API traffic.
 - Your tester can still open it on macOS by right-clicking the app and choosing **Open** on first launch.
 - To keep staging files for debugging package contents, run: `bun run dist:desktop:dmg -- --keep-stage`
+- Desktop artifacts accept `--flavor production|dx` or `T3CODE_DESKTOP_FLAVOR`. DX uses its own
+  app ID, renderer protocol, Electron data, backend state, artifact name, and disabled updater.
 - To allow code-signing/notarization when configured in CI/secrets, add: `--signed`.
 - Signed macOS builds also require `T3CODE_APPLE_TEAM_ID` and
   `T3CODE_MACOS_PROVISIONING_PROFILE`. The passkey RP domain is derived from

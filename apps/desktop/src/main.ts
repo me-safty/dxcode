@@ -35,6 +35,7 @@ import * as DesktopBackendPool from "./backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "./backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopNetworkInterfaces from "./backend/DesktopNetworkInterfaces.ts";
 import * as DesktopEnvironment from "./app/DesktopEnvironment.ts";
+import { embeddedDesktopFlavorId } from "./app/EmbeddedDesktopFlavor.ts";
 import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
 import * as DesktopShutdown from "./app/DesktopShutdown.ts";
 import * as DesktopObservability from "./app/DesktopObservability.ts";
@@ -65,6 +66,7 @@ const desktopEnvironmentLayer = Layer.unwrap(
       homeDirectory: NodeOS.homedir(),
       platform,
       processArch,
+      packagedFlavorId: embeddedDesktopFlavorId,
       ...metadata,
     });
   }),

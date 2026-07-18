@@ -14,6 +14,7 @@ import {
   createStagePatchedDependencies,
   createBuildConfig,
   DESKTOP_ASAR_UNPACK,
+  encodeIcns,
   InvalidMacPasskeyRpDomainError,
   InvalidMacPasskeyPublishableKeyError,
   InvalidMockUpdateServerPortError,
@@ -78,6 +79,21 @@ function iconResizeSpawnerLayer(
 }
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it("encodes PNG payloads into an ICNS container", () => {
+    const encoded = encodeIcns([
+      { type: "icp4", png: Uint8Array.from([1, 2, 3]) },
+      { type: "ic10", png: Uint8Array.from([4, 5]) },
+    ]);
+    const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+
+    assert.equal(new TextDecoder().decode(encoded.subarray(0, 4)), "icns");
+    assert.equal(view.getUint32(4, false), encoded.byteLength);
+    assert.equal(new TextDecoder().decode(encoded.subarray(8, 12)), "icp4");
+    assert.equal(view.getUint32(12, false), 11);
+    assert.deepStrictEqual([...encoded.subarray(16, 19)], [1, 2, 3]);
+    assert.equal(new TextDecoder().decode(encoded.subarray(19, 23)), "ic10");
+  });
+
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
@@ -489,6 +505,28 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(win.icon, "icon.ico");
       assert.equal(win.signAndEditExecutable, true);
       assert.notProperty(win, "azureSignOptions");
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("isolates DX package identity and disables upstream publishing", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        "dx",
+      );
+
+      const mac = config.mac as Record<string, unknown>;
+      assert.equal(config.appId, "com.t3tools.dxcode");
+      assert.equal(config.productName, "DX Code");
+      assert.equal(config.artifactName, "DX-Code-${version}-${arch}.${ext}");
+      assert.notProperty(config, "publish");
+      assert.deepStrictEqual(mac.protocols, [{ name: "DX Code", schemes: ["dxcode"] }]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
