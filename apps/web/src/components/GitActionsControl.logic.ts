@@ -3,6 +3,7 @@ import type {
   GitStackedAction,
   VcsStatusResult,
 } from "@t3tools/contracts";
+import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
@@ -35,6 +36,39 @@ export interface DefaultBranchActionDialogCopy {
   title: string;
   description: string;
   continueLabel: string;
+}
+
+/**
+ * Resolve the currently dirty files that belong to the net checkpoint diff for
+ * a thread. The intersection is important because the checkpoint range can
+ * include changes that have already been committed, while Git status is
+ * authoritative for what can be committed now.
+ */
+export function resolveThreadCommitFilePaths(
+  unifiedDiff: string | null | undefined,
+  workingTreeFiles: VcsStatusResult["workingTree"]["files"],
+): string[] {
+  const normalizedDiff = unifiedDiff?.trim();
+  if (!normalizedDiff) return [];
+
+  try {
+    const threadPaths = new Set(
+      parsePatchFiles(normalizedDiff).flatMap((patch) => patch.files.map((file) => file.name)),
+    );
+    return workingTreeFiles
+      .map((file) => file.path)
+      .filter((path) => threadPaths.has(path))
+      .toSorted((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+export function shouldLoadThreadCommitDiff(
+  isGitMenuOpen: boolean,
+  isThreadCommitDialogOpen: boolean,
+): boolean {
+  return isGitMenuOpen || isThreadCommitDialogOpen;
 }
 
 export type DefaultBranchConfirmableAction =

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyGitStatusStreamEvent,
   buildTemporaryWorktreeBranchName,
+  EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH,
+  isExactCommitPatchLegacyGuard,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
@@ -11,6 +13,14 @@ import {
   sanitizePrefixedBranchName,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
+
+describe("exact commit patch legacy guard", () => {
+  it("matches only the reserved fail-closed path", () => {
+    expect(isExactCommitPatchLegacyGuard([EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH])).toBe(true);
+    expect(isExactCommitPatchLegacyGuard([])).toBe(false);
+    expect(isExactCommitPatchLegacyGuard(["README.md"])).toBe(false);
+  });
+});
 
 describe("generated branch prefixes", () => {
   it("supports generated branches without a prefix", () => {

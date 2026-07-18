@@ -209,6 +209,7 @@ export class GitVcsDriver extends Context.Service<
     readonly prepareCommitContext: (
       cwd: string,
       filePaths?: readonly string[],
+      commitPatch?: string,
     ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
     readonly commit: (
       cwd: string,
@@ -825,6 +826,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         args: [
           "diff",
           "--patch",
+          "--binary",
           "--no-color",
           "--no-ext-diff",
           "--no-textconv",

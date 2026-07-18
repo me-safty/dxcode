@@ -23,6 +23,7 @@ import {
   getVcsActionTargetKey,
   normalizeVcsActionProgressEvent,
   parseVcsActionTargetKey,
+  resolveVcsCommitSelection,
   VcsActionMissingTerminalEventError,
   VcsActionRemoteFailureError,
   VcsActionTargetKeyParseError,
@@ -33,6 +34,21 @@ const actionId = "action-123";
 const action = "commit_push" as const;
 const cwd = "/repo";
 const environmentId = EnvironmentId.make("environment-1");
+
+describe("resolveVcsCommitSelection", () => {
+  it("sends a legacy-server guard with exact patches", () => {
+    expect(resolveVcsCommitSelection({ commitPatch: "diff --git a/a b/a" })).toEqual({
+      filePaths: [".git/t3code-exact-commit-patch-v1"],
+      commitPatch: "diff --git a/a b/a",
+    });
+  });
+
+  it("preserves ordinary file selection", () => {
+    expect(resolveVcsCommitSelection({ filePaths: ["README.md"] })).toEqual({
+      filePaths: ["README.md"],
+    });
+  });
+});
 const isVcsActionUnavailableError = Schema.is(VcsActionUnavailableError);
 const result: GitRunStackedActionResult = {
   action,

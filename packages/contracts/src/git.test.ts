@@ -84,6 +84,18 @@ describe("GitRunStackedActionInput", () => {
     expect(parsed.actionId).toBe("action-1");
     expect(parsed.action).toBe("create_pr");
   });
+
+  it("accepts an exact commit patch", () => {
+    const commitPatch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n";
+    const parsed = decodeRunStackedActionInput({
+      actionId: "action-1",
+      cwd: "/repo",
+      action: "commit",
+      commitPatch,
+    });
+
+    expect(parsed.commitPatch).toBe(commitPatch);
+  });
 });
 
 describe("GitRunStackedActionResult", () => {

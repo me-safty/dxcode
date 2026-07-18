@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH } from "@t3tools/shared/git";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { runStream } from "../rpc/client.ts";
@@ -74,7 +75,20 @@ export interface RunVcsStackedActionInput {
   readonly commitMessage?: string;
   readonly featureBranch?: boolean;
   readonly filePaths?: ReadonlyArray<string>;
+  readonly commitPatch?: string;
   readonly onProgress?: (event: GitActionProgressEvent) => void;
+}
+
+export function resolveVcsCommitSelection(
+  input: Pick<RunVcsStackedActionInput, "filePaths" | "commitPatch">,
+): Pick<GitRunStackedActionInput, "filePaths" | "commitPatch"> {
+  if (input.commitPatch) {
+    return {
+      filePaths: [EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH],
+      commitPatch: input.commitPatch,
+    };
+  }
+  return input.filePaths?.length ? { filePaths: [...input.filePaths] } : {};
 }
 
 export class VcsActionUnavailableError extends Schema.TaggedErrorClass<VcsActionUnavailableError>()(
@@ -460,7 +474,7 @@ export function createVcsActionManager<R, E>(
           action: input.action,
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),
-          ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
+          ...resolveVcsCommitSelection(input),
         };
         return consumeVcsActionProgress(
           runStreamInEnvironment(

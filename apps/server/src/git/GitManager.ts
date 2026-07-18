@@ -31,6 +31,7 @@ import {
 } from "@t3tools/contracts";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
+  isExactCommitPatchLegacyGuard,
   mergeGitStatusParts,
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
@@ -1145,10 +1146,19 @@ export const make = Effect.gen(function* () {
       /** When true, also produce a semantic feature branch name. */
       includeBranch?: boolean;
       filePaths?: readonly string[];
+      commitPatch?: string;
+      commitPatchApplied?: Ref.Ref<boolean>;
       modelSelection: ModelSelection;
       policy: TextGenerationPolicy;
     }) {
-      const context = yield* gitCore.prepareCommitContext(input.cwd, input.filePaths);
+      const context = yield* gitCore.prepareCommitContext(
+        input.cwd,
+        input.filePaths,
+        input.commitPatch,
+      );
+      if (input.commitPatch && input.commitPatchApplied) {
+        yield* Ref.set(input.commitPatchApplied, true);
+      }
       if (!context) {
         return null;
       }
@@ -1196,6 +1206,8 @@ export const make = Effect.gen(function* () {
     commitMessage?: string,
     preResolvedSuggestion?: CommitAndBranchSuggestion,
     filePaths?: readonly string[],
+    commitPatch?: string,
+    commitPatchApplied?: Ref.Ref<boolean>,
     progressReporter?: GitActionProgressReporter,
     actionId?: string,
   ) {
@@ -1224,6 +1236,8 @@ export const make = Effect.gen(function* () {
         branch,
         ...(commitMessage ? { commitMessage } : {}),
         ...(filePaths ? { filePaths } : {}),
+        ...(commitPatch ? { commitPatch } : {}),
+        ...(commitPatchApplied ? { commitPatchApplied } : {}),
         modelSelection,
         policy,
       });
@@ -1646,12 +1660,16 @@ export const make = Effect.gen(function* () {
     branch: string | null,
     commitMessage?: string,
     filePaths?: readonly string[],
+    commitPatch?: string,
+    commitPatchApplied?: Ref.Ref<boolean>,
   ) {
     const suggestion = yield* resolveCommitAndBranchSuggestion({
       cwd,
       branch,
       ...(commitMessage ? { commitMessage } : {}),
       ...(filePaths ? { filePaths } : {}),
+      ...(commitPatch ? { commitPatch } : {}),
+      ...(commitPatchApplied ? { commitPatchApplied } : {}),
       includeBranch: true,
       modelSelection,
       policy,
@@ -1686,6 +1704,7 @@ export const make = Effect.gen(function* () {
     function* (input, options) {
       const progress = yield* createProgressEmitter(input, options);
       const currentPhase = yield* Ref.make<Option.Option<GitActionProgressPhase>>(Option.none());
+      const commitPatchApplied = yield* Ref.make(false);
 
       const runAction = Effect.fn("runStackedAction.runAction")(function* (): Effect.fn.Return<
         GitRunStackedActionResult,
@@ -1701,6 +1720,24 @@ export const make = Effect.gen(function* () {
             (!initialStatus.hasUpstream || initialStatus.aheadCount > 0));
         const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
 
+        if (
+          input.commitPatch &&
+          input.filePaths &&
+          !isExactCommitPatchLegacyGuard(input.filePaths)
+        ) {
+          return yield* new GitManagerError({
+            operation: "runStackedAction",
+            cwd: input.cwd,
+            detail: "A commit cannot use both a patch and file path selection.",
+          });
+        }
+        if (input.commitPatch && !wantsCommit) {
+          return yield* new GitManagerError({
+            operation: "runStackedAction",
+            cwd: input.cwd,
+            detail: "Exact patches are only supported for commit actions.",
+          });
+        }
         if (input.featureBranch && !wantsCommit) {
           return yield* new GitManagerError({
             operation: "runStackedAction",
@@ -1781,6 +1818,8 @@ export const make = Effect.gen(function* () {
             initialStatus.branch,
             input.commitMessage,
             input.filePaths,
+            input.commitPatch,
+            commitPatchApplied,
           );
           branchStep = result.branchStep;
           commitMessageForStep = result.resolvedCommitMessage;
@@ -1811,6 +1850,8 @@ export const make = Effect.gen(function* () {
                   commitMessageForStep,
                   preResolvedCommitSuggestion,
                   input.filePaths,
+                  input.commitPatch,
+                  commitPatchApplied,
                   options?.progressReporter,
                   progress.actionId,
                 ),
@@ -1881,6 +1922,21 @@ export const make = Effect.gen(function* () {
 
       return yield* runAction().pipe(
         Effect.ensuring(invalidateStatus(input.cwd)),
+        Effect.tapError(() =>
+          Ref.get(commitPatchApplied).pipe(
+            Effect.flatMap((wasApplied) =>
+              wasApplied
+                ? gitCore
+                    .execute({
+                      operation: "GitManager.runStackedAction.resetFailedPatch",
+                      cwd: input.cwd,
+                      args: ["reset"],
+                    })
+                    .pipe(Effect.ignore)
+                : Effect.void,
+            ),
+          ),
+        ),
         Effect.tapError((error) =>
           Effect.flatMap(Ref.get(currentPhase), (phase) =>
             progress.emit({

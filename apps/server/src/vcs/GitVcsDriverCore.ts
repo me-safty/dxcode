@@ -30,7 +30,10 @@ import {
   type ReviewUnstagePathsInput,
   type VcsRef,
 } from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  isExactCommitPatchLegacyGuard,
+} from "@t3tools/shared/git";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
@@ -64,6 +67,9 @@ const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
   GIT_TERMINAL_PROMPT: "0",
   SSH_ASKPASS: "",
   SSH_ASKPASS_REQUIRE: "never",
+} satisfies NodeJS.ProcessEnv);
+const LOCAL_STATUS_ENV = Object.freeze({
+  GIT_OPTIONAL_LOCKS: "0",
 } satisfies NodeJS.ProcessEnv);
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const UNMERGED_STATUS_CODES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
@@ -1407,6 +1413,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ["status", "--porcelain=2", "--branch"],
       {
         allowNonZeroExit: true,
+        env: LOCAL_STATUS_ENV,
       },
     ).pipe(
       Effect.catchTags({
@@ -1613,8 +1620,63 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
 
   const prepareCommitContext: GitVcsDriver.GitVcsDriver["Service"]["prepareCommitContext"] =
-    Effect.fn("prepareCommitContext")(function* (cwd, filePaths) {
-      if (filePaths && filePaths.length > 0) {
+    Effect.fn("prepareCommitContext")(function* (cwd, filePaths, commitPatch) {
+      if (
+        commitPatch &&
+        filePaths &&
+        filePaths.length > 0 &&
+        !isExactCommitPatchLegacyGuard(filePaths)
+      ) {
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: "GitVcsDriver.prepareCommitContext",
+            cwd,
+            args: ["apply", "--cached"],
+          }),
+          detail: "A commit cannot use both a patch and file path selection.",
+        });
+      }
+
+      if (commitPatch) {
+        const stagedCheck = yield* executeGit(
+          "GitVcsDriver.prepareCommitContext.checkStaged",
+          cwd,
+          ["diff", "--cached", "--quiet"],
+          { allowNonZeroExit: true },
+        );
+        if (stagedCheck.exitCode !== 0) {
+          return yield* new GitCommandError({
+            ...gitCommandContext({
+              operation: "GitVcsDriver.prepareCommitContext.checkStaged",
+              cwd,
+              args: ["diff", "--cached", "--quiet"],
+            }),
+            detail:
+              stagedCheck.exitCode === 1
+                ? "Unstage existing changes before committing exact thread changes."
+                : "Failed to inspect the Git staging area before applying thread changes.",
+            ...(stagedCheck.exitCode === null ? {} : { exitCode: stagedCheck.exitCode }),
+          });
+        }
+
+        yield* executeGit(
+          "GitVcsDriver.prepareCommitContext.applyPatch",
+          cwd,
+          ["apply", "--cached", "--3way", "--whitespace=nowarn", "-"],
+          {
+            stdin: commitPatch,
+            fallbackErrorDetail:
+              "The exact thread patch no longer applies cleanly. Review overlapping workspace changes and try again.",
+          },
+        ).pipe(
+          Effect.catch((error) =>
+            runGit("GitVcsDriver.prepareCommitContext.resetFailedPatch", cwd, ["reset"]).pipe(
+              Effect.catch(() => Effect.void),
+              Effect.andThen(Effect.fail(error)),
+            ),
+          ),
+        );
+      } else if (filePaths && filePaths.length > 0) {
         yield* runGit("GitVcsDriver.prepareCommitContext.reset", cwd, ["reset"]).pipe(
           Effect.catchTags({
             GitCommandError: () => Effect.void,

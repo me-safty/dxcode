@@ -8,9 +8,52 @@ import {
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
   resolveQuickAction,
+  resolveThreadCommitFilePaths,
+  shouldLoadThreadCommitDiff,
   resolveThreadBranchUpdate,
   resolveThreadBranchMetadataPatch,
 } from "./GitActionsControl.logic";
+
+describe("resolveThreadCommitFilePaths", () => {
+  it("keeps only dirty files present in the net thread diff", () => {
+    const diff = [
+      "diff --git a/src/thread.ts b/src/thread.ts",
+      "--- a/src/thread.ts",
+      "+++ b/src/thread.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "diff --git a/src/reverted.ts b/src/reverted.ts",
+      "--- a/src/reverted.ts",
+      "+++ b/src/reverted.ts",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+    ].join("\n");
+
+    assert.deepEqual(
+      resolveThreadCommitFilePaths(diff, [
+        { path: "src/unrelated.ts", insertions: 1, deletions: 0 },
+        { path: "src/thread.ts", insertions: 1, deletions: 1 },
+      ]),
+      ["src/thread.ts"],
+    );
+  });
+
+  it("returns an empty selection for a missing or malformed diff", () => {
+    const files = [{ path: "src/thread.ts", insertions: 1, deletions: 0 }];
+    assert.deepEqual(resolveThreadCommitFilePaths(null, files), []);
+    assert.deepEqual(resolveThreadCommitFilePaths("not a unified diff", files), []);
+  });
+});
+
+describe("shouldLoadThreadCommitDiff", () => {
+  it("keeps the diff alive after the menu closes into the thread commit dialog", () => {
+    assert.isTrue(shouldLoadThreadCommitDiff(false, true));
+    assert.isTrue(shouldLoadThreadCommitDiff(true, false));
+    assert.isFalse(shouldLoadThreadCommitDiff(false, false));
+  });
+});
 
 function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
   return {
