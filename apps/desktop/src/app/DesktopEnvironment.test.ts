@@ -95,6 +95,25 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
+  it.effect("isolates packaged DX identity and state", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        { isPackaged: true, packagedFlavorId: "dx" },
+        { T3CODE_HOME: "/tmp/t3" },
+      );
+
+      assert.equal(environment.flavorId, "dx");
+      assert.equal(environment.stateDir, "/tmp/t3/dx");
+      assert.equal(environment.userDataDirName, "dxcode");
+      assert.equal(environment.appUserModelId, "com.t3tools.dxcode");
+      assert.equal(environment.rendererScheme, "dxcode");
+      assert.equal(environment.displayName, "DX Code");
+      assert.equal(environment.linuxDesktopEntryName, "dxcode.desktop");
+      assert.equal(environment.linuxWmClass, "dxcode");
+      assert.equal(environment.autoUpdatesEnabled, false);
+    }),
+  );
+
   it.effect("uses a configured app user model id override", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(

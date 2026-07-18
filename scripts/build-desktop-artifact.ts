@@ -4,6 +4,11 @@ import * as NodeModule from "node:module";
 
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  DesktopPackagedFlavorIds,
+  resolveDesktopFlavor,
+  type DesktopPackagedFlavorId,
+} from "@t3tools/shared/desktopFlavor";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import rootPackageJson from "../package.json" with { type: "json" };
@@ -30,7 +35,6 @@ import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -108,6 +112,7 @@ const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
 };
 
 interface BuildCliInput {
+  readonly flavor?: Option.Option<DesktopPackagedFlavorId>;
   readonly platform: Option.Option<typeof BuildPlatform.Type>;
   readonly target: Option.Option<string>;
   readonly arch: Option.Option<typeof BuildArch.Type>;
@@ -336,6 +341,19 @@ export class MissingDesktopBuildInputError extends Schema.TaggedErrorClass<Missi
   }
 }
 
+export class DesktopBuildFlavorMismatchError extends Schema.TaggedErrorClass<DesktopBuildFlavorMismatchError>()(
+  "DesktopBuildFlavorMismatchError",
+  {
+    requestedFlavor: Schema.String,
+    builtFlavor: Schema.String,
+    markerPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Desktop build flavor mismatch: requested ${this.requestedFlavor}, built ${this.builtFlavor}. Rebuild without --skip-build.`;
+  }
+}
+
 export class MacProvisioningProfileNotFoundError extends Schema.TaggedErrorClass<MacProvisioningProfileNotFoundError>()(
   "MacProvisioningProfileNotFoundError",
   {
@@ -542,6 +560,7 @@ const resolvePythonForNodeGyp = Effect.fn("resolvePythonForNodeGyp")(function* (
 });
 
 interface ResolvedBuildOptions {
+  readonly flavor: DesktopPackagedFlavorId;
   readonly platform: typeof BuildPlatform.Type;
   readonly target: string;
   readonly arch: typeof BuildArch.Type;
@@ -712,6 +731,7 @@ function normalizePasskeyRpDomain(value: string): string {
 
 export function resolveMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
+  appId = resolveDesktopFlavor("production").appId,
 ): MacPasskeySigningConfiguration {
   const teamId = env.T3CODE_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
   if (!APPLE_TEAM_ID_PATTERN.test(teamId)) {
@@ -747,7 +767,7 @@ export function resolveMacPasskeySigningConfiguration(
   }
 
   return {
-    appId: DESKTOP_APP_ID,
+    appId,
     teamId,
     rpDomains: uniqueRpDomains,
     provisioningProfilePath,
@@ -953,6 +973,9 @@ const AzureTrustedSigningOptionsConfig = Config.all({
 });
 
 const BuildEnvConfig = Config.all({
+  flavor: Config.schema(Schema.Literals(DesktopPackagedFlavorIds), "T3CODE_DESKTOP_FLAVOR").pipe(
+    Config.option,
+  ),
   platform: Config.schema(BuildPlatform, "T3CODE_DESKTOP_PLATFORM").pipe(Config.option),
   target: Config.string("T3CODE_DESKTOP_TARGET").pipe(Config.option),
   arch: Config.schema(BuildArch, "T3CODE_DESKTOP_ARCH").pipe(Config.option),
@@ -1023,13 +1046,16 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     return yield* new UnsupportedHostBuildPlatformError({ hostPlatform });
   }
 
+  const flavor = mergeOptions(input.flavor ?? Option.none(), env.flavor, "production" as const);
   const target = mergeOptions(input.target, env.target, PLATFORM_CONFIG[platform].defaultTarget);
   const defaultArch = yield* getDefaultArch(platform);
   const arch = mergeOptions(input.arch, env.arch, defaultArch);
   const version = mergeOptions(input.buildVersion, env.version, undefined);
   const releaseDir = resolveBooleanFlag(input.mockUpdates, env.mockUpdates)
     ? "release-mock"
-    : "release";
+    : flavor === "dx"
+      ? "release-dx"
+      : "release";
   const outputDir = path.resolve(
     repoRoot,
     mergeOptions(input.outputDir, env.outputDir, releaseDir),
@@ -1056,6 +1082,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     Option.getOrUndefined(input.wslPrebuild) ?? Option.getOrUndefined(env.wslPrebuild);
 
   return {
+    flavor,
     platform,
     target,
     arch,
@@ -1099,7 +1126,47 @@ const runCommand = Effect.fn("runCommand")(function* (
   }
 });
 
-function generateMacIconSet(
+const MAC_ICNS_ENTRIES = [
+  [16, "icp4"],
+  [32, "icp5"],
+  [64, "icp6"],
+  [128, "ic07"],
+  [256, "ic08"],
+  [512, "ic09"],
+  [1024, "ic10"],
+] as const;
+
+export function encodeIcns(
+  entries: ReadonlyArray<{
+    readonly type: string;
+    readonly png: Uint8Array;
+  }>,
+): Uint8Array {
+  const chunks = entries.map(({ type, png }) => {
+    if (type.length !== 4) {
+      throw new Error(`ICNS entry type must contain four characters: ${type}`);
+    }
+
+    const chunk = new Uint8Array(8 + png.byteLength);
+    chunk.set(new TextEncoder().encode(type), 0);
+    new DataView(chunk.buffer).setUint32(4, chunk.byteLength, false);
+    chunk.set(png, 8);
+    return chunk;
+  });
+  const byteLength = 8 + chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const icns = new Uint8Array(byteLength);
+  icns.set(new TextEncoder().encode("icns"), 0);
+  new DataView(icns.buffer).setUint32(4, byteLength, false);
+
+  let offset = 8;
+  for (const chunk of chunks) {
+    icns.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return icns;
+}
+
+function generateMacIcon(
   sourcePng: string,
   targetIcns: string,
   tmpRoot: string,
@@ -1108,31 +1175,16 @@ function generateMacIconSet(
 ) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const iconsetDir = path.join(tmpRoot, "icon.iconset");
-    yield* fs.makeDirectory(iconsetDir, { recursive: true });
-
-    const iconSizes = [16, 32, 128, 256, 512] as const;
-    for (const size of iconSizes) {
+    const entries = [] as Array<{ type: string; png: Uint8Array }>;
+    for (const [size, type] of MAC_ICNS_ENTRIES) {
+      const outputPath = path.join(tmpRoot, `icon-${size}.png`);
       yield* runCommand(
-        ChildProcess.make(
-          {},
-        )`sips -z ${size} ${size} ${sourcePng} --out ${path.join(iconsetDir, `icon_${size}x${size}.png`)}`,
+        ChildProcess.make({})`sips -z ${size} ${size} ${sourcePng} --out ${outputPath}`,
         { label: `sips icon ${size}x${size}`, verbose },
       );
-
-      const retinaSize = size * 2;
-      yield* runCommand(
-        ChildProcess.make(
-          {},
-        )`sips -z ${retinaSize} ${retinaSize} ${sourcePng} --out ${path.join(iconsetDir, `icon_${size}x${size}@2x.png`)}`,
-        { label: `sips icon ${size}x${size}@2x`, verbose },
-      );
+      entries.push({ type, png: yield* fs.readFile(outputPath) });
     }
-
-    yield* runCommand(ChildProcess.make({})`iconutil -c icns ${iconsetDir} -o ${targetIcns}`, {
-      label: "iconutil icns",
-      verbose,
-    });
+    yield* fs.writeFile(targetIcns, encodeIcns(entries));
   });
 }
 
@@ -1159,7 +1211,7 @@ function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: bo
       verbose,
     });
 
-    yield* generateMacIconSet(sourcePng, iconIcnsPath, tmpRoot, path, verbose);
+    yield* generateMacIcon(sourcePng, iconIcnsPath, tmpRoot, path, verbose);
   });
 }
 
@@ -1324,7 +1376,19 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
-export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
+export function resolveDesktopBuildIconAssets(
+  version: string,
+  flavorId: DesktopPackagedFlavorId = "production",
+): DesktopBuildIconAssets {
+  const flavor = resolveDesktopFlavor(flavorId);
+  if (flavor.iconBrand === "development") {
+    return {
+      macIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
+    };
+  }
+
   if (resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
@@ -1357,7 +1421,12 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
   return `${trimmed.slice(0, versionSeparator)}/${trimmed.slice(versionSeparator + 1)}`;
 }
 
-export function resolveDesktopProductName(version: string): string {
+export function resolveDesktopProductName(
+  version: string,
+  flavorId: DesktopPackagedFlavorId = "production",
+): string {
+  const flavor = resolveDesktopFlavor(flavorId);
+  if (flavorId === "dx") return flavor.productName;
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "T3 Code (Nightly)"
     : (desktopPackageJson.productName ?? "T3 Code");
@@ -1376,11 +1445,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         readonly provisioningProfilePath: string;
       }
     | undefined,
+  flavorId: DesktopPackagedFlavorId = "production",
 ) {
+  const flavor = resolveDesktopFlavor(flavorId);
   const buildConfig: Record<string, unknown> = {
-    appId: DESKTOP_APP_ID,
-    productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    appId: flavor.appId,
+    productName: resolveDesktopProductName(version, flavorId),
+    artifactName: `${flavor.artifactPrefix}-\${version}-\${arch}.\${ext}`,
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -1399,17 +1470,19 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // there's no duplication.
     asarUnpack: [...DESKTOP_ASAR_UNPACK, "apps/server/dist/**", "**/node_modules/**"],
   };
-  const updateChannel = resolveDesktopUpdateChannel(version);
-  const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
-  if (publishConfig) {
-    buildConfig.publish = [publishConfig];
-  } else if (mockUpdates) {
-    buildConfig.publish = [
-      {
-        provider: "generic",
-        url: resolveMockUpdateServerUrl(mockUpdateServerPort),
-      },
-    ];
+  if (flavor.autoUpdatesEnabled) {
+    const updateChannel = resolveDesktopUpdateChannel(version);
+    const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
+    if (publishConfig) {
+      buildConfig.publish = [publishConfig];
+    } else if (mockUpdates) {
+      buildConfig.publish = [
+        {
+          provider: "generic",
+          url: resolveMockUpdateServerUrl(mockUpdateServerPort),
+        },
+      ];
+    }
   }
 
   if (platform === "mac") {
@@ -1419,8 +1492,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       protocols: [
         {
-          name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          name: flavor.baseName,
+          schemes: [...flavor.registeredSchemes],
         },
       ],
       ...(macPasskeySigning
@@ -1435,12 +1508,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: flavor.executableName,
       icon: "icons",
       category: "Development",
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: flavor.linuxWmClass,
         },
       },
     };
@@ -1615,7 +1688,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   });
 
   const appVersion = options.version ?? serverPackageJson.version;
-  const iconAssets = resolveDesktopBuildIconAssets(appVersion);
+  const flavor = resolveDesktopFlavor(options.flavor);
+  const iconAssets = resolveDesktopBuildIconAssets(appVersion, options.flavor);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -1629,18 +1703,35 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     desktopResources: path.join(repoRoot, "apps/desktop/resources"),
     serverDist: path.join(repoRoot, "apps/server/dist"),
   };
+  const flavorMarkerPath = path.join(distDirs.desktopDist, "desktop-flavor.txt");
   const bundledClientEntry = path.join(distDirs.serverDist, "client/index.html");
 
   if (!options.skipBuild) {
     yield* Effect.log("[desktop-artifact] Building desktop/server/web artifacts...");
-    const spawnCommand = yield* resolveSpawnCommand("vp", ["run", "build:desktop"]);
+    const compileEnv = { ...process.env, T3CODE_DESKTOP_FLAVOR: options.flavor };
+    const spawnCommand = yield* resolveSpawnCommand("vp", ["run", "build:desktop"], {
+      env: compileEnv,
+    });
     yield* runCommand(
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         cwd: repoRoot,
+        env: compileEnv,
         shell: spawnCommand.shell,
       }),
       { label: "vp run build:desktop", verbose: options.verbose },
     );
+    yield* fs.writeFileString(flavorMarkerPath, `${options.flavor}\n`);
+  } else {
+    const builtFlavor = (yield* fs.exists(flavorMarkerPath))
+      ? (yield* fs.readFileString(flavorMarkerPath)).trim()
+      : "missing";
+    if (builtFlavor !== options.flavor) {
+      return yield* new DesktopBuildFlavorMismatchError({
+        requestedFlavor: options.flavor,
+        builtFlavor,
+        markerPath: flavorMarkerPath,
+      });
+    }
   }
 
   const requiredBuildInputs = [
@@ -1692,7 +1783,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const configuredMacPasskeySigning =
     options.platform === "mac" && options.signed
       ? yield* Effect.try({
-          try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
+          try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot }), flavor.appId),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
         })
       : undefined;
@@ -1742,13 +1833,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     stageDependencies,
   );
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: flavor.executableName,
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: "T3 Code desktop build",
+    description: `${flavor.productName} desktop build`,
     author: "T3 Tools",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
@@ -1764,6 +1855,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
             provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
           }
         : undefined,
+      options.flavor,
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -1849,7 +1941,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   yield* Effect.log(
-    `[desktop-artifact] Building ${options.platform}/${options.target} (arch=${options.arch}, version=${appVersion})...`,
+    `[desktop-artifact] Building ${options.platform}/${options.target} (flavor=${options.flavor}, arch=${options.arch}, version=${appVersion})...`,
   );
   const builderArgs = [
     "exec",
@@ -1914,6 +2006,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 });
 
 const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
+  flavor: Flag.choice("flavor", DesktopPackagedFlavorIds).pipe(
+    Flag.withDescription("Desktop distribution flavor (env: T3CODE_DESKTOP_FLAVOR)."),
+    Flag.optional,
+  ),
   platform: Flag.choice("platform", BuildPlatform.literals).pipe(
     Flag.withDescription("Build platform (env: T3CODE_DESKTOP_PLATFORM)."),
     Flag.optional,

@@ -4,6 +4,11 @@ import type {
   DesktopRuntimeArch,
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
+import {
+  resolveDesktopRuntimeFlavor,
+  type DesktopFlavorId,
+  type DesktopPackagedFlavorId,
+} from "@t3tools/shared/desktopFlavor";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,6 +30,7 @@ export interface MakeDesktopEnvironmentInput {
   readonly isPackaged: boolean;
   readonly resourcesPath: string;
   readonly runningUnderArm64Translation: boolean;
+  readonly packagedFlavorId?: DesktopPackagedFlavorId;
 }
 
 export class DesktopEnvironment extends Context.Service<
@@ -36,6 +42,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly processArch: string;
     readonly isPackaged: boolean;
     readonly isDevelopment: boolean;
+    readonly flavorId: DesktopFlavorId;
     readonly appVersion: string;
     readonly appPath: string;
     readonly resourcesPath: string;
@@ -43,6 +50,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly appDataDirectory: string;
     readonly baseDir: string;
     readonly stateDir: string;
+    readonly stateDirName: string;
     readonly desktopSettingsPath: string;
     readonly clientSettingsPath: string;
     readonly savedEnvironmentRegistryPath: string;
@@ -63,6 +71,9 @@ export class DesktopEnvironment extends Context.Service<
     readonly otlpExportIntervalMs: number;
     readonly branding: DesktopAppBranding;
     readonly displayName: string;
+    readonly rendererScheme: string;
+    readonly autoUpdatesEnabled: boolean;
+    readonly isolateStateRoot: boolean;
     readonly appUserModelId: string;
     readonly linuxDesktopEntryName: string;
     readonly linuxWmClass: string;
@@ -75,8 +86,6 @@ export class DesktopEnvironment extends Context.Service<
     readonly developmentDockIconPath: string;
   }
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
-
-const APP_BASE_NAME = "T3 Code";
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
@@ -92,12 +101,14 @@ function resolveDesktopAppStageLabel(input: {
 function resolveDesktopAppBranding(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
+  readonly baseName: string;
+  readonly displayNameOverride?: string;
 }): DesktopAppBranding {
   const stageLabel = resolveDesktopAppStageLabel(input);
   return {
-    baseName: APP_BASE_NAME,
+    baseName: input.baseName,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    displayName: input.displayNameOverride ?? `${input.baseName} (${stageLabel})`,
   };
 }
 
@@ -139,6 +150,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
   const homeDirectory = input.homeDirectory;
   const devServerUrl = config.devServerUrl;
   const isDevelopment = Option.isSome(devServerUrl);
+  const flavor = resolveDesktopRuntimeFlavor({
+    isDevelopment,
+    packagedFlavorId: input.packagedFlavorId ?? "production",
+  });
   const appDataDirectory =
     input.platform === "win32"
       ? Option.getOrElse(config.appDataDirectory, () =>
@@ -153,11 +168,11 @@ const make = Effect.fn("desktop.environment.make")(function* (
   const branding = resolveDesktopAppBranding({
     isDevelopment,
     appVersion: input.appVersion,
+    baseName: flavor.baseName,
+    ...(flavor.id === "dx" ? { displayNameOverride: flavor.productName } : {}),
   });
   const displayName = branding.displayName;
-  const stateDir = path.join(baseDir, isDevelopment ? "dev" : "userdata");
-  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
-  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+  const stateDir = path.join(baseDir, flavor.stateDirName);
   const resourcesPath = input.resourcesPath;
 
   return DesktopEnvironment.of({
@@ -167,6 +182,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     processArch: input.processArch,
     isPackaged: input.isPackaged,
     isDevelopment,
+    flavorId: flavor.id,
     appVersion: input.appVersion,
     appPath: input.appPath,
     resourcesPath,
@@ -174,6 +190,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appDataDirectory,
     baseDir,
     stateDir,
+    stateDirName: flavor.stateDirName,
     desktopSettingsPath: path.join(stateDir, "desktop-settings.json"),
     clientSettingsPath: path.join(stateDir, "client-settings.json"),
     savedEnvironmentRegistryPath: path.join(stateDir, "saved-environments.json"),
@@ -196,13 +213,14 @@ const make = Effect.fn("desktop.environment.make")(function* (
     otlpExportIntervalMs: config.otlpExportIntervalMs,
     branding,
     displayName,
-    appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
-      isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
-    ),
-    linuxDesktopEntryName: isDevelopment ? "t3code-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
-    userDataDirName,
-    legacyUserDataDirName,
+    rendererScheme: flavor.rendererScheme,
+    autoUpdatesEnabled: flavor.autoUpdatesEnabled,
+    isolateStateRoot: flavor.isolateStateRoot,
+    appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () => flavor.appUserModelId),
+    linuxDesktopEntryName: flavor.linuxDesktopEntryName,
+    linuxWmClass: flavor.linuxWmClass,
+    userDataDirName: flavor.userDataDirName,
+    legacyUserDataDirName: flavor.legacyUserDataDirName,
     defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),
     runtimeInfo: resolveDesktopRuntimeInfo({
       platform: input.platform,

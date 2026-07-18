@@ -17,6 +17,9 @@ bun run start
 # Build a shareable macOS .dmg (arm64 by default)
 bun run dist:desktop:dmg
 
+# Build isolated DX Code from this checkout
+bun run dist:desktop:dx:dmg
+
 # Or from any project directory after publishing:
 npx t3
 ```

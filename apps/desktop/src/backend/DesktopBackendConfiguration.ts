@@ -341,6 +341,8 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       noBrowser: true,
       port: backendExposure.port,
       t3Home: environment.baseDir,
+      stateDirName: environment.stateDirName,
+      isolateStateRoot: environment.isolateStateRoot,
       host: backendExposure.bindHost,
       desktopBootstrapToken: input.bootstrapToken,
       tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
@@ -403,6 +405,8 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     // Omit t3Home so the Linux backend uses its own home dir instead of
     // the Windows-side baseDir (which would be a /mnt/c path and share
     // the SQLite file with the primary).
+    stateDirName: environment.stateDirName,
+    isolateStateRoot: environment.isolateStateRoot,
     host: wslBindHost,
     desktopBootstrapToken: input.bootstrapToken,
     // PortSchema rejects 0, so when tailscale serve is disabled we still
