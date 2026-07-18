@@ -50,6 +50,8 @@ import {
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { GitSettingsSection } from "~/features/git-review-controls/GitSettingsSection";
+import { UpstreamSyncSettings } from "~/features/upstream-sync/UpstreamSyncSettings";
+import { APP_BASE_NAME } from "~/branding";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -479,6 +481,11 @@ export function SourceControlSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      {APP_BASE_NAME === "DX Code" ? (
+        <SettingsSection title="Upstream updates">
+          <UpstreamSyncSettings />
+        </SettingsSection>
+      ) : null}
       <GitSettingsSection />
       {isInitialScanPending ? (
         <>

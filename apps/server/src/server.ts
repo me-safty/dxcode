@@ -91,6 +91,10 @@ import {
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import * as GitUpstreamAdapter from "./upstreamSync/GitUpstreamAdapter.ts";
+import * as UpstreamIntegration from "./upstreamSync/UpstreamIntegration.ts";
+import * as UpstreamSyncPersistence from "./upstreamSync/UpstreamSyncPersistence.ts";
+import * as UpstreamSyncScheduler from "./upstreamSync/UpstreamSyncScheduler.ts";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
@@ -285,7 +289,16 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const UpstreamIntegrationLive = UpstreamIntegration.layer.pipe(
+  Layer.provide(GitUpstreamAdapter.layer.pipe(Layer.provide(GitVcsDriver.layer))),
+  Layer.provide(UpstreamSyncPersistence.layer),
+);
+
+const UpstreamSyncLayerLive = UpstreamSyncScheduler.layer.pipe(
+  Layer.provideMerge(UpstreamIntegrationLive),
+);
+
+const RuntimeCoreDependenciesBaseLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -327,6 +340,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       CloudManagedEndpointRuntimeLive,
     ),
   ),
+);
+
+const RuntimeCoreDependenciesLive = UpstreamSyncLayerLive.pipe(
+  Layer.provideMerge(RuntimeCoreDependenciesBaseLive),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(

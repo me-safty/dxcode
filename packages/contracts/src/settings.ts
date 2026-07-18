@@ -2,10 +2,11 @@ import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import { PositiveInt, ProjectId, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
+import { UpstreamPolicy, UpstreamSyncSettings } from "./upstreamSync.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -419,6 +420,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  upstreamSync: UpstreamSyncSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -528,6 +530,15 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  upstreamSync: Schema.optionalKey(
+    Schema.Struct({
+      sourceProjectId: Schema.optionalKey(Schema.NullOr(ProjectId)),
+      policy: Schema.optionalKey(UpstreamPolicy),
+      checkIntervalHours: Schema.optionalKey(PositiveInt),
+      paused: Schema.optionalKey(Schema.Boolean),
+      includeReleaseNotes: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   providers: Schema.optionalKey(

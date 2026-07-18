@@ -1,6 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off - Tests inspect platform path construction.
 import * as NodePath from "node:path";
 
-import { assert, it } from "@effect/vitest";
+import { assert, it } from "vite-plus/test";
 
 import {
   createDefaultSyncNames,
@@ -11,41 +12,61 @@ import {
   type UpstreamSyncOptions,
 } from "./sync-upstream.ts";
 
+const TAG = "v0.0.29-nightly.20260719.828";
+const REMOTE_OBJECT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const TARGET_COMMIT = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
 const options: UpstreamSyncOptions = {
   repoDir: "/repo",
-  upstreamRemote: "upstream",
-  upstreamRef: "upstream/main",
   baseRef: "dx/main",
-  branch: "sync/upstream-2026-07-18",
+  branch: "sync/t3-nightly-20260719-828",
   worktreePath: "/worktrees/upstream-sync",
+  targetTag: null,
+  policy: "nightly-tags",
   fetch: true,
   dryRun: false,
 };
 
-function response(status = 0, stdout = "", stderr = ""): GitCommandResult {
-  return { status, stdout, stderr };
-}
-
-function queuedRunner(
-  responses: ReadonlyArray<GitCommandResult>,
-  commands: Array<ReadonlyArray<string>>,
-) {
-  let index = 0;
-  return (args: ReadonlyArray<string>) => {
+const response = (status = 0, stdout = "", stderr = ""): GitCommandResult => ({
+  status,
+  stdout,
+  stderr,
+});
+function fakeRunner(commands: Array<ReadonlyArray<string>>, mergeStatus = 0) {
+  return (args: ReadonlyArray<string>): GitCommandResult => {
     commands.push(args);
-    const result = responses[index];
-    index += 1;
-    if (!result) {
-      throw new Error(`Unexpected command: git ${args.join(" ")}`);
+    const joined = args.join(" ");
+    if (joined.includes("remote get-url origin")) {
+      return response(0, "git@github.com:me-safty/dxcode.git\n");
     }
-    return result;
+    if (joined.includes("remote get-url upstream")) {
+      return response(0, "https://github.com/pingdotgg/t3code.git\n");
+    }
+    if (joined.includes("ls-remote --refs --tags")) {
+      return response(0, `${REMOTE_OBJECT}\trefs/tags/${TAG}\n`);
+    }
+    if (joined.includes("show-ref --hash --verify refs/dx/upstream-nightlies")) {
+      return response(1);
+    }
+    if (joined.includes("rev-parse refs/dx/upstream-nightlies")) {
+      return response(0, `${TARGET_COMMIT}\n`);
+    }
+    if (joined.includes("merge-base --is-ancestor")) return response(1);
+    if (joined.includes("rev-list --count")) return response(0, "2\n");
+    if (joined.includes("log --format")) return response(0, "abc\tOne\ndef\tTwo\n");
+    if (joined.includes("show-ref --verify --quiet refs/heads")) return response(1);
+    if (joined.includes(" merge --no-ff --no-commit ")) return response(mergeStatus);
+    if (joined.includes("diff --name-only --diff-filter=U")) {
+      return response(0, "apps/web/a.ts\n");
+    }
+    return response();
   };
 }
 
-it("derives deterministic default sync names", () => {
-  assert.deepStrictEqual(createDefaultSyncNames("/code/t3code", new Date("2026-07-18T12:00:00Z")), {
-    branch: "sync/upstream-2026-07-18",
-    worktreePath: NodePath.resolve("/code/t3code-upstream-sync-2026-07-18"),
+it("derives deterministic nightly sync names", () => {
+  assert.deepStrictEqual(createDefaultSyncNames("/code/t3code", TAG), {
+    branch: "sync/t3-nightly-20260719-828",
+    worktreePath: NodePath.resolve("/code/t3code-worktrees/sync-t3-nightly-20260719-828"),
   });
 });
 
@@ -54,130 +75,61 @@ it("rejects malformed commit counts", () => {
   assert.throws(() => parseCommitCount("-1"), /Invalid upstream commit count/);
 });
 
-it("detects an up-to-date base without creating a worktree", () => {
+it("detects newest nightly through --refs and isolated namespace", () => {
   const commands: Array<ReadonlyArray<string>> = [];
-  const result = runUpstreamSync(options, {
-    runGit: queuedRunner([response(), response(), response(0, "0\n"), response(0, "")], commands),
-    pathExists: () => false,
-  });
-
-  assert.equal(result.status, "up-to-date");
+  const result = runUpstreamSync(
+    { ...options, dryRun: true },
+    { runGit: fakeRunner(commands), pathExists: () => false },
+  );
+  assert.equal(result.status, "planned");
+  assert.equal(result.tag, TAG);
+  assert.equal(result.targetCommit, TARGET_COMMIT);
   assert.equal(
-    commands.some((command) => command.includes("worktree")),
-    false,
+    commands.some(
+      (command) => command.includes("--refs") && command.includes("refs/tags/v*-nightly.*"),
+    ),
+    true,
+  );
+  assert.equal(
+    commands.some((command) =>
+      command.includes(`refs/tags/${TAG}:refs/dx/upstream-nightlies/${TAG}`),
+    ),
+    true,
   );
 });
 
-it("creates an isolated branch and worktree, then merges upstream", () => {
+it("creates one deferred merge against the pinned commit", () => {
   const commands: Array<ReadonlyArray<string>> = [];
+  const worktreePath = options.worktreePath;
+  assert.ok(worktreePath);
   const result = runUpstreamSync(options, {
-    runGit: queuedRunner(
-      [
-        response(),
-        response(),
-        response(0, "2\n"),
-        response(0, "abc\tOne\ndef\tTwo\n"),
-        response(),
-        response(1),
-        response(),
-        response(),
-      ],
-      commands,
-    ),
+    runGit: fakeRunner(commands),
     pathExists: () => false,
   });
-
   assert.equal(result.status, "ready");
-  assert.deepStrictEqual(result.commits, ["abc\tOne", "def\tTwo"]);
-  assert.deepStrictEqual(commands.at(-2), [
-    "-C",
-    "/repo",
-    "worktree",
-    "add",
-    "-b",
-    options.branch,
-    options.worktreePath,
-    "dx/main",
-  ]);
   assert.deepStrictEqual(commands.at(-1), [
     "-C",
-    options.worktreePath,
+    worktreePath,
     "merge",
     "--no-ff",
-    "--no-edit",
-    "upstream/main",
+    "--no-commit",
+    TARGET_COMMIT,
   ]);
   assert.equal(
     commands.some((command) => command.includes("push")),
     false,
   );
+  assert.match(
+    formatUpstreamSyncReport(result),
+    /Commit, push, promotion, deletion: not performed/,
+  );
 });
 
-it("reports merge conflicts without promoting the sync branch", () => {
-  const commands: Array<ReadonlyArray<string>> = [];
+it("reports conflicts without committing", () => {
   const result = runUpstreamSync(options, {
-    runGit: queuedRunner(
-      [
-        response(),
-        response(),
-        response(0, "1\n"),
-        response(0, "abc\tOne\n"),
-        response(),
-        response(1),
-        response(),
-        response(1, "", "merge conflict"),
-        response(0, "apps/web/a.ts\napps/server/b.ts\n"),
-      ],
-      commands,
-    ),
+    runGit: fakeRunner([], 1),
     pathExists: () => false,
   });
-
   assert.equal(result.status, "conflicted");
-  assert.deepStrictEqual(result.conflicts, ["apps/web/a.ts", "apps/server/b.ts"]);
-  const report = formatUpstreamSyncReport(result);
-  assert.match(report, /vp check/);
-  assert.match(report, /vp run typecheck/);
-  assert.match(report, /Promotion: not performed/);
-});
-
-it("dry-run detects commits without reserving a branch or path", () => {
-  const commands: Array<ReadonlyArray<string>> = [];
-  const result = runUpstreamSync(
-    { ...options, dryRun: true },
-    {
-      runGit: queuedRunner(
-        [response(), response(), response(0, "1\n"), response(0, "abc\tOne\n")],
-        commands,
-      ),
-      pathExists: () => true,
-    },
-  );
-
-  assert.equal(result.status, "planned");
-  assert.equal(
-    commands.some((command) => command.includes("worktree")),
-    false,
-  );
-});
-
-it("refuses to overwrite an existing sync branch", () => {
-  assert.throws(
-    () =>
-      runUpstreamSync(options, {
-        runGit: queuedRunner(
-          [
-            response(),
-            response(),
-            response(0, "1\n"),
-            response(0, "abc\tOne\n"),
-            response(),
-            response(),
-          ],
-          [],
-        ),
-        pathExists: () => false,
-      }),
-    /Sync branch already exists/,
-  );
+  assert.deepStrictEqual(result.conflicts, ["apps/web/a.ts"]);
 });

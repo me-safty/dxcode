@@ -152,6 +152,17 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  UpstreamAbortError,
+  UpstreamAbortInput,
+  UpstreamCheckError,
+  UpstreamCheckInput,
+  UpstreamDismissInput,
+  UpstreamPrepareError,
+  UpstreamPrepareInput,
+  UpstreamSyncSession,
+  UpstreamUpdateState,
+} from "./upstreamSync.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -226,6 +237,13 @@ export const WS_METHODS = {
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
 
+  // DX upstream synchronization
+  upstreamGetState: "upstream.getState",
+  upstreamCheck: "upstream.check",
+  upstreamDismiss: "upstream.dismiss",
+  upstreamPrepare: "upstream.prepare",
+  upstreamAbort: "upstream.abort",
+
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -244,6 +262,7 @@ export const WS_METHODS = {
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
+  subscribeUpstreamUpdates: "subscribeUpstreamUpdates",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -327,6 +346,35 @@ export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess,
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsUpstreamGetStateRpc = Rpc.make(WS_METHODS.upstreamGetState, {
+  payload: Schema.Struct({}),
+  success: UpstreamUpdateState,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsUpstreamCheckRpc = Rpc.make(WS_METHODS.upstreamCheck, {
+  payload: UpstreamCheckInput,
+  success: UpstreamUpdateState,
+  error: Schema.Union([UpstreamCheckError, EnvironmentAuthorizationError]),
+});
+
+export const WsUpstreamDismissRpc = Rpc.make(WS_METHODS.upstreamDismiss, {
+  payload: UpstreamDismissInput,
+  success: UpstreamUpdateState,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsUpstreamPrepareRpc = Rpc.make(WS_METHODS.upstreamPrepare, {
+  payload: UpstreamPrepareInput,
+  success: UpstreamSyncSession,
+  error: Schema.Union([UpstreamPrepareError, EnvironmentAuthorizationError]),
+});
+
+export const WsUpstreamAbortRpc = Rpc.make(WS_METHODS.upstreamAbort, {
+  payload: UpstreamAbortInput,
+  error: Schema.Union([UpstreamAbortError, EnvironmentAuthorizationError]),
 });
 
 export const WsCloudGetRelayClientStatusRpc = Rpc.make(WS_METHODS.cloudGetRelayClientStatus, {
@@ -711,6 +759,13 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
   stream: true,
 });
 
+export const WsSubscribeUpstreamUpdatesRpc = Rpc.make(WS_METHODS.subscribeUpstreamUpdates, {
+  payload: Schema.Struct({}),
+  success: UpstreamUpdateState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -724,6 +779,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsUpstreamGetStateRpc,
+  WsUpstreamCheckRpc,
+  WsUpstreamDismissRpc,
+  WsUpstreamPrepareRpc,
+  WsUpstreamAbortRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsSourceControlLookupRepositoryRpc,
@@ -776,6 +836,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
+  WsSubscribeUpstreamUpdatesRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

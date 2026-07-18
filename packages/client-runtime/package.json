@@ -119,6 +119,10 @@
       "types": "./src/state/terminal.ts",
       "default": "./src/state/terminal.ts"
     },
+    "./state/upstream-sync": {
+      "types": "./src/state/upstreamSync.ts",
+      "default": "./src/state/upstreamSync.ts"
+    },
     "./state/threads": {
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"

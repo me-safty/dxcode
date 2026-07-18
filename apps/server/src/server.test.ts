@@ -87,6 +87,7 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as UpstreamIntegration from "./upstreamSync/UpstreamIntegration.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
@@ -549,14 +550,38 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ServerSettings.ServerSettingsService)({
-          start: Effect.void,
-          ready: Effect.void,
-          getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
-          updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
-          streamChanges: Stream.empty,
-          ...options?.layers?.serverSettings,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ServerSettings.ServerSettingsService)({
+            start: Effect.void,
+            ready: Effect.void,
+            getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+            updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
+            streamChanges: Stream.empty,
+            ...options?.layers?.serverSettings,
+          }),
+          Layer.mock(UpstreamIntegration.UpstreamIntegration)({
+            getState: Effect.succeed({
+              status: "disabled",
+              reason: "Upstream synchronization is not configured in this test.",
+            }),
+            streamChanges: Stream.empty,
+            check: () =>
+              Effect.succeed({
+                status: "disabled",
+                reason: "Upstream synchronization is not configured in this test.",
+              }),
+            dismiss: (target) =>
+              Effect.succeed({
+                status: "dismissed",
+                target,
+                checkedAt: "1970-01-01T00:00:00.000Z",
+              }),
+            prepare: () => Effect.die("UpstreamIntegration.prepare not stubbed in this test"),
+            abort: () => Effect.void,
+            attachThread: () =>
+              Effect.die("UpstreamIntegration.attachThread not stubbed in this test"),
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ExternalLauncher.ExternalLauncher)({

@@ -24,6 +24,7 @@ import {
   CommandId,
   type DiscoveredLocalServerList,
   EventId,
+  MessageId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -52,6 +53,7 @@ import {
   AssetWorkspaceContextResolutionError,
   EnvironmentAuthorizationError,
   ThreadId,
+  UpstreamPrepareError,
   type TerminalAttachStreamEvent,
   type TerminalError,
   type TerminalEvent,
@@ -93,6 +95,8 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
+import * as UpstreamIntegration from "./upstreamSync/UpstreamIntegration.ts";
+import { availableCounts, buildUpstreamSyncPrompt } from "./upstreamSync/UpstreamSyncPrompt.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -115,6 +119,7 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isUpstreamPrepareError = Schema.is(UpstreamPrepareError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -296,6 +301,11 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverGetProcessDiagnostics, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetProcessResourceHistory, AuthOrchestrationReadScope],
   [WS_METHODS.serverSignalProcess, AuthOrchestrationOperateScope],
+  [WS_METHODS.upstreamGetState, AuthOrchestrationReadScope],
+  [WS_METHODS.upstreamCheck, AuthOrchestrationOperateScope],
+  [WS_METHODS.upstreamDismiss, AuthOrchestrationOperateScope],
+  [WS_METHODS.upstreamPrepare, AuthOrchestrationOperateScope],
+  [WS_METHODS.upstreamAbort, AuthOrchestrationOperateScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
   [WS_METHODS.cloudInstallRelayClient, AuthRelayWriteScope],
   [WS_METHODS.sourceControlLookupRepository, AuthOrchestrationReadScope],
@@ -348,6 +358,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.subscribeServerConfig, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeServerLifecycle, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeAuthAccess, AuthAccessReadScope],
+  [WS_METHODS.subscribeUpstreamUpdates, AuthOrchestrationReadScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -439,6 +450,7 @@ const makeWsRpcLayer = (
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const relayClient = yield* RelayClient.RelayClient;
+      const upstreamIntegration = yield* UpstreamIntegration.UpstreamIntegration;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -514,6 +526,90 @@ const makeWsRpcLayer = (
       const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+
+      const createUpstreamSyncThread = Effect.fn("ws.createUpstreamSyncThread")(function* (input: {
+        readonly session: import("@t3tools/contracts").UpstreamSyncSession;
+        readonly commitCount: number;
+        readonly newerNightlyCount: number;
+      }) {
+        if (input.session.threadId) return input.session;
+        const project = yield* projectionSnapshotQuery.getProjectShellById(
+          input.session.sourceProjectId,
+        );
+        if (Option.isNone(project)) {
+          return yield* new UpstreamPrepareError({
+            operation: "create-guided-thread",
+            message: "The configured DX source project no longer exists.",
+            canRetry: false,
+          });
+        }
+        const currentSettings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError(
+            () =>
+              new UpstreamPrepareError({
+                operation: "create-guided-thread",
+                message: "Could not read the model selection for the guided thread.",
+                canRetry: true,
+              }),
+          ),
+        );
+        const threadId = ThreadId.make(yield* randomUUID);
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        const modelSelection =
+          project.value.defaultModelSelection ?? currentSettings.textGenerationModelSelection;
+        yield* orchestrationEngine
+          .dispatch({
+            type: "thread.create",
+            commandId: yield* serverCommandId("upstream-sync-thread-create"),
+            threadId,
+            projectId: input.session.sourceProjectId,
+            title: `T3 sync ${input.session.target.tag}`,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: input.session.branch,
+            worktreePath: input.session.worktreePath,
+            createdAt,
+          })
+          .pipe(
+            Effect.mapError(
+              () =>
+                new UpstreamPrepareError({
+                  operation: "create-guided-thread",
+                  message: "Could not create the guided synchronization thread.",
+                  canRetry: true,
+                }),
+            ),
+          );
+        yield* orchestrationEngine
+          .dispatch({
+            type: "thread.turn.start",
+            commandId: yield* serverCommandId("upstream-sync-review"),
+            threadId,
+            message: {
+              messageId: MessageId.make(yield* randomUUID),
+              role: "user",
+              text: buildUpstreamSyncPrompt(input),
+              attachments: [],
+            },
+            modelSelection,
+            titleSeed: `Review ${input.session.target.tag}`,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt,
+          })
+          .pipe(
+            Effect.mapError(
+              () =>
+                new UpstreamPrepareError({
+                  operation: "start-guided-thread",
+                  message: "The sync worktree is ready, but its guided review could not start.",
+                  canRetry: true,
+                }),
+            ),
+          );
+        return yield* upstreamIntegration.attachThread(input.session.id, threadId);
+      });
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -1335,6 +1431,44 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverSignalProcess, processDiagnostics.signal(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.upstreamGetState]: (_input) =>
+          observeRpcEffect(WS_METHODS.upstreamGetState, upstreamIntegration.getState, {
+            "rpc.aggregate": "upstream-sync",
+          }),
+        [WS_METHODS.upstreamCheck]: (input) =>
+          observeRpcEffect(WS_METHODS.upstreamCheck, upstreamIntegration.check(input.reason), {
+            "rpc.aggregate": "upstream-sync",
+          }),
+        [WS_METHODS.upstreamDismiss]: (input) =>
+          observeRpcEffect(WS_METHODS.upstreamDismiss, upstreamIntegration.dismiss(input.target), {
+            "rpc.aggregate": "upstream-sync",
+          }),
+        [WS_METHODS.upstreamPrepare]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.upstreamPrepare,
+            Effect.gen(function* () {
+              const before = yield* upstreamIntegration.getState;
+              const counts = availableCounts(before);
+              const session = yield* upstreamIntegration.prepare(input.target);
+              return yield* createUpstreamSyncThread({ session, ...counts });
+            }).pipe(
+              Effect.mapError((error) =>
+                isUpstreamPrepareError(error)
+                  ? error
+                  : new UpstreamPrepareError({
+                      operation: "create-guided-thread",
+                      message:
+                        "The sync worktree is ready, but its guided thread could not be created.",
+                      canRetry: true,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "upstream-sync" },
+          ),
+        [WS_METHODS.upstreamAbort]: (input) =>
+          observeRpcEffect(WS_METHODS.upstreamAbort, upstreamIntegration.abort(input.sessionId), {
+            "rpc.aggregate": "upstream-sync",
+          }),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {
             "rpc.aggregate": "cloud",
@@ -1876,6 +2010,10 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "auth" },
           ),
+        [WS_METHODS.subscribeUpstreamUpdates]: (_input) =>
+          observeRpcStream(WS_METHODS.subscribeUpstreamUpdates, upstreamIntegration.streamChanges, {
+            "rpc.aggregate": "upstream-sync",
+          }),
       });
     }),
   );
