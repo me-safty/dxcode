@@ -11,6 +11,7 @@ import {
   resolveDesktopUpdateButtonAction,
   shouldShowArm64IntelBuildWarning,
   shouldShowDesktopUpdateButton,
+  shouldShowDesktopUpdateTrack,
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
 
@@ -33,6 +34,12 @@ const baseState: DesktopUpdateState = {
 };
 
 describe("desktop update button state", () => {
+  it("hides the update track when desktop updates are unavailable", () => {
+    expect(shouldShowDesktopUpdateTrack(null)).toBe(false);
+    expect(shouldShowDesktopUpdateTrack({ ...baseState, enabled: false })).toBe(false);
+    expect(shouldShowDesktopUpdateTrack(baseState)).toBe(true);
+  });
+
   it("shows a download action when an update is available", () => {
     const state: DesktopUpdateState = {
       ...baseState,

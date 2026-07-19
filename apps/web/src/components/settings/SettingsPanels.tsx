@@ -30,6 +30,7 @@ import {
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
+  shouldShowDesktopUpdateTrack,
 } from "../../components/desktopUpdate.logic";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
@@ -299,7 +300,7 @@ function AboutVersionSection() {
           </Tooltip>
         }
       />
-      {hasDesktopBridge ? (
+      {hasDesktopBridge && shouldShowDesktopUpdateTrack(updateState) ? (
         <SettingsRow
           title="Update track"
           description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
