@@ -1072,21 +1072,13 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot,
-            projectionSnapshotQuery.getSnapshot().pipe(
-              Effect.flatMap((readModel) => {
-                const project = readModel.projects.find(
-                  (entry) => entry.id === input.projectId && entry.deletedAt === null,
-                );
-                if (!project)
+            projectionSnapshotQuery.getProjectDashboardSnapshot(input.projectId).pipe(
+              Effect.flatMap((snapshot) => {
+                if (Option.isNone(snapshot))
                   return Effect.fail(
                     new OrchestrationGetSnapshotError({ message: "Project not found" }),
                   );
-                const { deletedAt: _deletedAt, ...projectShell } = project;
-                return Effect.succeed({
-                  snapshotSequence: readModel.snapshotSequence,
-                  project: projectShell,
-                  tasks: (readModel.tasks ?? []).filter((task) => task.projectId === project.id),
-                });
+                return Effect.succeed(snapshot.value);
               }),
               Effect.mapError(
                 (cause) =>
@@ -1105,56 +1097,49 @@ const makeWsRpcLayer = (
               const isDashboardEvent = (event: OrchestrationEvent) =>
                 event.aggregateKind === "project" &&
                 event.aggregateId === input.projectId &&
-                event.type.startsWith("project.task-");
+                (event.type.startsWith("project.task-") ||
+                  event.type === "project.meta-updated" ||
+                  event.type === "project.deleted");
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(isDashboardEvent),
                 Stream.map((event) => ({ kind: "event" as const, event })),
               );
+              const liveBuffer = yield* Queue.unbounded<{
+                readonly kind: "event";
+                readonly event: OrchestrationEvent;
+              }>();
+              yield* Effect.forkScoped(
+                liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
+              );
+              const bufferedLiveStream = Stream.fromQueue(liveBuffer);
               if (input.afterSequence !== undefined) {
                 const afterSequence = input.afterSequence;
-                return Stream.unwrap(
-                  Effect.gen(function* () {
-                    const liveBuffer = yield* Queue.unbounded<{
-                      readonly kind: "event";
-                      readonly event: OrchestrationEvent;
-                    }>();
-                    yield* Effect.forkScoped(
-                      liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
-                    );
-                    const catchUp = orchestrationEngine
-                      .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
-                      .pipe(
-                        Stream.filter(isDashboardEvent),
-                        Stream.map((event) => ({ kind: "event" as const, event })),
-                        Stream.mapError(
-                          (cause) =>
-                            new OrchestrationGetSnapshotError({
-                              message: "Failed to replay project dashboard events",
-                              cause,
-                            }),
-                        ),
-                      );
-                    return Stream.concat(catchUp, Stream.fromQueue(liveBuffer));
-                  }),
-                );
+                const catchUp = orchestrationEngine
+                  .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
+                  .pipe(
+                    Stream.filter(isDashboardEvent),
+                    Stream.map((event) => ({ kind: "event" as const, event })),
+                    Stream.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: "Failed to replay project dashboard events",
+                          cause,
+                        }),
+                    ),
+                  );
+                return Stream.concat(catchUp, bufferedLiveStream);
               }
-              const readModel = yield* projectionSnapshotQuery.getSnapshot();
-              const project = readModel.projects.find(
-                (entry) => entry.id === input.projectId && entry.deletedAt === null,
+              const snapshot = yield* projectionSnapshotQuery.getProjectDashboardSnapshot(
+                input.projectId,
               );
-              if (!project)
+              if (Option.isNone(snapshot))
                 return yield* new OrchestrationGetSnapshotError({ message: "Project not found" });
-              const { deletedAt: _deletedAt, ...projectShell } = project;
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
-                  snapshot: {
-                    snapshotSequence: readModel.snapshotSequence,
-                    project: projectShell,
-                    tasks: (readModel.tasks ?? []).filter((task) => task.projectId === project.id),
-                  },
+                  snapshot: snapshot.value,
                 }),
-                liveStream,
+                bufferedLiveStream,
               );
             }).pipe(
               Effect.mapError(

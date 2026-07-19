@@ -297,10 +297,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Task '${command.taskId}' does not exist.`,
         });
       }
+      if (command.beforeTaskId === task.id) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "beforeTaskId must differ from taskId.",
+        });
+      }
       const beforeTask =
         command.beforeTaskId === null
           ? null
           : tasks.find((entry) => entry.id === command.beforeTaskId);
+      if (command.beforeTaskId !== null && !beforeTask) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.beforeTaskId}' does not exist.`,
+        });
+      }
       if (
         beforeTask &&
         (beforeTask.projectId !== task.projectId || beforeTask.status !== command.status)

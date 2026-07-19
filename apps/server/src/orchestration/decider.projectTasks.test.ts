@@ -132,4 +132,75 @@ it.layer(NodeServices.layer)("project task decider", (it) => {
       ]);
     }),
   );
+
+  it.effect("rejects a stale move target", () =>
+    Effect.gen(function* () {
+      const model = yield* projectEvent(
+        yield* withProject,
+        event(2, "project.task-created", {
+          task: {
+            id: "task-a",
+            projectId,
+            title: "Task",
+            description: "",
+            status: "open",
+            position: 0,
+            threadId: null,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+        }),
+      );
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "project.task.move",
+            commandId: CommandId.make("move-before-deleted-task"),
+            taskId: ProjectTaskId.make("task-a"),
+            beforeTaskId: ProjectTaskId.make("deleted-task"),
+            status: "open",
+          },
+        }),
+      );
+      expect(failure.message).toContain("Task 'deleted-task' does not exist.");
+    }),
+  );
+
+  it.effect("rejects moving a task before itself", () =>
+    Effect.gen(function* () {
+      const taskId = ProjectTaskId.make("task-a");
+      const model = yield* projectEvent(
+        yield* withProject,
+        event(2, "project.task-created", {
+          task: {
+            id: taskId,
+            projectId,
+            title: "Task",
+            description: "",
+            status: "open",
+            position: 0,
+            threadId: null,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+        }),
+      );
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "project.task.move",
+            commandId: CommandId.make("move-before-self"),
+            taskId,
+            beforeTaskId: taskId,
+            status: "open",
+          },
+        }),
+      );
+      expect(failure.message).toContain("beforeTaskId must differ from taskId.");
+    }),
+  );
 });

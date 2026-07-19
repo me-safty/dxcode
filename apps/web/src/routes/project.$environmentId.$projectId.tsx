@@ -7,7 +7,7 @@ import {
   type ProjectTask,
   type SidebarThreadSortOrder,
 } from "@t3tools/contracts";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -557,5 +557,13 @@ function TaskEditor({
 }
 
 export const Route = createFileRoute("/project/$environmentId/$projectId")({
+  beforeLoad: async ({ context }) => {
+    if (
+      context.authGateState.status !== "authenticated" &&
+      context.authGateState.status !== "hosted-static"
+    ) {
+      throw redirect({ to: "/pair", replace: true });
+    }
+  },
   component: ProjectDashboardRoute,
 });

@@ -16,6 +16,7 @@ import {
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
   type OrchestrationMessage,
+  type ProjectDashboardSnapshot,
   type OrchestrationProjectShell,
   type OrchestrationProposedPlan,
   type OrchestrationProject,
@@ -1827,6 +1828,49 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ),
     );
 
+  const getProjectDashboardSnapshot: ProjectionSnapshotQueryShape["getProjectDashboardSnapshot"] = (
+    projectId,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const project = yield* getProjectShellById(projectId);
+          if (Option.isNone(project)) {
+            return Option.none<ProjectDashboardSnapshot>();
+          }
+          const tasks = yield* listProjectTaskRows({ projectId }).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getProjectDashboardSnapshot:listTasks:query",
+                "ProjectionSnapshotQuery.getProjectDashboardSnapshot:listTasks:decodeRows",
+              ),
+            ),
+          );
+          const stateRows = yield* listProjectionStateRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getProjectDashboardSnapshot:listProjectionState:query",
+                "ProjectionSnapshotQuery.getProjectDashboardSnapshot:listProjectionState:decodeRows",
+              ),
+            ),
+          );
+          return Option.some({
+            snapshotSequence: computeTaskSnapshotSequence(stateRows),
+            project: project.value,
+            tasks,
+          });
+        }),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          isPersistenceError(error)
+            ? error
+            : toPersistenceSqlError(
+                "ProjectionSnapshotQuery.getProjectDashboardSnapshot:transaction",
+              )(error),
+        ),
+      );
+
   const getFirstActiveThreadIdByProjectId: ProjectionSnapshotQueryShape["getFirstActiveThreadIdByProjectId"] =
     (projectId) =>
       getFirstActiveThreadIdByProject({ projectId }).pipe(
@@ -2143,6 +2187,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getCounts,
     getActiveProjectByWorkspaceRoot,
     getProjectShellById,
+    getProjectDashboardSnapshot,
     getFirstActiveThreadIdByProjectId,
     getThreadCheckpointContext,
     getFullThreadDiffContext,

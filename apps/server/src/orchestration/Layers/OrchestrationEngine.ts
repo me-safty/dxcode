@@ -51,7 +51,10 @@ interface CommandEnvelope {
   startedAtMs: number;
 }
 
-function commandToAggregateRef(command: OrchestrationCommand): {
+function commandToAggregateRef(
+  command: OrchestrationCommand,
+  readModel: OrchestrationReadModel,
+): {
   readonly aggregateKind: "project" | "thread";
   readonly aggregateId: ProjectId | ThreadId;
 } {
@@ -68,7 +71,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.task.update":
     case "project.task.move":
     case "project.task.delete":
-      return { aggregateKind: "project", aggregateId: ProjectId.make(command.taskId) };
+      return {
+        aggregateKind: "project",
+        aggregateId:
+          (readModel.tasks ?? []).find((task) => task.id === command.taskId)?.projectId ??
+          ProjectId.make(command.taskId),
+      };
     default:
       return {
         aggregateKind: "thread",
@@ -106,7 +114,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     let processingStartedAtMs = 0;
-    const aggregateRef = commandToAggregateRef(envelope.command);
+    const aggregateRef = commandToAggregateRef(envelope.command, commandReadModel);
     const baseMetricAttributes = {
       commandType: envelope.command.type,
       aggregateKind: aggregateRef.aggregateKind,
