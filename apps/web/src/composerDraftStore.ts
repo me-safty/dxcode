@@ -5,6 +5,7 @@ import {
   type EnvironmentId,
   ModelSelection,
   ProjectId,
+  ProjectTaskId,
   ProviderInstanceId,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -208,6 +209,7 @@ const PersistedDraftThreadState = Schema.Struct({
   threadId: ThreadId,
   environmentId: Schema.String,
   projectId: ProjectId,
+  sourceTaskId: Schema.optionalKey(ProjectTaskId),
   logicalProjectKey: Schema.optionalKey(Schema.String),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
@@ -287,6 +289,7 @@ export interface DraftSessionState {
   threadId: ThreadId;
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  sourceTaskId?: ProjectTaskId;
   logicalProjectKey: string;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -359,6 +362,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      sourceTaskId?: ProjectTaskId;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -1322,6 +1326,7 @@ function createDraftThreadState(
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
+    sourceTaskId?: ProjectTaskId;
   },
 ): DraftThreadState {
   const projectChanged =
@@ -1350,6 +1355,11 @@ function createDraftThreadState(
     threadId,
     environmentId: projectRef.environmentId,
     projectId: projectRef.projectId,
+    ...(options?.sourceTaskId !== undefined
+      ? { sourceTaskId: options.sourceTaskId }
+      : existingThread?.sourceTaskId !== undefined
+        ? { sourceTaskId: existingThread.sourceTaskId }
+        : {}),
     logicalProjectKey,
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,

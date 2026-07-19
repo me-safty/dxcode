@@ -283,7 +283,9 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.replayEvents, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.subscribeProjectDashboard, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
@@ -827,6 +829,9 @@ const makeWsRpcLayer = (
                 commandId: yield* serverCommandId("bootstrap-thread-create"),
                 threadId: command.threadId,
                 projectId: bootstrap.createThread.projectId,
+                ...(bootstrap.createThread.sourceTaskId !== undefined
+                  ? { sourceTaskId: bootstrap.createThread.sourceTaskId }
+                  : {}),
                 title: bootstrap.createThread.title,
                 modelSelection: bootstrap.createThread.modelSelection,
                 runtimeMode: bootstrap.createThread.runtimeMode,
@@ -1058,6 +1063,104 @@ const makeWsRpcLayer = (
                 (cause) =>
                   new OrchestrationReplayEventsError({
                     message: "Failed to replay orchestration events",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot,
+            projectionSnapshotQuery.getSnapshot().pipe(
+              Effect.flatMap((readModel) => {
+                const project = readModel.projects.find(
+                  (entry) => entry.id === input.projectId && entry.deletedAt === null,
+                );
+                if (!project)
+                  return Effect.fail(
+                    new OrchestrationGetSnapshotError({ message: "Project not found" }),
+                  );
+                const { deletedAt: _deletedAt, ...projectShell } = project;
+                return Effect.succeed({
+                  snapshotSequence: readModel.snapshotSequence,
+                  project: projectShell,
+                  tasks: (readModel.tasks ?? []).filter((task) => task.projectId === project.id),
+                });
+              }),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load project dashboard",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeProjectDashboard]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeProjectDashboard,
+            Effect.gen(function* () {
+              const isDashboardEvent = (event: OrchestrationEvent) =>
+                event.aggregateKind === "project" &&
+                event.aggregateId === input.projectId &&
+                event.type.startsWith("project.task-");
+              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+                Stream.filter(isDashboardEvent),
+                Stream.map((event) => ({ kind: "event" as const, event })),
+              );
+              if (input.afterSequence !== undefined) {
+                const afterSequence = input.afterSequence;
+                return Stream.unwrap(
+                  Effect.gen(function* () {
+                    const liveBuffer = yield* Queue.unbounded<{
+                      readonly kind: "event";
+                      readonly event: OrchestrationEvent;
+                    }>();
+                    yield* Effect.forkScoped(
+                      liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
+                    );
+                    const catchUp = orchestrationEngine
+                      .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
+                      .pipe(
+                        Stream.filter(isDashboardEvent),
+                        Stream.map((event) => ({ kind: "event" as const, event })),
+                        Stream.mapError(
+                          (cause) =>
+                            new OrchestrationGetSnapshotError({
+                              message: "Failed to replay project dashboard events",
+                              cause,
+                            }),
+                        ),
+                      );
+                    return Stream.concat(catchUp, Stream.fromQueue(liveBuffer));
+                  }),
+                );
+              }
+              const readModel = yield* projectionSnapshotQuery.getSnapshot();
+              const project = readModel.projects.find(
+                (entry) => entry.id === input.projectId && entry.deletedAt === null,
+              );
+              if (!project)
+                return yield* new OrchestrationGetSnapshotError({ message: "Project not found" });
+              const { deletedAt: _deletedAt, ...projectShell } = project;
+              return Stream.concat(
+                Stream.make({
+                  kind: "snapshot" as const,
+                  snapshot: {
+                    snapshotSequence: readModel.snapshotSequence,
+                    project: projectShell,
+                    tasks: (readModel.tasks ?? []).filter((task) => task.projectId === project.id),
+                  },
+                }),
+                liveStream,
+              );
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to stream project dashboard",
                     cause,
                   }),
               ),

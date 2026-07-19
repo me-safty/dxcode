@@ -1377,14 +1377,49 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (useThreadSelectionStore.getState().hasSelection()) {
         clearSelection();
       }
-      setProjectExpanded(projectPreferenceKeys, !projectExpanded);
+      const openMember = (member: SidebarProjectGroupMember) => {
+        if (isMobile) setOpenMobile(false);
+        void router.navigate({
+          to: "/project/$environmentId/$projectId",
+          params: { environmentId: member.environmentId, projectId: member.id },
+        });
+      };
+      if (project.memberProjects.length === 1) {
+        openMember(project.memberProjects[0]!);
+        return;
+      }
+      void (async () => {
+        const api = readLocalApi();
+        if (api) {
+          const selected = await api.contextMenu.show(
+            project.memberProjects.map((member) => ({
+              id: scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+              label: `${member.title} — ${member.workspaceRoot}`,
+            })),
+          );
+          if (!selected) return;
+          const member = project.memberProjects.find(
+            (candidate) =>
+              scopedProjectKey(scopeProjectRef(candidate.environmentId, candidate.id)) === selected,
+          );
+          if (member) openMember(member);
+          return;
+        }
+        const choice = window.prompt(
+          `Choose project:\n${project.memberProjects.map((member, index) => `${index + 1}. ${member.title} — ${member.workspaceRoot}`).join("\n")}`,
+          "1",
+        );
+        const member = project.memberProjects[Number(choice) - 1];
+        if (member) openMember(member);
+      })();
     },
     [
       clearSelection,
       dragInProgressRef,
-      projectExpanded,
-      projectPreferenceKeys,
-      setProjectExpanded,
+      isMobile,
+      project.memberProjects,
+      router,
+      setOpenMobile,
       suppressProjectClickAfterDragRef,
       suppressProjectClickForContextMenuRef,
     ],
@@ -1397,9 +1432,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (dragInProgressRef.current) {
         return;
       }
+      handleProjectButtonClick(event as unknown as React.MouseEvent<HTMLButtonElement>);
+    },
+    [dragInProgressRef, handleProjectButtonClick],
+  );
+
+  const handleProjectChevronClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
       setProjectExpanded(projectPreferenceKeys, !projectExpanded);
     },
-    [dragInProgressRef, projectExpanded, projectPreferenceKeys, setProjectExpanded],
+    [projectExpanded, projectPreferenceKeys, setProjectExpanded],
   );
 
   const handleProjectButtonPointerDownCapture = useCallback(
@@ -2202,6 +2246,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   return (
     <>
       <div className="group/project-header relative">
+        <button
+          type="button"
+          aria-label={projectExpanded ? "Collapse project threads" : "Expand project threads"}
+          aria-expanded={projectExpanded}
+          className="absolute left-1 top-1 z-10 size-6 rounded-md"
+          onClick={handleProjectChevronClick}
+        />
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"

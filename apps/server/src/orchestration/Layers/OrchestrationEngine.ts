@@ -1,10 +1,5 @@
-import type {
-  OrchestrationEvent,
-  OrchestrationReadModel,
-  ProjectId,
-  ThreadId,
-} from "@t3tools/contracts";
-import { OrchestrationCommand } from "@t3tools/contracts";
+import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import { OrchestrationCommand, ProjectId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
@@ -68,6 +63,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateKind: "project",
         aggregateId: command.projectId,
       };
+    case "project.task.create":
+      return { aggregateKind: "project", aggregateId: command.projectId };
+    case "project.task.update":
+    case "project.task.move":
+    case "project.task.delete":
+      return { aggregateKind: "project", aggregateId: ProjectId.make(command.taskId) };
     default:
       return {
         aggregateKind: "thread",

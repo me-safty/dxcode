@@ -11,6 +11,7 @@ import {
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
+  ProjectTaskId,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -104,6 +105,18 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
 });
 const ProjectionStateDbRowSchema = ProjectionState;
+const ProjectionProjectTaskDbRowSchema = Schema.Struct({
+  id: ProjectTaskId,
+  projectId: ProjectId,
+  title: Schema.String,
+  description: Schema.String,
+  status: Schema.Literals(["open", "done"]),
+  position: NonNegativeInt,
+  threadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+});
 const ProjectionCountsRowSchema = Schema.Struct({
   projectCount: Schema.Number,
   threadCount: Schema.Number,
@@ -179,6 +192,16 @@ function computeSnapshotSequence(
   }
 
   return Number.isFinite(minSequence) ? minSequence : 0;
+}
+
+function computeTaskSnapshotSequence(
+  stateRows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionStateDbRowSchema>>,
+): number {
+  const snapshotSequence = computeSnapshotSequence(stateRows);
+  const taskSequence = stateRows.find(
+    (row) => row.projector === ORCHESTRATION_PROJECTOR_NAMES.projectTasks,
+  )?.lastAppliedSequence;
+  return Math.min(snapshotSequence, taskSequence ?? snapshotSequence);
 }
 
 function mapLatestTurn(
@@ -647,6 +670,27 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listProjectTaskRows = SqlSchema.findAll({
+    Request: Schema.Struct({ projectId: Schema.optional(ProjectId) }),
+    Result: ProjectionProjectTaskDbRowSchema,
+    execute: ({ projectId }) =>
+      projectId === undefined
+        ? sql`
+          SELECT task_id AS id, project_id AS "projectId", title, description, status,
+            position, thread_id AS "threadId", created_at AS "createdAt",
+            updated_at AS "updatedAt", completed_at AS "completedAt"
+          FROM projection_project_tasks
+          ORDER BY project_id, status, position, task_id
+        `
+        : sql`
+          SELECT task_id AS id, project_id AS "projectId", title, description, status,
+            position, thread_id AS "threadId", created_at AS "createdAt",
+            updated_at AS "updatedAt", completed_at AS "completedAt"
+          FROM projection_project_tasks WHERE project_id = ${projectId}
+          ORDER BY status, position, task_id
+        `,
+  });
+
   const readProjectionCounts = SqlSchema.findOne({
     Request: Schema.Void,
     Result: ProjectionCountsRowSchema,
@@ -1007,6 +1051,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listProjectTaskRows({}).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listProjectTasks:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listProjectTasks:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -1021,6 +1073,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             checkpointRows,
             latestTurnRows,
             stateRows,
+            taskRows,
           ]) =>
             Effect.gen(function* () {
               const messagesByThread = new Map<string, Array<OrchestrationMessage>>();
@@ -1195,9 +1248,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               }));
 
               const snapshot = {
-                snapshotSequence: computeSnapshotSequence(stateRows),
+                snapshotSequence: computeTaskSnapshotSequence(stateRows),
                 projects,
                 threads,
+                tasks: taskRows,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
@@ -1268,11 +1322,27 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listProjectTaskRows({}).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listProjectTasks:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listProjectTasks:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, proposedPlanRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            proposedPlanRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+            taskRows,
+          ]) =>
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
@@ -1394,9 +1464,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               }
 
               return {
-                snapshotSequence: computeSnapshotSequence(stateRows),
+                snapshotSequence: computeTaskSnapshotSequence(stateRows),
                 projects,
                 threads,
+                tasks: taskRows,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),

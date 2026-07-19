@@ -31,6 +31,10 @@ type CommandInput<T extends CommandType> = Omit<
 export type CreateProjectInput = CommandInput<"project.create">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
+export type CreateProjectTaskInput = CommandInput<"project.task.create">;
+export type UpdateProjectTaskInput = CommandInput<"project.task.update">;
+export type MoveProjectTaskInput = CommandInput<"project.task.move">;
+export type DeleteProjectTaskInput = CommandInput<"project.task.delete">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
@@ -107,6 +111,43 @@ export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effec
   return yield* dispatch({
     ...input,
     type: "project.delete",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const createProjectTask: (input: CreateProjectTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createProjectTask",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "project.task.create", ...metadata });
+});
+
+export const updateProjectTask: (input: UpdateProjectTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateProjectTask",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "project.task.update",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const moveProjectTask: (input: MoveProjectTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.moveProjectTask",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "project.task.move",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const deleteProjectTask: (input: DeleteProjectTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.deleteProjectTask",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "project.task.delete",
     commandId: yield* commandId(input),
   });
 });

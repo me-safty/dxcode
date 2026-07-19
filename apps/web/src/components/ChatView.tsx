@@ -4348,6 +4348,9 @@ function ChatViewContent(props: ChatViewProps) {
                 ? {
                     createThread: {
                       projectId: activeProject.id,
+                      ...(draftThread?.sourceTaskId !== undefined
+                        ? { sourceTaskId: draftThread.sourceTaskId }
+                        : {}),
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,

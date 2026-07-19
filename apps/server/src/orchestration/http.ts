@@ -55,6 +55,30 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         }),
       )
       .handle(
+        "projectDashboardSnapshot",
+        Effect.fn("environment.orchestration.projectDashboardSnapshot")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          const readModel = yield* projectionSnapshotQuery
+            .getSnapshot()
+            .pipe(
+              Effect.catch((cause) =>
+                failEnvironmentInternal("orchestration_snapshot_failed", cause),
+              ),
+            );
+          const project = readModel.projects.find(
+            (entry) => entry.id === args.params.projectId && entry.deletedAt === null,
+          );
+          if (!project) return yield* failEnvironmentNotFound("thread_not_found");
+          const { deletedAt: _deletedAt, ...projectShell } = project;
+          return {
+            snapshotSequence: readModel.snapshotSequence,
+            project: projectShell,
+            tasks: (readModel.tasks ?? []).filter((task) => task.projectId === project.id),
+          };
+        }),
+      )
+      .handle(
         "threadSnapshot",
         Effect.fn("environment.orchestration.threadSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);

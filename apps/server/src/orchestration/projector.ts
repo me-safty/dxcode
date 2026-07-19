@@ -14,6 +14,12 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
+  ProjectTaskCreatedPayload,
+  ProjectTaskDeletedPayload,
+  ProjectTaskMovedPayload,
+  ProjectTaskThreadLinkedPayload,
+  ProjectTaskThreadUnlinkedPayload,
+  ProjectTaskUpdatedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -183,6 +189,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    tasks: [],
     updatedAt: nowIso,
   };
 }
@@ -259,6 +266,89 @@ export function projectEvent(
                   updatedAt: payload.deletedAt,
                 }
               : project,
+          ),
+          tasks: (nextBase.tasks ?? []).filter((task) => task.projectId !== payload.projectId),
+        })),
+      );
+
+    case "project.task-created":
+      return decodeForEvent(ProjectTaskCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: [...(nextBase.tasks ?? []), payload.task],
+        })),
+      );
+    case "project.task-updated":
+      return decodeForEvent(ProjectTaskUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  ...(payload.title !== undefined ? { title: payload.title } : {}),
+                  ...(payload.description !== undefined
+                    ? { description: payload.description }
+                    : {}),
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+    case "project.task-moved":
+      return decodeForEvent(ProjectTaskMovedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  status: payload.status,
+                  position: payload.position,
+                  completedAt: payload.completedAt,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+    case "project.task-deleted":
+      return decodeForEvent(ProjectTaskDeletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).filter((task) => task.id !== payload.taskId),
+        })),
+      );
+    case "project.task-thread-linked":
+      return decodeForEvent(
+        ProjectTaskThreadLinkedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? { ...task, threadId: payload.threadId, updatedAt: payload.updatedAt }
+              : task,
+          ),
+        })),
+      );
+    case "project.task-thread-unlinked":
+      return decodeForEvent(
+        ProjectTaskThreadUnlinkedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.threadId === payload.threadId
+              ? { ...task, threadId: null, updatedAt: payload.updatedAt }
+              : task,
           ),
         })),
       );
