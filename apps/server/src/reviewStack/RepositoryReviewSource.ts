@@ -111,6 +111,10 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
       input.target._tag === "working-tree"
         ? parsePorcelainPathGroups(manifest.stdout)
         : parseNameStatusPathGroups(manifest.stdout);
+    const workingTreeHasHead =
+      input.target._tag !== "working-tree" ||
+      (yield* execute("ReviewStack.capture.verifyHead", ["rev-parse", "--verify", "HEAD"], true))
+        .exitCode === 0;
     const patches = yield* Effect.forEach(
       pathGroups,
       Effect.fn("ReviewStack.capture.file")(function* (pathGroup) {
@@ -130,7 +134,9 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
                   "--",
                   ...pathGroup.paths,
                 ]
-              : ["diff", ...common, "HEAD", "--", ...pathGroup.paths];
+              : workingTreeHasHead
+                ? ["diff", ...common, "HEAD", "--", ...pathGroup.paths]
+                : ["diff", "--no-index", ...common, "--", "/dev/null", pathGroup.displayPath];
         let result = yield* git.execute({
           operation: "ReviewStack.capture.filePatch",
           cwd: input.cwd,

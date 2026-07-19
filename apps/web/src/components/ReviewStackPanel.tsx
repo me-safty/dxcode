@@ -22,6 +22,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { cn } from "~/lib/utils";
 
 import { Button } from "./ui/button";
+import { filterReviewStackHistory } from "./ReviewStackPanel.logic";
 
 type Theme = "light" | "dark";
 
@@ -55,6 +56,7 @@ export function ReviewStackPanel(props: {
   });
   const cancel = useAtomCommand(reviewEnvironment.reviewStackCancel, "cancel review stack");
   const ensuredKeys = useRef(new Set<string>());
+  const selectedTargetKey = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<ReviewStackSnapshotId | null>(null);
   const [activeLayer, setActiveLayer] = useState(0);
   const [commandError, setCommandError] = useState<string | null>(null);
@@ -93,6 +95,7 @@ export function ReviewStackPanel(props: {
       },
     });
     if (result._tag === "Success") {
+      selectedTargetKey.current = targetKey;
       setSelectedId(result.value.snapshotId);
       list.refresh();
     } else {
@@ -100,22 +103,47 @@ export function ReviewStackPanel(props: {
     }
   };
 
+  const history = useMemo(
+    () =>
+      filterReviewStackHistory(list.data ?? [], {
+        threadId: props.threadId,
+        target: props.target,
+        ignoreWhitespace: props.ignoreWhitespace,
+      }),
+    [list.data, props.ignoreWhitespace, props.target, props.threadId],
+  );
+
   useEffect(() => {
-    if (ensuredKeys.current.has(targetKey) || list.data === null) return;
-    const exact = list.data.find(
+    selectedTargetKey.current = null;
+    setSelectedId(null);
+  }, [targetKey]);
+
+  useEffect(() => {
+    if (list.data === null) return;
+    if (
+      selectedTargetKey.current === targetKey &&
+      selectedId !== null &&
+      history.some((item) => item.snapshotId === selectedId)
+    ) {
+      return;
+    }
+    const exact = history.find(
       (item) =>
         item.isCurrent === true ||
         (props.currentSourceHash !== null && item.sourceHash === props.currentSourceHash),
     );
-    const displayed = exact ?? list.data[0];
+    const displayed = exact ?? history[0];
     if (displayed) {
       ensuredKeys.current.add(targetKey);
+      selectedTargetKey.current = targetKey;
       setSelectedId(displayed.snapshotId);
       return;
     }
+    setSelectedId(null);
+    if (ensuredKeys.current.has(targetKey)) return;
     ensuredKeys.current.add(targetKey);
     void runEnsure(false);
-  }, [list.data, props.currentSourceHash, targetKey]);
+  }, [history, list.data, props.currentSourceHash, selectedId, targetKey]);
 
   useEffect(() => {
     setActiveLayer(0);
@@ -132,7 +160,7 @@ export function ReviewStackPanel(props: {
   const selectedLayerIndex = Math.min(activeLayer, Math.max(0, layers.length - 1));
   const selectedLayer = layers[selectedLayerIndex];
   const isRunning = value?.metadata.status === "queued" || value?.metadata.status === "running";
-  const selectedHistoryItem = list.data?.find((item) => item.snapshotId === selectedId);
+  const selectedHistoryItem = history.find((item) => item.snapshotId === selectedId);
   const outdated =
     selectedHistoryItem?.isCurrent === false ||
     (props.currentSourceHash !== null &&
@@ -174,9 +202,12 @@ export function ReviewStackPanel(props: {
           aria-label="Review stack snapshot"
           className="h-7 max-w-56 rounded-md border border-border bg-background px-2"
           value={selectedId ?? ""}
-          onChange={(event) => setSelectedId(ReviewStackSnapshotId.make(event.target.value))}
+          onChange={(event) => {
+            selectedTargetKey.current = targetKey;
+            setSelectedId(ReviewStackSnapshotId.make(event.target.value));
+          }}
         >
-          {(list.data ?? []).map((item) => (
+          {history.map((item) => (
             <option key={item.snapshotId} value={item.snapshotId}>
               {new Date(item.createdAt).toLocaleString()} · {item.modelSelection.model}
             </option>
