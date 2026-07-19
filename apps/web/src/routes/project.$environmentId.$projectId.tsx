@@ -51,6 +51,11 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../workspaceTitlebar";
 
 type TaskStatus = ProjectTask["status"];
 
+function workspaceTitle(path: string, threads: ReadonlyArray<{ branch: string | null }>) {
+  if (path === "") return "Project root";
+  return threads.find((thread) => thread.branch !== null)?.branch ?? "Worktree";
+}
+
 function errorText(result: unknown): string {
   const error = squashAtomCommandFailure(result as never);
   return error instanceof Error ? error.message : "Request failed.";
@@ -273,15 +278,21 @@ function ProjectDashboardRoute() {
                             variant="outline"
                             aria-label={`Choose workspace for ${task.title}`}
                             onClick={() => {
-                              const worktrees = groups.map(([path]) => path).filter(Boolean);
+                              const worktrees = groups
+                                .filter(([path]) => path !== "")
+                                .map(([path, groupThreads]) => ({
+                                  path,
+                                  title: workspaceTitle(path, groupThreads),
+                                }));
                               const choice = window.prompt(
-                                `Workspace:\n1. New worktree${worktrees.map((path, index) => `\n${index + 2}. ${path}`).join("")}`,
+                                `Workspace:\n1. New worktree${worktrees.map((worktree, index) => `\n${index + 2}. ${worktree.title}`).join("")}`,
                                 "1",
                               );
                               const selected = Number(choice);
                               if (selected === 1) void startTaskThread(task, null, "worktree");
-                              else if (worktrees[selected - 2])
-                                void startTaskThread(task, worktrees[selected - 2]!, "local");
+                              else if (worktrees[selected - 2]) {
+                                void startTaskThread(task, worktrees[selected - 2]!.path, "local");
+                              }
                             }}
                           >
                             …
@@ -442,14 +453,7 @@ function ProjectDashboardRoute() {
               {groups.map(([path, groupThreads]) => (
                 <div key={path || "root"}>
                   <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <span>
-                      {path === ""
-                        ? "Project root"
-                        : path.split("/").findLast((segment) => segment.length > 0)}
-                    </span>
-                    {path ? (
-                      <span className="min-w-0 truncate font-normal opacity-65">{path}</span>
-                    ) : null}
+                    <span>{workspaceTitle(path, groupThreads)}</span>
                   </div>
                   <div className="overflow-hidden rounded-xl border">
                     {groupThreads.map((thread) => {
