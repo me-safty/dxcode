@@ -6,7 +6,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { filterReviewStackHistory } from "./ReviewStackPanel.logic";
+import { filterReviewStackHistory, isReviewStackSnapshotOutdated } from "./ReviewStackPanel.logic";
 
 function snapshot(
   snapshotId: string,
@@ -46,5 +46,15 @@ describe("filterReviewStackHistory", () => {
         { threadId: ThreadId.make("thread-1"), target, ignoreWhitespace: false },
       ).map((item) => item.snapshotId),
     ).toEqual(["current"]);
+  });
+
+  it("treats an unverifiable current hash as outdated", () => {
+    expect(
+      isReviewStackSnapshotOutdated({
+        snapshot: snapshot("current", { _tag: "working-tree" }, false),
+        currentSourceHash: null,
+        currentSourceHashUnverifiable: true,
+      }),
+    ).toBe(true);
   });
 });

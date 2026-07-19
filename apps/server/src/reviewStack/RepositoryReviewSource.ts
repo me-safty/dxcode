@@ -1,5 +1,6 @@
 import type { GitCommandError, ReviewStackTarget } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { normalizeGitDiff } from "@t3tools/shared/git";
 
@@ -7,6 +8,17 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 
 const MANIFEST_MAX_BYTES = 16 * 1024 * 1024;
 const FILE_PATCH_MAX_BYTES = 16 * 1024 * 1024;
+const AGGREGATE_PATCH_MAX_BYTES = 64 * 1024 * 1024;
+const textEncoder = new TextEncoder();
+
+export function nextAggregatePatchBytes(
+  currentBytes: number,
+  patch: string,
+  maxBytes = AGGREGATE_PATCH_MAX_BYTES,
+): number | null {
+  const nextBytes = currentBytes + textEncoder.encode(patch).byteLength;
+  return nextBytes <= maxBytes ? nextBytes : null;
+}
 
 export interface RepositoryReviewSource {
   readonly diff: string;
@@ -96,7 +108,17 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
 
     const manifestArgs =
       input.target._tag === "commit"
-        ? ["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", input.target.sha]
+        ? [
+            "diff-tree",
+            "--root",
+            "--first-parent",
+            "-m",
+            "--no-commit-id",
+            "--name-status",
+            "-r",
+            "-z",
+            input.target.sha,
+          ]
         : input.target._tag === "branch"
           ? ["diff", "--name-status", "-z", `${input.resolvedBase ?? "HEAD"}...HEAD`, "--"]
           : ["status", "--porcelain=1", "-z", "--untracked-files=all"];
@@ -115,6 +137,7 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
       input.target._tag !== "working-tree" ||
       (yield* execute("ReviewStack.capture.verifyHead", ["rev-parse", "--verify", "HEAD"], true))
         .exitCode === 0;
+    const aggregatePatchBytes = yield* Ref.make(0);
     const patches = yield* Effect.forEach(
       pathGroups,
       Effect.fn("ReviewStack.capture.file")(function* (pathGroup) {
@@ -125,7 +148,15 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
         ];
         const args =
           input.target._tag === "commit"
-            ? ["show", "--format=", ...common, input.target.sha, "--", ...pathGroup.paths]
+            ? [
+                "show",
+                "--first-parent",
+                "--format=",
+                ...common,
+                input.target.sha,
+                "--",
+                ...pathGroup.paths,
+              ]
             : input.target._tag === "branch"
               ? [
                   "diff",
@@ -164,7 +195,17 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
             message: `The patch for ${pathGroup.displayPath} exceeded the per-file safety limit; no partial review was created.`,
           });
         }
-        return normalizeGitDiff(result.stdout);
+        const patch = normalizeGitDiff(result.stdout);
+        const withinAggregateLimit = yield* Ref.modify(aggregatePatchBytes, (currentBytes) => {
+          const nextBytes = nextAggregatePatchBytes(currentBytes, patch);
+          return nextBytes === null ? [false, currentBytes] : [true, nextBytes];
+        });
+        if (!withinAggregateLimit) {
+          return yield* new ReviewSourceCaptureError({
+            message: "The combined review patch exceeded the aggregate safety limit.",
+          });
+        }
+        return patch;
       }),
       { concurrency: 4 },
     );

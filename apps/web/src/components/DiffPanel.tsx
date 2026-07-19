@@ -1036,6 +1036,10 @@ export default function DiffPanel({
                   ? null
                   : (reviewStackGitSource?.diffHash ?? null)
               }
+              currentSourceHashUnverifiable={
+                !selectedTurn &&
+                (reviewStackGitSource === undefined || reviewStackGitSource.truncated)
+              }
               theme={resolvedTheme as DiffThemeType}
               diffStyle={diffRenderMode}
               wordWrap={wordWrap}

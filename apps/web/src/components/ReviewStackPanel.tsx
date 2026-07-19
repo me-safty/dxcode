@@ -22,7 +22,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { cn } from "~/lib/utils";
 
 import { Button } from "./ui/button";
-import { filterReviewStackHistory } from "./ReviewStackPanel.logic";
+import { filterReviewStackHistory, isReviewStackSnapshotOutdated } from "./ReviewStackPanel.logic";
 
 type Theme = "light" | "dark";
 
@@ -44,6 +44,7 @@ export function ReviewStackPanel(props: {
   target: ReviewStackTarget;
   ignoreWhitespace: boolean;
   currentSourceHash: string | null;
+  currentSourceHashUnverifiable: boolean;
   theme: Theme;
   diffStyle: "stacked" | "split";
   wordWrap: boolean;
@@ -161,11 +162,11 @@ export function ReviewStackPanel(props: {
   const selectedLayer = layers[selectedLayerIndex];
   const isRunning = value?.metadata.status === "queued" || value?.metadata.status === "running";
   const selectedHistoryItem = history.find((item) => item.snapshotId === selectedId);
-  const outdated =
-    selectedHistoryItem?.isCurrent === false ||
-    (props.currentSourceHash !== null &&
-      selectedHistoryItem !== undefined &&
-      selectedHistoryItem.sourceHash !== props.currentSourceHash);
+  const outdated = isReviewStackSnapshotOutdated({
+    snapshot: selectedHistoryItem,
+    currentSourceHash: props.currentSourceHash,
+    currentSourceHashUnverifiable: props.currentSourceHashUnverifiable,
+  });
 
   const cancelGeneration = async () => {
     if (!value) return;

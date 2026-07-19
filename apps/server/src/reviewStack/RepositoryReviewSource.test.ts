@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 
 import {
   captureRepositoryReviewSource,
+  nextAggregatePatchBytes,
   parseNameStatusPathGroups,
   parsePorcelainPathGroups,
   parsePorcelainPaths,
@@ -35,6 +36,42 @@ describe("parsePorcelainPaths", () => {
       { paths: ["tracked.ts"], displayPath: "tracked.ts", isUntracked: false },
     ]);
   });
+
+  it("caps aggregate patch bytes", () => {
+    expect(nextAggregatePatchBytes(3, "é", 5)).toBe(5);
+    expect(nextAggregatePatchBytes(4, "é", 5)).toBeNull();
+  });
+
+  effectIt.effect("uses first-parent semantics for merge commits", () =>
+    Effect.gen(function* () {
+      const calls: ReadonlyArray<string>[] = [];
+      yield* captureRepositoryReviewSource({
+        cwd: "/repo",
+        target: { _tag: "commit", sha: "a".repeat(40) },
+        resolvedBase: null,
+        ignoreWhitespace: false,
+        git: {
+          execute: (input: Parameters<GitVcsDriver.GitVcsDriver["Service"]["execute"]>[0]) => {
+            calls.push(input.args);
+            return Effect.succeed({
+              exitCode: ChildProcessSpawner.ExitCode(0),
+              stdout:
+                input.operation === "ReviewStack.capture.manifest"
+                  ? "M\0file.txt\0"
+                  : "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new",
+              stderr: "",
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            });
+          },
+        } as unknown as GitVcsDriver.GitVcsDriver["Service"],
+      });
+
+      expect(calls[0]).toContain("--first-parent");
+      expect(calls[0]).toContain("-m");
+      expect(calls[1]).toContain("--first-parent");
+    }),
+  );
 
   effectIt.effect("captures staged files against the empty tree when HEAD is unborn", () =>
     Effect.gen(function* () {
