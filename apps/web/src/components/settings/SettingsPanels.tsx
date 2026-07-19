@@ -384,6 +384,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open task panel"]
         : []),
+      ...(settings.runningMessageBehavior !== DEFAULT_UNIFIED_SETTINGS.runningMessageBehavior
+        ? ["Messages during a turn"]
+        : []),
       ...(settings.shareProjectActionsAcrossWorktrees !==
       DEFAULT_UNIFIED_SETTINGS.shareProjectActionsAcrossWorktrees
         ? ["Shared project actions"]
@@ -418,6 +421,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ],
     [
       settings.autoOpenPlanSidebar,
+      settings.runningMessageBehavior,
       settings.shareProjectActionsAcrossWorktrees,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -452,6 +456,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
+      runningMessageBehavior: DEFAULT_UNIFIED_SETTINGS.runningMessageBehavior,
       shareProjectActionsAcrossWorktrees:
         DEFAULT_UNIFIED_SETTINGS.shareProjectActionsAcrossWorktrees,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
@@ -664,6 +669,47 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Check provider versions"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Messages during a turn"
+          description="Queue messages for the next turn, or steer the response that is currently running. Command/Ctrl+Enter always steers."
+          resetAction={
+            settings.runningMessageBehavior !== DEFAULT_UNIFIED_SETTINGS.runningMessageBehavior ? (
+              <SettingResetButton
+                label="messages during a turn"
+                onClick={() =>
+                  updateSettings({
+                    runningMessageBehavior: DEFAULT_UNIFIED_SETTINGS.runningMessageBehavior,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.runningMessageBehavior}
+              onValueChange={(value) => {
+                if (value === "queue" || value === "steer") {
+                  updateSettings({ runningMessageBehavior: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Messages during a turn">
+                <SelectValue>
+                  {settings.runningMessageBehavior === "queue" ? "Queue" : "Steer"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="queue">
+                  Queue
+                </SelectItem>
+                <SelectItem hideIndicator value="steer">
+                  Steer
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 

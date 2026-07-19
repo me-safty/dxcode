@@ -39,6 +39,7 @@ import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeV2TurnSteerResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnSteerResponse);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -1285,6 +1286,28 @@ export const makeCodexSessionRuntime = (
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           });
+          const currentSession = yield* Ref.get(sessionRef);
+          if (currentSession.status === "running" && currentSession.activeTurnId) {
+            const rawResponse = yield* client.raw.request("turn/steer", {
+              threadId: providerThreadId,
+              expectedTurnId: currentSession.activeTurnId,
+              input: params.input,
+            });
+            const response = yield* decodeV2TurnSteerResponse(rawResponse).pipe(
+              Effect.mapError((error) =>
+                CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+                  "decode-response-payload",
+                  error,
+                  { method: "turn/steer" },
+                ),
+              ),
+            );
+            return {
+              threadId: options.threadId,
+              turnId: TurnId.make(response.turnId),
+              resumeCursor: { threadId: providerThreadId },
+            } satisfies ProviderTurnStartResult;
+          }
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
             Effect.mapError((error) =>
