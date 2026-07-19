@@ -399,6 +399,21 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 // Handle exposed to ChatView
 // --------------------------------------------------------------------------
 
+export type ChatComposerSendContext = {
+  prompt: string;
+  images: ComposerImageAttachment[];
+  terminalContexts: TerminalContextDraft[];
+  elementContexts: ElementContextDraft[];
+  previewAnnotations: PreviewAnnotationPayload[];
+  reviewComments: ReviewCommentContext[];
+  selectedPromptEffort: string | null;
+  selectedModelOptionsForDispatch: unknown;
+  selectedModelSelection: ModelSelection;
+  selectedProvider: ProviderDriverKind;
+  selectedModel: string;
+  selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+};
+
 export interface ChatComposerHandle {
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
@@ -421,20 +436,7 @@ export interface ChatComposerHandle {
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Get the current prompt/effort/model state for use in send. */
-  getSendContext: () => {
-    prompt: string;
-    images: ComposerImageAttachment[];
-    terminalContexts: TerminalContextDraft[];
-    elementContexts: ElementContextDraft[];
-    previewAnnotations: PreviewAnnotationPayload[];
-    reviewComments: ReviewCommentContext[];
-    selectedPromptEffort: string | null;
-    selectedModelOptionsForDispatch: unknown;
-    selectedModelSelection: ModelSelection;
-    selectedProvider: ProviderDriverKind;
-    selectedModel: string;
-    selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
-  };
+  getSendContext: () => ChatComposerSendContext;
 }
 
 // --------------------------------------------------------------------------
@@ -2092,7 +2094,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     >
       <ComposerQueuedMessages
         messages={queuedMessages}
-        disabled={isConnecting || isSendBusy || environmentUnavailable !== null}
+        disabled={
+          isConnecting ||
+          isSendBusy ||
+          environmentUnavailable !== null ||
+          activePendingProgress !== null
+        }
         onSteer={onSteerQueuedMessage}
         onDelete={onDeleteQueuedMessage}
         onEdit={onEditQueuedMessage}
