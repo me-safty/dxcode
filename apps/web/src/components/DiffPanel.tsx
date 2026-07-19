@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
-import { type DraftId } from "../composerDraftStore";
+import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { cn } from "~/lib/utils";
@@ -239,7 +239,9 @@ export default function DiffPanel({
     select: (params) => resolveThreadRouteRef(params),
   });
   const activeThreadId = routeThreadRef?.threadId ?? null;
-  const activeThread = useThread(routeThreadRef);
+  const serverThread = useThread(routeThreadRef);
+  const draftThread = useComposerDraftStore((store) => store.getDraftThread(composerDraftTarget));
+  const activeThread = serverThread ?? draftThread;
   const activeProjectId = activeThread?.projectId ?? null;
   const activeProject = useProject(
     activeThread && activeProjectId
@@ -252,7 +254,7 @@ export default function DiffPanel({
   const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
   const workingTreeMutations = useWorkingTreeReviewMutations({
     environmentId: activeThread?.environmentId ?? null,
-    threadId: activeThread?.id ?? null,
+    threadId: activeThreadId,
     cwd: activeCwd,
     threadRef: routeThreadRef ?? null,
   });
@@ -281,7 +283,7 @@ export default function DiffPanel({
   );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
-    useTurnDiffSummaries(activeThread);
+    useTurnDiffSummaries(serverThread);
   const orderedTurnDiffSummaries = useMemo(
     () =>
       [...turnDiffSummaries].toSorted((left, right) => {
@@ -338,11 +340,11 @@ export default function DiffPanel({
     };
   }, [diffSelection, selectedBaseRef, selectedCheckpointTurnCount]);
   const reviewStackHistory = useEnvironmentQuery(
-    innerTab === "review-stack" && activeThread && reviewStackTarget
+    innerTab === "review-stack" && serverThread && reviewStackTarget
       ? reviewEnvironment.reviewStackListSnapshots({
-          environmentId: activeThread.environmentId,
+          environmentId: serverThread.environmentId,
           input: {
-            threadId: activeThread.id,
+            threadId: serverThread.id,
             target: reviewStackTarget,
             ignoreWhitespace: diffIgnoreWhitespace,
           },
@@ -350,16 +352,16 @@ export default function DiffPanel({
       : null,
   );
   const reviewStackEvents = useEnvironmentQuery(
-    innerTab === "review-stack" && activeThread
+    innerTab === "review-stack" && serverThread
       ? reviewEnvironment.reviewStackEvents({
-          environmentId: activeThread.environmentId,
+          environmentId: serverThread.environmentId,
           input: {},
         })
       : null,
   );
   useEffect(() => {
-    if (reviewStackEvents.data?.threadId === activeThread?.id) reviewStackHistory.refresh();
-  }, [activeThread?.id, reviewStackEvents.data]);
+    if (reviewStackEvents.data?.threadId === serverThread?.id) reviewStackHistory.refresh();
+  }, [reviewStackEvents.data, serverThread?.id]);
   const reviewStackBadgeStatus =
     reviewStackHistory.data?.find(({ status }) => status === "queued" || status === "running")
       ?.status ?? (reviewStackHistory.data?.[0]?.status === "failed" ? "failed" : null);
@@ -782,6 +784,7 @@ export default function DiffPanel({
               commits={overviewDiffPreview.data?.commits ?? []}
               commitsPending={overviewDiffPreview.isPending}
               turns={turnDiffSummaries}
+              turnAvailable={serverThread !== null}
               inferredTurnCountByTurnId={inferredCheckpointTurnCountByTurnId}
               onSelectWorkingTree={() => selectGitScope("unstaged")}
               onSelectBranch={() => selectGitScope("branch")}
@@ -1025,10 +1028,10 @@ export default function DiffPanel({
         </div>
       ) : (
         <div className="@container flex min-h-0 min-w-0 flex-1 flex-col">
-          {innerTab === "review-stack" && activeThread && reviewStackTarget ? (
+          {innerTab === "review-stack" && serverThread && reviewStackTarget ? (
             <ReviewStackPanel
-              environmentId={activeThread.environmentId}
-              threadId={activeThread.id}
+              environmentId={serverThread.environmentId}
+              threadId={serverThread.id}
               target={reviewStackTarget}
               ignoreWhitespace={diffIgnoreWhitespace}
               currentSourceHash={

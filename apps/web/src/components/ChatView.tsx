@@ -2977,7 +2977,7 @@ function ChatViewContent(props: ChatViewProps) {
     void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
   }, [activeThreadRef, openPreview]);
   const addDiffSurface = useCallback(() => {
-    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    if (!activeThreadRef || !isGitRepo) return;
     if (planSidebarOpen) {
       dismissPlanSidebarForCurrentTurn();
     }
@@ -2987,7 +2987,6 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadRef,
     dismissPlanSidebarForCurrentTurn,
     isGitRepo,
-    isServerThread,
     onDiffPanelOpen,
     planSidebarOpen,
   ]);
@@ -5530,7 +5529,8 @@ function ChatViewContent(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
-            diffAvailable={isServerThread && isGitRepo}
+            diffAvailable={isGitRepo}
+            turnDiffAvailable={isServerThread}
             turnDiffSummaries={turnDiffSummaries}
             inferredTurnCountByTurnId={inferredCheckpointTurnCountByTurnId}
             onOpenDiff={addDiffSurface}
@@ -5866,7 +5866,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
-          diffAvailable={isServerThread && isGitRepo}
+          diffAvailable={isGitRepo}
           filesAvailable={activeProject !== null}
         >
           {rightPanelContent}
@@ -5893,7 +5893,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
-            diffAvailable={isServerThread && isGitRepo}
+            diffAvailable={isGitRepo}
             filesAvailable={activeProject !== null}
           >
             {rightPanelContent}

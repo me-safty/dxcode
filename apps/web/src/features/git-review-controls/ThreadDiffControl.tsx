@@ -17,6 +17,7 @@ interface ThreadDiffControlProps {
   readonly threadRef: ScopedThreadRef;
   readonly cwd: string | null;
   readonly available: boolean;
+  readonly turnAvailable: boolean;
   readonly turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   readonly inferredTurnCountByTurnId: Readonly<Record<string, number>>;
   readonly onOpenDiff: () => void;
@@ -89,6 +90,7 @@ export function ThreadDiffControl(props: ThreadDiffControlProps) {
             commits={diffPreview.data?.commits ?? []}
             commitsPending={diffPreview.isPending}
             turns={props.turnDiffSummaries}
+            turnAvailable={props.turnAvailable}
             inferredTurnCountByTurnId={props.inferredTurnCountByTurnId}
             onSelectWorkingTree={() =>
               selectAndOpen(() =>
@@ -116,7 +118,7 @@ export function ThreadDiffControl(props: ThreadDiffControlProps) {
   return (
     <Tooltip>
       <TooltipTrigger render={<div className="inline-flex">{control}</div>} />
-      <TooltipPopup>Diff is only available for Git-backed server threads.</TooltipPopup>
+      <TooltipPopup>Diff is only available in Git repositories.</TooltipPopup>
     </Tooltip>
   );
 }

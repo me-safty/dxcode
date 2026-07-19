@@ -34,6 +34,7 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   gitCwd: string | null;
   diffAvailable: boolean;
+  turnDiffAvailable: boolean;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   inferredTurnCountByTurnId: Readonly<Record<string, number>>;
   onOpenDiff: () => void;
@@ -72,6 +73,7 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   gitCwd,
   diffAvailable,
+  turnDiffAvailable,
   turnDiffSummaries,
   inferredTurnCountByTurnId,
   onOpenDiff,
@@ -133,6 +135,7 @@ export const ChatHeader = memo(function ChatHeader({
           threadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
           cwd={gitCwd}
           available={diffAvailable}
+          turnAvailable={turnDiffAvailable}
           turnDiffSummaries={turnDiffSummaries}
           inferredTurnCountByTurnId={inferredTurnCountByTurnId}
           onOpenDiff={onOpenDiff}

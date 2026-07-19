@@ -18,6 +18,7 @@ export interface DiffScopeMenuItemsProps {
   readonly commits: ReadonlyArray<ReviewCommit>;
   readonly commitsPending: boolean;
   readonly turns: ReadonlyArray<TurnDiffSummary>;
+  readonly turnAvailable?: boolean;
   readonly inferredTurnCountByTurnId: Readonly<Record<string, number>>;
   readonly onSelectWorkingTree: () => void;
   readonly onSelectBranch: () => void;
@@ -79,7 +80,7 @@ export function DiffScopeMenuItems(props: DiffScopeMenuItemsProps) {
         </DropdownMenuSubContent>
       </DropdownMenuSub>
       <DropdownMenuItem
-        disabled={!latestTurn}
+        disabled={props.turnAvailable === false || !latestTurn}
         onClick={() => {
           if (latestTurn) props.onSelectTurn(latestTurn.turnId);
         }}
@@ -90,7 +91,9 @@ export function DiffScopeMenuItems(props: DiffScopeMenuItemsProps) {
         )}
       </DropdownMenuItem>
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger disabled={turns.length === 0}>Turns</DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger disabled={props.turnAvailable === false || turns.length === 0}>
+          Turns
+        </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="w-64">
           {turns.map((turn) => (
             <DropdownMenuItem key={turn.turnId} onClick={() => props.onSelectTurn(turn.turnId)}>
