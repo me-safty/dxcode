@@ -29,24 +29,35 @@ type RunningMessageQueueStore = {
   readonly setSubmissions: (submissions: QueuedComposerSubmission[]) => void;
 };
 
-function hydrateImage(attachment: PersistedComposerImageAttachment) {
+function hydrateImage(attachment: unknown) {
   if (typeof File === "undefined") return null;
-  const commaIndex = attachment.dataUrl.indexOf(",");
-  if (commaIndex < 0) return null;
   try {
-    const header = attachment.dataUrl.slice(0, commaIndex);
-    const payload = attachment.dataUrl.slice(commaIndex + 1);
+    if (
+      !attachment ||
+      typeof attachment !== "object" ||
+      !("dataUrl" in attachment) ||
+      typeof attachment.dataUrl !== "string"
+    ) {
+      return null;
+    }
+    const persistedAttachment = attachment as PersistedComposerImageAttachment;
+    const commaIndex = persistedAttachment.dataUrl.indexOf(",");
+    if (commaIndex < 0) return null;
+    const header = persistedAttachment.dataUrl.slice(0, commaIndex);
+    const payload = persistedAttachment.dataUrl.slice(commaIndex + 1);
     const bytes = header.includes(";base64")
       ? Uint8Array.from(atob(payload), (character) => character.charCodeAt(0))
       : new TextEncoder().encode(decodeURIComponent(payload));
-    const file = new File([bytes], attachment.name, { type: attachment.mimeType });
+    const file = new File([bytes], persistedAttachment.name, {
+      type: persistedAttachment.mimeType,
+    });
     return {
       type: "image" as const,
-      id: attachment.id,
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      sizeBytes: attachment.sizeBytes,
-      previewUrl: attachment.dataUrl,
+      id: persistedAttachment.id,
+      name: persistedAttachment.name,
+      mimeType: persistedAttachment.mimeType,
+      sizeBytes: persistedAttachment.sizeBytes,
+      previewUrl: persistedAttachment.dataUrl,
       file,
     };
   } catch {
