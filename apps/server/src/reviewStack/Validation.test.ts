@@ -34,7 +34,7 @@ const document = (
   summary: "Review",
   mergeAssessment: {
     recommendation: "merge",
-    confidence: 4,
+    mergeConfidence: 4,
     rationale: "The evidence supports merging.",
   },
   references: [
@@ -44,6 +44,7 @@ const document = (
     { _tag: "file", path: "schema.ts" },
     { _tag: "file", path: "missing.ts" },
   ],
+  overviewDiagram: { title: "Feature flow", text: "schema -> service -> UI" },
   layers: [
     {
       id: "layer",
@@ -81,13 +82,17 @@ describe("validateReviewStackDocument", () => {
     ]);
     expect(result.mergeAssessment).toEqual({
       recommendation: "merge",
-      confidence: 4,
+      mergeConfidence: 4,
       rationale: "The evidence supports merging.",
     });
     expect(result.references).toEqual([
       { _tag: "layer", layerId: "layer" },
       { _tag: "file", path: "schema.ts" },
     ]);
+    expect(result.overviewDiagram).toEqual({
+      title: "Feature flow",
+      text: "schema -> service -> UI",
+    });
   });
 
   it("caps oversized diagrams and rejects zero valid model coverage", () => {
@@ -96,9 +101,13 @@ describe("validateReviewStackDocument", () => {
     );
     const oversized: ReviewStackDocument = {
       ...base,
+      overviewDiagram: { title: "Overview", text: "x".repeat(10_000) },
       layers: [{ ...base.layers[0]!, diagram: { title: "Diagram", text: "x".repeat(10_000) } }],
     };
     expect(validateReviewStackDocument(oversized, anchors).layers[0]?.diagram?.text).toHaveLength(
+      8_000,
+    );
+    expect(validateReviewStackDocument(oversized, anchors).overviewDiagram?.text).toHaveLength(
       8_000,
     );
     expect(() =>

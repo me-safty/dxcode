@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import {
   AlertTriangleIcon,
-  ChevronRightIcon,
+  CheckCircle2Icon,
   LoaderCircleIcon,
   RefreshCwIcon,
   SquareIcon,
@@ -22,7 +22,6 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { cn } from "~/lib/utils";
 
 import { Button } from "./ui/button";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 
 type Theme = "light" | "dark";
 
@@ -58,7 +57,6 @@ export function ReviewStackPanel(props: {
   const ensuredKeys = useRef(new Set<string>());
   const [selectedId, setSelectedId] = useState<ReviewStackSnapshotId | null>(null);
   const [activeLayer, setActiveLayer] = useState(0);
-  const [overviewOpen, setOverviewOpen] = useState(true);
   const [commandError, setCommandError] = useState<string | null>(null);
 
   const list = useEnvironmentQuery(
@@ -117,7 +115,6 @@ export function ReviewStackPanel(props: {
 
   useEffect(() => {
     setActiveLayer(0);
-    setOverviewOpen(true);
   }, [selectedId]);
 
   useEffect(() => {
@@ -185,6 +182,15 @@ export function ReviewStackPanel(props: {
         {outdated && (
           <span className="rounded bg-warning/15 px-1.5 py-0.5 text-warning">Outdated</span>
         )}
+        {value?.metadata.status === "completed" && value.coverage.status === "complete" && (
+          <span
+            className="inline-flex items-center gap-1 text-success"
+            title={`All ${value.coverage.totalAnchors} changed code ranges were inspected`}
+          >
+            <CheckCircle2Icon className="size-3" />
+            {value.coverage.reviewedAnchors}/{value.coverage.totalAnchors} reviewed
+          </span>
+        )}
         {isRunning && (
           <span className="inline-flex items-center gap-1 text-muted-foreground">
             <LoaderCircleIcon className="size-3 animate-spin" />
@@ -221,65 +227,76 @@ export function ReviewStackPanel(props: {
           Incomplete review: source diff was truncated.
         </div>
       )}
-      {value?.metadata.status === "completed" && value.coverage.status === "complete" && (
-        <div className="border-b border-success/30 bg-success/10 px-3 py-2 text-[11px] text-success">
-          Complete review: all {value.coverage.totalAnchors} changed code ranges were inspected.
-        </div>
-      )}
       {(commandError ?? list.error ?? snapshot.error) && (
         <p className="border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {commandError ?? list.error ?? snapshot.error}
         </p>
       )}
-      {value?.review && (
-        <Collapsible
-          className="border-b border-border/70 px-3 py-3"
-          open={overviewOpen}
-          onOpenChange={setOverviewOpen}
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <CollapsibleTrigger
-              aria-label={overviewOpen ? "Collapse review overview" : "Expand review overview"}
-              className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+      <div className="min-h-0 flex-1 overflow-auto">
+        {value?.review && (
+          <section className="border-b border-border/70 px-3 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Overview
+              </h2>
+              {value.review.mergeAssessment && (
+                <>
+                  <span
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase",
+                      value.review.mergeAssessment.recommendation === "merge"
+                        ? "bg-success/15 text-success"
+                        : "bg-destructive/15 text-destructive",
+                    )}
+                  >
+                    {value.review.mergeAssessment.recommendation === "merge"
+                      ? "Merge"
+                      : "Do not merge"}
+                  </span>
+                  {value.review.mergeAssessment.mergeConfidence !== undefined ? (
+                    <span className="text-[10px] text-muted-foreground">
+                      Merge confidence {value.review.mergeAssessment.mergeConfidence}/5
+                    </span>
+                  ) : value.review.mergeAssessment.confidence !== undefined ? (
+                    <span
+                      className="text-[10px] text-muted-foreground"
+                      title="This saved review uses the previous decision-confidence scale"
+                    >
+                      Decision confidence {value.review.mergeAssessment.confidence}/5
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </div>
+            <div
+              className={cn(
+                "mt-2 grid gap-3",
+                value.review.overviewDiagram &&
+                  "@min-[760px]:grid-cols-[minmax(0,3fr)_minmax(16rem,2fr)]",
+              )}
             >
-              <ChevronRightIcon
-                aria-hidden
-                className={cn(
-                  "size-3 transition-transform",
-                  overviewOpen ? "rotate-90" : "rotate-0",
+              <section>
+                <p className="whitespace-pre-line text-xs leading-relaxed">
+                  {value.review.summary}
+                </p>
+                {value.review.mergeAssessment && (
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                    <span className="font-medium text-foreground">Merge assessment: </span>
+                    {value.review.mergeAssessment.rationale}
+                  </p>
                 )}
-              />
-              Overview
-            </CollapsibleTrigger>
-            {value.review.mergeAssessment && (
-              <>
-                <span
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase",
-                    value.review.mergeAssessment.recommendation === "merge"
-                      ? "bg-success/15 text-success"
-                      : "bg-destructive/15 text-destructive",
-                  )}
-                >
-                  {value.review.mergeAssessment.recommendation === "merge"
-                    ? "Merge"
-                    : "Do not merge"}
-                </span>
-                <span className="text-[10px] text-muted-foreground">
-                  Confidence {value.review.mergeAssessment.confidence}/5
-                </span>
-              </>
-            )}
-          </div>
-          <CollapsiblePanel>
-            <p className="mt-2 whitespace-pre-line text-xs leading-relaxed">
-              {value.review.summary}
-            </p>
-            {value.review.mergeAssessment && (
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                {value.review.mergeAssessment.rationale}
-              </p>
-            )}
+              </section>
+              {value.review.overviewDiagram && (
+                <section className="min-w-0 rounded-md border border-border/70 bg-muted/30 p-2.5">
+                  <h3 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {value.review.overviewDiagram.title}
+                  </h3>
+                  <pre className="mt-2 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[10px] leading-relaxed text-foreground">
+                    {value.review.overviewDiagram.text}
+                  </pre>
+                </section>
+              )}
+            </div>
             {value.review.references && value.review.references.length > 0 && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <span className="text-[10px] text-muted-foreground">References:</span>
@@ -312,77 +329,77 @@ export function ReviewStackPanel(props: {
                 })}
               </div>
             )}
-          </CollapsiblePanel>
-        </Collapsible>
-      )}
-      {!value || snapshot.isPending ? (
-        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-          <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-          Loading review stack…
-        </div>
-      ) : value.metadata.status === "failed" || value.metadata.status === "cancelled" ? (
-        <div className="flex flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground">
-          {value.metadata.status === "cancelled"
-            ? "Review generation cancelled."
-            : (summarizeReviewStackError(value.metadata.errorMessage) ??
-              "Review generation failed.")}
-        </div>
-      ) : isRunning && !value.review ? (
-        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-          <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-          {value.metadata.stage}…
-        </div>
-      ) : value.review?.layers.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-          No changes to review.
-        </div>
-      ) : (
-        <div className="@container flex min-h-0 flex-1 flex-col @min-[680px]:flex-row">
-          <select
-            aria-label="Review layer"
-            className="m-2 h-8 rounded-md border border-border bg-background px-2 @min-[680px]:hidden"
-            value={activeLayer}
-            onChange={(event) => setActiveLayer(Number(event.target.value))}
-          >
-            {layers.map((layer, index) => (
-              <option key={layer.id} value={index}>
-                {index + 1}. {layer.title}
-              </option>
-            ))}
-          </select>
-          <nav
-            className="hidden w-52 shrink-0 overflow-auto border-r border-border/70 p-2 @min-[680px]:block"
-            aria-label="Review stack layers"
-          >
-            {layers.map((layer, index) => (
-              <button
-                key={layer.id}
-                type="button"
-                className={cn(
-                  "mb-1 w-full rounded-md px-2 py-2 text-left text-xs",
-                  index === activeLayer
-                    ? "bg-muted font-medium"
-                    : "text-muted-foreground hover:bg-muted/60",
-                )}
-                onClick={() => setActiveLayer(index)}
-              >
-                <span className="mr-2 text-[10px] tabular-nums">{index + 1}</span>
-                {layer.title}
-              </button>
-            ))}
-          </nav>
-          {selectedLayer && (
-            <LayerContent
-              snapshot={value}
-              layerIndex={selectedLayerIndex}
-              theme={props.theme}
-              diffStyle={props.diffStyle}
-              wordWrap={props.wordWrap}
-              onOpenFile={props.onOpenFile}
-            />
-          )}
-        </div>
-      )}
+          </section>
+        )}
+        {!value || snapshot.isPending ? (
+          <div className="flex min-h-full items-center justify-center text-xs text-muted-foreground">
+            <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+            Loading review stack…
+          </div>
+        ) : value.metadata.status === "failed" || value.metadata.status === "cancelled" ? (
+          <div className="flex min-h-full items-center justify-center px-6 text-center text-xs text-muted-foreground">
+            {value.metadata.status === "cancelled"
+              ? "Review generation cancelled."
+              : (summarizeReviewStackError(value.metadata.errorMessage) ??
+                "Review generation failed.")}
+          </div>
+        ) : isRunning && !value.review ? (
+          <div className="flex min-h-full items-center justify-center text-xs text-muted-foreground">
+            <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+            {value.metadata.stage}…
+          </div>
+        ) : value.review?.layers.length === 0 ? (
+          <div className="flex min-h-full items-center justify-center text-xs text-muted-foreground">
+            No changes to review.
+          </div>
+        ) : (
+          <div className="@container flex min-h-full flex-col items-stretch @min-[680px]:flex-row @min-[680px]:items-start">
+            <select
+              aria-label="Review layer"
+              className="sticky top-0 z-10 m-2 h-8 rounded-md border border-border bg-background px-2 @min-[680px]:hidden"
+              value={activeLayer}
+              onChange={(event) => setActiveLayer(Number(event.target.value))}
+            >
+              {layers.map((layer, index) => (
+                <option key={layer.id} value={index}>
+                  {index + 1}. {layer.title}
+                </option>
+              ))}
+            </select>
+            <nav
+              className="sticky top-0 hidden max-h-[100dvh] w-52 shrink-0 overflow-auto border-r border-border/70 p-2 @min-[680px]:block"
+              aria-label="Review stack layers"
+            >
+              {layers.map((layer, index) => (
+                <button
+                  key={layer.id}
+                  type="button"
+                  className={cn(
+                    "mb-1 w-full rounded-md px-2 py-2 text-left text-xs",
+                    index === activeLayer
+                      ? "bg-muted font-medium"
+                      : "text-muted-foreground hover:bg-muted/60",
+                  )}
+                  onClick={() => setActiveLayer(index)}
+                >
+                  <span className="mr-2 text-[10px] tabular-nums">{index + 1}</span>
+                  {layer.title}
+                </button>
+              ))}
+            </nav>
+            {selectedLayer && (
+              <LayerContent
+                snapshot={value}
+                layerIndex={selectedLayerIndex}
+                theme={props.theme}
+                diffStyle={props.diffStyle}
+                wordWrap={props.wordWrap}
+                onOpenFile={props.onOpenFile}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -402,7 +419,7 @@ function LayerContent(props: {
   );
   if (!layer) return null;
   return (
-    <main className="min-w-0 flex-1 overflow-auto p-3">
+    <main className="min-w-0 flex-1 p-3">
       <h2 className="text-sm font-semibold">{layer.title}</h2>
       <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
         {layer.summary}

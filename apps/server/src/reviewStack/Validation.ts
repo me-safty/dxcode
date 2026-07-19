@@ -78,6 +78,17 @@ export function validateReviewStackDocument(
 
   return {
     summary: cap(document.summary),
+    ...(document.overviewDiagram !== undefined
+      ? {
+          overviewDiagram:
+            document.overviewDiagram === null
+              ? null
+              : {
+                  title: cap(document.overviewDiagram.title),
+                  text: cap(document.overviewDiagram.text, MAX_DIAGRAM),
+                },
+        }
+      : {}),
     ...(document.mergeAssessment
       ? {
           mergeAssessment: {

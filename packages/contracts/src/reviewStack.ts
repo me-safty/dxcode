@@ -44,17 +44,18 @@ export const ReviewStackRange = Schema.Struct({
 });
 export type ReviewStackRange = typeof ReviewStackRange.Type;
 
+export const ReviewStackDiagram = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  text: TrimmedNonEmptyString,
+});
+export type ReviewStackDiagram = typeof ReviewStackDiagram.Type;
+
 export const ReviewStackLayer = Schema.Struct({
   id: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   summary: TrimmedNonEmptyString,
   ranges: Schema.Array(ReviewStackRange),
-  diagram: Schema.NullOr(
-    Schema.Struct({
-      title: TrimmedNonEmptyString,
-      text: TrimmedNonEmptyString,
-    }),
-  ),
+  diagram: Schema.NullOr(ReviewStackDiagram),
 });
 export type ReviewStackLayer = typeof ReviewStackLayer.Type;
 
@@ -62,10 +63,19 @@ export const ReviewStackMergeAssessment = Schema.Struct({
   recommendation: Schema.Literals(["merge", "do-not-merge"]),
   // Explicit literals keep the generated structured-output JSON Schema free of `allOf`,
   // which is rejected by Codex response formats.
-  confidence: Schema.Literals([1, 2, 3, 4, 5]),
+  mergeConfidence: Schema.optionalKey(Schema.Literals([1, 2, 3, 4, 5])),
+  // Saved reviews generated before mergeConfidence used confidence for certainty in the
+  // recommendation itself. Keep it readable, but do not reuse it as merge readiness.
+  confidence: Schema.optionalKey(Schema.Literals([1, 2, 3, 4, 5])),
   rationale: TrimmedNonEmptyString,
 });
 export type ReviewStackMergeAssessment = typeof ReviewStackMergeAssessment.Type;
+
+const ReviewStackGenerationMergeAssessment = Schema.Struct({
+  recommendation: Schema.Literals(["merge", "do-not-merge"]),
+  mergeConfidence: Schema.Literals([1, 2, 3, 4, 5]),
+  rationale: TrimmedNonEmptyString,
+});
 
 export const ReviewStackOverviewReference = Schema.Union([
   Schema.TaggedStruct("layer", { layerId: TrimmedNonEmptyString }),
@@ -78,6 +88,7 @@ export const ReviewStackDocument = Schema.Struct({
   // Optional keys keep review snapshots generated before these fields were introduced readable.
   mergeAssessment: Schema.optionalKey(ReviewStackMergeAssessment),
   references: Schema.optionalKey(Schema.Array(ReviewStackOverviewReference)),
+  overviewDiagram: Schema.optionalKey(Schema.NullOr(ReviewStackDiagram)),
   layers: Schema.Array(ReviewStackLayer),
 });
 export type ReviewStackDocument = typeof ReviewStackDocument.Type;
@@ -85,8 +96,9 @@ export type ReviewStackDocument = typeof ReviewStackDocument.Type;
 /** Strict provider output schema; unlike persisted documents, every property must be required. */
 export const ReviewStackGenerationDocument = Schema.Struct({
   summary: TrimmedNonEmptyString,
-  mergeAssessment: ReviewStackMergeAssessment,
+  mergeAssessment: ReviewStackGenerationMergeAssessment,
   references: Schema.Array(ReviewStackOverviewReference),
+  overviewDiagram: Schema.NullOr(ReviewStackDiagram),
   layers: Schema.Array(ReviewStackLayer),
 });
 export type ReviewStackGenerationDocument = typeof ReviewStackGenerationDocument.Type;

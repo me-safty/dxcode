@@ -50,13 +50,17 @@ describe("Review stack contracts", () => {
         summary: "Two dependent changes with a new schema and service consumer.",
         mergeAssessment: {
           recommendation: "merge",
-          confidence: 4,
+          mergeConfidence: 4,
           rationale: "The implementation is covered and has no blocking risks.",
         },
         references: [
           { _tag: "layer", layerId: "foundation" },
           { _tag: "file", path: "schema.ts" },
         ],
+        overviewDiagram: {
+          title: "Feature flow",
+          text: "schema -> service -> UI",
+        },
         layers: [
           {
             id: "foundation",
@@ -70,10 +74,10 @@ describe("Review stack contracts", () => {
     ).toHaveLength(1);
     expect(() =>
       decodeDocument({
-        summary: "Invalid confidence.",
+        summary: "Invalid merge confidence.",
         mergeAssessment: {
           recommendation: "merge",
-          confidence: 6,
+          mergeConfidence: 6,
           rationale: "Outside the supported scale.",
         },
         layers: [],
