@@ -34,6 +34,7 @@ export function ThreadDiffControl(props: ThreadDiffControlProps) {
           environmentId: props.threadRef.environmentId,
           input: {
             cwd: props.cwd,
+            threadId: props.threadRef.threadId,
             ignoreWhitespace: settings.diffIgnoreWhitespace,
             selection: { _tag: "all" },
           },

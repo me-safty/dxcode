@@ -1140,10 +1140,17 @@ export default function GitActionsControl({
     commitDialogScope === "thread",
   );
   const threadCommitWorkingTreeDiff = useEnvironmentQuery(
-    shouldLoadThreadCommit && activeEnvironmentId !== null && gitCwd !== null
+    shouldLoadThreadCommit &&
+      activeThreadRef !== null &&
+      activeEnvironmentId !== null &&
+      gitCwd !== null
       ? reviewEnvironment.diffPreview({
           environmentId: activeEnvironmentId,
-          input: { cwd: gitCwd, selection: { _tag: "all" } },
+          input: {
+            cwd: gitCwd,
+            threadId: activeThreadRef.threadId,
+            selection: { _tag: "all" },
+          },
         })
       : null,
   );

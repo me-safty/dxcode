@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalConsole:off - Standalone Node CLI runs outside an Effect runtime.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalConsole:off - Host-side git orchestration intentionally uses synchronous Node APIs.
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

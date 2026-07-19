@@ -41,6 +41,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   replaceTextRange,
+  shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
@@ -94,6 +95,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
+  CheckIcon,
   CircleAlertIcon,
   ListTodoIcon,
   PencilRulerIcon,
@@ -125,6 +127,8 @@ import { formatProviderSkillDisplayName } from "../../providerSkillPresentation"
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
+import { shouldShowRunningStopAction } from "../../runningMessageDelivery";
+import { ComposerQueuedMessages, type ComposerQueuedMessage } from "./ComposerQueuedMessages";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -272,16 +276,25 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             {runtimeModeOptions.map((mode) => {
               const option = runtimeModeConfig[mode];
               const OptionIcon = option.icon;
+              const isSelected = props.runtimeMode === mode;
               return (
-                <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                  <div className="grid min-w-0 gap-0.5">
-                    <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                      <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                      {option.label}
-                    </span>
-                    <span className="text-muted-foreground text-xs leading-4">
-                      {option.description}
-                    </span>
+                <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="grid min-w-0 flex-1 gap-0.5">
+                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                        <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        {option.label}
+                      </span>
+                      <span className="text-muted-foreground text-xs leading-4">
+                        {option.description}
+                      </span>
+                    </div>
+                    <CheckIcon
+                      className={cn(
+                        "size-4 text-blue-400",
+                        isSelected ? "opacity-100" : "opacity-0",
+                      )}
+                    />
                   </div>
                 </SelectItem>
               );
@@ -386,10 +399,25 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 // Handle exposed to ChatView
 // --------------------------------------------------------------------------
 
+export type ChatComposerSendContext = {
+  prompt: string;
+  images: ComposerImageAttachment[];
+  terminalContexts: TerminalContextDraft[];
+  elementContexts: ElementContextDraft[];
+  previewAnnotations: PreviewAnnotationPayload[];
+  reviewComments: ReviewCommentContext[];
+  selectedPromptEffort: string | null;
+  selectedModelOptionsForDispatch: unknown;
+  selectedModelSelection: ModelSelection;
+  selectedProvider: ProviderDriverKind;
+  selectedModel: string;
+  selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+};
+
 export interface ChatComposerHandle {
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
-  insertTextAtEnd: (text: string) => boolean;
+  insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   isModelPickerOpen: () => boolean;
@@ -408,20 +436,7 @@ export interface ChatComposerHandle {
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Get the current prompt/effort/model state for use in send. */
-  getSendContext: () => {
-    prompt: string;
-    images: ComposerImageAttachment[];
-    terminalContexts: TerminalContextDraft[];
-    elementContexts: ElementContextDraft[];
-    previewAnnotations: PreviewAnnotationPayload[];
-    reviewComments: ReviewCommentContext[];
-    selectedPromptEffort: string | null;
-    selectedModelOptionsForDispatch: unknown;
-    selectedModelSelection: ModelSelection;
-    selectedProvider: ProviderDriverKind;
-    selectedModel: string;
-    selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
-  };
+  getSendContext: () => ChatComposerSendContext;
 }
 
 // --------------------------------------------------------------------------
@@ -441,6 +456,8 @@ export interface ChatComposerProps {
   activeThread: Thread | undefined;
   isServerThread: boolean;
   isLocalDraftThread: boolean;
+  forceExpandedOnMobile: boolean;
+  projectSelectionRequired: boolean;
 
   // Session phase
   phase: SessionPhase;
@@ -496,6 +513,7 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  queuedMessages: ReadonlyArray<ComposerQueuedMessage>;
 
   // Refs the parent needs kept in sync
   promptRef: React.RefObject<string>;
@@ -505,7 +523,10 @@ export interface ChatComposerProps {
   composerRef: React.RefObject<ChatComposerHandle | null>;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }) => void;
+  onSend: (e?: { preventDefault: () => void }, options?: { steerRunningTurn?: boolean }) => void;
+  onSteerQueuedMessage: (id: string) => void;
+  onDeleteQueuedMessage: (id: string) => void;
+  onEditQueuedMessage: (id: string) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -552,6 +573,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThread,
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
+    forceExpandedOnMobile,
+    projectSelectionRequired,
     phase,
     isConnecting,
     isSendBusy,
@@ -584,12 +607,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     keybindings,
     terminalOpen,
     gitCwd,
+    queuedMessages,
     promptRef,
     composerRef,
     composerImagesRef,
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
+    onSteerQueuedMessage,
+    onDeleteQueuedMessage,
+    onEditQueuedMessage,
     onInterrupt,
     onImplementPlanInNewThread,
     onRespondToApproval,
@@ -882,7 +909,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const isMobileViewport = useMediaQuery("max-sm");
-  const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
+  const isComposerCollapsedMobile =
+    isMobileViewport && !forceExpandedOnMobile && !isComposerFocused;
 
   // ------------------------------------------------------------------
   // Refs
@@ -1135,7 +1163,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
   const collapsedComposerPrimaryActionDisabled =
-    phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+    phase === "running" ||
+    isSendBusy ||
+    isConnecting ||
+    projectSelectionRequired ||
+    !composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
@@ -1690,8 +1722,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const submitComposer = useCallback(
-    (event?: { preventDefault: () => void }) => {
-      onSend(event);
+    (event?: { preventDefault: () => void }, options?: { steerRunningTurn?: boolean }) => {
+      onSend(event, options);
       if (shouldBlurMobileComposerOnSubmit()) {
         blurMobileComposerAfterSend();
       }
@@ -1750,8 +1782,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       }
     }
-    if (key === "Enter" && !event.shiftKey) {
-      submitComposer();
+    if (
+      key === "Enter" &&
+      shouldSubmitComposerOnEnter({ isMobileViewport, shiftKey: event.shiftKey })
+    ) {
+      submitComposer(undefined, {
+        steerRunningTurn: phase === "running" && (event.metaKey || event.ctrlKey),
+      });
       return true;
     }
     return false;
@@ -1918,18 +1955,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       focusAt: (cursor: number) => {
         composerEditorRef.current?.focusAt(cursor);
       },
-      insertTextAtEnd: (text: string) => {
+      insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => {
         if (
           text.length === 0 ||
           isConnecting ||
           isComposerApprovalState ||
           pendingUserInputs.length > 0 ||
+          projectSelectionRequired ||
           (environmentUnavailable !== null && activePendingProgress === null)
         ) {
           return false;
         }
-        const rangeEnd = promptRef.current.length;
-        return applyPromptReplacement(rangeEnd, rangeEnd, text);
+        const prompt = promptRef.current;
+        const needsLeadingSpace =
+          (options?.ensureLeadingBoundary ?? false) && prompt.length > 0 && !/\s$/.test(prompt);
+        return applyPromptReplacement(
+          prompt.length,
+          prompt.length,
+          needsLeadingSpace ? ` ${text}` : text,
+        );
       },
       openModelPicker: () => {
         setIsComposerModelPickerOpen(true);
@@ -2024,6 +2068,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       isConnecting,
       isComposerApprovalState,
       pendingUserInputs.length,
+      projectSelectionRequired,
       environmentUnavailable,
       activePendingProgress,
       applyPromptReplacement,
@@ -2047,9 +2092,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       className="mx-auto w-full min-w-0 max-w-3xl"
       data-chat-composer-form="true"
     >
+      <ComposerQueuedMessages
+        messages={queuedMessages}
+        disabled={
+          isConnecting ||
+          isSendBusy ||
+          environmentUnavailable !== null ||
+          activePendingProgress !== null
+        }
+        onSteer={onSteerQueuedMessage}
+        onDelete={onDeleteQueuedMessage}
+        onEdit={onEditQueuedMessage}
+      />
       <div
         className={cn(
           "group rounded-[22px] p-px transition-colors duration-200",
+          queuedMessages.length > 0 && "rounded-t-none pt-0",
           composerProviderState.composerFrameClassName,
         )}
         onDragEnter={onComposerDragEnter}
@@ -2061,9 +2119,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ref={composerSurfaceRef}
           data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
           className={cn(
-            "chat-composer-glass rounded-[20px] border transition-colors duration-200 has-focus-visible:border-ring/45",
+            "chat-composer-glass rounded-[20px] border transition-[background-color] duration-200 has-focus-visible:border-ring/45",
+            queuedMessages.length > 0 && "rounded-t-none border-t-0",
             isDragOverComposer ? "border-primary/70 bg-accent/45" : "border-border",
-            environmentUnavailable ? "opacity-75" : null,
+            environmentUnavailable || projectSelectionRequired ? "opacity-75" : null,
             composerProviderState.composerSurfaceClassName,
           )}
           onFocusCapture={(event) => {
@@ -2175,7 +2234,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       promptHasText={false}
                       isSendBusy={isSendBusy}
                       isConnecting={isConnecting}
-                      isEnvironmentUnavailable={environmentUnavailable !== null}
+                      isEnvironmentUnavailable={
+                        environmentUnavailable !== null || projectSelectionRequired
+                      }
                       isPreparingWorktree={false}
                       hasSendableContent={false}
                       preserveComposerFocusOnPointerDown
@@ -2235,7 +2296,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <div
             className={cn(
               "relative px-3 pb-2 sm:px-4",
-              hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+              queuedMessages.length > 0
+                ? "pt-2"
+                : hasComposerHeader
+                  ? "pt-2.5 sm:pt-3"
+                  : "pt-3.5 sm:pt-4",
               isComposerCollapsedMobile && "hidden",
             )}
           >
@@ -2397,7 +2462,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : []
                 }
                 skills={selectedProviderStatus?.skills ?? []}
-                {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+                className={cn(
+                  showMobilePendingAnswerActions && "max-sm:pb-11",
+                  queuedMessages.length > 0 && "!min-h-10",
+                )}
                 onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                 onChange={onPromptChange}
                 onCommandKeyDown={onComposerCommandKey}
@@ -2409,17 +2477,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       ? "Type your own answer, or leave this blank to use the selected option"
                       : showPlanFollowUpPrompt && activeProposedPlan
                         ? "Add feedback to refine the plan, or leave this blank to implement it"
-                        : environmentUnavailable
-                          ? `${environmentUnavailable.label}: ${connectionStatusText(
-                              environmentUnavailable.connection,
-                            )}`
-                          : phase === "disconnected"
-                            ? "Ask for follow-up changes or attach images"
-                            : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                        : projectSelectionRequired
+                          ? "Choose a project above to start a thread"
+                          : environmentUnavailable
+                            ? `${environmentUnavailable.label}: ${connectionStatusText(
+                                environmentUnavailable.connection,
+                              )}`
+                            : phase === "disconnected"
+                              ? "Ask for follow-up changes or attach images"
+                              : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
                 disabled={
                   isConnecting ||
                   isComposerApprovalState ||
+                  projectSelectionRequired ||
                   (environmentUnavailable !== null && activePendingProgress === null)
                 }
               />
@@ -2436,7 +2507,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     promptHasText={false}
                     isSendBusy={isSendBusy}
                     isConnecting={isConnecting}
-                    isEnvironmentUnavailable={environmentUnavailable !== null}
+                    isEnvironmentUnavailable={
+                      environmentUnavailable !== null || projectSelectionRequired
+                    }
                     isPreparingWorktree={false}
                     hasSendableContent={false}
                     preserveComposerFocusOnPointerDown
@@ -2542,12 +2615,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeContextWindow={activeContextWindow}
                   activeThreadProviderDisplayName={activeThreadProviderDisplayName}
                   pendingAction={pendingPrimaryAction}
-                  isRunning={phase === "running"}
+                  isRunning={shouldShowRunningStopAction({
+                    running: phase === "running",
+                    hasSendableContent: composerSendState.hasSendableContent,
+                  })}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}
                   isConnecting={isConnecting}
-                  isEnvironmentUnavailable={environmentUnavailable !== null}
+                  isEnvironmentUnavailable={
+                    environmentUnavailable !== null || projectSelectionRequired
+                  }
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
                   preserveComposerFocusOnPointerDown={isMobileViewport}

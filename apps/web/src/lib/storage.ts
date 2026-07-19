@@ -39,6 +39,46 @@ export function resolveStorage(storage: Partial<StateStorage> | null | undefined
   return isStateStorage(storage) ? storage : createMemoryStorage();
 }
 
+/** Keep state usable in-memory when browser persistence rejects a write (for example, quota). */
+export function createResilientStorage(
+  primary: Partial<StateStorage> | null | undefined,
+): StateStorage {
+  const resolvedPrimary = resolveStorage(primary);
+  const fallback = createMemoryStorage();
+  const fallbackKeys = new Set<string>();
+
+  return {
+    getItem: (name) => {
+      if (fallbackKeys.has(name)) return fallback.getItem(name);
+      try {
+        return resolvedPrimary.getItem(name);
+      } catch {
+        fallbackKeys.add(name);
+        return fallback.getItem(name);
+      }
+    },
+    setItem: (name, value) => {
+      try {
+        resolvedPrimary.setItem(name, value);
+        fallbackKeys.delete(name);
+        fallback.removeItem(name);
+      } catch {
+        fallbackKeys.add(name);
+        fallback.setItem(name, value);
+      }
+    },
+    removeItem: (name) => {
+      fallbackKeys.delete(name);
+      fallback.removeItem(name);
+      try {
+        resolvedPrimary.removeItem(name);
+      } catch {
+        // The in-memory state remains authoritative for this session.
+      }
+    },
+  };
+}
+
 export function createDebouncedStorage(
   baseStorage: Partial<StateStorage> | null | undefined,
   debounceMs: number = 300,
