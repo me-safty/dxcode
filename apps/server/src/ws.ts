@@ -284,7 +284,9 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.replayEvents, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.subscribeProjectDashboard, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
@@ -834,6 +836,9 @@ const makeWsRpcLayer = (
                 commandId: yield* serverCommandId("bootstrap-thread-create"),
                 threadId: command.threadId,
                 projectId: bootstrap.createThread.projectId,
+                ...(bootstrap.createThread.sourceTaskId !== undefined
+                  ? { sourceTaskId: bootstrap.createThread.sourceTaskId }
+                  : {}),
                 title: bootstrap.createThread.title,
                 modelSelection: bootstrap.createThread.modelSelection,
                 runtimeMode: bootstrap.createThread.runtimeMode,
@@ -1069,6 +1074,89 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot,
+            projectionSnapshotQuery.getProjectDashboardSnapshot(input.projectId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load project dashboard",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((snapshot) => {
+                if (Option.isNone(snapshot))
+                  return Effect.fail(
+                    new OrchestrationGetSnapshotError({ message: "Project not found" }),
+                  );
+                return Effect.succeed(snapshot.value);
+              }),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeProjectDashboard]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeProjectDashboard,
+            Effect.gen(function* () {
+              const isDashboardEvent = (event: OrchestrationEvent) =>
+                event.aggregateKind === "project" &&
+                event.aggregateId === input.projectId &&
+                (event.type.startsWith("project.task-") ||
+                  event.type === "project.meta-updated" ||
+                  event.type === "project.deleted");
+              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+                Stream.filter(isDashboardEvent),
+                Stream.map((event) => ({ kind: "event" as const, event })),
+              );
+              const liveBuffer = yield* Queue.unbounded<{
+                readonly kind: "event";
+                readonly event: OrchestrationEvent;
+              }>();
+              yield* Effect.forkScoped(
+                liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
+              );
+              const bufferedLiveStream = Stream.fromQueue(liveBuffer);
+              if (input.afterSequence !== undefined) {
+                const afterSequence = input.afterSequence;
+                const catchUp = orchestrationEngine
+                  .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
+                  .pipe(
+                    Stream.filter(isDashboardEvent),
+                    Stream.map((event) => ({ kind: "event" as const, event })),
+                    Stream.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: "Failed to replay project dashboard events",
+                          cause,
+                        }),
+                    ),
+                  );
+                return Stream.concat(catchUp, bufferedLiveStream);
+              }
+              const snapshot = yield* projectionSnapshotQuery
+                .getProjectDashboardSnapshot(input.projectId)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to stream project dashboard",
+                        cause,
+                      }),
+                  ),
+                );
+              if (Option.isNone(snapshot))
+                return yield* new OrchestrationGetSnapshotError({ message: "Project not found" });
+              return Stream.concat(
+                Stream.make({
+                  kind: "snapshot" as const,
+                  snapshot: snapshot.value,
+                }),
+                bufferedLiveStream,
+              );
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) =>

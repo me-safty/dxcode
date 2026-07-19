@@ -705,6 +705,15 @@ export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetProjectDashboardSnapshotRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot,
+  {
+    payload: OrchestrationRpcSchemas.getProjectDashboardSnapshot.input,
+    success: OrchestrationRpcSchemas.getProjectDashboardSnapshot.output,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationSubscribeShellRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subscribeShell, {
   payload: OrchestrationRpcSchemas.subscribeShell.input,
   success: OrchestrationRpcSchemas.subscribeShell.output,
@@ -717,6 +726,16 @@ export const WsOrchestrationSubscribeThreadRpc = Rpc.make(
   {
     payload: OrchestrationRpcSchemas.subscribeThread.input,
     success: OrchestrationRpcSchemas.subscribeThread.output,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+
+export const WsOrchestrationSubscribeProjectDashboardRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.subscribeProjectDashboard,
+  {
+    payload: OrchestrationRpcSchemas.subscribeProjectDashboard.input,
+    success: OrchestrationRpcSchemas.subscribeProjectDashboard.output,
     error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
     stream: true,
   },
@@ -832,6 +851,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
+  WsOrchestrationGetProjectDashboardSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsOrchestrationSubscribeProjectDashboardRpc,
 );

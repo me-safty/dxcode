@@ -65,6 +65,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
+  projectTasks: "projection.project-tasks",
 } as const;
 
 type ProjectorName =
@@ -543,6 +544,75 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
       }
     });
+
+    const applyProjectTasksProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyProjectTasksProjection",
+    )(
+      function* (event, _attachmentSideEffects) {
+        switch (event.type) {
+          case "project.task-created": {
+            const task = event.payload.task;
+            yield* sql`
+            INSERT INTO projection_project_tasks (
+              task_id, project_id, title, description, status, position, thread_id,
+              created_at, updated_at, completed_at
+            ) VALUES (
+              ${task.id}, ${task.projectId}, ${task.title}, ${task.description}, ${task.status},
+              ${task.position}, ${task.threadId}, ${task.createdAt}, ${task.updatedAt}, ${task.completedAt}
+            )
+            ON CONFLICT(task_id) DO UPDATE SET
+              project_id = excluded.project_id,
+              title = excluded.title,
+              description = excluded.description,
+              status = excluded.status,
+              position = excluded.position,
+              thread_id = excluded.thread_id,
+              updated_at = excluded.updated_at,
+              completed_at = excluded.completed_at
+          `;
+            return;
+          }
+          case "project.task-updated":
+            yield* sql`
+            UPDATE projection_project_tasks SET
+              title = COALESCE(${event.payload.title ?? null}, title),
+              description = COALESCE(${event.payload.description ?? null}, description),
+              updated_at = ${event.payload.updatedAt}
+            WHERE task_id = ${event.payload.taskId}
+          `;
+            return;
+          case "project.task-moved":
+            yield* sql`
+            UPDATE projection_project_tasks SET
+              status = ${event.payload.status}, position = ${event.payload.position},
+              completed_at = ${event.payload.completedAt}, updated_at = ${event.payload.updatedAt}
+            WHERE task_id = ${event.payload.taskId}
+          `;
+            return;
+          case "project.task-deleted":
+            yield* sql`DELETE FROM projection_project_tasks WHERE task_id = ${event.payload.taskId}`;
+            return;
+          case "project.task-thread-linked":
+            yield* sql`
+            UPDATE projection_project_tasks SET thread_id = ${event.payload.threadId}, updated_at = ${event.payload.updatedAt}
+            WHERE task_id = ${event.payload.taskId}
+          `;
+            return;
+          case "project.task-thread-unlinked":
+            yield* sql`
+            UPDATE projection_project_tasks SET thread_id = NULL, updated_at = ${event.payload.updatedAt}
+            WHERE task_id = ${event.payload.taskId} AND thread_id = ${event.payload.threadId}
+          `;
+            return;
+          case "project.deleted":
+            yield* sql`DELETE FROM projection_project_tasks WHERE project_id = ${event.payload.projectId}`;
+            return;
+          default:
+            return;
+        }
+      },
+      Effect.mapError(toPersistenceSqlError("ProjectionPipeline.applyProjectTasksProjection")),
+    );
 
     const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
       threadId: ThreadId,
@@ -1463,6 +1533,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
         apply: applyProjectsProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.projectTasks,
+        apply: applyProjectTasksProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,

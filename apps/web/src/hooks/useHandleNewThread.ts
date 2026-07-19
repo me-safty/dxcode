@@ -7,6 +7,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_SERVER_SETTINGS,
   type ScopedProjectRef,
+  type ProjectTaskId,
 } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
@@ -48,6 +49,8 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
+        sourceTaskId?: ProjectTaskId;
+        draftPrompt?: string;
       },
     ): Promise<void> => {
       const {
@@ -66,9 +69,12 @@ export function useNewThreadHandler() {
       );
       const environmentSettings =
         serverConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
-      const logicalProjectKey = project
+      const baseLogicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
+      const logicalProjectKey = options?.sourceTaskId
+        ? `${baseLogicalProjectKey}:task:${options.sourceTaskId}`
+        : baseLogicalProjectKey;
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
@@ -176,8 +182,12 @@ export function useNewThreadHandler() {
               newWorktreesStartFromOrigin: environmentSettings.newWorktreesStartFromOrigin,
             }),
           runtimeMode: DEFAULT_RUNTIME_MODE,
+          ...(options?.sourceTaskId !== undefined ? { sourceTaskId: options.sourceTaskId } : {}),
         });
         applyStickyState(draftId);
+        if (options?.draftPrompt !== undefined) {
+          useComposerDraftStore.getState().setPrompt(draftId, options.draftPrompt);
+        }
 
         await router.navigate({
           to: "/draft/$draftId",

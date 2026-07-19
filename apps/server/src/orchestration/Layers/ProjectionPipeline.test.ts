@@ -5,6 +5,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProjectTaskId,
   ThreadId,
   TurnId,
   ProviderInstanceId,
@@ -174,6 +175,148 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 });
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-project-task-projection-test-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("materializes durable project task lifecycle events", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const projectId = ProjectId.make("project-tasks");
+        const taskId = ProjectTaskId.make("task-1");
+        const threadId = ThreadId.make("thread-task-1");
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        const updatedAt = "2026-01-01T00:00:01.000Z";
+        const completedAt = "2026-01-01T00:00:02.000Z";
+
+        yield* eventStore.append({
+          type: "project.task-created",
+          eventId: EventId.make("evt-task-created"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: createdAt,
+          commandId: CommandId.make("cmd-task-created"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-task-created"),
+          metadata: {},
+          payload: {
+            task: {
+              id: taskId,
+              projectId,
+              title: "Initial title",
+              description: "Initial description",
+              status: "open",
+              position: 0,
+              threadId: null,
+              createdAt,
+              updatedAt: createdAt,
+              completedAt: null,
+            },
+          },
+        });
+        yield* eventStore.append({
+          type: "project.task-updated",
+          eventId: EventId.make("evt-task-updated"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: updatedAt,
+          commandId: CommandId.make("cmd-task-updated"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-task-updated"),
+          metadata: {},
+          payload: { taskId, title: "Ship dashboard", description: "Covered", updatedAt },
+        });
+        yield* eventStore.append({
+          type: "project.task-moved",
+          eventId: EventId.make("evt-task-moved"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: completedAt,
+          commandId: CommandId.make("cmd-task-moved"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-task-moved"),
+          metadata: {},
+          payload: { taskId, status: "done", position: 2, completedAt, updatedAt: completedAt },
+        });
+        yield* eventStore.append({
+          type: "project.task-thread-linked",
+          eventId: EventId.make("evt-task-linked"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: completedAt,
+          commandId: CommandId.make("cmd-task-linked"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-task-linked"),
+          metadata: {},
+          payload: { taskId, threadId, updatedAt: completedAt },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly id: string;
+          readonly title: string;
+          readonly description: string;
+          readonly status: string;
+          readonly position: number;
+          readonly threadId: string | null;
+          readonly completedAt: string | null;
+        }>`
+        SELECT task_id AS id, title, description, status, position,
+          thread_id AS "threadId", completed_at AS "completedAt"
+        FROM projection_project_tasks
+      `;
+        assert.deepEqual(rows, [
+          {
+            id: "task-1",
+            title: "Ship dashboard",
+            description: "Covered",
+            status: "done",
+            position: 2,
+            threadId: "thread-task-1",
+            completedAt,
+          },
+        ]);
+
+        const unlinkEvent = yield* eventStore.append({
+          type: "project.task-thread-unlinked",
+          eventId: EventId.make("evt-task-unlinked"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: completedAt,
+          commandId: CommandId.make("cmd-task-unlinked"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-task-unlinked"),
+          metadata: {},
+          payload: { taskId, threadId, updatedAt: completedAt },
+        });
+        yield* projectionPipeline.projectEvent(unlinkEvent);
+        const unlinked = yield* sql<{ readonly threadId: string | null }>`
+        SELECT thread_id AS "threadId" FROM projection_project_tasks WHERE task_id = ${taskId}
+      `;
+        assert.deepEqual(unlinked, [{ threadId: null }]);
+
+        const deleteEvent = yield* eventStore.append({
+          type: "project.task-deleted",
+          eventId: EventId.make("evt-task-deleted"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: completedAt,
+          commandId: CommandId.make("cmd-task-deleted"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-task-deleted"),
+          metadata: {},
+          payload: { taskId },
+        });
+        yield* projectionPipeline.projectEvent(deleteEvent);
+        const deleted = yield* sql`SELECT task_id FROM projection_project_tasks`;
+        assert.deepEqual(deleted, []);
+      }),
+    );
+  },
+);
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",

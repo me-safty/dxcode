@@ -5,6 +5,7 @@ import {
   type EnvironmentId,
   ModelSelection,
   ProjectId,
+  ProjectTaskId,
   ProviderInstanceId,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -208,6 +209,7 @@ const PersistedDraftThreadState = Schema.Struct({
   threadId: ThreadId,
   environmentId: Schema.String,
   projectId: ProjectId,
+  sourceTaskId: Schema.optionalKey(ProjectTaskId),
   logicalProjectKey: Schema.optionalKey(Schema.String),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
@@ -287,6 +289,7 @@ export interface DraftSessionState {
   threadId: ThreadId;
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  sourceTaskId?: ProjectTaskId;
   logicalProjectKey: string;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -359,6 +362,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      sourceTaskId?: ProjectTaskId;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -1322,6 +1326,7 @@ function createDraftThreadState(
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
+    sourceTaskId?: ProjectTaskId;
   },
 ): DraftThreadState {
   const projectChanged =
@@ -1350,6 +1355,11 @@ function createDraftThreadState(
     threadId,
     environmentId: projectRef.environmentId,
     projectId: projectRef.projectId,
+    ...(options?.sourceTaskId !== undefined
+      ? { sourceTaskId: options.sourceTaskId }
+      : existingThread?.sourceTaskId !== undefined
+        ? { sourceTaskId: existingThread.sourceTaskId }
+        : {}),
     logicalProjectKey,
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
@@ -1389,6 +1399,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.threadId === right.threadId &&
     left.environmentId === right.environmentId &&
     left.projectId === right.projectId &&
+    left.sourceTaskId === right.sourceTaskId &&
     left.logicalProjectKey === right.logicalProjectKey &&
     left.createdAt === right.createdAt &&
     left.runtimeMode === right.runtimeMode &&
@@ -1488,6 +1499,7 @@ function normalizePersistedDraftThreads(
           ? (candidateDraftThread.environmentId as EnvironmentId)
           : environmentIdByThreadId.get(threadKeyOrId as ThreadId));
       const projectId = candidateDraftThread.projectId;
+      const sourceTaskId = candidateDraftThread.sourceTaskId;
       const createdAt = candidateDraftThread.createdAt;
       const branch = candidateDraftThread.branch;
       const worktreePath = candidateDraftThread.worktreePath;
@@ -1517,6 +1529,9 @@ function normalizePersistedDraftThreads(
         threadId,
         environmentId: normalizedEnvironmentId,
         projectId: projectId as ProjectId,
+        ...(typeof sourceTaskId === "string" && sourceTaskId.length > 0
+          ? { sourceTaskId: sourceTaskId as ProjectTaskId }
+          : {}),
         logicalProjectKey:
           typeof candidateDraftThread.logicalProjectKey === "string" &&
           candidateDraftThread.logicalProjectKey.length > 0
@@ -2142,6 +2157,9 @@ function toHydratedDraftThreadState(
     threadId: persistedDraftThread.threadId,
     environmentId: persistedDraftThread.environmentId as EnvironmentId,
     projectId: persistedDraftThread.projectId,
+    ...(persistedDraftThread.sourceTaskId !== undefined
+      ? { sourceTaskId: persistedDraftThread.sourceTaskId }
+      : {}),
     logicalProjectKey:
       persistedDraftThread.logicalProjectKey ??
       projectDraftKey(

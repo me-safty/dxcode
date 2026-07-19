@@ -105,6 +105,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
   Crypto.Crypto
 > {
+  const tasks = readModel.tasks ?? [];
   switch (command.type) {
     case "project.create": {
       yield* requireProjectAbsent({
@@ -226,6 +227,188 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.task.create": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (tasks.some((task) => task.id === command.taskId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' already exists.`,
+        });
+      }
+      const position = tasks
+        .filter((task) => task.projectId === command.projectId && task.status === "open")
+        .reduce((maximum, task) => Math.max(maximum, task.position + 1), 0);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "project.task-created",
+        payload: {
+          task: {
+            id: command.taskId,
+            projectId: command.projectId,
+            title: command.title,
+            description: command.description,
+            status: "open",
+            position,
+            threadId: null,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+            completedAt: null,
+          },
+        },
+      };
+    }
+
+    case "project.task.update": {
+      const task = tasks.find((entry) => entry.id === command.taskId);
+      if (!task) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' does not exist.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: task.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.task-updated",
+        payload: {
+          taskId: task.id,
+          ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.description !== undefined ? { description: command.description } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.task.move": {
+      const task = tasks.find((entry) => entry.id === command.taskId);
+      if (!task) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' does not exist.`,
+        });
+      }
+      if (command.beforeTaskId === task.id) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "beforeTaskId must differ from taskId.",
+        });
+      }
+      const beforeTask =
+        command.beforeTaskId === null
+          ? null
+          : tasks.find((entry) => entry.id === command.beforeTaskId);
+      if (command.beforeTaskId !== null && !beforeTask) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.beforeTaskId}' does not exist.`,
+        });
+      }
+      if (
+        beforeTask &&
+        (beforeTask.projectId !== task.projectId || beforeTask.status !== command.status)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "beforeTaskId must be in the target project and status.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      const source = tasks
+        .filter(
+          (entry) =>
+            entry.projectId === task.projectId &&
+            entry.status === task.status &&
+            entry.id !== task.id,
+        )
+        .toSorted(
+          (left, right) => left.position - right.position || left.id.localeCompare(right.id),
+        );
+      const target = tasks
+        .filter(
+          (entry) =>
+            entry.projectId === task.projectId &&
+            entry.status === command.status &&
+            entry.id !== task.id,
+        )
+        .toSorted(
+          (left, right) => left.position - right.position || left.id.localeCompare(right.id),
+        );
+      const insertAt = beforeTask
+        ? target.findIndex((entry) => entry.id === beforeTask.id)
+        : target.length;
+      target.splice(insertAt < 0 ? target.length : insertAt, 0, task);
+      const nextById = new Map<string, { status: "open" | "done"; position: number }>();
+      source.forEach((entry, position) =>
+        nextById.set(entry.id, { status: task.status, position }),
+      );
+      target.forEach((entry, position) =>
+        nextById.set(entry.id, { status: command.status, position }),
+      );
+      const changed = tasks.filter((entry) => {
+        const next = nextById.get(entry.id);
+        return next && (next.status !== entry.status || next.position !== entry.position);
+      });
+      if (changed.length === 0) changed.push(task);
+      return yield* Effect.forEach(
+        changed,
+        (entry) =>
+          Effect.gen(function* () {
+            const next = nextById.get(entry.id) ?? {
+              status: command.status,
+              position: entry.position,
+            };
+            return {
+              ...(yield* withEventBase({
+                aggregateKind: "project",
+                aggregateId: task.projectId,
+                occurredAt,
+                commandId: command.commandId,
+              })),
+              type: "project.task-moved" as const,
+              payload: {
+                taskId: entry.id,
+                status: next.status,
+                position: next.position,
+                completedAt: next.status === "done" ? (entry.completedAt ?? occurredAt) : null,
+                updatedAt: occurredAt,
+              },
+            };
+          }),
+        { concurrency: 1 },
+      );
+    }
+
+    case "project.task.delete": {
+      const task = tasks.find((entry) => entry.id === command.taskId);
+      if (!task) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' does not exist.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: task.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.task-deleted",
+        payload: { taskId: task.id },
+      };
+    }
+
     case "thread.create": {
       yield* requireProject({
         readModel,
@@ -237,7 +420,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      return {
+      const sourceTask =
+        command.sourceTaskId === undefined
+          ? null
+          : tasks.find((task) => task.id === command.sourceTaskId);
+      if (
+        command.sourceTaskId !== undefined &&
+        (!sourceTask || sourceTask.projectId !== command.projectId)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.sourceTaskId}' does not belong to project '${command.projectId}'.`,
+        });
+      }
+      if (sourceTask?.threadId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${sourceTask.id}' is already linked to a thread.`,
+        });
+      }
+      if (tasks.some((task) => task.threadId === command.threadId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is already linked to a task.`,
+        });
+      }
+      const createdEvent: PlannedOrchestrationEvent = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -258,6 +466,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+      if (!sourceTask) return createdEvent;
+      return [
+        createdEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: sourceTask.projectId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "project.task-thread-linked",
+          payload: {
+            taskId: sourceTask.id,
+            threadId: command.threadId,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
     }
 
     case "thread.delete": {
@@ -267,7 +493,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const occurredAt = yield* nowIso;
-      return {
+      const deletedEvent: PlannedOrchestrationEvent = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -280,6 +506,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           deletedAt: occurredAt,
         },
       };
+      const linkedTask = tasks.find((task) => task.threadId === command.threadId);
+      if (!linkedTask) return deletedEvent;
+      return [
+        deletedEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: linkedTask.projectId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "project.task-thread-unlinked",
+          payload: { taskId: linkedTask.id, threadId: command.threadId, updatedAt: occurredAt },
+        },
+      ];
     }
 
     case "thread.archive": {

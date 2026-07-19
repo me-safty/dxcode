@@ -16,6 +16,7 @@ import type {
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
+  ProjectDashboardSnapshot,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -121,6 +122,11 @@ export interface ProjectionSnapshotQueryShape {
   readonly getProjectShellById: (
     projectId: ProjectId,
   ) => Effect.Effect<Option.Option<OrchestrationProjectShell>, ProjectionRepositoryError>;
+
+  /** Read one active project's dashboard without hydrating thread bodies. */
+  readonly getProjectDashboardSnapshot: (
+    projectId: ProjectId,
+  ) => Effect.Effect<Option.Option<ProjectDashboardSnapshot>, ProjectionRepositoryError>;
 
   /**
    * Read the earliest active thread for a project.

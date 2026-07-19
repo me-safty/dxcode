@@ -9,6 +9,7 @@ import {
   defaultInstanceIdForDriver,
   EnvironmentId,
   ProjectId,
+  ProjectTaskId,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
@@ -765,6 +766,31 @@ describe("composerDraftStore project draft thread mapping", () => {
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+  });
+
+  it("preserves a draft task association through persistence", () => {
+    const sourceTaskId = ProjectTaskId.make("task-persisted");
+    useComposerDraftStore
+      .getState()
+      .setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+        threadId,
+        sourceTaskId,
+      });
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown;
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const persisted = persistApi.getOptions().partialize(useComposerDraftStore.getState());
+    const merged = persistApi
+      .getOptions()
+      .merge(persisted, useComposerDraftStore.getInitialState());
+
+    expect(merged.draftThreadsByThreadKey[draftId]?.sourceTaskId).toBe(sourceTaskId);
   });
 
   it("clears only matching project draft mapping entries", () => {

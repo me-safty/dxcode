@@ -1,10 +1,5 @@
-import type {
-  OrchestrationEvent,
-  OrchestrationReadModel,
-  ProjectId,
-  ThreadId,
-} from "@t3tools/contracts";
-import { OrchestrationCommand } from "@t3tools/contracts";
+import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import { OrchestrationCommand, ProjectId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
@@ -56,7 +51,10 @@ interface CommandEnvelope {
   startedAtMs: number;
 }
 
-function commandToAggregateRef(command: OrchestrationCommand): {
+function commandToAggregateRef(
+  command: OrchestrationCommand,
+  readModel: OrchestrationReadModel,
+): {
   readonly aggregateKind: "project" | "thread";
   readonly aggregateId: ProjectId | ThreadId;
 } {
@@ -67,6 +65,17 @@ function commandToAggregateRef(command: OrchestrationCommand): {
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,
+      };
+    case "project.task.create":
+      return { aggregateKind: "project", aggregateId: command.projectId };
+    case "project.task.update":
+    case "project.task.move":
+    case "project.task.delete":
+      return {
+        aggregateKind: "project",
+        aggregateId:
+          (readModel.tasks ?? []).find((task) => task.id === command.taskId)?.projectId ??
+          ProjectId.make(command.taskId),
       };
     default:
       return {
@@ -105,7 +114,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     let processingStartedAtMs = 0;
-    const aggregateRef = commandToAggregateRef(envelope.command);
+    const aggregateRef = commandToAggregateRef(envelope.command, commandReadModel);
     const baseMetricAttributes = {
       commandType: envelope.command.type,
       aggregateKind: aggregateRef.aggregateKind,

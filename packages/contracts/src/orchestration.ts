@@ -15,6 +15,7 @@ import {
   MessageId,
   NonNegativeInt,
   ProjectId,
+  ProjectTaskId,
   ProviderItemId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -28,8 +29,10 @@ export const ORCHESTRATION_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
+  getProjectDashboardSnapshot: "orchestration.getProjectDashboardSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeProjectDashboard: "orchestration.subscribeProjectDashboard",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -371,6 +374,22 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  tasks: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: ProjectTaskId,
+        projectId: ProjectId,
+        title: TrimmedNonEmptyString,
+        description: Schema.String,
+        status: Schema.Literals(["open", "done"]),
+        position: NonNegativeInt,
+        threadId: Schema.NullOr(ThreadId),
+        createdAt: IsoDateTime,
+        updatedAt: IsoDateTime,
+        completedAt: Schema.NullOr(IsoDateTime),
+      }),
+    ),
+  ),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -386,6 +405,35 @@ export const OrchestrationProjectShell = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
+
+export const ProjectTaskStatus = Schema.Literals(["open", "done"]);
+export type ProjectTaskStatus = typeof ProjectTaskStatus.Type;
+
+export const ProjectTask = Schema.Struct({
+  id: ProjectTaskId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  description: Schema.String,
+  status: ProjectTaskStatus,
+  position: NonNegativeInt,
+  threadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+});
+export type ProjectTask = typeof ProjectTask.Type;
+
+export const ProjectDashboardSnapshot = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  project: OrchestrationProjectShell,
+  tasks: Schema.Array(ProjectTask),
+});
+export type ProjectDashboardSnapshot = typeof ProjectDashboardSnapshot.Type;
+
+export const ProjectDashboardSubscribeInput = Schema.Struct({
+  projectId: ProjectId,
+  afterSequence: Schema.optionalKey(NonNegativeInt),
+});
 
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
@@ -511,11 +559,44 @@ const ProjectDeleteCommand = Schema.Struct({
   force: Schema.optional(Schema.Boolean),
 });
 
+const ProjectTaskCreateCommand = Schema.Struct({
+  type: Schema.Literal("project.task.create"),
+  commandId: CommandId,
+  taskId: ProjectTaskId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  description: Schema.String,
+  createdAt: IsoDateTime,
+});
+
+const ProjectTaskUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.task.update"),
+  commandId: CommandId,
+  taskId: ProjectTaskId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  description: Schema.optional(Schema.String),
+});
+
+const ProjectTaskMoveCommand = Schema.Struct({
+  type: Schema.Literal("project.task.move"),
+  commandId: CommandId,
+  taskId: ProjectTaskId,
+  beforeTaskId: Schema.NullOr(ProjectTaskId),
+  status: ProjectTaskStatus,
+});
+
+const ProjectTaskDeleteCommand = Schema.Struct({
+  type: Schema.Literal("project.task.delete"),
+  commandId: CommandId,
+  taskId: ProjectTaskId,
+});
+
 const ThreadCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.create"),
   commandId: CommandId,
   threadId: ThreadId,
   projectId: ProjectId,
+  sourceTaskId: Schema.optional(ProjectTaskId),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -574,6 +655,7 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
 
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
+  sourceTaskId: Schema.optional(ProjectTaskId),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -683,6 +765,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  ProjectTaskCreateCommand,
+  ProjectTaskUpdateCommand,
+  ProjectTaskMoveCommand,
+  ProjectTaskDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -704,6 +790,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  ProjectTaskCreateCommand,
+  ProjectTaskUpdateCommand,
+  ProjectTaskMoveCommand,
+  ProjectTaskDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -806,6 +896,12 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "project.task-created",
+  "project.task-updated",
+  "project.task-moved",
+  "project.task-deleted",
+  "project.task-thread-linked",
+  "project.task-thread-unlinked",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -856,6 +952,32 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+export const ProjectTaskCreatedPayload = Schema.Struct({ task: ProjectTask });
+export const ProjectTaskUpdatedPayload = Schema.Struct({
+  taskId: ProjectTaskId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  description: Schema.optional(Schema.String),
+  updatedAt: IsoDateTime,
+});
+export const ProjectTaskMovedPayload = Schema.Struct({
+  taskId: ProjectTaskId,
+  status: ProjectTaskStatus,
+  position: NonNegativeInt,
+  completedAt: Schema.NullOr(IsoDateTime),
+  updatedAt: IsoDateTime,
+});
+export const ProjectTaskDeletedPayload = Schema.Struct({ taskId: ProjectTaskId });
+export const ProjectTaskThreadLinkedPayload = Schema.Struct({
+  taskId: ProjectTaskId,
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+export const ProjectTaskThreadUnlinkedPayload = Schema.Struct({
+  taskId: ProjectTaskId,
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -1038,6 +1160,36 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("project.task-created"),
+    payload: ProjectTaskCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.task-updated"),
+    payload: ProjectTaskUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.task-moved"),
+    payload: ProjectTaskMovedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.task-deleted"),
+    payload: ProjectTaskDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.task-thread-linked"),
+    payload: ProjectTaskThreadLinkedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.task-thread-unlinked"),
+    payload: ProjectTaskThreadUnlinkedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.created"),
     payload: ThreadCreatedPayload,
   }),
@@ -1145,6 +1297,11 @@ export const OrchestrationThreadStreamItem = Schema.Union([
   }),
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
+
+export const ProjectDashboardStreamItem = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("snapshot"), snapshot: ProjectDashboardSnapshot }),
+  Schema.Struct({ kind: Schema.Literal("event"), event: OrchestrationEvent }),
+]);
 
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
@@ -1261,6 +1418,10 @@ export const OrchestrationRpcSchemas = {
     input: Schema.Struct({}),
     output: OrchestrationShellSnapshot,
   },
+  getProjectDashboardSnapshot: {
+    input: Schema.Struct({ projectId: ProjectId }),
+    output: ProjectDashboardSnapshot,
+  },
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,
     output: OrchestrationThreadStreamItem,
@@ -1268,6 +1429,10 @@ export const OrchestrationRpcSchemas = {
   subscribeShell: {
     input: OrchestrationSubscribeShellInput,
     output: OrchestrationShellStreamItem,
+  },
+  subscribeProjectDashboard: {
+    input: ProjectDashboardSubscribeInput,
+    output: ProjectDashboardStreamItem,
   },
 } as const;
 

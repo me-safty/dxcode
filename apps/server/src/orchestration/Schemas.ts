@@ -2,6 +2,12 @@ import {
   ProjectCreatedPayload as ContractsProjectCreatedPayloadSchema,
   ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
+  ProjectTaskCreatedPayload as ContractsProjectTaskCreatedPayloadSchema,
+  ProjectTaskUpdatedPayload as ContractsProjectTaskUpdatedPayloadSchema,
+  ProjectTaskMovedPayload as ContractsProjectTaskMovedPayloadSchema,
+  ProjectTaskDeletedPayload as ContractsProjectTaskDeletedPayloadSchema,
+  ProjectTaskThreadLinkedPayload as ContractsProjectTaskThreadLinkedPayloadSchema,
+  ProjectTaskThreadUnlinkedPayload as ContractsProjectTaskThreadUnlinkedPayloadSchema,
   ThreadCreatedPayload as ContractsThreadCreatedPayloadSchema,
   ThreadArchivedPayload as ContractsThreadArchivedPayloadSchema,
   ThreadMetaUpdatedPayload as ContractsThreadMetaUpdatedPayloadSchema,
@@ -26,6 +32,12 @@ import {
 export const ProjectCreatedPayload = ContractsProjectCreatedPayloadSchema;
 export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
+export const ProjectTaskCreatedPayload = ContractsProjectTaskCreatedPayloadSchema;
+export const ProjectTaskUpdatedPayload = ContractsProjectTaskUpdatedPayloadSchema;
+export const ProjectTaskMovedPayload = ContractsProjectTaskMovedPayloadSchema;
+export const ProjectTaskDeletedPayload = ContractsProjectTaskDeletedPayloadSchema;
+export const ProjectTaskThreadLinkedPayload = ContractsProjectTaskThreadLinkedPayloadSchema;
+export const ProjectTaskThreadUnlinkedPayload = ContractsProjectTaskThreadUnlinkedPayloadSchema;
 
 export const ThreadCreatedPayload = ContractsThreadCreatedPayloadSchema;
 export const ThreadArchivedPayload = ContractsThreadArchivedPayloadSchema;

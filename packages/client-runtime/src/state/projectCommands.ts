@@ -1,4 +1,9 @@
-import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@t3tools/contracts";
+import {
+  ORCHESTRATION_WS_METHODS,
+  type EnvironmentId,
+  type ProjectReadFileResult,
+  WS_METHODS,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -13,14 +18,22 @@ import {
   type DeleteProjectInput,
   type UpdateProjectInput,
   createProject,
+  createProjectTask,
   deleteProject,
+  deleteProjectTask,
+  moveProjectTask,
+  updateProjectTask,
   updateProject,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export type {
   CreateProjectInput,
+  CreateProjectTaskInput,
   DeleteProjectInput,
+  DeleteProjectTaskInput,
+  MoveProjectTaskInput,
+  UpdateProjectTaskInput,
   UpdateProjectInput,
 } from "../operations/commands.ts";
 
@@ -55,6 +68,12 @@ export function createProjectEnvironmentAtoms<R, E>(
       JSON.stringify([environmentId, input.projectId]),
   };
   return {
+    dashboard: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:dashboard",
+      tag: ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot,
+      staleTimeMs: 1_000,
+      refreshIntervalMs: 2_000,
+    }),
     searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:search-entries",
       tag: WS_METHODS.projectsSearchEntries,
@@ -91,6 +110,39 @@ export function createProjectEnvironmentAtoms<R, E>(
       execute: (input: DeleteProjectInput) => deleteProject(input),
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
+    }),
+    createTask: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project-task:create",
+      execute: createProjectTask,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    updateTask: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project-task:update",
+      execute: updateProjectTask,
+      scheduler: projectScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.taskId]),
+      },
+    }),
+    moveTask: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project-task:move",
+      execute: moveProjectTask,
+      scheduler: projectScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.taskId]),
+      },
+    }),
+    deleteTask: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project-task:delete",
+      execute: deleteProjectTask,
+      scheduler: projectScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.taskId]),
+      },
     }),
     writeFile: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projects:write-file",
