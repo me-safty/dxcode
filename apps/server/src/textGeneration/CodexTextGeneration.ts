@@ -19,7 +19,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
-  buildReviewStackPrompt,
+  buildRepositoryReviewStackPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -34,6 +34,7 @@ import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 
 const CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT = "low";
 const CODEX_TIMEOUT_MS = 180_000;
+const CODEX_REPOSITORY_REVIEW_TIMEOUT_MS = 15 * 60_000;
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
 /**
  * Build a Codex text-generation closure bound to a specific `CodexSettings`
@@ -88,9 +89,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             }),
         ),
       );
-
-  const safeUnlink = (filePath: string): Effect.Effect<void, never> =>
-    fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
   const safeRemoveTempFile = (filePath: string): Effect.Effect<void, never> =>
     fileSystem
@@ -160,6 +158,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     imagePaths = [],
     cleanupPaths = [],
     modelSelection,
+    timeoutMs = CODEX_TIMEOUT_MS,
   }: {
     operation:
       | "generateCommitMessage"
@@ -173,6 +172,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     imagePaths?: ReadonlyArray<string>;
     cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
+    timeoutMs?: number;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const schemaJson = yield* encodeJsonForOperation(
       operation,
@@ -259,7 +259,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       [
         safeRemoveTempFile(schemaPath),
         safeRemoveTempFile(outputPath),
-        ...cleanupPaths.map((filePath) => safeUnlink(filePath)),
+        ...cleanupPaths.map((filePath) => safeRemoveTempFile(filePath)),
       ],
       { concurrency: "unbounded" },
     ).pipe(Effect.asVoid);
@@ -267,7 +267,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     return yield* Effect.gen(function* () {
       yield* runCodexCommand().pipe(
         Effect.scoped,
-        Effect.timeoutOption(CODEX_TIMEOUT_MS),
+        Effect.timeoutOption(timeoutMs),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -409,13 +409,24 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
   const generateReviewStack: TextGeneration.TextGeneration["Service"]["generateReviewStack"] =
     Effect.fn("CodexTextGeneration.generateReviewStack")(function* (input) {
-      const { prompt, outputSchema } = buildReviewStackPrompt(input);
+      const evidencePath = yield* writeTempFile(
+        "generateReviewStack",
+        "review-evidence",
+        input.sourceDiff,
+      );
+      const { prompt, outputSchema } = buildRepositoryReviewStackPrompt({
+        evidencePath,
+        anchorCatalog: input.anchorCatalog,
+        instructions: input.instructions,
+      });
       return yield* runCodexJson({
         operation: "generateReviewStack",
         cwd: input.cwd,
         prompt,
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
+        cleanupPaths: [evidencePath],
+        timeoutMs: CODEX_REPOSITORY_REVIEW_TIMEOUT_MS,
       });
     });
 

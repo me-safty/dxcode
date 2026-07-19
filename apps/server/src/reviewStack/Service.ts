@@ -29,7 +29,9 @@ import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSn
 import * as ReviewService from "../review/ReviewService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { parseReviewStackAnchors } from "./Anchors.ts";
+import { captureRepositoryReviewSource } from "./RepositoryReviewSource.ts";
 import * as Repository from "./Repository.ts";
 import { validateReviewStackDocument } from "./Validation.ts";
 
@@ -75,6 +77,7 @@ export const make = Effect.gen(function* () {
   const repository = yield* Repository.ReviewStackRepository;
   const projection = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const review = yield* ReviewService.ReviewService;
+  const git = yield* GitVcsDriver.GitVcsDriver;
   const checkpoints = yield* CheckpointDiffQuery.CheckpointDiffQuery;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const settings = yield* ServerSettings.ServerSettingsService;
@@ -151,11 +154,19 @@ export const make = Effect.gen(function* () {
       input.target._tag === "branch"
         ? preview.sources.find((candidate) => candidate.id === "branch-range")
         : preview.sources[0];
+    const resolvedBase = source?.baseRef ?? null;
+    const captured = yield* captureRepositoryReviewSource({
+      cwd: preview.cwd,
+      target: input.target,
+      resolvedBase,
+      ignoreWhitespace: input.ignoreWhitespace,
+      git,
+    }).pipe(Effect.mapError((cause) => error("captureReviewSource", cause.message)));
     return {
       cwd: preview.cwd,
-      diff: source?.diff ?? "",
-      truncated: source?.truncated ?? false,
-      resolvedBase: source?.baseRef ?? null,
+      diff: captured.diff,
+      truncated: false,
+      resolvedBase,
     };
   });
 
@@ -206,22 +217,34 @@ export const make = Effect.gen(function* () {
       updatedAt: startedAt,
       errorMessage: null,
     });
-    const generated = yield* textGeneration.generateReviewStack({
-      cwd: running.sourceDiff.length > 0 ? yield* resolveWorkspace(running.metadata.threadId) : ".",
-      sourceDiff: running.sourceDiff,
-      anchorCatalog: running.anchorCatalog,
-      instructions: running.instructions,
-      modelSelection: running.metadata.modelSelection,
-    });
+    const cwd =
+      running.sourceDiff.length > 0 ? yield* resolveWorkspace(running.metadata.threadId) : ".";
+    const generateAndValidate = Effect.fn("ReviewStackService.generateAndValidate")(
+      function* (): Effect.fn.Return<ReviewStackSnapshot["review"], ReviewStackError> {
+        const generated = yield* textGeneration
+          .generateReviewStack({
+            cwd,
+            sourceDiff: running.sourceDiff,
+            anchorCatalog: running.anchorCatalog,
+            instructions: running.instructions,
+            modelSelection: running.metadata.modelSelection,
+          })
+          .pipe(Effect.mapError((cause) => error("reviewAgent", cause.message)));
+        const validated = yield* Effect.try({
+          try: () => validateReviewStackDocument(generated, running.anchorCatalog),
+          catch: (cause) =>
+            error("validate", cause instanceof Error ? cause.message : String(cause)),
+        });
+        if (validated === null) return yield* error("validate", "Review output was empty.");
+        return validated;
+      },
+    );
+    const document = yield* generateAndValidate().pipe(Effect.retry({ times: 2 }));
     const validating = yield* setState(running, {
       snapshotId: id,
       status: "running",
       stage: "validating",
       updatedAt: yield* now,
-    });
-    const document = yield* Effect.try({
-      try: () => validateReviewStackDocument(generated, validating.anchorCatalog),
-      catch: (cause) => error("validate", cause instanceof Error ? cause.message : String(cause)),
     });
     const saving = yield* setState(validating, {
       snapshotId: id,
@@ -346,10 +369,15 @@ export const make = Effect.gen(function* () {
     "ReviewStackService.listSnapshots",
   )(function* (input) {
     const source = yield* resolveSource(input);
-    return yield* repository.list(
+    const snapshots = yield* repository.list(
       input.threadId,
       scopeKey(input.target, source.resolvedBase, input.ignoreWhitespace),
     );
+    const currentHash = hash(source.diff);
+    return snapshots.map((snapshot) => ({
+      ...snapshot,
+      isCurrent: snapshot.sourceHash === currentHash,
+    }));
   });
 
   const getSnapshot: ReviewStackService["Service"]["getSnapshot"] = (input) =>

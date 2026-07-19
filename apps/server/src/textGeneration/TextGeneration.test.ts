@@ -63,7 +63,7 @@ const makeStubRegistry = (
 describe("makeTextGenerationFromRegistry", () => {
   it.effect("dispatches review stack model and options unchanged", () =>
     Effect.gen(function* () {
-      const instanceId = ProviderInstanceId.make("claude_review");
+      const instanceId = ProviderInstanceId.make("codex");
       const selections: TextGeneration.ReviewStackGenerationInput["modelSelection"][] = [];
       const instance = makeStubInstance(
         instanceId,
@@ -75,7 +75,7 @@ describe("makeTextGenerationFromRegistry", () => {
         }),
       );
       const tg = TextGeneration.makeTextGenerationFromRegistry(makeStubRegistry([instance]));
-      const modelSelection = createModelSelection(instanceId, "claude-opus", [
+      const modelSelection = createModelSelection(instanceId, "gpt-5", [
         { id: "effort", value: "high" },
       ]);
 

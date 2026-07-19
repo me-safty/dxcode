@@ -104,6 +104,13 @@ export const ReviewStackAnchor = Schema.Struct({
 });
 export type ReviewStackAnchor = typeof ReviewStackAnchor.Type;
 
+export const ReviewStackCoverage = Schema.Struct({
+  status: Schema.Literals(["complete", "incomplete"]),
+  totalAnchors: NonNegativeInt,
+  reviewedAnchors: NonNegativeInt,
+});
+export type ReviewStackCoverage = typeof ReviewStackCoverage.Type;
+
 export const ReviewStackStatus = Schema.Literals([
   "queued",
   "running",
@@ -130,6 +137,8 @@ export const ReviewStackSnapshotMetadata = Schema.Struct({
   target: ReviewStackTarget,
   scopeKey: TrimmedNonEmptyString,
   sourceHash: TrimmedNonEmptyString,
+  /** Present on history results when the server compared this snapshot with the full live source. */
+  isCurrent: Schema.optionalKey(Schema.Boolean),
   sourceTruncated: Schema.Boolean,
   status: ReviewStackStatus,
   stage: ReviewStackStage,
@@ -146,6 +155,7 @@ export const ReviewStackSnapshot = Schema.Struct({
   metadata: ReviewStackSnapshotMetadata,
   sourceDiff: Schema.String,
   anchorCatalog: Schema.Array(ReviewStackAnchor),
+  coverage: ReviewStackCoverage,
   instructions: Schema.String,
   review: Schema.NullOr(ReviewStackDocument),
 });

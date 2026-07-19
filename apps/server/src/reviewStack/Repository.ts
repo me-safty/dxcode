@@ -112,6 +112,12 @@ const decodeSnapshot = Effect.fn("ReviewStackRepository.decodeSnapshot")(
     const anchorCatalog = yield* decodeAnchorCatalogJson(row.anchorCatalogJson);
     const modelSelection = yield* decodeModelSelectionJson(row.modelSelectionJson);
     const review = row.reviewJson === null ? null : yield* decodeDocumentJson(row.reviewJson);
+    const reviewedAnchorIds = new Set(
+      review?.layers.flatMap((layer) => layer.ranges.map((range) => range.anchorId)) ?? [],
+    );
+    const reviewedAnchors = anchorCatalog.filter((anchor) =>
+      reviewedAnchorIds.has(anchor.id),
+    ).length;
     return yield* decodeSnapshotValue({
       metadata: {
         snapshotId: row.snapshotId,
@@ -131,6 +137,16 @@ const decodeSnapshot = Effect.fn("ReviewStackRepository.decodeSnapshot")(
       },
       sourceDiff: row.sourceDiff,
       anchorCatalog,
+      coverage: {
+        status:
+          anchorCatalog.length === reviewedAnchors &&
+          row.status === "completed" &&
+          row.sourceTruncated === 0
+            ? "complete"
+            : "incomplete",
+        totalAnchors: anchorCatalog.length,
+        reviewedAnchors,
+      },
       instructions: row.instructions,
       review,
     }).pipe(Effect.mapError((cause) => failure("decode", cause)));

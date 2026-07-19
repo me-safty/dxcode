@@ -183,8 +183,25 @@ export const makeTextGenerationFromRegistry = (
         Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
       ),
     generateReviewStack: (input) =>
-      resolveInstance(registry, "generateReviewStack", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateReviewStack(input)),
+      registry.getInstance(input.modelSelection.instanceId).pipe(
+        Effect.flatMap((instance) =>
+          !instance
+            ? Effect.fail(
+                new TextGenerationError({
+                  operation: "generateReviewStack",
+                  detail: `No provider instance registered for id '${input.modelSelection.instanceId}'.`,
+                }),
+              )
+            : instance.driverKind !== "codex"
+              ? Effect.fail(
+                  new TextGenerationError({
+                    operation: "generateReviewStack",
+                    detail:
+                      "Complete repository-agent reviews currently require a Codex provider instance with enforced read-only tools.",
+                  }),
+                )
+              : instance.textGeneration.generateReviewStack(input),
+        ),
       ),
   });
 

@@ -76,6 +76,11 @@ layer("ReviewStackRepository", (it) => {
         (yield* repository.findReusable(threadId, base.scopeKey, base.sourceHash))?.metadata
           .snapshotId,
       ).toBe(secondId);
+      expect((yield* repository.get(threadId, secondId))?.coverage).toEqual({
+        status: "complete",
+        totalAnchors: 0,
+        reviewedAnchors: 0,
+      });
     }),
   );
 });

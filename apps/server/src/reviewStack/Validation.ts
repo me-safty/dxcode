@@ -53,17 +53,12 @@ export function validateReviewStackDocument(
 
   const missing = anchors.filter((anchor) => !used.has(anchor.id));
   if (missing.length > 0) {
-    layers.push({
-      id: "other-changes",
-      title: "Other changes",
-      summary: "Changes not grouped by the generated review.",
-      diagram: null,
-      ranges: missing.map((anchor) => ({
-        anchorId: anchor.id,
-        summary: `Changes in ${anchor.path}.`,
-        risks: [],
-      })),
-    });
+    throw new Error(
+      `Review stack output is incomplete: ${missing.length} of ${anchors.length} anchors were not inspected (${missing
+        .slice(0, 8)
+        .map((anchor) => anchor.id)
+        .join(", ")}${missing.length > 8 ? ", …" : ""}).`,
+    );
   }
   const layerIds = new Set(layers.map((layer) => layer.id));
   const paths = new Set(

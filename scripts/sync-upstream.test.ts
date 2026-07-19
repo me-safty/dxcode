@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off - Tests exercise the standalone Node CLI boundary directly.
 import * as NodePath from "node:path";
 
 import { assert, it } from "@effect/vitest";

@@ -104,10 +104,7 @@ export function ReviewStackPanel(props: {
 
   useEffect(() => {
     if (ensuredKeys.current.has(targetKey) || list.data === null) return;
-    const exact =
-      props.currentSourceHash === null
-        ? list.data[0]
-        : list.data.find((item) => item.sourceHash === props.currentSourceHash);
+    const exact = list.data.find((item) => item.isCurrent === true);
     const displayed = exact ?? list.data[0];
     if (displayed) {
       ensuredKeys.current.add(targetKey);
@@ -134,10 +131,8 @@ export function ReviewStackPanel(props: {
   const selectedLayerIndex = Math.min(activeLayer, Math.max(0, layers.length - 1));
   const selectedLayer = layers[selectedLayerIndex];
   const isRunning = value?.metadata.status === "queued" || value?.metadata.status === "running";
-  const outdated =
-    value !== null &&
-    props.currentSourceHash !== null &&
-    value.metadata.sourceHash !== props.currentSourceHash;
+  const selectedHistoryItem = list.data?.find((item) => item.snapshotId === selectedId);
+  const outdated = selectedHistoryItem?.isCurrent === false;
 
   const cancelGeneration = async () => {
     if (!value) return;
@@ -224,6 +219,11 @@ export function ReviewStackPanel(props: {
         <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-warning">
           <AlertTriangleIcon className="size-3.5" />
           Incomplete review: source diff was truncated.
+        </div>
+      )}
+      {value?.metadata.status === "completed" && value.coverage.status === "complete" && (
+        <div className="border-b border-success/30 bg-success/10 px-3 py-2 text-[11px] text-success">
+          Complete review: all {value.coverage.totalAnchors} changed code ranges were inspected.
         </div>
       )}
       {(commandError ?? list.error ?? snapshot.error) && (

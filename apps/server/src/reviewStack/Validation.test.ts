@@ -56,21 +56,29 @@ const document = (
 });
 
 describe("validateReviewStackDocument", () => {
-  it("removes unknown and duplicate IDs, then appends missing anchors", () => {
+  it("rejects incomplete coverage instead of manufacturing placeholder reviews", () => {
+    expect(() =>
+      validateReviewStackDocument(
+        document([
+          { anchorId: "anchor-0001", summary: "First", risks: [] },
+          { anchorId: "unknown", summary: "Unknown", risks: [] },
+          { anchorId: "anchor-0001", summary: "Duplicate", risks: [] },
+        ]),
+        anchors,
+      ),
+    ).toThrow("1 of 2 anchors were not inspected");
+  });
+
+  it("sanitizes a complete review and its overview references", () => {
     const result = validateReviewStackDocument(
-      document([
-        { anchorId: "anchor-0001", summary: "First", risks: [] },
-        { anchorId: "unknown", summary: "Unknown", risks: [] },
-        { anchorId: "anchor-0001", summary: "Duplicate", risks: [] },
-      ]),
+      document(anchors.map((anchor) => ({ anchorId: anchor.id, summary: anchor.path, risks: [] }))),
       anchors,
     );
 
-    expect(result.layers[0]?.ranges.map(({ anchorId }) => anchorId)).toEqual(["anchor-0001"]);
-    expect(result.layers[1]).toMatchObject({
-      id: "other-changes",
-      ranges: [{ anchorId: "anchor-0002" }],
-    });
+    expect(result.layers[0]?.ranges.map(({ anchorId }) => anchorId)).toEqual([
+      "anchor-0001",
+      "anchor-0002",
+    ]);
     expect(result.mergeAssessment).toEqual({
       recommendation: "merge",
       confidence: 4,
@@ -83,7 +91,9 @@ describe("validateReviewStackDocument", () => {
   });
 
   it("caps oversized diagrams and rejects zero valid model coverage", () => {
-    const base = document([{ anchorId: "anchor-0001", summary: "First", risks: [] }]);
+    const base = document(
+      anchors.map((anchor) => ({ anchorId: anchor.id, summary: anchor.path, risks: [] })),
+    );
     const oversized: ReviewStackDocument = {
       ...base,
       layers: [{ ...base.layers[0]!, diagram: { title: "Diagram", text: "x".repeat(10_000) } }],
