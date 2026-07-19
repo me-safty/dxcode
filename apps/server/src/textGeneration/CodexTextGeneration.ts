@@ -69,6 +69,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       ),
     );
 
+  const safeRemoveTempFile = (filePath: string): Effect.Effect<void, never> =>
+    fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
+
   const writeTempFile = (
     operation: string,
     prefix: string,
@@ -79,7 +82,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         prefix: `t3code-${prefix}-${process.pid}-`,
       })
       .pipe(
-        Effect.tap((filePath) => fileSystem.writeFileString(filePath, content)),
+        Effect.flatMap((filePath) =>
+          fileSystem.writeFileString(filePath, content).pipe(
+            Effect.as(filePath),
+            Effect.onError(() => safeRemoveTempFile(filePath)),
+          ),
+        ),
         Effect.mapError(
           (cause) =>
             new TextGenerationError({
@@ -89,11 +97,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             }),
         ),
       );
-
-  const safeRemoveTempFile = (filePath: string): Effect.Effect<void, never> =>
-    fileSystem
-      .remove(path.dirname(filePath), { recursive: true })
-      .pipe(Effect.catch(() => Effect.void));
 
   const encodeJsonForOperation = (
     operation:
@@ -179,7 +182,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       toJsonSchemaObject(outputSchemaJson),
     );
     const schemaPath = yield* writeTempFile(operation, "codex-schema", schemaJson);
-    const outputPath = yield* writeTempFile(operation, "codex-output", "");
+    const outputPath = yield* writeTempFile(operation, "codex-output", "").pipe(
+      Effect.onError(() => safeRemoveTempFile(schemaPath)),
+    );
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
       const reasoningEffort =
@@ -414,20 +419,21 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         "review-evidence",
         input.sourceDiff,
       );
-      const { prompt, outputSchema } = buildRepositoryReviewStackPrompt({
-        evidencePath,
-        anchorCatalog: input.anchorCatalog,
-        instructions: input.instructions,
-      });
-      return yield* runCodexJson({
-        operation: "generateReviewStack",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        cleanupPaths: [evidencePath],
-        timeoutMs: CODEX_REPOSITORY_REVIEW_TIMEOUT_MS,
-      });
+      return yield* Effect.gen(function* () {
+        const { prompt, outputSchema } = buildRepositoryReviewStackPrompt({
+          evidencePath,
+          anchorCatalog: input.anchorCatalog,
+          instructions: input.instructions,
+        });
+        return yield* runCodexJson({
+          operation: "generateReviewStack",
+          cwd: input.cwd,
+          prompt,
+          outputSchemaJson: outputSchema,
+          modelSelection: input.modelSelection,
+          timeoutMs: CODEX_REPOSITORY_REVIEW_TIMEOUT_MS,
+        });
+      }).pipe(Effect.ensuring(safeRemoveTempFile(evidencePath)));
     });
 
   return {

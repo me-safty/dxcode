@@ -17,10 +17,51 @@ export class ReviewSourceCaptureError extends Schema.TaggedErrorClass<ReviewSour
   { message: Schema.String },
 ) {}
 
-function uniquePaths(stdout: string): ReadonlyArray<string> {
-  return [...new Set(stdout.split("\0").filter((value) => value.length > 0))].sort((a, b) =>
-    a.localeCompare(b),
-  );
+export interface ReviewPathGroup {
+  readonly paths: ReadonlyArray<string>;
+  readonly displayPath: string;
+}
+
+export function parseNameStatusPathGroups(stdout: string): ReadonlyArray<ReviewPathGroup> {
+  const records = stdout.split("\0");
+  const groups: ReviewPathGroup[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const status = records[index];
+    if (!status) continue;
+    const isPair = status.startsWith("R") || status.startsWith("C");
+    const oldPath = records[index + 1];
+    const newPath = isPair ? records[index + 2] : undefined;
+    if (oldPath && (!isPair || newPath)) {
+      const paths = isPair && newPath ? [oldPath, newPath] : [oldPath];
+      groups.push({
+        paths,
+        displayPath: newPath ?? oldPath,
+      });
+    }
+    index += isPair ? 2 : 1;
+  }
+  return groups;
+}
+
+function parsePorcelainPathGroups(stdout: string): ReadonlyArray<ReviewPathGroup> {
+  const records = stdout.split("\0");
+  const groups: ReviewPathGroup[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record || record.length < 4) continue;
+    const status = new Set(record.slice(0, 2));
+    const path = record.slice(3);
+    if (status.has("R") || status.has("C")) {
+      const previousPath = records[index + 1];
+      if (path && previousPath) {
+        groups.push({ paths: [previousPath, path], displayPath: path });
+      }
+      index += 1;
+    } else if (path) {
+      groups.push({ paths: [path], displayPath: path });
+    }
+  }
+  return groups.sort((a, b) => a.displayPath.localeCompare(b.displayPath));
 }
 
 /**
@@ -52,9 +93,9 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
 
     const manifestArgs =
       input.target._tag === "commit"
-        ? ["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-z", input.target.sha]
+        ? ["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", input.target.sha]
         : input.target._tag === "branch"
-          ? ["diff", "--name-only", "-z", `${input.resolvedBase ?? "HEAD"}...HEAD`, "--"]
+          ? ["diff", "--name-status", "-z", `${input.resolvedBase ?? "HEAD"}...HEAD`, "--"]
           : ["status", "--porcelain=1", "-z", "--untracked-files=all"];
     const manifest = yield* execute("ReviewStack.capture.manifest", manifestArgs);
     if (manifest.stdoutTruncated) {
@@ -63,13 +104,13 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
       });
     }
 
-    const paths =
+    const pathGroups =
       input.target._tag === "working-tree"
-        ? parsePorcelainPaths(manifest.stdout)
-        : uniquePaths(manifest.stdout);
+        ? parsePorcelainPathGroups(manifest.stdout)
+        : parseNameStatusPathGroups(manifest.stdout);
     const patches = yield* Effect.forEach(
-      paths,
-      Effect.fn("ReviewStack.capture.file")(function* (filePath) {
+      pathGroups,
+      Effect.fn("ReviewStack.capture.file")(function* (pathGroup) {
         const common = [
           "--patch",
           "--minimal",
@@ -77,10 +118,16 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
         ];
         const args =
           input.target._tag === "commit"
-            ? ["show", "--format=", ...common, input.target.sha, "--", filePath]
+            ? ["show", "--format=", ...common, input.target.sha, "--", ...pathGroup.paths]
             : input.target._tag === "branch"
-              ? ["diff", ...common, `${input.resolvedBase ?? "HEAD"}...HEAD`, "--", filePath]
-              : ["diff", ...common, "HEAD", "--", filePath];
+              ? [
+                  "diff",
+                  ...common,
+                  `${input.resolvedBase ?? "HEAD"}...HEAD`,
+                  "--",
+                  ...pathGroup.paths,
+                ]
+              : ["diff", ...common, "HEAD", "--", ...pathGroup.paths];
         let result = yield* git.execute({
           operation: "ReviewStack.capture.filePatch",
           cwd: input.cwd,
@@ -89,11 +136,15 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
           maxOutputBytes: FILE_PATCH_MAX_BYTES,
           appendTruncationMarker: true,
         });
-        if (input.target._tag === "working-tree" && result.stdout.trim().length === 0) {
+        if (
+          input.target._tag === "working-tree" &&
+          pathGroup.paths.length === 1 &&
+          result.stdout.trim().length === 0
+        ) {
           result = yield* git.execute({
             operation: "ReviewStack.capture.untrackedFilePatch",
             cwd: input.cwd,
-            args: ["diff", "--no-index", ...common, "--", "/dev/null", filePath],
+            args: ["diff", "--no-index", ...common, "--", "/dev/null", pathGroup.displayPath],
             allowNonZeroExit: true,
             maxOutputBytes: FILE_PATCH_MAX_BYTES,
             appendTruncationMarker: true,
@@ -101,7 +152,7 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
         }
         if (result.stdoutTruncated) {
           return yield* new ReviewSourceCaptureError({
-            message: `The patch for ${filePath} exceeded the per-file safety limit; no partial review was created.`,
+            message: `The patch for ${pathGroup.displayPath} exceeded the per-file safety limit; no partial review was created.`,
           });
         }
         return result.stdout.trimEnd();
@@ -111,26 +162,14 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
 
     return {
       diff: patches.filter((patch) => patch.length > 0).join("\n"),
-      fileCount: paths.length,
+      fileCount: pathGroups.length,
     };
   },
 );
 
 /** Parse paths from porcelain v1 -z, including the second path emitted for renames/copies. */
 export function parsePorcelainPaths(stdout: string): ReadonlyArray<string> {
-  const records = stdout.split("\0");
-  const paths: string[] = [];
-  for (let index = 0; index < records.length; index += 1) {
-    const record = records[index];
-    if (!record || record.length < 4) continue;
-    const status = new Set(record.slice(0, 2));
-    const path = record.slice(3);
-    if (path.length > 0) paths.push(path);
-    if (status.has("R") || status.has("C")) {
-      const previousPath = records[index + 1];
-      if (previousPath) paths.push(previousPath);
-      index += 1;
-    }
-  }
-  return [...new Set(paths)].sort((a, b) => a.localeCompare(b));
+  return [...new Set(parsePorcelainPathGroups(stdout).flatMap((group) => group.paths))].sort(
+    (a, b) => a.localeCompare(b),
+  );
 }

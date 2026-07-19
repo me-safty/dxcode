@@ -53,6 +53,7 @@ function GenerationModelSettingsRow(props: {
     selection.model,
   );
   const defaultSelection = DEFAULT_UNIFIED_SETTINGS[props.setting];
+  const lockedProvider = props.setting === "reviewStackModelSelection" ? DEFAULT_DRIVER_KIND : null;
   const isDirty = !Equal.equals(settings[props.setting] ?? null, defaultSelection ?? null);
   const patch = (value: typeof selection) =>
     props.setting === "textGenerationModelSelection"
@@ -81,7 +82,7 @@ function GenerationModelSettingsRow(props: {
           <ProviderModelPicker
             activeInstanceId={selection.instanceId}
             model={selection.model}
-            lockedProvider={null}
+            lockedProvider={lockedProvider}
             instanceEntries={entries}
             modelOptionsByInstance={modelOptionsByInstance}
             triggerVariant="outline"

@@ -117,4 +117,19 @@ describe("validateReviewStackDocument", () => {
       ),
     ).toThrow("zero valid anchor coverage");
   });
+
+  it("rejects duplicate layer IDs after normalization", () => {
+    const base = document(
+      anchors.map((anchor) => ({ anchorId: anchor.id, summary: anchor.path, risks: [] })),
+    );
+    expect(() =>
+      validateReviewStackDocument(
+        {
+          ...base,
+          layers: [base.layers[0]!, { ...base.layers[0]!, id: " layer " }],
+        },
+        anchors,
+      ),
+    ).toThrow("duplicate layer id 'layer'");
+  });
 });

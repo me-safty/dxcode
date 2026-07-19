@@ -328,7 +328,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
     };
   }, [diffSelection, selectedBaseRef, selectedCheckpointTurnCount]);
   const reviewStackHistory = useEnvironmentQuery(
-    activeThread && reviewStackTarget
+    innerTab === "review-stack" && activeThread && reviewStackTarget
       ? reviewEnvironment.reviewStackListSnapshots({
           environmentId: activeThread.environmentId,
           input: {
@@ -340,7 +340,7 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
       : null,
   );
   const reviewStackEvents = useEnvironmentQuery(
-    activeThread
+    innerTab === "review-stack" && activeThread
       ? reviewEnvironment.reviewStackEvents({
           environmentId: activeThread.environmentId,
           input: {},

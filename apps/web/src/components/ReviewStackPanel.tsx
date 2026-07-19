@@ -102,7 +102,11 @@ export function ReviewStackPanel(props: {
 
   useEffect(() => {
     if (ensuredKeys.current.has(targetKey) || list.data === null) return;
-    const exact = list.data.find((item) => item.isCurrent === true);
+    const exact = list.data.find(
+      (item) =>
+        item.isCurrent === true ||
+        (props.currentSourceHash !== null && item.sourceHash === props.currentSourceHash),
+    );
     const displayed = exact ?? list.data[0];
     if (displayed) {
       ensuredKeys.current.add(targetKey);
@@ -129,7 +133,11 @@ export function ReviewStackPanel(props: {
   const selectedLayer = layers[selectedLayerIndex];
   const isRunning = value?.metadata.status === "queued" || value?.metadata.status === "running";
   const selectedHistoryItem = list.data?.find((item) => item.snapshotId === selectedId);
-  const outdated = selectedHistoryItem?.isCurrent === false;
+  const outdated =
+    selectedHistoryItem?.isCurrent === false ||
+    (props.currentSourceHash !== null &&
+      selectedHistoryItem !== undefined &&
+      selectedHistoryItem.sourceHash !== props.currentSourceHash);
 
   const cancelGeneration = async () => {
     if (!value) return;

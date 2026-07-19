@@ -75,4 +75,43 @@ describe("parseReviewStackAnchors", () => {
     });
     expect(parseReviewStackAnchors("")).toEqual([]);
   });
+
+  it("decodes Git C-quoted UTF-8 paths", () => {
+    const anchors = parseReviewStackAnchors(
+      [
+        'diff --git "a/\\303\\251.ts" "b/\\303\\251.ts"',
+        '--- "a/\\303\\251.ts"',
+        '+++ "b/\\303\\251.ts"',
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+      ].join("\n"),
+    );
+
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]).toMatchObject({ path: "é.ts", previousPath: null });
+    expect(anchors[0]?.patch).toContain('diff --git "a/\\303\\251.ts" "b/\\303\\251.ts"');
+  });
+
+  it("parses diff headers when only one rename path is quoted", () => {
+    const oldQuoted = parseReviewStackAnchors(
+      [
+        'diff --git "a/\\303\\251.ts" b/plain.ts',
+        "similarity index 100%",
+        'rename from "\\303\\251.ts"',
+        "rename to plain.ts",
+      ].join("\n"),
+    );
+    const newQuoted = parseReviewStackAnchors(
+      [
+        'diff --git a/plain.ts "b/\\303\\251.ts"',
+        "similarity index 100%",
+        "rename from plain.ts",
+        'rename to "\\303\\251.ts"',
+      ].join("\n"),
+    );
+
+    expect(oldQuoted[0]).toMatchObject({ path: "plain.ts", previousPath: "é.ts" });
+    expect(newQuoted[0]).toMatchObject({ path: "é.ts", previousPath: "plain.ts" });
+  });
 });

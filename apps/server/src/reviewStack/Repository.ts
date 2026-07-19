@@ -75,12 +75,21 @@ export class ReviewStackRepository extends Context.Service<
       threadId: ThreadId,
       scopeKey: string,
     ) => Effect.Effect<ReadonlyArray<ReviewStackSnapshotMetadata>, ReviewStackError>;
+    readonly listHistory: (
+      threadId: ThreadId,
+      target: ReviewStackTarget,
+      ignoreWhitespace: boolean,
+    ) => Effect.Effect<ReadonlyArray<ReviewStackSnapshotMetadata>, ReviewStackError>;
     readonly findReusable: (
       threadId: ThreadId,
       scopeKey: string,
       sourceHash: string,
     ) => Effect.Effect<ReviewStackSnapshot | null, ReviewStackError>;
     readonly update: (input: UpdateSnapshotInput) => Effect.Effect<void, ReviewStackError>;
+    readonly cancelActive: (
+      snapshotId: ReviewStackSnapshotId,
+      completedAt: string,
+    ) => Effect.Effect<boolean, ReviewStackError>;
     readonly listRecoverable: Effect.Effect<ReadonlyArray<ReviewStackSnapshot>, ReviewStackError>;
   }
 >()("t3/reviewStack/Repository/ReviewStackRepository") {}
@@ -207,6 +216,25 @@ export const make = Effect.gen(function* () {
       Effect.map((snapshots) => snapshots.map((snapshot) => snapshot.metadata)),
     );
 
+  const listHistory: ReviewStackRepository["Service"]["listHistory"] = (
+    threadId,
+    target,
+    ignoreWhitespace,
+  ) =>
+    run(
+      "listHistory",
+      sql.unsafe<SnapshotRow>(
+        `SELECT ${selectColumns} FROM review_stack_snapshots
+         WHERE thread_id = ? AND scope_json = ?
+           AND json_extract(scope_key, '$.ignoreWhitespace') = ?
+         ORDER BY created_at DESC, snapshot_id DESC`,
+        [threadId, encodeTargetJson(target), ignoreWhitespace ? 1 : 0],
+      ),
+    ).pipe(
+      Effect.flatMap((rows) => Effect.all(rows.map(decodeSnapshot))),
+      Effect.map((snapshots) => snapshots.map((snapshot) => snapshot.metadata)),
+    );
+
   const findReusable: ReviewStackRepository["Service"]["findReusable"] = (
     threadId,
     scopeKey,
@@ -237,6 +265,22 @@ export const make = Effect.gen(function* () {
     `,
     ).pipe(Effect.asVoid);
 
+  const cancelActive: ReviewStackRepository["Service"]["cancelActive"] = (
+    snapshotId,
+    completedAt,
+  ) =>
+    run(
+      "cancelActive",
+      sql.unsafe<{ snapshotId: string }>(
+        `UPDATE review_stack_snapshots
+         SET status = 'cancelled', stage = 'cancelled', completed_at = ?, updated_at = ?,
+             error_message = NULL
+         WHERE snapshot_id = ? AND status IN ('queued', 'running')
+         RETURNING snapshot_id AS "snapshotId"`,
+        [completedAt, completedAt, snapshotId],
+      ),
+    ).pipe(Effect.map((rows) => rows.length > 0));
+
   const listRecoverable = run(
     "listRecoverable",
     sql.unsafe<SnapshotRow>(
@@ -244,7 +288,16 @@ export const make = Effect.gen(function* () {
     ),
   ).pipe(Effect.flatMap((rows) => Effect.all(rows.map(decodeSnapshot))));
 
-  return ReviewStackRepository.of({ insert, get, list, findReusable, update, listRecoverable });
+  return ReviewStackRepository.of({
+    insert,
+    get,
+    list,
+    listHistory,
+    findReusable,
+    update,
+    cancelActive,
+    listRecoverable,
+  });
 });
 
 export const layer = Layer.effect(ReviewStackRepository, make);

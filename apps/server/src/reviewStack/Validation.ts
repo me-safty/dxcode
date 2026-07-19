@@ -17,9 +17,15 @@ export function validateReviewStackDocument(
 ): ReviewStackDocument {
   const known = new Set(anchors.map((anchor) => anchor.id));
   const used = new Set<string>();
+  const seenLayerIds = new Set<string>();
   const layers: ReviewStackLayer[] = [];
 
   for (const layer of document.layers) {
+    const layerId = cap(layer.id);
+    if (seenLayerIds.has(layerId)) {
+      throw new Error(`Review stack output has duplicate layer id '${layerId}'.`);
+    }
+    seenLayerIds.add(layerId);
     const ranges: ReviewStackRange[] = [];
     for (const range of layer.ranges) {
       if (!known.has(range.anchorId) || used.has(range.anchorId)) continue;
@@ -36,7 +42,7 @@ export function validateReviewStackDocument(
     }
     if (ranges.length === 0) continue;
     layers.push({
-      id: cap(layer.id),
+      id: layerId,
       title: cap(layer.title),
       summary: cap(layer.summary),
       ranges,

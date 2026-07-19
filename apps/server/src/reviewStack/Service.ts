@@ -155,6 +155,12 @@ export const make = Effect.gen(function* () {
         ? preview.sources.find((candidate) => candidate.id === "branch-range")
         : preview.sources[0];
     const resolvedBase = source?.baseRef ?? null;
+    if (input.target._tag === "branch" && resolvedBase === null) {
+      return yield* error(
+        "resolveBase",
+        "A base reference is required for branch review, but none could be resolved.",
+      );
+    }
     const captured = yield* captureRepositoryReviewSource({
       cwd: preview.cwd,
       target: input.target,
@@ -295,6 +301,13 @@ export const make = Effect.gen(function* () {
       const source = yield* resolveSource(input);
       const key = scopeKey(input.target, source.resolvedBase, input.ignoreWhitespace);
       const sourceHash = hash(source.diff);
+      const anchors = parseReviewStackAnchors(source.diff);
+      if (source.diff.trim().length > 0 && anchors.length === 0) {
+        return yield* error(
+          "parseDiff",
+          "The review source uses unsupported diff syntax; no empty review was created.",
+        );
+      }
       if (input.force !== true) {
         const reusable = yield* repository.findReusable(input.threadId, key, sourceHash);
         if (reusable) {
@@ -307,7 +320,6 @@ export const make = Effect.gen(function* () {
       );
       const createdAt = yield* now;
       const snapshotId = ReviewStackSnapshotId.make(NodeCrypto.randomUUID());
-      const anchors = parseReviewStackAnchors(source.diff);
       yield* repository
         .insert({
           snapshotId,
@@ -368,16 +380,7 @@ export const make = Effect.gen(function* () {
   const listSnapshots: ReviewStackService["Service"]["listSnapshots"] = Effect.fn(
     "ReviewStackService.listSnapshots",
   )(function* (input) {
-    const source = yield* resolveSource(input);
-    const snapshots = yield* repository.list(
-      input.threadId,
-      scopeKey(input.target, source.resolvedBase, input.ignoreWhitespace),
-    );
-    const currentHash = hash(source.diff);
-    return snapshots.map((snapshot) => ({
-      ...snapshot,
-      isCurrent: snapshot.sourceHash === currentHash,
-    }));
+    return yield* repository.listHistory(input.threadId, input.target, input.ignoreWhitespace);
   });
 
   const getSnapshot: ReviewStackService["Service"]["getSnapshot"] = (input) =>
@@ -385,11 +388,13 @@ export const make = Effect.gen(function* () {
 
   const cancel: ReviewStackService["Service"]["cancel"] = Effect.fn("ReviewStackService.cancel")(
     function* (input) {
-      const snapshot = yield* requireSnapshot(input.threadId, input.snapshotId);
+      yield* requireSnapshot(input.threadId, input.snapshotId);
       const fiber = jobs.get(input.snapshotId);
       if (fiber) yield* Fiber.interrupt(fiber);
-      if (snapshot.metadata.status === "queued" || snapshot.metadata.status === "running") {
-        yield* setTerminalState(snapshot, "cancelled");
+      const cancelled = yield* repository.cancelActive(input.snapshotId, yield* now);
+      if (cancelled) {
+        const cancelledSnapshot = yield* requireSnapshot(input.threadId, input.snapshotId);
+        yield* publish(cancelledSnapshot.metadata);
       }
       const updated = yield* requireSnapshot(input.threadId, input.snapshotId);
       return updated.metadata;
