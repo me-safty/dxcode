@@ -22,7 +22,7 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { Textarea } from "../components/ui/textarea";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
+import { toSortableTimestamp } from "../lib/threadSort";
 import { cn } from "../lib/utils";
 import { newProjectTaskId } from "../lib/utils";
 import {
@@ -47,6 +47,10 @@ type TaskStatus = ProjectTask["status"];
 function workspaceTitle(path: string, threads: ReadonlyArray<{ branch: string | null }>) {
   if (path === "") return "Project root";
   return threads.find((thread) => thread.branch !== null)?.branch ?? "Worktree";
+}
+
+function updatedTimestamp(thread: { updatedAt: string }) {
+  return toSortableTimestamp(thread.updatedAt) ?? Number.NEGATIVE_INFINITY;
 }
 
 function errorText(result: unknown): string {
@@ -77,7 +81,6 @@ function ProjectDashboardRoute() {
   const restoreThread = useAtomCommand(threadEnvironment.unarchive, { reportFailure: false });
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<ProjectTaskId | null>(null);
 
   useEffect(() => {
@@ -94,10 +97,12 @@ function ProjectDashboardRoute() {
 
   const groups = useMemo(() => {
     if (!project) return [];
-    const sorted = sortThreads(
-      threads.filter((thread) => thread.archivedAt === null),
-      "updated_at",
-    );
+    const sorted = threads
+      .filter((thread) => thread.archivedAt === null)
+      .toSorted(
+        (left, right) =>
+          updatedTimestamp(right) - updatedTimestamp(left) || right.id.localeCompare(left.id),
+      );
     const byPath = new Map<string, typeof sorted>();
     for (const thread of sorted) {
       const key = thread.worktreePath ?? "";
@@ -105,8 +110,7 @@ function ProjectDashboardRoute() {
     }
     return [...byPath.entries()].toSorted(([leftPath, leftThreads], [rightPath, rightThreads]) => {
       const timestampDifference =
-        getThreadSortTimestamp(rightThreads[0]!, "updated_at") -
-        getThreadSortTimestamp(leftThreads[0]!, "updated_at");
+        updatedTimestamp(rightThreads[0]!) - updatedTimestamp(leftThreads[0]!);
       return timestampDifference || leftPath.localeCompare(rightPath);
     });
   }, [project, threads]);
@@ -134,12 +138,11 @@ function ProjectDashboardRoute() {
     const ok = await runTaskCommand(() =>
       createTask({
         environmentId,
-        input: { taskId: newProjectTaskId(), projectId, title: trimmed, description },
+        input: { taskId: newProjectTaskId(), projectId, title: trimmed, description: "" },
       }),
     );
     if (ok) {
       setTitle("");
-      setDescription("");
       setAdding(false);
     }
   };
@@ -491,21 +494,14 @@ function ProjectDashboardRoute() {
                   void submitTask();
                 }}
               >
-                <Input
+                <Textarea
                   autoFocus
                   className="w-full"
+                  size="sm"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Task title"
-                  aria-label="Task title"
-                />
-                <Textarea
-                  className="mt-2 w-full"
-                  size="sm"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Description"
-                  aria-label="Task description"
+                  placeholder="What needs doing?"
+                  aria-label="Task"
                 />
                 <div className="mt-3 flex gap-2 sm:justify-end">
                   <Button
