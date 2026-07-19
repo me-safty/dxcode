@@ -222,14 +222,14 @@ function ProjectDashboardRoute() {
                     >
                       <h3
                         className={cn(
-                          "text-sm font-medium",
+                          "break-words text-sm font-medium",
                           status === "done" && "text-muted-foreground line-through",
                         )}
                       >
                         {task.title}
                       </h3>
                       {task.description ? (
-                        <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                        <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
                           {task.description}
                         </p>
                       ) : null}
@@ -401,17 +401,23 @@ function ProjectDashboardRoute() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <header
         className={cn(
-          "flex min-h-13 items-center gap-3 border-b px-4 sm:px-6",
+          "flex min-h-13 flex-wrap items-center gap-3 border-b px-4 py-2 sm:flex-nowrap sm:px-6 sm:py-0",
           COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
       >
         <ProjectFavicon environmentId={environmentId} cwd={project.workspaceRoot} />
         <h1 className="min-w-0 truncate text-sm font-semibold">{project.title}</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+        <div className="order-3 flex w-full items-center gap-2 sm:order-none sm:ml-auto sm:w-auto">
+          <Button
+            className="flex-1 sm:flex-none"
+            size="sm"
+            variant="outline"
+            onClick={() => setAdding(true)}
+          >
             <PlusIcon /> Add task
           </Button>
           <Button
+            className="flex-1 sm:flex-none"
             size="sm"
             onClick={() =>
               void handleNewThread(projectRef, { worktreePath: null, envMode: "local" })
@@ -483,31 +489,44 @@ function ProjectDashboardRoute() {
           </section>
           <div className="space-y-7">
             {adding ? (
-              <div className="rounded-xl border bg-card/40 p-3">
+              <form
+                className="min-w-0 rounded-xl border bg-card/40 p-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitTask();
+                }}
+              >
                 <Input
                   autoFocus
+                  className="w-full"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Task title"
                   aria-label="Task title"
                 />
                 <Textarea
-                  className="mt-2"
+                  className="mt-2 w-full"
                   size="sm"
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
                   placeholder="Description"
                   aria-label="Task description"
                 />
-                <div className="mt-2 flex justify-end gap-2">
-                  <Button size="xs" variant="ghost" onClick={() => setAdding(false)}>
+                <div className="mt-3 flex gap-2 sm:justify-end">
+                  <Button
+                    className="flex-1 sm:flex-none"
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setAdding(false)}
+                  >
                     Cancel
                   </Button>
-                  <Button size="xs" disabled={!title.trim()} onClick={() => void submitTask()}>
+                  <Button className="flex-1 sm:flex-none" size="sm" disabled={!title.trim()}>
                     Add task
                   </Button>
                 </div>
-              </div>
+              </form>
             ) : null}
             {taskSection("open")}
             {taskSection("done")}
