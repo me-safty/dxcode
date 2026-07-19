@@ -32,6 +32,18 @@ const document = (
   ranges: ReviewStackDocument["layers"][number]["ranges"],
 ): ReviewStackDocument => ({
   summary: "Review",
+  mergeAssessment: {
+    recommendation: "merge",
+    confidence: 4,
+    rationale: "The evidence supports merging.",
+  },
+  references: [
+    { _tag: "layer", layerId: "layer" },
+    { _tag: "layer", layerId: "layer" },
+    { _tag: "layer", layerId: "missing-layer" },
+    { _tag: "file", path: "schema.ts" },
+    { _tag: "file", path: "missing.ts" },
+  ],
   layers: [
     {
       id: "layer",
@@ -59,6 +71,15 @@ describe("validateReviewStackDocument", () => {
       id: "other-changes",
       ranges: [{ anchorId: "anchor-0002" }],
     });
+    expect(result.mergeAssessment).toEqual({
+      recommendation: "merge",
+      confidence: 4,
+      rationale: "The evidence supports merging.",
+    });
+    expect(result.references).toEqual([
+      { _tag: "layer", layerId: "layer" },
+      { _tag: "file", path: "schema.ts" },
+    ]);
   });
 
   it("caps oversized diagrams and rejects zero valid model coverage", () => {

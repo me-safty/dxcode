@@ -58,11 +58,38 @@ export const ReviewStackLayer = Schema.Struct({
 });
 export type ReviewStackLayer = typeof ReviewStackLayer.Type;
 
+export const ReviewStackMergeAssessment = Schema.Struct({
+  recommendation: Schema.Literals(["merge", "do-not-merge"]),
+  // Explicit literals keep the generated structured-output JSON Schema free of `allOf`,
+  // which is rejected by Codex response formats.
+  confidence: Schema.Literals([1, 2, 3, 4, 5]),
+  rationale: TrimmedNonEmptyString,
+});
+export type ReviewStackMergeAssessment = typeof ReviewStackMergeAssessment.Type;
+
+export const ReviewStackOverviewReference = Schema.Union([
+  Schema.TaggedStruct("layer", { layerId: TrimmedNonEmptyString }),
+  Schema.TaggedStruct("file", { path: TrimmedNonEmptyString }),
+]);
+export type ReviewStackOverviewReference = typeof ReviewStackOverviewReference.Type;
+
 export const ReviewStackDocument = Schema.Struct({
   summary: TrimmedNonEmptyString,
+  // Optional keys keep review snapshots generated before these fields were introduced readable.
+  mergeAssessment: Schema.optionalKey(ReviewStackMergeAssessment),
+  references: Schema.optionalKey(Schema.Array(ReviewStackOverviewReference)),
   layers: Schema.Array(ReviewStackLayer),
 });
 export type ReviewStackDocument = typeof ReviewStackDocument.Type;
+
+/** Strict provider output schema; unlike persisted documents, every property must be required. */
+export const ReviewStackGenerationDocument = Schema.Struct({
+  summary: TrimmedNonEmptyString,
+  mergeAssessment: ReviewStackMergeAssessment,
+  references: Schema.Array(ReviewStackOverviewReference),
+  layers: Schema.Array(ReviewStackLayer),
+});
+export type ReviewStackGenerationDocument = typeof ReviewStackGenerationDocument.Type;
 
 export const ReviewStackAnchor = Schema.Struct({
   id: TrimmedNonEmptyString,

@@ -47,7 +47,16 @@ describe("Review stack contracts", () => {
     ).toBe("high");
     expect(
       decodeDocument({
-        summary: "Two dependent changes.",
+        summary: "Two dependent changes with a new schema and service consumer.",
+        mergeAssessment: {
+          recommendation: "merge",
+          confidence: 4,
+          rationale: "The implementation is covered and has no blocking risks.",
+        },
+        references: [
+          { _tag: "layer", layerId: "foundation" },
+          { _tag: "file", path: "schema.ts" },
+        ],
         layers: [
           {
             id: "foundation",
@@ -59,6 +68,17 @@ describe("Review stack contracts", () => {
         ],
       }).layers,
     ).toHaveLength(1);
+    expect(() =>
+      decodeDocument({
+        summary: "Invalid confidence.",
+        mergeAssessment: {
+          recommendation: "merge",
+          confidence: 6,
+          rationale: "Outside the supported scale.",
+        },
+        layers: [],
+      }),
+    ).toThrow();
     expect(
       decodeEvent({
         snapshotId: "snapshot-1",
@@ -68,5 +88,14 @@ describe("Review stack contracts", () => {
         updatedAt: "2026-07-18T00:00:00.000Z",
       }).status,
     ).toBe("completed");
+  });
+
+  it("keeps review documents from before merge assessments readable", () => {
+    expect(
+      decodeDocument({
+        summary: "Legacy review.",
+        layers: [],
+      }),
+    ).toEqual({ summary: "Legacy review.", layers: [] });
   });
 });

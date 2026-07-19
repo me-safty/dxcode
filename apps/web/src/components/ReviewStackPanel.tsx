@@ -6,7 +6,13 @@ import {
   ReviewStackTarget,
   ThreadId,
 } from "@t3tools/contracts";
-import { AlertTriangleIcon, LoaderCircleIcon, RefreshCwIcon, SquareIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ChevronRightIcon,
+  LoaderCircleIcon,
+  RefreshCwIcon,
+  SquareIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getRenderablePatch, resolveDiffThemeName } from "~/lib/diffRendering";
@@ -16,8 +22,21 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { cn } from "~/lib/utils";
 
 import { Button } from "./ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 
 type Theme = "light" | "dark";
+
+export function summarizeReviewStackError(errorMessage: string | null): string | null {
+  const value = errorMessage?.trim();
+  if (!value || value.length <= 600) return value ?? null;
+
+  const structuredMessage = /"message"\s*:\s*"([^"\n]+)"/.exec(value)?.[1];
+  if (structuredMessage) return `Review generation failed: ${structuredMessage}`;
+  if (value.includes("missing field `supports_reasoning_summaries`")) {
+    return "Review generation failed because the Codex model cache is incompatible. Retry the review; if it continues, restart Codex.";
+  }
+  return "Review generation failed. The provider returned an oversized error; see the server logs for details.";
+}
 
 export function ReviewStackPanel(props: {
   environmentId: EnvironmentId;
@@ -39,6 +58,7 @@ export function ReviewStackPanel(props: {
   const ensuredKeys = useRef(new Set<string>());
   const [selectedId, setSelectedId] = useState<ReviewStackSnapshotId | null>(null);
   const [activeLayer, setActiveLayer] = useState(0);
+  const [overviewOpen, setOverviewOpen] = useState(true);
   const [commandError, setCommandError] = useState<string | null>(null);
 
   const list = useEnvironmentQuery(
@@ -98,7 +118,10 @@ export function ReviewStackPanel(props: {
     void runEnsure(false);
   }, [list.data, props.currentSourceHash, targetKey]);
 
-  useEffect(() => setActiveLayer(0), [selectedId]);
+  useEffect(() => {
+    setActiveLayer(0);
+    setOverviewOpen(true);
+  }, [selectedId]);
 
   useEffect(() => {
     if (events.data?.threadId !== props.threadId) return;
@@ -209,12 +232,88 @@ export function ReviewStackPanel(props: {
         </p>
       )}
       {value?.review && (
-        <div className="border-b border-border/70 px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Overview
-          </p>
-          <p className="mt-1 text-xs leading-relaxed">{value.review.summary}</p>
-        </div>
+        <Collapsible
+          className="border-b border-border/70 px-3 py-3"
+          open={overviewOpen}
+          onOpenChange={setOverviewOpen}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <CollapsibleTrigger
+              aria-label={overviewOpen ? "Collapse review overview" : "Expand review overview"}
+              className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+            >
+              <ChevronRightIcon
+                aria-hidden
+                className={cn(
+                  "size-3 transition-transform",
+                  overviewOpen ? "rotate-90" : "rotate-0",
+                )}
+              />
+              Overview
+            </CollapsibleTrigger>
+            {value.review.mergeAssessment && (
+              <>
+                <span
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase",
+                    value.review.mergeAssessment.recommendation === "merge"
+                      ? "bg-success/15 text-success"
+                      : "bg-destructive/15 text-destructive",
+                  )}
+                >
+                  {value.review.mergeAssessment.recommendation === "merge"
+                    ? "Merge"
+                    : "Do not merge"}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  Confidence {value.review.mergeAssessment.confidence}/5
+                </span>
+              </>
+            )}
+          </div>
+          <CollapsiblePanel>
+            <p className="mt-2 whitespace-pre-line text-xs leading-relaxed">
+              {value.review.summary}
+            </p>
+            {value.review.mergeAssessment && (
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                {value.review.mergeAssessment.rationale}
+              </p>
+            )}
+            {value.review.references && value.review.references.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-muted-foreground">References:</span>
+                {value.review.references.map((reference) => {
+                  if (reference._tag === "file") {
+                    return (
+                      <button
+                        key={`file:${reference.path}`}
+                        type="button"
+                        className="rounded border border-border/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={() => props.onOpenFile(reference.path)}
+                      >
+                        {reference.path}
+                      </button>
+                    );
+                  }
+                  const layerIndex = layers.findIndex((layer) => layer.id === reference.layerId);
+                  const layer = layers[layerIndex];
+                  if (!layer) return null;
+                  return (
+                    <button
+                      key={`layer:${reference.layerId}`}
+                      type="button"
+                      className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() => setActiveLayer(layerIndex)}
+                    >
+                      Step {layerIndex + 1}: {layer.title}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </CollapsiblePanel>
+        </Collapsible>
       )}
       {!value || snapshot.isPending ? (
         <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
@@ -225,7 +324,8 @@ export function ReviewStackPanel(props: {
         <div className="flex flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground">
           {value.metadata.status === "cancelled"
             ? "Review generation cancelled."
-            : (value.metadata.errorMessage ?? "Review generation failed.")}
+            : (summarizeReviewStackError(value.metadata.errorMessage) ??
+              "Review generation failed.")}
         </div>
       ) : isRunning && !value.review ? (
         <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
@@ -304,7 +404,9 @@ function LayerContent(props: {
   return (
     <main className="min-w-0 flex-1 overflow-auto p-3">
       <h2 className="text-sm font-semibold">{layer.title}</h2>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{layer.summary}</p>
+      <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
+        {layer.summary}
+      </p>
       {layer.diagram && (
         <section className="mt-3">
           <h3 className="mb-1 text-xs font-medium">{layer.diagram.title}</h3>
@@ -330,7 +432,9 @@ function LayerContent(props: {
                 >
                   {anchor.path}
                 </button>
-                <p className="text-xs font-medium">{range.summary}</p>
+                <p className="whitespace-pre-line text-xs font-medium leading-relaxed">
+                  {range.summary}
+                </p>
                 {range.risks.map((risk) => (
                   <div
                     key={`${risk.severity}:${risk.summary}:${risk.evidence}`}

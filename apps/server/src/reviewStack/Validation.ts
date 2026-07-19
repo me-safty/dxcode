@@ -65,5 +65,33 @@ export function validateReviewStackDocument(
       })),
     });
   }
-  return { summary: cap(document.summary), layers };
+  const layerIds = new Set(layers.map((layer) => layer.id));
+  const paths = new Set(
+    anchors
+      .flatMap((anchor) => [anchor.path, anchor.previousPath])
+      .filter((path): path is string => path !== null),
+  );
+  const referenceKeys = new Set<string>();
+  const references = document.references?.filter((reference) => {
+    const value = reference._tag === "layer" ? reference.layerId : reference.path;
+    const valid = reference._tag === "layer" ? layerIds.has(value) : paths.has(value);
+    const key = `${reference._tag}:${value}`;
+    if (!valid || referenceKeys.has(key)) return false;
+    referenceKeys.add(key);
+    return true;
+  });
+
+  return {
+    summary: cap(document.summary),
+    ...(document.mergeAssessment
+      ? {
+          mergeAssessment: {
+            ...document.mergeAssessment,
+            rationale: cap(document.mergeAssessment.rationale),
+          },
+        }
+      : {}),
+    ...(references ? { references } : {}),
+    layers,
+  };
 }
