@@ -3,6 +3,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProjectTaskId,
   ThreadId,
   TurnId,
   ProviderInstanceId,
@@ -11,6 +12,7 @@ import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -1430,6 +1432,90 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.equal(shellSnapshot.projects.length, 0);
       assert.equal(shellSnapshot.threads.length, 0);
+    }),
+  );
+});
+
+it.layer(
+  Layer.fresh(
+    OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provideMerge(RepositoryIdentityResolver.layer),
+      Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(NodeServices.layer),
+    ),
+  ),
+)("ProjectionSnapshotQuery project dashboard", (it) => {
+  it.effect("reads durable task rows at the task projector snapshot sequence", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = asProjectId("project-dashboard");
+
+      yield* sql`DELETE FROM projection_project_tasks`;
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_state`;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json, scripts_json,
+          created_at, updated_at, deleted_at
+        ) VALUES (
+          ${projectId}, 'Dashboard', '/tmp/project-dashboard', NULL, '[]',
+          '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:01.000Z', NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_project_tasks (
+          task_id, project_id, title, description, status, position, thread_id,
+          created_at, updated_at, completed_at
+        ) VALUES
+          ('task-open', ${projectId}, 'Open task', 'Still active', 'open', 1, NULL,
+           '2026-07-01T00:00:02.000Z', '2026-07-01T00:00:03.000Z', NULL),
+          ('task-done', ${projectId}, 'Done task', 'Already shipped', 'done', 0, 'thread-1',
+           '2026-07-01T00:00:02.000Z', '2026-07-01T00:00:04.000Z', '2026-07-01T00:00:04.000Z')
+      `;
+
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
+          VALUES (
+            ${projector},
+            ${projector === ORCHESTRATION_PROJECTOR_NAMES.projectTasks ? 7 : 9},
+            '2026-07-01T00:00:05.000Z'
+          )
+        `;
+      }
+
+      const result = yield* snapshotQuery.getProjectDashboardSnapshot(projectId);
+      assert.isTrue(Option.isSome(result));
+      if (Option.isNone(result)) return;
+      assert.equal(result.value.snapshotSequence, 7);
+      assert.equal(result.value.project.id, projectId);
+      assert.deepEqual(result.value.tasks, [
+        {
+          id: ProjectTaskId.make("task-done"),
+          projectId,
+          title: "Done task",
+          description: "Already shipped",
+          status: "done",
+          position: 0,
+          threadId: ThreadId.make("thread-1"),
+          createdAt: "2026-07-01T00:00:02.000Z",
+          updatedAt: "2026-07-01T00:00:04.000Z",
+          completedAt: "2026-07-01T00:00:04.000Z",
+        },
+        {
+          id: ProjectTaskId.make("task-open"),
+          projectId,
+          title: "Open task",
+          description: "Still active",
+          status: "open",
+          position: 1,
+          threadId: null,
+          createdAt: "2026-07-01T00:00:02.000Z",
+          updatedAt: "2026-07-01T00:00:03.000Z",
+          completedAt: null,
+        },
+      ]);
     }),
   );
 });

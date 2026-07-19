@@ -23,6 +23,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
+  ProjectTaskId,
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
@@ -5517,6 +5518,199 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
         yield* Deferred.await(localRefreshStarted);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "authorizes dashboard HTTP and websocket transports with orchestration read scope",
+    () =>
+      Effect.gen(function* () {
+        const now = "2026-07-01T00:00:00.000Z";
+        const project = makeDefaultOrchestrationReadModel().projects[0]!;
+        const dashboard = {
+          snapshotSequence: 4,
+          project,
+          tasks: [
+            {
+              id: ProjectTaskId.make("task-auth"),
+              projectId: defaultProjectId,
+              title: "Protected task",
+              description: "",
+              status: "open" as const,
+              position: 0,
+              threadId: null,
+              createdAt: now,
+              updatedAt: now,
+              completedAt: null,
+            },
+          ],
+        };
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              getProjectDashboardSnapshot: () => Effect.succeed(Option.some(dashboard)),
+            },
+          },
+        });
+
+        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+        const successResponse = yield* HttpClient.get(
+          `/api/orchestration/projects/${defaultProjectId}/dashboard`,
+          { headers: { cookie: ownerCookie } },
+        );
+        const successBody = (yield* successResponse.json) as typeof dashboard;
+        assert.equal(successResponse.status, 200);
+        assert.equal(successBody.tasks[0]?.title, "Protected task");
+
+        const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+          headers: { cookie: ownerCookie },
+          body: yield* HttpBody.json({ scopes: ["access:write"] }),
+        });
+        const pairingBody = (yield* pairingResponse.json) as { readonly credential: string };
+        const restrictedCookie = yield* getAuthenticatedSessionCookieHeader(pairingBody.credential);
+        const forbiddenResponse = yield* HttpClient.get(
+          `/api/orchestration/projects/${defaultProjectId}/dashboard`,
+          { headers: { cookie: restrictedCookie } },
+        );
+        const forbiddenBody = (yield* forbiddenResponse.json) as {
+          readonly code: string;
+          readonly requiredScope: string;
+        };
+        assert.equal(forbiddenResponse.status, 403);
+        assert.deepInclude(forbiddenBody, {
+          code: "insufficient_scope",
+          requiredScope: "orchestration:read",
+        });
+
+        const restrictedWsUrl = appendSessionCookieToWsUrl(
+          yield* getWsServerUrl("/ws", { authenticated: false }),
+          restrictedCookie,
+        );
+        const [snapshotError, streamError] = yield* Effect.scoped(
+          withWsRpcClient(restrictedWsUrl, (client) =>
+            Effect.all([
+              client[ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot]({
+                projectId: defaultProjectId,
+              }).pipe(Effect.flip),
+              client[ORCHESTRATION_WS_METHODS.subscribeProjectDashboard]({
+                projectId: defaultProjectId,
+              }).pipe(Stream.runCollect, Effect.flip),
+            ]),
+          ),
+        );
+        assert.equal(snapshotError._tag, "EnvironmentAuthorizationError");
+        assert.equal(streamError._tag, "EnvironmentAuthorizationError");
+        if (snapshotError._tag === "EnvironmentAuthorizationError") {
+          assert.equal(snapshotError.requiredScope, "orchestration:read");
+        }
+        if (streamError._tag === "EnvironmentAuthorizationError") {
+          assert.equal(streamError.requiredScope, "orchestration:read");
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("catches up project dashboard streams after the requested sequence", () =>
+    Effect.gen(function* () {
+      const readCalls: Array<readonly [number, number | undefined]> = [];
+      const taskId = ProjectTaskId.make("task-catch-up");
+      const otherProjectId = ProjectId.make("project-other");
+      const event = (
+        sequence: number,
+        aggregateId: ProjectId,
+        title: string,
+      ): Extract<OrchestrationEvent, { type: "project.task-created" }> => ({
+        sequence,
+        eventId: EventId.make(`event-task-${sequence}`),
+        aggregateKind: "project",
+        aggregateId,
+        occurredAt: `2026-07-01T00:00:0${sequence - 10}.000Z`,
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        type: "project.task-created",
+        payload: {
+          task: {
+            id: sequence === 12 ? ProjectTaskId.make("task-other") : taskId,
+            projectId: aggregateId,
+            title,
+            description: "",
+            status: "open",
+            position: 0,
+            threadId: null,
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z",
+            completedAt: null,
+          },
+        },
+      });
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEvents: (fromSequenceExclusive, limit) => {
+              readCalls.push([fromSequenceExclusive, limit]);
+              return Stream.fromIterable([
+                event(11, defaultProjectId, "Missed task"),
+                event(12, otherProjectId, "Other project"),
+                event(13, defaultProjectId, "Latest task"),
+              ]);
+            },
+            streamDomainEvents: Stream.empty,
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeProjectDashboard]({
+            projectId: defaultProjectId,
+            afterSequence: 10,
+          }).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      );
+
+      assert.deepEqual(readCalls, [[10, Number.MAX_SAFE_INTEGER]]);
+      assert.deepEqual(
+        Array.from(items).map((item) =>
+          item.kind === "event" ? [item.event.sequence, item.event.aggregateId] : ["snapshot"],
+        ),
+        [
+          [11, defaultProjectId],
+          [13, defaultProjectId],
+        ],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("preserves project-not-found dashboard RPC errors", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectDashboardSnapshot: () => Effect.succeed(Option.none()),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const [snapshotError, streamError] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all([
+            client[ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot]({
+              projectId: defaultProjectId,
+            }).pipe(Effect.flip),
+            client[ORCHESTRATION_WS_METHODS.subscribeProjectDashboard]({
+              projectId: defaultProjectId,
+            }).pipe(Stream.runCollect, Effect.flip),
+          ]),
+        ),
+      );
+
+      assert.equal(snapshotError._tag, "OrchestrationGetSnapshotError");
+      assert.equal(snapshotError.message, "Project not found");
+      assert.equal(streamError._tag, "OrchestrationGetSnapshotError");
+      assert.equal(streamError.message, "Project not found");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc orchestration methods", () =>

@@ -1073,13 +1073,6 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getProjectDashboardSnapshot,
             projectionSnapshotQuery.getProjectDashboardSnapshot(input.projectId).pipe(
-              Effect.flatMap((snapshot) => {
-                if (Option.isNone(snapshot))
-                  return Effect.fail(
-                    new OrchestrationGetSnapshotError({ message: "Project not found" }),
-                  );
-                return Effect.succeed(snapshot.value);
-              }),
               Effect.mapError(
                 (cause) =>
                   new OrchestrationGetSnapshotError({
@@ -1087,6 +1080,13 @@ const makeWsRpcLayer = (
                     cause,
                   }),
               ),
+              Effect.flatMap((snapshot) => {
+                if (Option.isNone(snapshot))
+                  return Effect.fail(
+                    new OrchestrationGetSnapshotError({ message: "Project not found" }),
+                  );
+                return Effect.succeed(snapshot.value);
+              }),
             ),
             { "rpc.aggregate": "orchestration" },
           ),
@@ -1129,9 +1129,17 @@ const makeWsRpcLayer = (
                   );
                 return Stream.concat(catchUp, bufferedLiveStream);
               }
-              const snapshot = yield* projectionSnapshotQuery.getProjectDashboardSnapshot(
-                input.projectId,
-              );
+              const snapshot = yield* projectionSnapshotQuery
+                .getProjectDashboardSnapshot(input.projectId)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to stream project dashboard",
+                        cause,
+                      }),
+                  ),
+                );
               if (Option.isNone(snapshot))
                 return yield* new OrchestrationGetSnapshotError({ message: "Project not found" });
               return Stream.concat(
@@ -1141,15 +1149,7 @@ const makeWsRpcLayer = (
                 }),
                 bufferedLiveStream,
               );
-            }).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationGetSnapshotError({
-                    message: "Failed to stream project dashboard",
-                    cause,
-                  }),
-              ),
-            ),
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) =>

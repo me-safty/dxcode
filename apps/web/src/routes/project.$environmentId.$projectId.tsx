@@ -32,6 +32,12 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { sortThreads } from "../lib/threadSort";
 import { cn } from "../lib/utils";
 import { newProjectTaskId } from "../lib/utils";
+import {
+  oppositeTaskStatus,
+  taskMoveTarget,
+  tasksForStatus,
+  taskThreadDraft,
+} from "./projectDashboard.logic";
 import { projectEnvironment } from "../state/projects";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
@@ -162,9 +168,7 @@ function ProjectDashboardRoute() {
   }
 
   const taskSection = (status: TaskStatus) => {
-    const sectionTasks = tasks
-      .filter((task) => task.status === status)
-      .toSorted((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+    const sectionTasks = tasksForStatus(tasks, status);
     return (
       <section aria-labelledby={`${status}-tasks-title`}>
         <div className="mb-2 flex items-center gap-2">
@@ -295,7 +299,7 @@ function ProjectDashboardRoute() {
                               environmentId,
                               input: {
                                 taskId: task.id,
-                                beforeTaskId: sectionTasks[index - 1]!.id,
+                                beforeTaskId: taskMoveTarget(sectionTasks, index, "up"),
                                 status,
                               },
                             }),
@@ -315,7 +319,7 @@ function ProjectDashboardRoute() {
                               environmentId,
                               input: {
                                 taskId: task.id,
-                                beforeTaskId: sectionTasks[index + 2]?.id ?? null,
+                                beforeTaskId: taskMoveTarget(sectionTasks, index, "down"),
                                 status,
                               },
                             }),
@@ -334,7 +338,7 @@ function ProjectDashboardRoute() {
                               input: {
                                 taskId: task.id,
                                 beforeTaskId: null,
-                                status: status === "open" ? "done" : "open",
+                                status: oppositeTaskStatus(status),
                               },
                             }),
                           )
@@ -387,7 +391,7 @@ function ProjectDashboardRoute() {
   ) {
     return handleNewThread(projectRef, {
       sourceTaskId: task.id,
-      draftPrompt: `${task.title}\n\n${task.description}`,
+      draftPrompt: taskThreadDraft(task),
       worktreePath,
       envMode,
     });
