@@ -289,7 +289,7 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
   it.effect("runs Claude text generation with the configured CLAUDE_CONFIG_DIR", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
-      const claudeConfigDir = path.join(process.cwd(), ".claude-work-test");
+      const claudeHome = path.join(process.cwd(), ".claude-work-test");
       return yield* withFakeClaudeEnv(
         {
           // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -298,8 +298,8 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
               title: "Use Claude home",
             },
           }),
-          configDirMustBe: claudeConfigDir,
-          claudeConfig: { homePath: claudeConfigDir },
+          configDirMustBe: path.join(claudeHome, ".claude"),
+          claudeConfig: { homePath: claudeHome },
         },
         (textGeneration) =>
           Effect.gen(function* () {

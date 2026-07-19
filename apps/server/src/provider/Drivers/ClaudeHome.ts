@@ -21,6 +21,7 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   const resolvedBaseEnv = baseEnv ?? process.env;
   const homePath = config.homePath.trim();
   if (homePath.length === 0) return resolvedBaseEnv;
+  const path = yield* Path.Path;
   const resolvedHomePath = yield* resolveClaudeHomePath(config);
   return {
     ...resolvedBaseEnv,
@@ -29,8 +30,9 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
     // ($HOME/Library/Keychains), so the spawned CLI can't find its stored
     // OAuth credentials and reports "Not logged in". CLAUDE_CONFIG_DIR points
     // Claude Code at its config dir directly while leaving HOME (and the
-    // keychain) intact.
-    CLAUDE_CONFIG_DIR: resolvedHomePath,
+    // keychain) intact. homePath historically represented HOME, so retain
+    // persisted settings by selecting the existing .claude child directory.
+    CLAUDE_CONFIG_DIR: path.join(resolvedHomePath, ".claude"),
   };
 });
 

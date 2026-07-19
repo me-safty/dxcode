@@ -38,26 +38,21 @@ export interface DefaultBranchActionDialogCopy {
   continueLabel: string;
 }
 
-/**
- * Resolve dirty files that still share changed lines with the net thread diff.
- * File-path intersection alone is insufficient: a thread hunk can already be
- * committed while an unrelated hunk remains dirty in the same file.
- */
+/** Resolve dirty files whose exact hunks remain in the net thread diff. */
 function splitGitFileSections(diff: string): string[] {
   const starts = [...diff.matchAll(/^diff --git /gm)].map((match) => match.index);
   return starts.map((start, index) => diff.slice(start, starts[index + 1] ?? diff.length));
 }
 
-function changedLineTokens(diff: string): Set<string> {
-  return new Set(
-    diff
-      .split("\n")
-      .filter(
-        (line) =>
-          (line.startsWith("+") && !line.startsWith("+++")) ||
-          (line.startsWith("-") && !line.startsWith("---")),
-      ),
-  );
+function splitGitHunks(section: string): string[] {
+  const starts = [...section.matchAll(/^@@ /gm)].map((match) => match.index);
+  return starts.map((start, index) => section.slice(start, starts[index + 1] ?? section.length));
+}
+
+function countValues(values: ReadonlyArray<string>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return counts;
 }
 
 function parseSectionPath(section: string): string | null {
@@ -69,9 +64,9 @@ function parseSectionPath(section: string): string | null {
 }
 
 /**
- * Rebuild the historical thread patch from the live worktree hunks that still
- * contain thread changes. Using the live patch headers makes the result apply
- * cleanly after earlier thread turns have already been committed.
+ * Rebuild the historical thread patch from exact live worktree hunks. Requiring
+ * the complete hunk (including its range and context) fails closed when nearby
+ * user edits merge into the same hunk or unrelated hunks repeat common lines.
  */
 export function resolveRemainingThreadPatch(
   threadDiff: string | null | undefined,
@@ -82,34 +77,39 @@ export function resolveRemainingThreadPatch(
   if (!normalizedThreadDiff || !normalizedWorkingTreeDiff) return null;
 
   try {
-    const threadLinesByPath = new Map<string, Set<string>>();
-    const threadPaths = new Set<string>();
+    const threadHunksByPath = new Map<string, Map<string, number>>();
+    const threadSectionsByPath = new Map<string, Map<string, number>>();
     for (const section of splitGitFileSections(normalizedThreadDiff)) {
       const path = parseSectionPath(section);
       if (!path) continue;
-      threadPaths.add(path);
-      const lines = threadLinesByPath.get(path) ?? new Set<string>();
-      for (const line of changedLineTokens(section)) lines.add(line);
-      threadLinesByPath.set(path, lines);
+      const hunks = splitGitHunks(section).map((hunk) => hunk.trimEnd());
+      if (hunks.length > 0) {
+        threadHunksByPath.set(path, countValues(hunks));
+      } else {
+        threadSectionsByPath.set(path, countValues([section.trimEnd()]));
+      }
     }
 
     const remainingSections: string[] = [];
     for (const section of splitGitFileSections(normalizedWorkingTreeDiff)) {
       const path = parseSectionPath(section);
-      if (!path || !threadPaths.has(path)) continue;
-      const threadLines = threadLinesByPath.get(path) ?? new Set<string>();
+      if (!path) continue;
       const hunkStarts = [...section.matchAll(/^@@ /gm)].map((match) => match.index);
 
       if (hunkStarts.length === 0) {
-        // Binary and pure-rename patches do not have textual hunks.
-        remainingSections.push(section);
+        const signature = section.trimEnd();
+        if (threadSectionsByPath.get(path)?.get(signature) === 1) remainingSections.push(section);
         continue;
       }
 
       const header = section.slice(0, hunkStarts[0]);
-      const matchingHunks = hunkStarts
-        .map((start, index) => section.slice(start, hunkStarts[index + 1] ?? section.length))
-        .filter((hunk) => [...changedLineTokens(hunk)].some((line) => threadLines.has(line)));
+      const workingHunks = splitGitHunks(section);
+      const workingHunkCounts = countValues(workingHunks.map((hunk) => hunk.trimEnd()));
+      const threadHunkCounts = threadHunksByPath.get(path);
+      const matchingHunks = workingHunks.filter((hunk) => {
+        const signature = hunk.trimEnd();
+        return threadHunkCounts?.get(signature) === 1 && workingHunkCounts.get(signature) === 1;
+      });
       if (matchingHunks.length > 0) {
         remainingSections.push(`${header}${matchingHunks.join("")}`);
       }

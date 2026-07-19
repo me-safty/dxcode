@@ -5115,7 +5115,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const diffPreview = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.reviewGetDiffPreview]({ cwd: "/tmp/repo" }),
+          client[WS_METHODS.reviewGetDiffPreview]({
+            cwd: "/tmp/repo",
+            threadId: ThreadId.make("thread-review-test"),
+          }),
         ),
       );
       assert.equal(diffPreview.sources[0]?.diff, "dirty-diff");

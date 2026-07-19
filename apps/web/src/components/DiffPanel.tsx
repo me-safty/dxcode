@@ -355,11 +355,12 @@ export default function DiffPanel({
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
   const overviewDiffPreviewQuery = useEnvironmentQuery(
-    activeThread && activeCwd
+    activeThread && activeThreadId !== null && activeCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
             cwd: activeCwd,
+            threadId: activeThreadId,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
             selection: selectedCommitSha
@@ -376,6 +377,7 @@ export default function DiffPanel({
   };
   const selectedFileDiffPreviewQuery = useEnvironmentQuery(
     activeThread &&
+      activeThreadId !== null &&
       activeCwd &&
       diffSelection.kind === "working-tree" &&
       diffSelection.file &&
@@ -384,6 +386,7 @@ export default function DiffPanel({
           environmentId: activeThread.environmentId,
           input: {
             cwd: activeCwd,
+            threadId: activeThreadId,
             ignoreWhitespace: diffIgnoreWhitespace,
             selection: {
               _tag: "file",

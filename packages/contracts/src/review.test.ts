@@ -24,6 +24,7 @@ describe("Review contracts", () => {
     expect(
       decodePreviewInput({
         cwd: "/repo",
+        threadId,
         selection: { _tag: "file", area: "staged", path: "src/app.ts" },
       }).selection,
     ).toEqual({ _tag: "file", area: "staged", path: "src/app.ts" });
@@ -32,7 +33,7 @@ describe("Review contracts", () => {
   it("decodes commit selections", () => {
     const sha = "0123456789abcdef0123456789abcdef01234567";
     expect(
-      decodePreviewInput({ cwd: "/repo", selection: { _tag: "commit", sha } }).selection,
+      decodePreviewInput({ cwd: "/repo", threadId, selection: { _tag: "commit", sha } }).selection,
     ).toEqual({ _tag: "commit", sha });
   });
 

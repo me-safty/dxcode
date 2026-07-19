@@ -54,94 +54,85 @@ export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
 
-  type MutationOperation =
+  type ReviewOperation =
+    | "ReviewService.getDiffPreview"
     | "ReviewService.discardChanges"
     | "ReviewService.stagePaths"
     | "ReviewService.unstagePaths";
 
-  const mutationContextError = (operation: MutationOperation, cwd: string, detail: string) =>
+  const reviewContextError = (operation: ReviewOperation, cwd: string, detail: string) =>
     new VcsRepositoryDetectionError({ operation, cwd, detail });
 
   const canonicalizeWorkspace = Effect.fn("ReviewService.canonicalizeWorkspace")(function* (
-    operation: MutationOperation,
+    operation: ReviewOperation,
     cwd: string,
   ) {
     const normalized = yield* workspacePaths
       .normalizeWorkspaceRoot(cwd)
       .pipe(
         Effect.mapError(() =>
-          mutationContextError(operation, cwd, "Review workspace is unavailable or invalid."),
+          reviewContextError(operation, cwd, "Review workspace is unavailable or invalid."),
         ),
       );
     return yield* fileSystem
       .realPath(normalized)
       .pipe(
         Effect.mapError(() =>
-          mutationContextError(operation, cwd, "Review workspace could not be canonicalized."),
+          reviewContextError(operation, cwd, "Review workspace could not be canonicalized."),
         ),
       );
   });
 
-  const resolveAuthorizedMutationCwd = Effect.fn("ReviewService.resolveAuthorizedMutationCwd")(
-    function* (
-      operation: MutationOperation,
-      input: { readonly cwd: string; readonly threadId: ReviewStagePathsInput["threadId"] },
-    ) {
-      const thread = yield* projectionSnapshotQuery
-        .getThreadShellById(input.threadId)
-        .pipe(
-          Effect.mapError(() =>
-            mutationContextError(
-              operation,
-              input.cwd,
-              "Review thread context could not be loaded.",
-            ),
-          ),
-        );
-      if (Option.isNone(thread)) {
-        return yield* mutationContextError(
-          operation,
-          input.cwd,
-          "Review thread does not exist or is archived.",
-        );
-      }
-      const project = yield* projectionSnapshotQuery
-        .getProjectShellById(thread.value.projectId)
-        .pipe(
-          Effect.mapError(() =>
-            mutationContextError(
-              operation,
-              input.cwd,
-              "Review project context could not be loaded.",
-            ),
-          ),
-        );
-      if (Option.isNone(project)) {
-        return yield* mutationContextError(
-          operation,
-          input.cwd,
-          "Review project does not exist or is archived.",
-        );
-      }
+  const resolveAuthorizedCwd = Effect.fn("ReviewService.resolveAuthorizedCwd")(function* (
+    operation: ReviewOperation,
+    input: { readonly cwd: string; readonly threadId: ReviewStagePathsInput["threadId"] },
+  ) {
+    const thread = yield* projectionSnapshotQuery
+      .getThreadShellById(input.threadId)
+      .pipe(
+        Effect.mapError(() =>
+          reviewContextError(operation, input.cwd, "Review thread context could not be loaded."),
+        ),
+      );
+    if (Option.isNone(thread)) {
+      return yield* reviewContextError(
+        operation,
+        input.cwd,
+        "Review thread does not exist or is archived.",
+      );
+    }
+    const project = yield* projectionSnapshotQuery
+      .getProjectShellById(thread.value.projectId)
+      .pipe(
+        Effect.mapError(() =>
+          reviewContextError(operation, input.cwd, "Review project context could not be loaded."),
+        ),
+      );
+    if (Option.isNone(project)) {
+      return yield* reviewContextError(
+        operation,
+        input.cwd,
+        "Review project does not exist or is archived.",
+      );
+    }
 
-      const authorizedCwd = thread.value.worktreePath ?? project.value.workspaceRoot;
-      const [requestedCanonicalCwd, authorizedCanonicalCwd] = yield* Effect.all([
-        canonicalizeWorkspace(operation, input.cwd),
-        canonicalizeWorkspace(operation, authorizedCwd),
-      ]);
-      if (requestedCanonicalCwd !== authorizedCanonicalCwd) {
-        return yield* mutationContextError(
-          operation,
-          input.cwd,
-          "Review workspace is not authorized for this thread.",
-        );
-      }
-      return authorizedCanonicalCwd;
-    },
-  );
+    const authorizedCwd = thread.value.worktreePath ?? project.value.workspaceRoot;
+    const [requestedCanonicalCwd, authorizedCanonicalCwd] = yield* Effect.all([
+      canonicalizeWorkspace(operation, input.cwd),
+      canonicalizeWorkspace(operation, authorizedCwd),
+    ]);
+    if (requestedCanonicalCwd !== authorizedCanonicalCwd) {
+      return yield* reviewContextError(
+        operation,
+        input.cwd,
+        "Review workspace is not authorized for this thread.",
+      );
+    }
+    return authorizedCanonicalCwd;
+  });
 
   const validatePaths = Effect.fn("ReviewService.validatePaths")(function* (
-    operation: MutationOperation,
+    operation: ReviewOperation,
     cwd: string,
     paths: ReadonlyArray<string>,
   ) {
@@ -165,7 +156,8 @@ export const make = Effect.gen(function* () {
   const getDiffPreview: ReviewService["Service"]["getDiffPreview"] = Effect.fn(
     "ReviewService.getDiffPreview",
   )(function* (input) {
-    const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
+    const authorizedCwd = yield* resolveAuthorizedCwd("ReviewService.getDiffPreview", input);
+    const handle = yield* vcsRegistry.detect({ cwd: authorizedCwd, requestedKind: "auto" });
     if (!handle) {
       return {
         cwd: input.cwd,
@@ -193,7 +185,7 @@ export const make = Effect.gen(function* () {
 
   const stagePaths: ReviewService["Service"]["stagePaths"] = Effect.fn("ReviewService.stagePaths")(
     function* (input) {
-      const authorizedCwd = yield* resolveAuthorizedMutationCwd("ReviewService.stagePaths", input);
+      const authorizedCwd = yield* resolveAuthorizedCwd("ReviewService.stagePaths", input);
       yield* validatePaths("ReviewService.stagePaths", input.cwd, input.paths);
 
       const handle = yield* vcsRegistry.detect({ cwd: authorizedCwd, requestedKind: "auto" });
@@ -211,10 +203,7 @@ export const make = Effect.gen(function* () {
   const discardChanges: ReviewService["Service"]["discardChanges"] = Effect.fn(
     "ReviewService.discardChanges",
   )(function* (input) {
-    const authorizedCwd = yield* resolveAuthorizedMutationCwd(
-      "ReviewService.discardChanges",
-      input,
-    );
+    const authorizedCwd = yield* resolveAuthorizedCwd("ReviewService.discardChanges", input);
     yield* validatePaths(
       "ReviewService.discardChanges",
       input.cwd,
@@ -237,7 +226,7 @@ export const make = Effect.gen(function* () {
   const unstagePaths: ReviewService["Service"]["unstagePaths"] = Effect.fn(
     "ReviewService.unstagePaths",
   )(function* (input) {
-    const authorizedCwd = yield* resolveAuthorizedMutationCwd("ReviewService.unstagePaths", input);
+    const authorizedCwd = yield* resolveAuthorizedCwd("ReviewService.unstagePaths", input);
     yield* validatePaths(
       "ReviewService.unstagePaths",
       input.cwd,

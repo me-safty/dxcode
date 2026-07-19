@@ -2077,7 +2077,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   const readSelectedReviewDiff = Effect.fn("readSelectedReviewDiff")(function* (
-    input: ReviewDiffPreviewInput,
+    input: Omit<ReviewDiffPreviewInput, "threadId">,
     manifest: ReturnType<typeof parseReviewStatus> & { truncated: boolean },
   ) {
     const selection = input.selection ?? { _tag: "all" as const };
@@ -2252,7 +2252,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
-    input: ReviewDiffPreviewInput,
+    input: Omit<ReviewDiffPreviewInput, "threadId">,
   ) {
     const details = yield* statusDetailsLocal(input.cwd);
     if (!details.isRepo) {

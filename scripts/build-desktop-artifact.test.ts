@@ -122,6 +122,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("switches the bundled splash and favicon branding for nightly versions", () => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
     assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");
+    assert.equal(resolveDesktopWebAssetBrand("0.0.17", "dx"), "development");
+    assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42", "dx"), "development");
   });
 
   it.effect("resolves GitHub desktop publish config from Effect config", () =>

@@ -118,6 +118,53 @@ describe("resolveRemainingThreadPatch", () => {
     assert.notInclude(remainingPatch, "+new unrelated");
   });
 
+  it("rejects an unrelated hunk that only repeats a changed line", () => {
+    const threadDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -1,2 +1,2 @@",
+      "-const thread = { open: true;",
+      "+const thread = { open: false;",
+      " }",
+    ].join("\n");
+    const workingTreeDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -20,2 +20,2 @@",
+      "-const manual = { open: true;",
+      "+const manual = { open: false;",
+      " }",
+    ].join("\n");
+
+    assert.isNull(resolveRemainingThreadPatch(threadDiff, workingTreeDiff));
+  });
+
+  it("rejects a thread hunk combined with an adjacent user edit", () => {
+    const threadDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -1,2 +1,2 @@",
+      "-const value = 1;",
+      "+const value = 2;",
+      " export default value;",
+    ].join("\n");
+    const workingTreeDiff = [
+      "diff --git a/src/shared.ts b/src/shared.ts",
+      "--- a/src/shared.ts",
+      "+++ b/src/shared.ts",
+      "@@ -1,2 +1,3 @@",
+      "-const value = 1;",
+      "+const value = 2;",
+      "+const manual = true;",
+      " export default value;",
+    ].join("\n");
+
+    assert.isNull(resolveRemainingThreadPatch(threadDiff, workingTreeDiff));
+  });
+
   it("returns an empty selection for a missing or malformed diff", () => {
     const files = [{ path: "src/thread.ts", insertions: 1, deletions: 0 }];
     assert.isNull(resolveRemainingThreadPatch(null, ""));

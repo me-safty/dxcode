@@ -74,7 +74,7 @@ export class VcsDriver extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<string>, VcsError>;
     readonly initRepository: (input: VcsInitInput) => Effect.Effect<void, VcsError>;
     readonly getDiffPreview?: (
-      input: ReviewDiffPreviewInput,
+      input: Omit<ReviewDiffPreviewInput, "threadId">,
     ) => Effect.Effect<ReviewDiffPreviewResult, VcsError>;
   }
 >()("t3/vcs/VcsDriver") {}

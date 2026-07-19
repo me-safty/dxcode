@@ -124,7 +124,7 @@ describe("ReviewService", () => {
 
       yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
-        yield* review.getDiffPreview({ cwd: nestedCwd });
+        yield* review.getDiffPreview({ cwd: nestedCwd, threadId: TEST_THREAD_ID });
         yield* review.discardChanges({
           cwd: nestedCwd,
           threadId: TEST_THREAD_ID,
@@ -155,16 +155,39 @@ describe("ReviewService", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
+      const canonicalProjectRoot = yield* fs.realPath(projectRoot);
       const detectCalls: Array<{ readonly cwd: string }> = [];
 
       const result = yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
-        return yield* review.getDiffPreview({ cwd: projectRoot });
-      }).pipe(Effect.provide(makeLayer({ detectCalls })));
+        return yield* review.getDiffPreview({ cwd: projectRoot, threadId: TEST_THREAD_ID });
+      }).pipe(Effect.provide(makeLayer({ authorizedCwd: projectRoot, detectCalls })));
 
       assert.strictEqual(result.cwd, projectRoot);
       assert.deepStrictEqual(result.sources, []);
-      assert.deepStrictEqual(detectCalls, [{ cwd: projectRoot }]);
+      assert.deepStrictEqual(detectCalls, [{ cwd: canonicalProjectRoot }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects diff preview cwd outside the thread workspace", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const authorizedCwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-authorized-" });
+      const requestedCwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-unauthorized-" });
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review
+          .getDiffPreview({ cwd: requestedCwd, threadId: TEST_THREAD_ID })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(makeLayer({ authorizedCwd, detectCalls })));
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+      if (error._tag === "VcsRepositoryDetectionError") {
+        assert.include(error.detail, "not authorized");
+      }
+      assert.deepStrictEqual(detectCalls, []);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

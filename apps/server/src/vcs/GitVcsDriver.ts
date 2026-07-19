@@ -227,7 +227,7 @@ export class GitVcsDriver extends Context.Service<
       baseRef: string,
     ) => Effect.Effect<GitRangeContext, GitCommandError>;
     readonly getReviewDiffPreview: (
-      input: ReviewDiffPreviewInput,
+      input: Omit<ReviewDiffPreviewInput, "threadId">,
     ) => Effect.Effect<ReviewDiffPreviewResult, GitCommandError>;
     readonly discardReviewChanges: (
       input: Omit<ReviewDiscardChangesInput, "threadId">,
