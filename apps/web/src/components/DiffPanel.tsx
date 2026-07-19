@@ -708,6 +708,53 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
   const headerRow = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
+        <div
+          className="flex h-6 shrink-0 items-center rounded-md border border-border/70 bg-muted/40 p-0.5"
+          role="tablist"
+          aria-label="Diff views"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={innerTab === "diff"}
+            className={cn(
+              "h-5 rounded-sm px-2 text-xs transition-colors",
+              innerTab === "diff"
+                ? "bg-background font-medium text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setInnerTab("diff")}
+          >
+            Diff
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={innerTab === "review-stack"}
+            className={cn(
+              "h-5 rounded-sm px-2 text-xs transition-colors",
+              innerTab === "review-stack"
+                ? "bg-background font-medium text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setInnerTab("review-stack")}
+          >
+            Review stack
+            {reviewStackBadgeStatus && (
+              <span
+                className={cn(
+                  "ml-1 inline-block size-1.5 rounded-full",
+                  reviewStackBadgeStatus === "failed" ? "bg-destructive" : "bg-primary",
+                )}
+                aria-label={
+                  reviewStackBadgeStatus === "failed"
+                    ? "Review stack failed"
+                    : "Review stack running"
+                }
+              />
+            )}
+          </button>
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger
             className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted/70 px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
@@ -965,75 +1012,17 @@ export default function DiffPanel({ mode = "inline", composerDraftTarget }: Diff
         </div>
       ) : (
         <div className="@container flex min-h-0 min-w-0 flex-1 flex-col">
-          <div
-            className="flex h-9 shrink-0 items-end gap-1 border-b border-border/70 px-3"
-            role="tablist"
-            aria-label="Diff views"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={innerTab === "diff"}
-              className={cn(
-                "h-8 border-b-2 px-2 text-xs",
-                innerTab === "diff"
-                  ? "border-primary font-medium text-foreground"
-                  : "border-transparent text-muted-foreground",
-              )}
-              onClick={() => setInnerTab("diff")}
-            >
-              Diff
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={innerTab === "review-stack"}
-              className={cn(
-                "h-8 border-b-2 px-2 text-xs",
-                innerTab === "review-stack"
-                  ? "border-primary font-medium text-foreground"
-                  : "border-transparent text-muted-foreground",
-              )}
-              onClick={() => setInnerTab("review-stack")}
-            >
-              Review stack
-              {reviewStackBadgeStatus && (
-                <span
-                  className={cn(
-                    "ml-1 inline-block size-1.5 rounded-full",
-                    reviewStackBadgeStatus === "failed" ? "bg-destructive" : "bg-primary",
-                  )}
-                  aria-label={
-                    reviewStackBadgeStatus === "failed"
-                      ? "Review stack failed"
-                      : "Review stack running"
-                  }
-                />
-              )}
-            </button>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    role="tab"
-                    disabled
-                    className="h-8 cursor-not-allowed border-b-2 border-transparent px-2 text-xs text-muted-foreground/50"
-                  />
-                }
-              >
-                Full review · Soon
-              </TooltipTrigger>
-              <TooltipPopup side="top">Coming soon</TooltipPopup>
-            </Tooltip>
-          </div>
           {innerTab === "review-stack" && activeThread && reviewStackTarget ? (
             <ReviewStackPanel
               environmentId={activeThread.environmentId}
               threadId={activeThread.id}
               target={reviewStackTarget}
               ignoreWhitespace={diffIgnoreWhitespace}
-              currentSourceHash={selectedTurn ? null : (reviewStackGitSource?.diffHash ?? null)}
+              currentSourceHash={
+                selectedTurn || reviewStackGitSource?.truncated
+                  ? null
+                  : (reviewStackGitSource?.diffHash ?? null)
+              }
               theme={resolvedTheme as DiffThemeType}
               diffStyle={diffRenderMode}
               wordWrap={wordWrap}
