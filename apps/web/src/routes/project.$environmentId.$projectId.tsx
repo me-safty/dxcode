@@ -6,6 +6,7 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CheckIcon,
+  ChevronDownIcon,
   CircleIcon,
   ExternalLinkIcon,
   PlusIcon,
@@ -17,7 +18,9 @@ import { useEffect, useMemo, useState } from "react";
 import { ProjectFavicon } from "../components/ProjectFavicon";
 import { resolveThreadStatusPill } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
+import { ButtonGroup } from "../components/ui/group";
 import { Input } from "../components/ui/input";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Textarea } from "../components/ui/textarea";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -166,10 +169,44 @@ function ProjectDashboardRoute() {
     );
   }
 
+  const taskForm = (
+    <form
+      className="min-w-0 rounded-xl border bg-card/40 p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submitTask();
+      }}
+    >
+      <Textarea
+        autoFocus
+        className="w-full"
+        size="sm"
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+        placeholder="What needs doing?"
+        aria-label="Task"
+      />
+      <div className="mt-3 flex gap-2 sm:justify-end">
+        <Button
+          className="flex-1 sm:flex-none"
+          size="sm"
+          type="button"
+          variant="ghost"
+          onClick={() => setAdding(false)}
+        >
+          Cancel
+        </Button>
+        <Button className="flex-1 sm:flex-none" size="sm" type="submit" disabled={!title.trim()}>
+          Add task
+        </Button>
+      </div>
+    </form>
+  );
+
   const taskSection = (status: TaskStatus) => {
     const sectionTasks = tasksForStatus(tasks, status);
     return (
-      <section aria-labelledby={`${status}-tasks-title`}>
+      <section className="min-w-0" aria-labelledby={`${status}-tasks-title`}>
         <div className="mb-2 flex items-center gap-2">
           {status === "open" ? (
             <CircleIcon className="size-3.5" />
@@ -193,7 +230,7 @@ function ProjectDashboardRoute() {
               : null;
             const editing = editingTaskId === task.id;
             return (
-              <article key={task.id} className="rounded-xl border bg-card/40 p-3">
+              <article key={task.id} className="min-w-0 rounded-xl border bg-card/40 p-3">
                 {editing ? (
                   <TaskEditor
                     task={task}
@@ -260,38 +297,43 @@ function ProjectDashboardRoute() {
                           <RotateCcwIcon className="size-3" /> Restore thread
                         </Button>
                       ) : (
-                        <>
+                        <ButtonGroup>
                           <Button
                             size="xs"
                             onClick={() => void startTaskThread(task, null, "local")}
                           >
                             Start thread
                           </Button>
-                          <Button
-                            size="icon-xs"
-                            variant="outline"
-                            aria-label={`Choose workspace for ${task.title}`}
-                            onClick={() => {
-                              const worktrees = groups
-                                .filter(([path]) => path !== "")
-                                .map(([path, groupThreads]) => ({
-                                  path,
-                                  title: workspaceTitle(path, groupThreads),
-                                }));
-                              const choice = window.prompt(
-                                `Workspace:\n1. New worktree${worktrees.map((worktree, index) => `\n${index + 2}. ${worktree.title}`).join("")}`,
-                                "1",
-                              );
-                              const selected = Number(choice);
-                              if (selected === 1) void startTaskThread(task, null, "worktree");
-                              else if (worktrees[selected - 2]) {
-                                void startTaskThread(task, worktrees[selected - 2]!.path, "local");
+                          <Menu>
+                            <MenuTrigger
+                              render={
+                                <Button
+                                  size="icon-xs"
+                                  aria-label={`Choose workspace for ${task.title}`}
+                                />
                               }
-                            }}
-                          >
-                            …
-                          </Button>
-                        </>
+                            >
+                              <ChevronDownIcon />
+                            </MenuTrigger>
+                            <MenuPopup align="end" className="min-w-48">
+                              <MenuItem
+                                onClick={() => void startTaskThread(task, null, "worktree")}
+                              >
+                                New worktree
+                              </MenuItem>
+                              {groups
+                                .filter(([path]) => path !== "")
+                                .map(([path, groupThreads]) => (
+                                  <MenuItem
+                                    key={path}
+                                    onClick={() => void startTaskThread(task, path, "local")}
+                                  >
+                                    {workspaceTitle(path, groupThreads)}
+                                  </MenuItem>
+                                ))}
+                            </MenuPopup>
+                          </Menu>
+                        </ButtonGroup>
                       )}
                       <Button
                         size="icon-xs"
@@ -384,6 +426,15 @@ function ProjectDashboardRoute() {
               </article>
             );
           })}
+          {status === "open" ? (
+            adding ? (
+              taskForm
+            ) : (
+              <Button className="w-full" variant="outline" onClick={() => setAdding(true)}>
+                <PlusIcon /> New task
+              </Button>
+            )
+          ) : null}
         </div>
       </section>
     );
@@ -406,21 +457,13 @@ function ProjectDashboardRoute() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <header
         className={cn(
-          "flex min-h-13 flex-wrap items-center gap-3 border-b px-4 py-2 sm:flex-nowrap sm:px-6 sm:py-0",
+          "flex min-h-13 flex-wrap items-center gap-3 border-b px-3 py-2 sm:flex-nowrap sm:px-6 sm:py-0",
           COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
       >
         <ProjectFavicon environmentId={environmentId} cwd={project.workspaceRoot} />
         <h1 className="min-w-0 truncate text-sm font-semibold">{project.title}</h1>
         <div className="order-3 flex w-full items-center gap-2 sm:order-none sm:ml-auto sm:w-auto">
-          <Button
-            className="flex-1 sm:flex-none"
-            size="sm"
-            variant="outline"
-            onClick={() => setAdding(true)}
-          >
-            <PlusIcon /> Add task
-          </Button>
           <Button
             className="flex-1 sm:flex-none"
             size="sm"
@@ -432,9 +475,9 @@ function ProjectDashboardRoute() {
           </Button>
         </div>
       </header>
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid w-full max-w-6xl gap-8 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)]">
-          <section aria-labelledby="active-threads-title">
+      <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-6 p-3 sm:gap-8 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)]">
+          <section className="min-w-0" aria-labelledby="active-threads-title">
             <h2 id="active-threads-title" className="mb-3 text-sm font-semibold">
               Active threads
             </h2>
@@ -446,8 +489,8 @@ function ProjectDashboardRoute() {
               ) : null}
               {groups.map(([path, groupThreads]) => (
                 <div key={path || "root"}>
-                  <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <span>{workspaceTitle(path, groupThreads)}</span>
+                  <div className="mb-1.5 flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <span className="min-w-0 truncate">{workspaceTitle(path, groupThreads)}</span>
                   </div>
                   <div className="overflow-hidden rounded-xl border">
                     {groupThreads.map((thread) => {
@@ -473,7 +516,7 @@ function ProjectDashboardRoute() {
                           )}
                           <span className="min-w-0 flex-1 truncate">{thread.title}</span>
                           {thread.branch ? (
-                            <span className="max-w-40 truncate text-xs text-muted-foreground">
+                            <span className="hidden max-w-40 truncate text-xs text-muted-foreground sm:block">
                               {thread.branch}
                             </span>
                           ) : null}
@@ -485,40 +528,7 @@ function ProjectDashboardRoute() {
               ))}
             </div>
           </section>
-          <div className="space-y-7">
-            {adding ? (
-              <form
-                className="min-w-0 rounded-xl border bg-card/40 p-3"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void submitTask();
-                }}
-              >
-                <Textarea
-                  autoFocus
-                  className="w-full"
-                  size="sm"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="What needs doing?"
-                  aria-label="Task"
-                />
-                <div className="mt-3 flex gap-2 sm:justify-end">
-                  <Button
-                    className="flex-1 sm:flex-none"
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setAdding(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button className="flex-1 sm:flex-none" size="sm" disabled={!title.trim()}>
-                    Add task
-                  </Button>
-                </div>
-              </form>
-            ) : null}
+          <div className="min-w-0 space-y-7">
             {taskSection("open")}
             {taskSection("done")}
           </div>
