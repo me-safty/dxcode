@@ -92,7 +92,7 @@ import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
-import { openPullRequestLink } from "~/lib/openPullRequestLink";
+import { useOpenPullRequestLink } from "~/lib/openPullRequestLink";
 import { useRefreshOnWindowFocus } from "~/features/git-review-controls/useRefreshOnWindowFocus";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { reviewEnvironment } from "~/state/review";
@@ -992,6 +992,7 @@ export default function GitActionsControl({
     () => (activeThreadRef ? { threadRef: activeThreadRef } : undefined),
     [activeThreadRef],
   );
+  const openPullRequestLink = useOpenPullRequestLink();
   const activeServerThread = useThread(activeThreadRef);
   const activeDraftThread = useComposerDraftStore((store) =>
     draftId
@@ -1278,15 +1279,6 @@ export default function GitActionsControl({
   useRefreshOnWindowFocus(refreshCurrentGitStatus, gitCwd !== null);
 
   const openExistingPr = useCallback(async () => {
-    const api = readLocalApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Link opening is unavailable.",
-        data: threadToastData,
-      });
-      return;
-    }
     const prUrl = gitStatusForActions?.pr?.state === "open" ? gitStatusForActions.pr.url : null;
     if (!prUrl) {
       toastManager.add({
@@ -1296,7 +1288,7 @@ export default function GitActionsControl({
       });
       return;
     }
-    void openPullRequestLink(api.shell, prUrl).catch((err: unknown) => {
+    void openPullRequestLink(prUrl, activeThreadRef).catch((err: unknown) => {
       console.error(err);
       toastManager.add(
         stackedThreadToast({
@@ -1307,7 +1299,7 @@ export default function GitActionsControl({
         }),
       );
     });
-  }, [gitStatusForActions, threadToastData]);
+  }, [activeThreadRef, gitStatusForActions, openPullRequestLink, threadToastData]);
 
   runGitActionWithToast = useEffectEvent(
     async ({
@@ -1511,10 +1503,18 @@ export default function GitActionsControl({
         toastActionProps = {
           children: toastCta.label,
           onClick: () => {
-            const api = readLocalApi();
-            if (!api) return;
             closeResultToast();
-            void api.shell.openExternal(toastCta.url);
+            void openPullRequestLink(toastCta.url, activeThreadRef).catch((error: unknown) => {
+              console.error(error);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Unable to open pull request link",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                  ...(scopedToastData !== undefined ? { data: scopedToastData } : {}),
+                }),
+              );
+            });
           },
         };
       }

@@ -537,7 +537,7 @@ export function BranchToolbarBranchSelector({
   // Action-oriented tooltip (the pill opens the PR), distinct from the sidebar's
   // state-description tooltip.
   const branchPrTooltip = branchPr
-    ? `Open ${sourceControlPresentation.terminology.singular} #${branchPr.number} (${branchPr.state}) in browser`
+    ? `Open ${sourceControlPresentation.terminology.singular} #${branchPr.number} (${branchPr.state}) in preview`
     : "";
   const openPrLink = useOpenPrLink();
 
@@ -645,7 +645,7 @@ export function BranchToolbarBranchSelector({
                 <button
                   type="button"
                   aria-label={branchPrTooltip}
-                  onClick={(event) => openPrLink(event, branchPrStatus.url)}
+                  onClick={(event) => openPrLink(event, branchPrStatus.url, threadRef)}
                   className={cn(
                     "inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium tabular-nums transition-colors hover:bg-muted/60",
                     branchPrStatus.colorClass,
