@@ -1,17 +1,12 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import {
-  EnvironmentId,
-  ProjectId,
-  ProjectTaskId,
-  type ProjectTask,
-  type SidebarThreadSortOrder,
-} from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProjectTaskId, type ProjectTask } from "@t3tools/contracts";
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
   CheckIcon,
+  ChevronDownIcon,
   CircleIcon,
   ExternalLinkIcon,
   PlusIcon,
@@ -23,13 +18,14 @@ import { useEffect, useMemo, useState } from "react";
 import { ProjectFavicon } from "../components/ProjectFavicon";
 import { resolveThreadStatusPill } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
+import { ButtonGroup } from "../components/ui/group";
 import { Input } from "../components/ui/input";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Textarea } from "../components/ui/textarea";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
-import { useClientSettings } from "../hooks/useSettings";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { sortThreads } from "../lib/threadSort";
+import { toSortableTimestamp } from "../lib/threadSort";
 import { cn } from "../lib/utils";
 import { newProjectTaskId } from "../lib/utils";
 import {
@@ -51,6 +47,15 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../workspaceTitlebar";
 
 type TaskStatus = ProjectTask["status"];
 
+function workspaceTitle(path: string, threads: ReadonlyArray<{ branch: string | null }>) {
+  if (path === "") return "Project root";
+  return threads.find((thread) => thread.branch !== null)?.branch ?? "Worktree";
+}
+
+function updatedTimestamp(thread: { updatedAt: string }) {
+  return toSortableTimestamp(thread.updatedAt) ?? Number.NEGATIVE_INFINITY;
+}
+
 function errorText(result: unknown): string {
   const error = squashAtomCommandFailure(result as never);
   return error instanceof Error ? error.message : "Request failed.";
@@ -71,9 +76,6 @@ function ProjectDashboardRoute() {
     projectEnvironment.dashboard({ environmentId, input: { projectId } }),
   );
   const threads = useThreadShellsForProjectRefs([projectRef]);
-  const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
-    (settings) => settings.sidebarThreadSortOrder,
-  );
   const handleNewThread = useNewThreadHandler();
   const createTask = useAtomCommand(projectEnvironment.createTask, { reportFailure: false });
   const updateTask = useAtomCommand(projectEnvironment.updateTask, { reportFailure: false });
@@ -82,7 +84,6 @@ function ProjectDashboardRoute() {
   const restoreThread = useAtomCommand(threadEnvironment.unarchive, { reportFailure: false });
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<ProjectTaskId | null>(null);
 
   useEffect(() => {
@@ -99,21 +100,23 @@ function ProjectDashboardRoute() {
 
   const groups = useMemo(() => {
     if (!project) return [];
-    const sorted = sortThreads(
-      threads.filter((thread) => thread.archivedAt === null),
-      threadSortOrder,
-    );
+    const sorted = threads
+      .filter((thread) => thread.archivedAt === null)
+      .toSorted(
+        (left, right) =>
+          updatedTimestamp(right) - updatedTimestamp(left) || right.id.localeCompare(left.id),
+      );
     const byPath = new Map<string, typeof sorted>();
     for (const thread of sorted) {
       const key = thread.worktreePath ?? "";
       byPath.set(key, [...(byPath.get(key) ?? []), thread]);
     }
-    return [...byPath.entries()].toSorted(([left], [right]) => {
-      if (left === "") return -1;
-      if (right === "") return 1;
-      return left.localeCompare(right);
+    return [...byPath.entries()].toSorted(([leftPath, leftThreads], [rightPath, rightThreads]) => {
+      const timestampDifference =
+        updatedTimestamp(rightThreads[0]!) - updatedTimestamp(leftThreads[0]!);
+      return timestampDifference || leftPath.localeCompare(rightPath);
     });
-  }, [project, threadSortOrder, threads]);
+  }, [project, threads]);
 
   const tasks = dashboard.data?.tasks ?? [];
   const runTaskCommand = async (run: () => Promise<unknown>) => {
@@ -138,12 +141,11 @@ function ProjectDashboardRoute() {
     const ok = await runTaskCommand(() =>
       createTask({
         environmentId,
-        input: { taskId: newProjectTaskId(), projectId, title: trimmed, description },
+        input: { taskId: newProjectTaskId(), projectId, title: trimmed, description: "" },
       }),
     );
     if (ok) {
       setTitle("");
-      setDescription("");
       setAdding(false);
     }
   };
@@ -167,10 +169,44 @@ function ProjectDashboardRoute() {
     );
   }
 
+  const taskForm = (
+    <form
+      className="min-w-0 rounded-xl border bg-card/40 p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submitTask();
+      }}
+    >
+      <Textarea
+        autoFocus
+        className="w-full"
+        size="sm"
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+        placeholder="What needs doing?"
+        aria-label="Task"
+      />
+      <div className="mt-3 flex gap-2 sm:justify-end">
+        <Button
+          className="flex-1 sm:flex-none"
+          size="sm"
+          type="button"
+          variant="ghost"
+          onClick={() => setAdding(false)}
+        >
+          Cancel
+        </Button>
+        <Button className="flex-1 sm:flex-none" size="sm" type="submit" disabled={!title.trim()}>
+          Add task
+        </Button>
+      </div>
+    </form>
+  );
+
   const taskSection = (status: TaskStatus) => {
     const sectionTasks = tasksForStatus(tasks, status);
     return (
-      <section aria-labelledby={`${status}-tasks-title`}>
+      <section className="min-w-0" aria-labelledby={`${status}-tasks-title`}>
         <div className="mb-2 flex items-center gap-2">
           {status === "open" ? (
             <CircleIcon className="size-3.5" />
@@ -194,7 +230,7 @@ function ProjectDashboardRoute() {
               : null;
             const editing = editingTaskId === task.id;
             return (
-              <article key={task.id} className="rounded-xl border bg-card/40 p-3">
+              <article key={task.id} className="min-w-0 rounded-xl border bg-card/40 p-3">
                 {editing ? (
                   <TaskEditor
                     task={task}
@@ -222,14 +258,14 @@ function ProjectDashboardRoute() {
                     >
                       <h3
                         className={cn(
-                          "text-sm font-medium",
+                          "break-words text-sm font-medium",
                           status === "done" && "text-muted-foreground line-through",
                         )}
                       >
                         {task.title}
                       </h3>
                       {task.description ? (
-                        <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                        <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
                           {task.description}
                         </p>
                       ) : null}
@@ -261,32 +297,43 @@ function ProjectDashboardRoute() {
                           <RotateCcwIcon className="size-3" /> Restore thread
                         </Button>
                       ) : (
-                        <>
+                        <ButtonGroup>
                           <Button
                             size="xs"
                             onClick={() => void startTaskThread(task, null, "local")}
                           >
                             Start thread
                           </Button>
-                          <Button
-                            size="icon-xs"
-                            variant="outline"
-                            aria-label={`Choose workspace for ${task.title}`}
-                            onClick={() => {
-                              const worktrees = groups.map(([path]) => path).filter(Boolean);
-                              const choice = window.prompt(
-                                `Workspace:\n1. New worktree${worktrees.map((path, index) => `\n${index + 2}. ${path}`).join("")}`,
-                                "1",
-                              );
-                              const selected = Number(choice);
-                              if (selected === 1) void startTaskThread(task, null, "worktree");
-                              else if (worktrees[selected - 2])
-                                void startTaskThread(task, worktrees[selected - 2]!, "local");
-                            }}
-                          >
-                            …
-                          </Button>
-                        </>
+                          <Menu>
+                            <MenuTrigger
+                              render={
+                                <Button
+                                  size="icon-xs"
+                                  aria-label={`Choose workspace for ${task.title}`}
+                                />
+                              }
+                            >
+                              <ChevronDownIcon />
+                            </MenuTrigger>
+                            <MenuPopup align="end" className="min-w-48">
+                              <MenuItem
+                                onClick={() => void startTaskThread(task, null, "worktree")}
+                              >
+                                New worktree
+                              </MenuItem>
+                              {groups
+                                .filter(([path]) => path !== "")
+                                .map(([path, groupThreads]) => (
+                                  <MenuItem
+                                    key={path}
+                                    onClick={() => void startTaskThread(task, path, "local")}
+                                  >
+                                    {workspaceTitle(path, groupThreads)}
+                                  </MenuItem>
+                                ))}
+                            </MenuPopup>
+                          </Menu>
+                        </ButtonGroup>
                       )}
                       <Button
                         size="icon-xs"
@@ -379,6 +426,15 @@ function ProjectDashboardRoute() {
               </article>
             );
           })}
+          {status === "open" ? (
+            adding ? (
+              taskForm
+            ) : (
+              <Button className="w-full" variant="outline" onClick={() => setAdding(true)}>
+                <PlusIcon /> New task
+              </Button>
+            )
+          ) : null}
         </div>
       </section>
     );
@@ -401,29 +457,16 @@ function ProjectDashboardRoute() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <header
         className={cn(
-          "flex min-h-13 items-center gap-3 border-b px-4 sm:px-6",
+          "flex min-h-13 items-center gap-3 border-b px-3 sm:px-6",
           COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
       >
         <ProjectFavicon environmentId={environmentId} cwd={project.workspaceRoot} />
         <h1 className="min-w-0 truncate text-sm font-semibold">{project.title}</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-            <PlusIcon /> Add task
-          </Button>
-          <Button
-            size="sm"
-            onClick={() =>
-              void handleNewThread(projectRef, { worktreePath: null, envMode: "local" })
-            }
-          >
-            <PlusIcon /> New thread
-          </Button>
-        </div>
       </header>
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid w-full max-w-6xl gap-8 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)]">
-          <section aria-labelledby="active-threads-title">
+      <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-6 p-3 sm:gap-8 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)]">
+          <section className="min-w-0" aria-labelledby="active-threads-title">
             <h2 id="active-threads-title" className="mb-3 text-sm font-semibold">
               Active threads
             </h2>
@@ -435,15 +478,8 @@ function ProjectDashboardRoute() {
               ) : null}
               {groups.map(([path, groupThreads]) => (
                 <div key={path || "root"}>
-                  <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <span>
-                      {path === ""
-                        ? "Project root"
-                        : path.split("/").findLast((segment) => segment.length > 0)}
-                    </span>
-                    {path ? (
-                      <span className="min-w-0 truncate font-normal opacity-65">{path}</span>
-                    ) : null}
+                  <div className="mb-1.5 flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <span className="min-w-0 truncate">{workspaceTitle(path, groupThreads)}</span>
                   </div>
                   <div className="overflow-hidden rounded-xl border">
                     {groupThreads.map((thread) => {
@@ -469,7 +505,7 @@ function ProjectDashboardRoute() {
                           )}
                           <span className="min-w-0 flex-1 truncate">{thread.title}</span>
                           {thread.branch ? (
-                            <span className="max-w-40 truncate text-xs text-muted-foreground">
+                            <span className="hidden max-w-40 truncate text-xs text-muted-foreground sm:block">
                               {thread.branch}
                             </span>
                           ) : null}
@@ -479,36 +515,17 @@ function ProjectDashboardRoute() {
                   </div>
                 </div>
               ))}
+              <Button
+                className="w-full"
+                onClick={() =>
+                  void handleNewThread(projectRef, { worktreePath: null, envMode: "local" })
+                }
+              >
+                <PlusIcon /> New thread
+              </Button>
             </div>
           </section>
-          <div className="space-y-7">
-            {adding ? (
-              <div className="rounded-xl border bg-card/40 p-3">
-                <Input
-                  autoFocus
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Task title"
-                  aria-label="Task title"
-                />
-                <Textarea
-                  className="mt-2"
-                  size="sm"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Description"
-                  aria-label="Task description"
-                />
-                <div className="mt-2 flex justify-end gap-2">
-                  <Button size="xs" variant="ghost" onClick={() => setAdding(false)}>
-                    Cancel
-                  </Button>
-                  <Button size="xs" disabled={!title.trim()} onClick={() => void submitTask()}>
-                    Add task
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+          <div className="min-w-0 space-y-7">
             {taskSection("open")}
             {taskSection("done")}
           </div>
