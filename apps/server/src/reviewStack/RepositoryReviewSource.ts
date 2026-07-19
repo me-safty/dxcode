@@ -1,6 +1,7 @@
 import type { GitCommandError, ReviewStackTarget } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { normalizeGitDiff } from "@t3tools/shared/git";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 
@@ -20,6 +21,7 @@ export class ReviewSourceCaptureError extends Schema.TaggedErrorClass<ReviewSour
 export interface ReviewPathGroup {
   readonly paths: ReadonlyArray<string>;
   readonly displayPath: string;
+  readonly isUntracked: boolean;
 }
 
 export function parseNameStatusPathGroups(stdout: string): ReadonlyArray<ReviewPathGroup> {
@@ -36,6 +38,7 @@ export function parseNameStatusPathGroups(stdout: string): ReadonlyArray<ReviewP
       groups.push({
         paths,
         displayPath: newPath ?? oldPath,
+        isUntracked: false,
       });
     }
     index += isPair ? 2 : 1;
@@ -43,7 +46,7 @@ export function parseNameStatusPathGroups(stdout: string): ReadonlyArray<ReviewP
   return groups;
 }
 
-function parsePorcelainPathGroups(stdout: string): ReadonlyArray<ReviewPathGroup> {
+export function parsePorcelainPathGroups(stdout: string): ReadonlyArray<ReviewPathGroup> {
   const records = stdout.split("\0");
   const groups: ReviewPathGroup[] = [];
   for (let index = 0; index < records.length; index += 1) {
@@ -54,11 +57,11 @@ function parsePorcelainPathGroups(stdout: string): ReadonlyArray<ReviewPathGroup
     if (status.has("R") || status.has("C")) {
       const previousPath = records[index + 1];
       if (path && previousPath) {
-        groups.push({ paths: [previousPath, path], displayPath: path });
+        groups.push({ paths: [previousPath, path], displayPath: path, isUntracked: false });
       }
       index += 1;
     } else if (path) {
-      groups.push({ paths: [path], displayPath: path });
+      groups.push({ paths: [path], displayPath: path, isUntracked: record.startsWith("??") });
     }
   }
   return groups.sort((a, b) => a.displayPath.localeCompare(b.displayPath));
@@ -138,7 +141,7 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
         });
         if (
           input.target._tag === "working-tree" &&
-          pathGroup.paths.length === 1 &&
+          pathGroup.isUntracked &&
           result.stdout.trim().length === 0
         ) {
           result = yield* git.execute({
@@ -155,7 +158,7 @@ export const captureRepositoryReviewSource = Effect.fn("captureRepositoryReviewS
             message: `The patch for ${pathGroup.displayPath} exceeded the per-file safety limit; no partial review was created.`,
           });
         }
-        return result.stdout.trimEnd();
+        return normalizeGitDiff(result.stdout);
       }),
       { concurrency: 4 },
     );

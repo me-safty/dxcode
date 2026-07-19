@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseNameStatusPathGroups, parsePorcelainPaths } from "./RepositoryReviewSource.ts";
+import {
+  parseNameStatusPathGroups,
+  parsePorcelainPathGroups,
+  parsePorcelainPaths,
+} from "./RepositoryReviewSource.ts";
 
 describe("parsePorcelainPaths", () => {
   it("returns every changed path once, including both sides of a rename", () => {
@@ -15,8 +19,15 @@ describe("parsePorcelainPaths", () => {
     expect(
       parseNameStatusPathGroups(["M", "src/a.ts", "R100", "old.ts", "new.ts", ""].join("\0")),
     ).toEqual([
-      { paths: ["src/a.ts"], displayPath: "src/a.ts" },
-      { paths: ["old.ts", "new.ts"], displayPath: "new.ts" },
+      { paths: ["src/a.ts"], displayPath: "src/a.ts", isUntracked: false },
+      { paths: ["old.ts", "new.ts"], displayPath: "new.ts", isUntracked: false },
+    ]);
+  });
+
+  it("marks only porcelain ?? entries as untracked", () => {
+    expect(parsePorcelainPathGroups([" M tracked.ts", "?? new.ts", ""].join("\0"))).toEqual([
+      { paths: ["new.ts"], displayPath: "new.ts", isUntracked: true },
+      { paths: ["tracked.ts"], displayPath: "tracked.ts", isUntracked: false },
     ]);
   });
 });

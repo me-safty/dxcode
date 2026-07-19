@@ -33,6 +33,7 @@ import {
 import {
   dedupeRemoteBranchesWithLocalMatches,
   isExactCommitPatchLegacyGuard,
+  normalizeGitDiff,
 } from "@t3tools/shared/git";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -2278,7 +2279,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const workingTree = yield* readReviewWorkingTreeManifest(input.cwd);
     const selectedDiff = yield* readSelectedReviewDiff(input, workingTree);
     const hashDiff = (diff: string) =>
-      crypto.digest("SHA-256", new TextEncoder().encode(diff)).pipe(
+      crypto.digest("SHA-256", new TextEncoder().encode(normalizeGitDiff(diff))).pipe(
         Effect.map(Encoding.encodeHex),
         Effect.mapError(
           (cause) =>

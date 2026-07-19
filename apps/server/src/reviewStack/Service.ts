@@ -23,6 +23,7 @@ import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import { normalizeGitDiff } from "@t3tools/shared/git";
 
 import * as CheckpointDiffQuery from "../checkpointing/CheckpointDiffQuery.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -143,6 +144,7 @@ export const make = Effect.gen(function* () {
     const preview = yield* review
       .getDiffPreview({
         cwd,
+        threadId: input.threadId,
         ignoreWhitespace: input.ignoreWhitespace,
         selection,
         ...(input.target._tag === "branch" && input.target.baseRef !== null
@@ -300,7 +302,7 @@ export const make = Effect.gen(function* () {
     function* (input) {
       const source = yield* resolveSource(input);
       const key = scopeKey(input.target, source.resolvedBase, input.ignoreWhitespace);
-      const sourceHash = hash(source.diff);
+      const sourceHash = hash(normalizeGitDiff(source.diff));
       const anchors = parseReviewStackAnchors(source.diff);
       if (source.diff.trim().length > 0 && anchors.length === 0) {
         return yield* error(

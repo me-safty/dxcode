@@ -7,12 +7,21 @@ import {
   EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH,
   isExactCommitPatchLegacyGuard,
   isTemporaryWorktreeBranch,
+  normalizeGitDiff,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
   resolveAutoFeatureBranchName,
   sanitizePrefixedBranchName,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
+
+describe("git diff normalization", () => {
+  it("normalizes line endings and trailing whitespace", () => {
+    expect(normalizeGitDiff("diff --git a/a b/a\r\n+value\r\n  \r\n")).toBe(
+      "diff --git a/a b/a\n+value",
+    );
+  });
+});
 
 describe("exact commit patch legacy guard", () => {
   it("matches only the reserved fail-closed path", () => {

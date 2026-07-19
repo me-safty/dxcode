@@ -443,6 +443,7 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerS
 
 export const ServerSettingsOperation = Schema.Literals([
   "normalize",
+  "validate-review-stack-model",
   "check-exists",
   "read-file",
   "read-secret",
