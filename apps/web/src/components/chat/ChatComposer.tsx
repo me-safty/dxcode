@@ -127,6 +127,8 @@ import { formatProviderSkillDisplayName } from "../../providerSkillPresentation"
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
+import { shouldShowRunningStopAction } from "../../runningMessageDelivery";
+import { ComposerQueuedMessages, type ComposerQueuedMessage } from "./ComposerQueuedMessages";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -397,6 +399,21 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 // Handle exposed to ChatView
 // --------------------------------------------------------------------------
 
+export type ChatComposerSendContext = {
+  prompt: string;
+  images: ComposerImageAttachment[];
+  terminalContexts: TerminalContextDraft[];
+  elementContexts: ElementContextDraft[];
+  previewAnnotations: PreviewAnnotationPayload[];
+  reviewComments: ReviewCommentContext[];
+  selectedPromptEffort: string | null;
+  selectedModelOptionsForDispatch: unknown;
+  selectedModelSelection: ModelSelection;
+  selectedProvider: ProviderDriverKind;
+  selectedModel: string;
+  selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+};
+
 export interface ChatComposerHandle {
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
@@ -419,20 +436,7 @@ export interface ChatComposerHandle {
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Get the current prompt/effort/model state for use in send. */
-  getSendContext: () => {
-    prompt: string;
-    images: ComposerImageAttachment[];
-    terminalContexts: TerminalContextDraft[];
-    elementContexts: ElementContextDraft[];
-    previewAnnotations: PreviewAnnotationPayload[];
-    reviewComments: ReviewCommentContext[];
-    selectedPromptEffort: string | null;
-    selectedModelOptionsForDispatch: unknown;
-    selectedModelSelection: ModelSelection;
-    selectedProvider: ProviderDriverKind;
-    selectedModel: string;
-    selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
-  };
+  getSendContext: () => ChatComposerSendContext;
 }
 
 // --------------------------------------------------------------------------
@@ -509,6 +513,7 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  queuedMessages: ReadonlyArray<ComposerQueuedMessage>;
 
   // Refs the parent needs kept in sync
   promptRef: React.RefObject<string>;
@@ -518,7 +523,10 @@ export interface ChatComposerProps {
   composerRef: React.RefObject<ChatComposerHandle | null>;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }) => void;
+  onSend: (e?: { preventDefault: () => void }, options?: { steerRunningTurn?: boolean }) => void;
+  onSteerQueuedMessage: (id: string) => void;
+  onDeleteQueuedMessage: (id: string) => void;
+  onEditQueuedMessage: (id: string) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -599,12 +607,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     keybindings,
     terminalOpen,
     gitCwd,
+    queuedMessages,
     promptRef,
     composerRef,
     composerImagesRef,
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
+    onSteerQueuedMessage,
+    onDeleteQueuedMessage,
+    onEditQueuedMessage,
     onInterrupt,
     onImplementPlanInNewThread,
     onRespondToApproval,
@@ -1710,8 +1722,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const submitComposer = useCallback(
-    (event?: { preventDefault: () => void }) => {
-      onSend(event);
+    (event?: { preventDefault: () => void }, options?: { steerRunningTurn?: boolean }) => {
+      onSend(event, options);
       if (shouldBlurMobileComposerOnSubmit()) {
         blurMobileComposerAfterSend();
       }
@@ -1774,7 +1786,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       key === "Enter" &&
       shouldSubmitComposerOnEnter({ isMobileViewport, shiftKey: event.shiftKey })
     ) {
-      submitComposer();
+      submitComposer(undefined, {
+        steerRunningTurn: phase === "running" && (event.metaKey || event.ctrlKey),
+      });
       return true;
     }
     return false;
@@ -2078,9 +2092,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       className="mx-auto w-full min-w-0 max-w-3xl"
       data-chat-composer-form="true"
     >
+      <ComposerQueuedMessages
+        messages={queuedMessages}
+        disabled={
+          isConnecting ||
+          isSendBusy ||
+          environmentUnavailable !== null ||
+          activePendingProgress !== null
+        }
+        onSteer={onSteerQueuedMessage}
+        onDelete={onDeleteQueuedMessage}
+        onEdit={onEditQueuedMessage}
+      />
       <div
         className={cn(
           "group rounded-[22px] p-px transition-colors duration-200",
+          queuedMessages.length > 0 && "rounded-t-none pt-0",
           composerProviderState.composerFrameClassName,
         )}
         onDragEnter={onComposerDragEnter}
@@ -2093,6 +2120,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
           className={cn(
             "chat-composer-glass rounded-[20px] border transition-[background-color] duration-200 has-focus-visible:border-ring/45",
+            queuedMessages.length > 0 && "rounded-t-none border-t-0",
             isDragOverComposer ? "border-primary/70 bg-accent/45" : "border-border",
             environmentUnavailable || projectSelectionRequired ? "opacity-75" : null,
             composerProviderState.composerSurfaceClassName,
@@ -2268,7 +2296,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <div
             className={cn(
               "relative px-3 pb-2 sm:px-4",
-              hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+              queuedMessages.length > 0
+                ? "pt-2"
+                : hasComposerHeader
+                  ? "pt-2.5 sm:pt-3"
+                  : "pt-3.5 sm:pt-4",
               isComposerCollapsedMobile && "hidden",
             )}
           >
@@ -2430,7 +2462,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : []
                 }
                 skills={selectedProviderStatus?.skills ?? []}
-                {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+                className={cn(
+                  showMobilePendingAnswerActions && "max-sm:pb-11",
+                  queuedMessages.length > 0 && "!min-h-10",
+                )}
                 onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                 onChange={onPromptChange}
                 onCommandKeyDown={onComposerCommandKey}
@@ -2580,7 +2615,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeContextWindow={activeContextWindow}
                   activeThreadProviderDisplayName={activeThreadProviderDisplayName}
                   pendingAction={pendingPrimaryAction}
-                  isRunning={phase === "running"}
+                  isRunning={shouldShowRunningStopAction({
+                    running: phase === "running",
+                    hasSendableContent: composerSendState.hasSendableContent,
+                  })}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}

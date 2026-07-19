@@ -14,6 +14,7 @@ import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 
 const clientSettings: ClientSettings = {
   autoOpenPlanSidebar: false,
+  runningMessageBehavior: "queue",
   shareProjectActionsAcrossWorktrees: true,
   confirmThreadArchive: true,
   confirmThreadDelete: false,

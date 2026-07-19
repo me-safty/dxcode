@@ -37,6 +37,15 @@ describe("ClientSettings project actions", () => {
   });
 });
 
+describe("ClientSettings running messages", () => {
+  it("defaults legacy settings to queue and accepts steer", () => {
+    expect(decodeClientSettings({}).runningMessageBehavior).toBe("queue");
+    expect(decodeClientSettings({ runningMessageBehavior: "steer" }).runningMessageBehavior).toBe(
+      "steer",
+    );
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});

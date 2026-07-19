@@ -13,6 +13,10 @@ export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"])
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 
+export const RunningMessageBehavior = Schema.Literals(["queue", "steer"]);
+export type RunningMessageBehavior = typeof RunningMessageBehavior.Type;
+export const DEFAULT_RUNNING_MESSAGE_BEHAVIOR: RunningMessageBehavior = "queue";
+
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
@@ -41,6 +45,9 @@ export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6
 
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  runningMessageBehavior: RunningMessageBehavior.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNNING_MESSAGE_BEHAVIOR)),
+  ),
   shareProjectActionsAcrossWorktrees: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
@@ -549,6 +556,7 @@ export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
+  runningMessageBehavior: Schema.optionalKey(RunningMessageBehavior),
   shareProjectActionsAcrossWorktrees: Schema.optionalKey(Schema.Boolean),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
