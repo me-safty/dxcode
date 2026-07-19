@@ -352,7 +352,11 @@ interface SidebarThreadRowProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
-  openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
+  openPrLink: (
+    event: React.MouseEvent<HTMLElement>,
+    prUrl: string,
+    threadRef: ScopedThreadRef,
+  ) => void;
 }
 
 export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -577,9 +581,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const handlePrClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       if (!prStatus) return;
-      openPrLink(event, prStatus.url);
+      navigateToThread(threadRef);
+      openPrLink(event, prStatus.url, threadRef);
     },
-    [openPrLink, prStatus],
+    [navigateToThread, openPrLink, prStatus, threadRef],
   );
   const handleRenameInputRef = useCallback(
     (element: HTMLInputElement | null) => {
@@ -930,7 +935,11 @@ interface SidebarProjectThreadListProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
-  openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
+  openPrLink: (
+    event: React.MouseEvent<HTMLElement>,
+    prUrl: string,
+    threadRef: ScopedThreadRef,
+  ) => void;
   expandThreadListForProject: (projectKey: string) => void;
   collapseThreadListForProject: (projectKey: string) => void;
 }
