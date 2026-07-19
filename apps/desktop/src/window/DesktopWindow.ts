@@ -254,7 +254,6 @@ export const make = Effect.gen(function* () {
       width: 1100,
       height: 780,
       minWidth: 840,
-      minHeight: 620,
       show: false,
       autoHideMenuBar: true,
       ...(environment.platform === "darwin" ? { disableAutoHideCursor: true } : {}),

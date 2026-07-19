@@ -909,8 +909,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const isMobileViewport = useMediaQuery("max-sm");
+  const isShortViewport = useMediaQuery("(max-height: 619px)");
+  const useCompactComposerLayout = isMobileViewport || isShortViewport;
   const isComposerCollapsedMobile =
-    isMobileViewport && !forceExpandedOnMobile && !isComposerFocused;
+    useCompactComposerLayout && !forceExpandedOnMobile && !isComposerFocused;
 
   // ------------------------------------------------------------------
   // Refs
@@ -1170,7 +1172,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     !composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
-    isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
+    useCompactComposerLayout && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
 
   // ------------------------------------------------------------------
   // Prompt helpers
@@ -1691,7 +1693,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const blurMobileComposerAfterSend = useCallback(() => {
-    if (!isMobileViewport) return;
+    if (!useCompactComposerLayout) return;
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
       composerBlurFrameRef.current = null;
@@ -1701,10 +1703,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeElement.blur();
     }
     setIsComposerFocused(false);
-  }, [isMobileViewport]);
+  }, [useCompactComposerLayout]);
 
   const shouldBlurMobileComposerOnSubmit = useCallback(() => {
-    if (!isMobileViewport) return false;
+    if (!useCompactComposerLayout) return false;
     if (isSendBusy || isConnecting || phase === "running") return false;
     if (activePendingProgress) {
       return activePendingProgress.isLastQuestion && Boolean(activePendingResolvedAnswers);
@@ -1715,7 +1717,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingResolvedAnswers,
     composerSendState.hasSendableContent,
     isConnecting,
-    isMobileViewport,
+    useCompactComposerLayout,
     isSendBusy,
     phase,
     showPlanFollowUpPrompt,
@@ -1899,7 +1901,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     void onImplementPlanInNewThread();
   }, [onImplementPlanInNewThread]);
   const scheduleComposerCollapseCheck = useCallback(() => {
-    if (!isMobileViewport) {
+    if (!useCompactComposerLayout) {
       return;
     }
     if (mobileComposerExpandInFlightRef.current) {
@@ -1927,7 +1929,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       setIsComposerFocused(false);
     });
-  }, [isMobileViewport]);
+  }, [useCompactComposerLayout]);
 
   useEffect(() => {
     return () => {
@@ -2628,7 +2630,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
-                  preserveComposerFocusOnPointerDown={isMobileViewport}
+                  preserveComposerFocusOnPointerDown={useCompactComposerLayout}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}
                   onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
