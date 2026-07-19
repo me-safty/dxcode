@@ -457,23 +457,12 @@ function ProjectDashboardRoute() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <header
         className={cn(
-          "flex min-h-13 flex-wrap items-center gap-3 border-b px-3 py-2 sm:flex-nowrap sm:px-6 sm:py-0",
+          "flex min-h-13 items-center gap-3 border-b px-3 sm:px-6",
           COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
       >
         <ProjectFavicon environmentId={environmentId} cwd={project.workspaceRoot} />
         <h1 className="min-w-0 truncate text-sm font-semibold">{project.title}</h1>
-        <div className="order-3 flex w-full items-center gap-2 sm:order-none sm:ml-auto sm:w-auto">
-          <Button
-            className="flex-1 sm:flex-none"
-            size="sm"
-            onClick={() =>
-              void handleNewThread(projectRef, { worktreePath: null, envMode: "local" })
-            }
-          >
-            <PlusIcon /> New thread
-          </Button>
-        </div>
       </header>
       <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
         <div className="mx-auto grid min-w-0 w-full max-w-6xl gap-6 p-3 sm:gap-8 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.9fr)]">
@@ -526,6 +515,14 @@ function ProjectDashboardRoute() {
                   </div>
                 </div>
               ))}
+              <Button
+                className="w-full"
+                onClick={() =>
+                  void handleNewThread(projectRef, { worktreePath: null, envMode: "local" })
+                }
+              >
+                <PlusIcon /> New thread
+              </Button>
             </div>
           </section>
           <div className="min-w-0 space-y-7">
