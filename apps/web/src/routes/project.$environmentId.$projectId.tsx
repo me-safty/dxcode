@@ -1,12 +1,6 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import {
-  EnvironmentId,
-  ProjectId,
-  ProjectTaskId,
-  type ProjectTask,
-  type SidebarThreadSortOrder,
-} from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProjectTaskId, type ProjectTask } from "@t3tools/contracts";
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDownIcon,
@@ -27,9 +21,8 @@ import { Input } from "../components/ui/input";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Textarea } from "../components/ui/textarea";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
-import { useClientSettings } from "../hooks/useSettings";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { sortThreads } from "../lib/threadSort";
+import { getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
 import { cn } from "../lib/utils";
 import { newProjectTaskId } from "../lib/utils";
 import {
@@ -76,9 +69,6 @@ function ProjectDashboardRoute() {
     projectEnvironment.dashboard({ environmentId, input: { projectId } }),
   );
   const threads = useThreadShellsForProjectRefs([projectRef]);
-  const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
-    (settings) => settings.sidebarThreadSortOrder,
-  );
   const handleNewThread = useNewThreadHandler();
   const createTask = useAtomCommand(projectEnvironment.createTask, { reportFailure: false });
   const updateTask = useAtomCommand(projectEnvironment.updateTask, { reportFailure: false });
@@ -106,19 +96,20 @@ function ProjectDashboardRoute() {
     if (!project) return [];
     const sorted = sortThreads(
       threads.filter((thread) => thread.archivedAt === null),
-      threadSortOrder,
+      "updated_at",
     );
     const byPath = new Map<string, typeof sorted>();
     for (const thread of sorted) {
       const key = thread.worktreePath ?? "";
       byPath.set(key, [...(byPath.get(key) ?? []), thread]);
     }
-    return [...byPath.entries()].toSorted(([left], [right]) => {
-      if (left === "") return -1;
-      if (right === "") return 1;
-      return left.localeCompare(right);
+    return [...byPath.entries()].toSorted(([leftPath, leftThreads], [rightPath, rightThreads]) => {
+      const timestampDifference =
+        getThreadSortTimestamp(rightThreads[0]!, "updated_at") -
+        getThreadSortTimestamp(leftThreads[0]!, "updated_at");
+      return timestampDifference || leftPath.localeCompare(rightPath);
     });
-  }, [project, threadSortOrder, threads]);
+  }, [project, threads]);
 
   const tasks = dashboard.data?.tasks ?? [];
   const runTaskCommand = async (run: () => Promise<unknown>) => {
