@@ -22,8 +22,24 @@ nightlies and prepares only this target.
 
 ## Upstream sync session
 
-A persisted, pinned nightly target plus its temporary branch, worktree, comparison, conflicts, and
-guided review thread. A newer target never retargets an active session.
+A persisted, pinned nightly target plus its commit counts, temporary branch, worktree, comparison,
+conflicts, and guided review thread. A newer target never retargets an active session.
+
+## DX local update
+
+An explicitly approved workflow that reconciles `origin/dx/main` and a pinned upstream sync, verifies
+the exact result, publishes one integration commit, builds a provenance-bound DX artifact, and
+optionally replaces the running DX application with rollback protection.
+
+## DX build provenance
+
+The immutable `dx/main` source commit, build time, clean-tree assertion, flavor, bundle identity, and
+artifact digest embedded into a DX package and its machine-readable manifest.
+
+## DX update session
+
+A persisted phase record for remote reconciliation, upstream review, publication, build, validation,
+installation, health confirmation, and recovery. It never authorizes the next irreversible phase.
 
 ## Upstream notification cursor
 

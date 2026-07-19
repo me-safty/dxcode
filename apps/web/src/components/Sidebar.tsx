@@ -222,6 +222,7 @@ import {
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 import { UpstreamUpdatePill } from "../features/upstream-sync/UpstreamUpdatePill";
+import { DxUpdatePill } from "../features/dx-local-update/DxUpdatePill";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -2816,6 +2817,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 
   return (
     <SidebarFooter className="p-2">
+      <DxUpdatePill />
       <UpstreamUpdatePill />
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />

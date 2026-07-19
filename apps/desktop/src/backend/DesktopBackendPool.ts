@@ -98,6 +98,7 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as LocalDxUpdateRecovery from "../localUpdate/LocalDxUpdateRecovery.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 
 const { logWarning: logBackendPoolWarning } =
@@ -208,6 +209,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    const localDxUpdateRecovery = yield* LocalDxUpdateRecovery.LocalDxUpdateRecovery;
     const electronDialog = yield* ElectronDialog.ElectronDialog;
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     // Anchor the pool's lifetime to its layer scope so registered
@@ -288,7 +290,8 @@ export const layer = Layer.effect(
       // otherwise a post-readiness window-open failure vanishes silently and
       // is near-impossible to diagnose in production.
       onReady: (httpBaseUrl) =>
-        desktopWindow.handleBackendReady(httpBaseUrl).pipe(
+        localDxUpdateRecovery.markHealthy.pipe(
+          Effect.andThen(desktopWindow.handleBackendReady(httpBaseUrl)),
           Effect.catch((error) =>
             logBackendPoolWarning("failed to open main window after backend readiness", {
               error: error.message,

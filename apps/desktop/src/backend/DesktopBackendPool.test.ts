@@ -15,6 +15,7 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
 import type { DesktopBackendSnapshot, DesktopBackendStartConfig } from "./DesktopBackendManager.ts";
+import * as LocalDxUpdateRecovery from "../localUpdate/LocalDxUpdateRecovery.ts";
 
 function makeStubInstance(
   id: DesktopBackendPool.BackendInstanceId,
@@ -79,6 +80,9 @@ function makePoolLayer(
           dispatchMenuAction: () => Effect.die("unexpected menu action"),
           syncAppearance: Effect.void,
         } satisfies DesktopWindow.DesktopWindow["Service"]),
+        Layer.succeed(LocalDxUpdateRecovery.LocalDxUpdateRecovery, {
+          markHealthy: Effect.void,
+        }),
       ),
     ),
   );

@@ -123,6 +123,10 @@
       "types": "./src/state/upstreamSync.ts",
       "default": "./src/state/upstreamSync.ts"
     },
+    "./state/dx-local-update": {
+      "types": "./src/state/dxLocalUpdate.ts",
+      "default": "./src/state/dxLocalUpdate.ts"
+    },
     "./state/threads": {
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"

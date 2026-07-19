@@ -22,6 +22,9 @@ export const DesktopBackendBootstrap = Schema.Struct({
   tailscaleServePort: PortSchema,
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
+  desktopFlavor: Schema.optional(Schema.Literals(["production", "development", "dx"])),
+  installedSourceCommit: Schema.optional(Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/))),
+  localDxUpdateCapable: Schema.optional(Schema.Boolean),
 });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;

@@ -3,7 +3,7 @@ import type { UpstreamPolicy } from "@t3tools/contracts";
 import { LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { APP_BASE_NAME } from "../../branding";
+import { UPSTREAM_SYNC_UI_ENABLED } from "../../branding";
 import { Button } from "../../components/ui/button";
 import { Radio, RadioGroup } from "../../components/ui/radio-group";
 import {
@@ -61,7 +61,7 @@ export function UpstreamSyncSettings() {
     [environmentId, projects],
   );
 
-  if (APP_BASE_NAME !== "DX Code") return null;
+  if (!UPSTREAM_SYNC_UI_ENABLED) return null;
 
   const handleCheck = async () => {
     if (environmentId === null) return;

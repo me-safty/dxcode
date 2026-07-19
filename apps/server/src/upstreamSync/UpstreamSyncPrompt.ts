@@ -1,4 +1,4 @@
-import type { UpstreamSyncSession, UpstreamUpdateState } from "@t3tools/contracts";
+import type { UpstreamSyncSession } from "@t3tools/contracts";
 
 const tableRows = (paths: ReadonlyArray<string>): string =>
   paths.length === 0
@@ -10,19 +10,15 @@ const tableRows = (paths: ReadonlyArray<string>): string =>
         )
         .join("\n");
 
-export function buildUpstreamSyncPrompt(input: {
-  readonly session: UpstreamSyncSession;
-  readonly commitCount: number;
-  readonly newerNightlyCount: number;
-}): string {
+export function buildUpstreamSyncPrompt(input: { readonly session: UpstreamSyncSession }): string {
   const { session } = input;
   return [
     "Review the pinned T3 upstream synchronization.",
     "",
     `Target tag: ${session.target.tag}`,
     `Target commit: ${session.target.commit}`,
-    `New commits: ${input.commitCount}`,
-    `Newer nightly tags since previous notification: ${input.newerNightlyCount}`,
+    `New commits: ${session.commitCount}`,
+    `Newer nightly tags since previous notification: ${session.newerNightlyCount}`,
     `Conflicted files: ${session.conflictFiles.length > 0 ? session.conflictFiles.join(", ") : "none"}`,
     "",
     "| File | Upstream behavior | DX behavior | Suggested decision |",
@@ -36,16 +32,4 @@ export function buildUpstreamSyncPrompt(input: {
     "Do not commit, push, promote, abort, or delete the worktree without approval.",
     "Run `vp check` and `vp run typecheck` before proposing the sync commit.",
   ].join("\n");
-}
-
-export function availableCounts(state: UpstreamUpdateState): {
-  readonly commitCount: number;
-  readonly newerNightlyCount: number;
-} {
-  return state.status === "available"
-    ? {
-        commitCount: state.commitCount,
-        newerNightlyCount: state.newerNightlyCount,
-      }
-    : { commitCount: 0, newerNightlyCount: 0 };
 }

@@ -27,3 +27,4 @@ export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./rpc.ts";
 export * from "./upstreamSync.ts";
+export * from "./dxLocalUpdate.ts";

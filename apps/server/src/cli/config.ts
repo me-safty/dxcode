@@ -368,6 +368,13 @@ export const resolveServerConfig = (
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,
+      ...(bootstrap?.desktopFlavor === undefined ? {} : { desktopFlavor: bootstrap.desktopFlavor }),
+      ...(bootstrap?.installedSourceCommit === undefined
+        ? {}
+        : { installedSourceCommit: bootstrap.installedSourceCommit }),
+      ...(bootstrap?.localDxUpdateCapable === undefined
+        ? {}
+        : { localDxUpdateCapable: bootstrap.localDxUpdateCapable }),
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
       tailscaleServeEnabled,

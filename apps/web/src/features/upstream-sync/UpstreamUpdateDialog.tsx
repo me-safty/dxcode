@@ -153,19 +153,26 @@ export function UpstreamUpdateDialog({
               <dt className="text-muted-foreground">Target commit</dt>
               <dd className="mt-1 font-mono text-foreground">{shortCommit(target.commit)}</dd>
             </div>
-            {state.status === "available" ? (
+            {state.status === "available" || state.status === "session-active" ? (
               <>
                 <div>
                   <dt className="text-muted-foreground">Changes</dt>
-                  <dd className="mt-1 text-foreground">{state.commitCount} upstream commits</dd>
+                  <dd className="mt-1 text-foreground">
+                    {state.status === "available" ? state.commitCount : state.session.commitCount}{" "}
+                    upstream commits
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Grouped updates</dt>
                   <dd className="mt-1 text-foreground">
-                    {groupedNightlyLabel(state.newerNightlyCount)}
+                    {groupedNightlyLabel(
+                      state.status === "available"
+                        ? state.newerNightlyCount
+                        : state.session.newerNightlyCount,
+                    )}
                   </dd>
                 </div>
-                {state.previousDismissedTag ? (
+                {state.status === "available" && state.previousDismissedTag ? (
                   <div className="sm:col-span-2">
                     <dt className="text-muted-foreground">Previously dismissed</dt>
                     <dd className="mt-1 font-mono text-foreground">{state.previousDismissedTag}</dd>

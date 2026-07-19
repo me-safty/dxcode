@@ -442,6 +442,7 @@ export const make = Effect.gen(function* () {
       );
     }
     const comparison = yield* git.comparisonReport(project.workspaceRoot, target.commit);
+    const commitCount = yield* git.countCommits(project.workspaceRoot, target.commit);
     const merge = yield* git.prepareMerge({
       cwd: project.workspaceRoot,
       branch: names.branch,
@@ -452,6 +453,14 @@ export const make = Effect.gen(function* () {
       id: NodeCrypto.randomUUID(),
       sourceProjectId: projectId,
       target,
+      commitCount,
+      newerNightlyCount:
+        document.state.status === "available" &&
+        document.state.target.tag === target.tag &&
+        document.state.target.commit === target.commit
+          ? document.state.newerNightlyCount
+          : 0,
+      metricsHydrated: true,
       remoteTagObject: remoteRef.remoteObject,
       branch: names.branch,
       worktreePath: names.worktreePath,
@@ -543,17 +552,55 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  if (initialDocument.activeSession) {
-    const exists = yield* fs
-      .exists(initialDocument.activeSession.worktreePath)
-      .pipe(Effect.orElseSucceed(() => false));
-    if (!exists && initialDocument.activeSession.status !== "recoverable") {
-      const session = { ...initialDocument.activeSession, status: "recoverable" as const };
+  if (initialDocument.activeSession && !initialDocument.activeSession.metricsHydrated) {
+    yield* Effect.gen(function* () {
+      const document = yield* Ref.get(documentRef);
+      const session = document.activeSession;
+      if (!session || session.metricsHydrated) return;
+      const project = yield* sourceProject(session.sourceProjectId);
+      const commitCount = yield* git.countCommits(project.workspaceRoot, session.target.commit);
+      const refs = document.cursor.dismissedTarget
+        ? yield* git.listNightlies(project.workspaceRoot)
+        : [];
+      const nextSession: UpstreamSyncSession = {
+        ...session,
+        commitCount,
+        newerNightlyCount: countNightliesAfter(
+          refs,
+          document.cursor.dismissedTarget?.tag ?? null,
+          session.target.tag,
+        ),
+        metricsHydrated: true,
+      };
       yield* publishDocument({
-        ...initialDocument,
-        activeSession: session,
-        state: { status: "session-active", session, newerTarget: null },
+        ...document,
+        activeSession: nextSession,
+        state: { status: "session-active", session: nextSession, newerTarget: null },
       });
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not recover legacy synchronization metrics.").pipe(
+          Effect.annotateLogs({ cause }),
+        ),
+      ),
+    );
+  }
+
+  if (initialDocument.activeSession) {
+    const document = yield* Ref.get(documentRef);
+    const activeSession = document.activeSession;
+    if (activeSession) {
+      const exists = yield* fs
+        .exists(activeSession.worktreePath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!exists && activeSession.status !== "recoverable") {
+        const session = { ...activeSession, status: "recoverable" as const };
+        yield* publishDocument({
+          ...document,
+          activeSession: session,
+          state: { status: "session-active", session, newerTarget: null },
+        });
+      }
     }
   }
 

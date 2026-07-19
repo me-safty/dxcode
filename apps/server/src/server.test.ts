@@ -88,6 +88,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as UpstreamIntegration from "./upstreamSync/UpstreamIntegration.ts";
+import * as DxLocalUpdate from "./dxLocalUpdate/DxLocalUpdate.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
@@ -580,6 +581,22 @@ const buildAppUnderTest = (options?: {
             abort: () => Effect.void,
             attachThread: () =>
               Effect.die("UpstreamIntegration.attachThread not stubbed in this test"),
+          }),
+          Layer.mock(DxLocalUpdate.DxLocalUpdate)({
+            getState: Effect.succeed({
+              status: "disabled",
+              reason: "Local DX updates are not configured in this test.",
+            }),
+            streamChanges: Stream.empty,
+            check: () =>
+              Effect.succeed({
+                status: "disabled",
+                reason: "Local DX updates are not configured in this test.",
+              }),
+            prepare: Effect.die("DxLocalUpdate.prepare not stubbed in this test"),
+            publishAndBuild: () =>
+              Effect.die("DxLocalUpdate.publishAndBuild not stubbed in this test"),
+            attachReviewSession: () => Effect.void,
           }),
         ),
       ),

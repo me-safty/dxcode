@@ -1,5 +1,6 @@
 import * as NodeOS from "node:os";
 
+import { DxBuildProvenance } from "@t3tools/contracts";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -169,7 +170,10 @@ const readPersistedBackendObservabilitySettings = Effect.gen(function* () {
 interface SharedBootstrapInput {
   readonly bootstrapToken: string;
   readonly observabilitySettings: BackendObservabilitySettings;
+  readonly dxSourceCommit: Option.Option<string>;
 }
+
+const decodeDxBuildProvenance = Schema.decodeEffect(Schema.fromJsonString(DxBuildProvenance));
 
 interface WslPreflightSuccess {
   readonly _tag: "Ready";
@@ -345,6 +349,16 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       isolateStateRoot: environment.isolateStateRoot,
       host: backendExposure.bindHost,
       desktopBootstrapToken: input.bootstrapToken,
+      ...(environment.flavorId === "dx"
+        ? {
+            desktopFlavor: "dx" as const,
+            localDxUpdateCapable: true,
+            ...Option.match(input.dxSourceCommit, {
+              onNone: () => ({}),
+              onSome: (installedSourceCommit) => ({ installedSourceCommit }),
+            }),
+          }
+        : {}),
       tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
       tailscaleServePort: backendExposure.tailscaleServePort,
       ...buildObservabilityFragment(input.observabilitySettings),
@@ -598,7 +612,19 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
-    return { bootstrapToken, observabilitySettings } satisfies SharedBootstrapInput;
+    const dxSourceCommit =
+      environment.flavorId === "dx" && environment.isPackaged
+        ? yield* fileSystem
+            .readFileString(
+              environment.path.join(environment.resourcesPath, "dx-build-provenance.json"),
+            )
+            .pipe(
+              Effect.flatMap(decodeDxBuildProvenance),
+              Effect.map((provenance) => Option.some(provenance.sourceCommit)),
+              Effect.orElseSucceed(() => Option.none<string>()),
+            )
+        : Option.none<string>();
+    return { bootstrapToken, observabilitySettings, dxSourceCommit } satisfies SharedBootstrapInput;
   });
 
   const buildWslPrimaryConfig = Effect.gen(function* () {

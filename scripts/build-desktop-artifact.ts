@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import * as NodeModule from "node:module";
+import * as NodeCrypto from "node:crypto";
 
+import type { DxArtifactManifest, DxBuildProvenance } from "@t3tools/contracts";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
@@ -23,6 +25,7 @@ import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Config from "effect/Config";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -507,6 +510,111 @@ const resolveGitCommitHash = Effect.fn("resolveGitCommitHash")(function* (repoRo
     return "unknown";
   }
   return hash.toLowerCase();
+});
+
+export const DxBuildSourceFailureReason = Schema.Literals([
+  "git-failed",
+  "wrong-branch",
+  "dirty",
+  "ref-mismatch",
+  "invalid-commit",
+]);
+
+export class InvalidDxBuildSourceError extends Schema.TaggedErrorClass<InvalidDxBuildSourceError>()(
+  "InvalidDxBuildSourceError",
+  {
+    reason: DxBuildSourceFailureReason,
+    message: Schema.String,
+  },
+) {}
+
+const runGitForDxBuild = Effect.fn("runGitForDxBuild")(function* (
+  repoRoot: string,
+  args: ReadonlyArray<string>,
+) {
+  const result = yield* spawnAndCollectOutput(
+    ChildProcess.make("git", args, { cwd: repoRoot }),
+  ).pipe(
+    Effect.mapError(
+      () =>
+        new InvalidDxBuildSourceError({
+          reason: "git-failed",
+          message: `Git failed while validating a DX build: git ${args.join(" ")}`,
+        }),
+    ),
+  );
+  if (result.exitCode !== 0) {
+    return yield* new InvalidDxBuildSourceError({
+      reason: "git-failed",
+      message: `Git failed while validating a DX build: git ${args.join(" ")}`,
+    });
+  }
+  return result.stdout.trim();
+});
+
+const validateFullCommit = (value: string): string | null =>
+  /^[0-9a-f]{40,64}$/i.test(value) ? value.toLowerCase() : null;
+
+export const resolveDxBuildProvenance = Effect.fn("resolveDxBuildProvenance")(function* (
+  repoRoot: string,
+) {
+  const [branch, status, headRaw, dxMainRaw] = yield* Effect.all([
+    runGitForDxBuild(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]),
+    runGitForDxBuild(repoRoot, ["status", "--porcelain=v1", "--untracked-files=normal"]),
+    runGitForDxBuild(repoRoot, ["rev-parse", "HEAD"]),
+    runGitForDxBuild(repoRoot, ["rev-parse", "dx/main"]),
+  ]);
+  if (branch !== "dx/main") {
+    return yield* new InvalidDxBuildSourceError({
+      reason: "wrong-branch",
+      message: `DX artifacts must be built from dx/main, not ${branch || "detached HEAD"}.`,
+    });
+  }
+  if (status.length > 0) {
+    return yield* new InvalidDxBuildSourceError({
+      reason: "dirty",
+      message: "DX artifacts require a clean dx/main worktree.",
+    });
+  }
+  const head = validateFullCommit(headRaw);
+  const dxMain = validateFullCommit(dxMainRaw);
+  if (!head || !dxMain) {
+    return yield* new InvalidDxBuildSourceError({
+      reason: "invalid-commit",
+      message: "DX build provenance requires a full Git commit identifier.",
+    });
+  }
+  if (head !== dxMain) {
+    return yield* new InvalidDxBuildSourceError({
+      reason: "ref-mismatch",
+      message: "The checked-out DX source does not match dx/main.",
+    });
+  }
+  return {
+    flavor: "dx",
+    sourceCommit: head,
+    builtAt: DateTime.formatIso(yield* DateTime.now),
+    dirty: false,
+  } satisfies DxBuildProvenance;
+});
+
+const recheckDxBuildProvenance = Effect.fn("recheckDxBuildProvenance")(function* (
+  repoRoot: string,
+  expectedCommit: string,
+) {
+  const provenance = yield* resolveDxBuildProvenance(repoRoot);
+  if (provenance.sourceCommit !== expectedCommit) {
+    return yield* new InvalidDxBuildSourceError({
+      reason: "ref-mismatch",
+      message: "dx/main changed while the DX artifact was being built.",
+    });
+  }
+});
+
+export const hashFileSha256 = Effect.fn("hashFileSha256")(function* (filePath: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const bytes = yield* fs.readFile(filePath);
+  return NodeCrypto.createHash("sha256").update(bytes).digest("hex");
 });
 
 const resolvePythonForNodeGyp = Effect.fn("resolvePythonForNodeGyp")(function* () {
@@ -1470,6 +1578,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // there's no duplication.
     asarUnpack: [...DESKTOP_ASAR_UNPACK, "apps/server/dist/**", "**/node_modules/**"],
   };
+  if (flavorId === "dx") {
+    buildConfig.extraResources = [
+      { from: "dx-build-provenance.json", to: "dx-build-provenance.json" },
+    ];
+  }
   if (flavor.autoUpdatesEnabled) {
     const updateChannel = resolveDesktopUpdateChannel(version);
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
@@ -1690,7 +1803,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const appVersion = options.version ?? serverPackageJson.version;
   const flavor = resolveDesktopFlavor(options.flavor);
   const iconAssets = resolveDesktopBuildIconAssets(appVersion, options.flavor);
-  const commitHash = yield* resolveGitCommitHash(repoRoot);
+  const dxProvenance =
+    options.flavor === "dx" ? yield* resolveDxBuildProvenance(repoRoot) : undefined;
+  const commitHash = dxProvenance?.sourceCommit ?? (yield* resolveGitCommitHash(repoRoot));
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
     prefix: `t3code-desktop-${options.platform}-stage-`,
@@ -1721,6 +1836,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       { label: "vp run build:desktop", verbose: options.verbose },
     );
     yield* fs.writeFileString(flavorMarkerPath, `${options.flavor}\n`);
+    if (dxProvenance) {
+      yield* recheckDxBuildProvenance(repoRoot, dxProvenance.sourceCommit);
+    }
   } else {
     const builtFlavor = (yield* fs.exists(flavorMarkerPath))
       ? (yield* fs.readFileString(flavorMarkerPath)).trim()
@@ -1865,6 +1983,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
+  if (dxProvenance) {
+    const dxProvenanceJson = yield* encodeJsonString(dxProvenance);
+    yield* fs.writeFileString(
+      path.join(stageAppDir, "dx-build-provenance.json"),
+      `${dxProvenanceJson}\n`,
+    );
+  }
   const stageWorkspaceConfig = createStageWorkspaceConfig({
     platform: options.platform,
     arch: options.arch,
@@ -1998,6 +2123,30 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       platform: options.platform,
       arch: options.arch,
     });
+  }
+
+  if (dxProvenance && options.platform === "mac" && options.target === "dmg") {
+    const dmgArtifacts = copiedArtifacts.filter((artifact) => artifact.endsWith(".dmg"));
+    if (dmgArtifacts.length !== 1 || !dmgArtifacts[0]) {
+      return yield* new DesktopBuildNoArtifactsProducedError({
+        distPath: stageDistDir,
+        platform: options.platform,
+        arch: options.arch,
+      });
+    }
+    const artifactPath = dmgArtifacts[0];
+    const manifest = {
+      artifactPath,
+      sourceCommit: dxProvenance.sourceCommit,
+      sha256: yield* hashFileSha256(artifactPath),
+      bundleId: flavor.appId,
+    } satisfies DxArtifactManifest;
+    const manifestPath = `${artifactPath}.manifest.json`;
+    const temporaryManifestPath = `${manifestPath}.tmp-${process.pid}`;
+    const manifestJson = yield* encodeJsonString(manifest);
+    yield* fs.writeFileString(temporaryManifestPath, `${manifestJson}\n`);
+    yield* fs.rename(temporaryManifestPath, manifestPath);
+    copiedArtifacts.push(manifestPath);
   }
 
   yield* Effect.log("[desktop-artifact] Done. Artifacts:").pipe(

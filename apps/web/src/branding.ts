@@ -17,6 +17,8 @@ export const HOSTED_APP_CHANNEL =
 export const HOSTED_APP_CHANNEL_LABEL =
   HOSTED_APP_CHANNEL === "nightly" ? "Nightly" : HOSTED_APP_CHANNEL === "latest" ? "Latest" : null;
 export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? "T3 Code";
+export const UPSTREAM_SYNC_UI_ENABLED = APP_BASE_NAME === "DX Code" || import.meta.env.DEV;
+export const DX_LOCAL_UPDATE_UI_ENABLED = APP_BASE_NAME === "DX Code" || import.meta.env.DEV;
 export const APP_STAGE_LABEL =
   injectedDesktopAppBranding?.stageLabel ??
   HOSTED_APP_CHANNEL_LABEL ??

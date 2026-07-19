@@ -2,7 +2,7 @@ import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime"
 import { ArrowUpIcon, XIcon } from "lucide-react";
 import { useCallback, useState } from "react";
 
-import { APP_BASE_NAME } from "../../branding";
+import { APP_BASE_NAME, UPSTREAM_SYNC_UI_ENABLED } from "../../branding";
 import { usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -30,7 +30,14 @@ export function UpstreamUpdatePill() {
     if (result._tag === "Failure" && isAtomCommandInterrupted(result)) return;
   }, [dismiss, environmentId, state]);
 
-  if (APP_BASE_NAME !== "DX Code" || environmentId === null || !state || !view) return null;
+  if (
+    !UPSTREAM_SYNC_UI_ENABLED ||
+    APP_BASE_NAME === "DX Code" ||
+    environmentId === null ||
+    !state ||
+    !view
+  )
+    return null;
 
   return (
     <>

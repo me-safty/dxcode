@@ -95,6 +95,11 @@ import * as GitUpstreamAdapter from "./upstreamSync/GitUpstreamAdapter.ts";
 import * as UpstreamIntegration from "./upstreamSync/UpstreamIntegration.ts";
 import * as UpstreamSyncPersistence from "./upstreamSync/UpstreamSyncPersistence.ts";
 import * as UpstreamSyncScheduler from "./upstreamSync/UpstreamSyncScheduler.ts";
+import * as DxLocalUpdate from "./dxLocalUpdate/DxLocalUpdate.ts";
+import * as DxUpdatePersistence from "./dxLocalUpdate/DxUpdatePersistence.ts";
+import * as DxUpdateScheduler from "./dxLocalUpdate/DxUpdateScheduler.ts";
+import * as GitDxReleaseAdapter from "./dxLocalUpdate/GitDxReleaseAdapter.ts";
+import * as DxBuildAdapter from "./dxLocalUpdate/DxBuildAdapter.ts";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
@@ -298,6 +303,15 @@ const UpstreamSyncLayerLive = UpstreamSyncScheduler.layer.pipe(
   Layer.provideMerge(UpstreamIntegrationLive),
 );
 
+const DxLocalUpdateLive = DxLocalUpdate.layer.pipe(
+  Layer.provide(GitDxReleaseAdapter.layer.pipe(Layer.provide(GitVcsDriver.layer))),
+  Layer.provide(DxUpdatePersistence.layer),
+  Layer.provide(DxBuildAdapter.layer.pipe(Layer.provide(ProcessRunner.layer))),
+  Layer.provide(UpstreamIntegrationLive),
+);
+
+const DxUpdateLayerLive = DxUpdateScheduler.layer.pipe(Layer.provideMerge(DxLocalUpdateLive));
+
 const RuntimeCoreDependenciesBaseLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
@@ -342,7 +356,7 @@ const RuntimeCoreDependenciesBaseLive = ReactorLayerLive.pipe(
   ),
 );
 
-const RuntimeCoreDependenciesLive = UpstreamSyncLayerLive.pipe(
+const RuntimeCoreDependenciesLive = Layer.merge(UpstreamSyncLayerLive, DxUpdateLayerLive).pipe(
   Layer.provideMerge(RuntimeCoreDependenciesBaseLive),
 );
 

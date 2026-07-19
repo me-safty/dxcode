@@ -163,6 +163,17 @@ import {
   UpstreamSyncSession,
   UpstreamUpdateState,
 } from "./upstreamSync.ts";
+import {
+  DxArtifactManifest,
+  DxLocalUpdateState,
+  DxPublishAndBuildInput,
+  DxPublishError,
+  DxUpdateCheckError,
+  DxUpdateCheckInput,
+  DxUpdatePlan,
+  DxUpdatePrepareError,
+  DxUpdatePrepareInput,
+} from "./dxLocalUpdate.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -244,6 +255,11 @@ export const WS_METHODS = {
   upstreamPrepare: "upstream.prepare",
   upstreamAbort: "upstream.abort",
 
+  dxLocalUpdateGetState: "dxLocalUpdate.getState",
+  dxLocalUpdateCheck: "dxLocalUpdate.check",
+  dxLocalUpdatePrepare: "dxLocalUpdate.prepare",
+  dxLocalUpdatePublishAndBuild: "dxLocalUpdate.publishAndBuild",
+
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -263,6 +279,7 @@ export const WS_METHODS = {
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeUpstreamUpdates: "subscribeUpstreamUpdates",
+  subscribeDxLocalUpdates: "subscribeDxLocalUpdates",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -375,6 +392,30 @@ export const WsUpstreamPrepareRpc = Rpc.make(WS_METHODS.upstreamPrepare, {
 export const WsUpstreamAbortRpc = Rpc.make(WS_METHODS.upstreamAbort, {
   payload: UpstreamAbortInput,
   error: Schema.Union([UpstreamAbortError, EnvironmentAuthorizationError]),
+});
+
+export const WsDxLocalUpdateGetStateRpc = Rpc.make(WS_METHODS.dxLocalUpdateGetState, {
+  payload: Schema.Struct({}),
+  success: DxLocalUpdateState,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsDxLocalUpdateCheckRpc = Rpc.make(WS_METHODS.dxLocalUpdateCheck, {
+  payload: DxUpdateCheckInput,
+  success: DxLocalUpdateState,
+  error: Schema.Union([DxUpdateCheckError, EnvironmentAuthorizationError]),
+});
+
+export const WsDxLocalUpdatePrepareRpc = Rpc.make(WS_METHODS.dxLocalUpdatePrepare, {
+  payload: DxUpdatePrepareInput,
+  success: DxUpdatePlan,
+  error: Schema.Union([DxUpdatePrepareError, EnvironmentAuthorizationError]),
+});
+
+export const WsDxLocalUpdatePublishAndBuildRpc = Rpc.make(WS_METHODS.dxLocalUpdatePublishAndBuild, {
+  payload: DxPublishAndBuildInput,
+  success: DxArtifactManifest,
+  error: Schema.Union([DxPublishError, EnvironmentAuthorizationError]),
 });
 
 export const WsCloudGetRelayClientStatusRpc = Rpc.make(WS_METHODS.cloudGetRelayClientStatus, {
@@ -766,6 +807,13 @@ export const WsSubscribeUpstreamUpdatesRpc = Rpc.make(WS_METHODS.subscribeUpstre
   stream: true,
 });
 
+export const WsSubscribeDxLocalUpdatesRpc = Rpc.make(WS_METHODS.subscribeDxLocalUpdates, {
+  payload: Schema.Struct({}),
+  success: DxLocalUpdateState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -784,6 +832,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsUpstreamDismissRpc,
   WsUpstreamPrepareRpc,
   WsUpstreamAbortRpc,
+  WsDxLocalUpdateGetStateRpc,
+  WsDxLocalUpdateCheckRpc,
+  WsDxLocalUpdatePrepareRpc,
+  WsDxLocalUpdatePublishAndBuildRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsSourceControlLookupRepositoryRpc,
@@ -837,6 +889,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
   WsSubscribeUpstreamUpdatesRpc,
+  WsSubscribeDxLocalUpdatesRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

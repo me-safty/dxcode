@@ -53,6 +53,8 @@ import * as PreviewManager from "./preview/Manager.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
 import * as DesktopWslBackend from "./wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "./wsl/DesktopWslEnvironment.ts";
+import * as LocalDxInstaller from "./localUpdate/LocalDxInstaller.ts";
+import * as LocalDxUpdateRecovery from "./localUpdate/LocalDxUpdateRecovery.ts";
 
 const desktopEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -157,6 +159,7 @@ const desktopBackendLayer = DesktopBackendPool.layer.pipe(
   Layer.provideMerge(DesktopBackendConfiguration.layer),
   Layer.provideMerge(DesktopWslEnvironment.layer),
   Layer.provideMerge(desktopWindowLayer),
+  Layer.provideMerge(LocalDxUpdateRecovery.layer),
 );
 
 // WSL orchestrator hangs off the backend layer because it needs the
@@ -175,6 +178,7 @@ const desktopApplicationLayer = Layer.mergeAll(
   DesktopApplicationMenu.layer,
   DesktopShellEnvironment.layer,
   desktopSshLayer,
+  LocalDxInstaller.layer,
 ).pipe(
   Layer.provideMerge(DesktopUpdates.layer),
   Layer.provideMerge(desktopWslBackendLayer),

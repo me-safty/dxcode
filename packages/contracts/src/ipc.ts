@@ -1010,6 +1010,9 @@ export interface DesktopBridge {
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
+  installLocalDxUpdate: (
+    input: import("./dxLocalUpdate.ts").DxLocalInstallInput,
+  ) => Promise<import("./dxLocalUpdate.ts").DxLocalInstallResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
   /**
    * Desktop-only preview surface. Present iff the renderer is hosted by the
