@@ -37,6 +37,12 @@ describe("Review contracts", () => {
     ).toEqual({ _tag: "commit", sha });
   });
 
+  it("decodes an explicit branch comparison head", () => {
+    expect(
+      decodePreviewInput({ cwd: "/repo", threadId, headRef: "feature/draft-diff" }).headRef,
+    ).toBe("feature/draft-diff");
+  });
+
   it("allows the same path in both working tree sections", () => {
     const file = {
       path: "src/app.ts",

@@ -344,6 +344,33 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("previews a branch that is not checked out", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/draft-diff"]);
+        yield* writeTextFile(cwd, "draft.ts", "export const draft = true;\n");
+        yield* git(cwd, ["add", "draft.ts"]);
+        yield* git(cwd, ["commit", "-m", "feat: draft diff"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          headRef: "feature/draft-diff",
+        });
+        const branchSource = preview.sources.find((source) => source.id === "branch-range");
+
+        assert.strictEqual(branchSource?.headRef, "feature/draft-diff");
+        assert.include(branchSource?.diff ?? "", "+export const draft = true;");
+        assert.deepStrictEqual(
+          preview.commits.map((commit) => commit.title),
+          ["feat: draft diff"],
+        );
+      }),
+    );
+
     it.effect("separates staged and unstaged patches for a partially staged file", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

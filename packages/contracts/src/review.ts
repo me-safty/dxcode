@@ -52,6 +52,7 @@ export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   threadId: ThreadId,
   baseRef: Schema.optional(TrimmedNonEmptyString),
+  headRef: Schema.optional(TrimmedNonEmptyString),
   ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
   selection: Schema.optionalKey(ReviewDiffSelection),
 });

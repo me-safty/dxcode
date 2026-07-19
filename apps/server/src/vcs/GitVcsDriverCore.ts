@@ -2223,6 +2223,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const readReviewCommits = Effect.fn("readReviewCommits")(function* (
     cwd: string,
     baseRef: string | null,
+    headRef: string,
   ) {
     const result = yield* executeGit(
       "GitVcsDriver.getReviewDiffPreview.commits",
@@ -2232,7 +2233,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "-z",
         "--format=%H%x00%s%x00%cI",
         "--max-count=50",
-        ...(baseRef ? [`${baseRef}..HEAD`] : ["HEAD"]),
+        ...(baseRef ? [`${baseRef}..${headRef}`] : [headRef]),
       ],
       {
         allowNonZeroExit: true,
@@ -2267,15 +2268,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     const branch = details.branch;
+    const branchHeadRef = input.headRef ?? branch;
+    const headRef = branchHeadRef ?? "HEAD";
     const baseRef =
       input.baseRef ??
-      (branch
-        ? yield* resolveBaseBranchForNoUpstream(input.cwd, branch).pipe(
+      (branchHeadRef
+        ? yield* resolveBaseBranchForNoUpstream(input.cwd, branchHeadRef).pipe(
             Effect.orElseSucceed(() => null),
           )
         : null);
     const commits =
-      input.selection?._tag === "file" ? [] : yield* readReviewCommits(input.cwd, baseRef);
+      input.selection?._tag === "file" ? [] : yield* readReviewCommits(input.cwd, baseRef, headRef);
     const workingTree = yield* readReviewWorkingTreeManifest(input.cwd);
     const selectedDiff = yield* readSelectedReviewDiff(input, workingTree);
     const hashDiff = (diff: string) =>
@@ -2317,32 +2320,31 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    const baseResult =
-      baseRef && branch
-        ? yield* executeGit(
-            "GitVcsDriver.getReviewDiffPreview.base",
-            input.cwd,
-            [
-              "diff",
-              "--patch",
-              "--minimal",
-              ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
-              `${baseRef}...HEAD`,
-            ],
-            {
-              maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
-              appendTruncationMarker: true,
-            },
-          ).pipe(
-            Effect.orElseSucceed(() => ({
-              exitCode: 0,
-              stdout: "",
-              stderr: "",
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            })),
-          )
-        : null;
+    const baseResult = baseRef
+      ? yield* executeGit(
+          "GitVcsDriver.getReviewDiffPreview.base",
+          input.cwd,
+          [
+            "diff",
+            "--patch",
+            "--minimal",
+            ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+            `${baseRef}...${headRef}`,
+          ],
+          {
+            maxOutputBytes: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
+            appendTruncationMarker: true,
+          },
+        ).pipe(
+          Effect.orElseSucceed(() => ({
+            exitCode: 0,
+            stdout: "",
+            stderr: "",
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          })),
+        )
+      : null;
     const baseDiff = baseResult?.stdout ?? "";
     const baseDiffHash = yield* hashDiff(baseDiff);
 
@@ -2353,7 +2355,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         kind: "branch-range",
         title: baseRef ? `Against ${baseRef}` : "Against base branch",
         baseRef,
-        headRef: branch ?? "HEAD",
+        headRef,
         diff: baseDiff,
         diffHash: baseDiffHash,
         truncated: baseResult?.stdoutTruncated ?? false,

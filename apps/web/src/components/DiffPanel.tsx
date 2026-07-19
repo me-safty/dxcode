@@ -282,6 +282,9 @@ export default function DiffPanel({
     ),
   );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const draftHeadRef = draftThread
+    ? (draftThread.branch ?? gitStatusQuery.data?.refName ?? null)
+    : null;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(serverThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -409,6 +412,7 @@ export default function DiffPanel({
             cwd: activeCwd,
             threadId: activeThreadId,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+            ...(draftHeadRef ? { headRef: draftHeadRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
             selection: selectedCommitSha
               ? { _tag: "commit", sha: selectedCommitSha }
@@ -417,7 +421,7 @@ export default function DiffPanel({
         })
       : null,
   );
-  const overviewDiffPreviewKey = `${activeThread?.environmentId ?? ""}\0${activeCwd ?? ""}\0${selectedBaseRef ?? ""}\0${selectedCommitSha ?? ""}\0${diffIgnoreWhitespace}`;
+  const overviewDiffPreviewKey = `${activeThread?.environmentId ?? ""}\0${activeCwd ?? ""}\0${draftHeadRef ?? ""}\0${selectedBaseRef ?? ""}\0${selectedCommitSha ?? ""}\0${diffIgnoreWhitespace}`;
   const overviewDiffPreview = {
     ...overviewDiffPreviewQuery,
     data: useRetainedQueryData(overviewDiffPreviewKey, overviewDiffPreviewQuery.data),
