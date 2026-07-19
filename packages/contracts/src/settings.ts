@@ -403,6 +403,16 @@ export const ServerSettings = Schema.Struct({
       }),
     ),
   ),
+  reviewStackInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  reviewStackModelSelection: ModelSelection.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.6-terra",
+        options: [{ id: "reasoningEffort", value: "medium" }],
+      }),
+    ),
+  ),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -433,6 +443,7 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerS
 
 export const ServerSettingsOperation = Schema.Literals([
   "normalize",
+  "validate-review-stack-model",
   "check-exists",
   "read-file",
   "read-secret",
@@ -531,6 +542,8 @@ export const ServerSettingsPatch = Schema.Struct({
   gitBranchPrefix: Schema.optionalKey(TrimmedString),
   gitNoVerify: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  reviewStackInstructions: Schema.optionalKey(TrimmedString),
+  reviewStackModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),

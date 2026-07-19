@@ -114,6 +114,44 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }),
   );
 
+  it.effect("rejects non-Codex review stack model selections", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const error = yield* Effect.flip(
+        serverSettings.updateSettings({
+          reviewStackModelSelection: createModelSelection(
+            ProviderInstanceId.make("opencode"),
+            "openai/gpt-5",
+          ),
+        }),
+      );
+
+      assert.deepInclude(error, {
+        _tag: "ServerSettingsError",
+        operation: "validate-review-stack-model",
+        providerInstanceId: "opencode",
+      });
+    }).pipe(Effect.provide(ServerSettingsModule.layerTest())),
+  );
+
+  it.effect("accepts custom Codex review stack model selections", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("codex_personal");
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("codex"),
+            config: {},
+          },
+        },
+        reviewStackModelSelection: createModelSelection(instanceId, "gpt-5.6-terra"),
+      });
+
+      assert.equal(next.reviewStackModelSelection.instanceId, instanceId);
+    }).pipe(Effect.provide(ServerSettingsModule.layerTest())),
+  );
+
   it.effect(
     "decodes legacy object-shaped textGenerationModelSelection.options from settings.json",
     () =>

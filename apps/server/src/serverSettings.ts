@@ -72,6 +72,27 @@ const normalizeServerSettings = (
     ),
   );
 
+function validateReviewStackModelSelection(
+  settings: ServerSettings,
+  settingsPath: string,
+): Effect.Effect<ServerSettings, ServerSettingsError> {
+  const instanceId = settings.reviewStackModelSelection.instanceId;
+  const instanceConfig = settings.providerInstances[instanceId];
+  const driverKind =
+    instanceConfig?.driver ?? (isProviderDriverKind(instanceId) ? instanceId : null);
+
+  return driverKind === "codex"
+    ? Effect.succeed(settings)
+    : Effect.fail(
+        new ServerSettingsError({
+          settingsPath,
+          operation: "validate-review-stack-model",
+          providerInstanceId: instanceId,
+          cause: new Error("Review stack generation requires a Codex provider instance."),
+        }),
+      );
+}
+
 function providerEnvironmentSecretName(input: {
   readonly instanceId: string;
   readonly name: string;
@@ -152,6 +173,7 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
       updateSettings: (patch) =>
         Ref.get(currentSettingsRef).pipe(
           Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
+          Effect.flatMap((settings) => validateReviewStackModelSelection(settings, "<memory>")),
           Effect.flatMap(normalizeServerSettings),
           Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
         ),
@@ -219,6 +241,7 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "automaticGitFetchInterval",
   "textGenerationModelSelection",
+  "reviewStackModelSelection",
 ]);
 
 function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {
@@ -567,10 +590,11 @@ const make = Effect.gen(function* () {
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const nextPersisted = yield* persistProviderEnvironmentSecrets(
-            current,
+          const patched = yield* validateReviewStackModelSelection(
             applyServerSettingsPatch(current, patch),
+            settingsPath,
           );
+          const nextPersisted = yield* persistProviderEnvironmentSecrets(current, patched);
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);

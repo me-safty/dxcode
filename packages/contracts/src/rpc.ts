@@ -53,6 +53,16 @@ import {
   ReviewUnstagePathsInput,
   ReviewUnstagePathsResult,
 } from "./review.ts";
+import {
+  ReviewStackCancelInput,
+  ReviewStackEnsureInput,
+  ReviewStackError,
+  ReviewStackEvent,
+  ReviewStackGetSnapshotInput,
+  ReviewStackListSnapshotsInput,
+  ReviewStackSnapshot,
+  ReviewStackSnapshotMetadata,
+} from "./reviewStack.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
   ClientOrchestrationCommand,
@@ -190,6 +200,11 @@ export const WS_METHODS = {
   reviewDiscardChanges: "review.discardChanges",
   reviewStagePaths: "review.stagePaths",
   reviewUnstagePaths: "review.unstagePaths",
+  reviewStackEnsure: "reviewStack.ensure",
+  reviewStackListSnapshots: "reviewStack.listSnapshots",
+  reviewStackGetSnapshot: "reviewStack.getSnapshot",
+  reviewStackCancel: "reviewStack.cancel",
+  reviewStackSubscribeEvents: "reviewStack.subscribeEvents",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -508,6 +523,37 @@ export const WsReviewUnstagePathsRpc = Rpc.make(WS_METHODS.reviewUnstagePaths, {
   error: Schema.Union([ReviewUnstagePathsError, EnvironmentAuthorizationError]),
 });
 
+export const WsReviewStackEnsureRpc = Rpc.make(WS_METHODS.reviewStackEnsure, {
+  payload: ReviewStackEnsureInput,
+  success: ReviewStackSnapshotMetadata,
+  error: Schema.Union([ReviewStackError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewStackListSnapshotsRpc = Rpc.make(WS_METHODS.reviewStackListSnapshots, {
+  payload: ReviewStackListSnapshotsInput,
+  success: Schema.Array(ReviewStackSnapshotMetadata),
+  error: Schema.Union([ReviewStackError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewStackGetSnapshotRpc = Rpc.make(WS_METHODS.reviewStackGetSnapshot, {
+  payload: ReviewStackGetSnapshotInput,
+  success: ReviewStackSnapshot,
+  error: Schema.Union([ReviewStackError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewStackCancelRpc = Rpc.make(WS_METHODS.reviewStackCancel, {
+  payload: ReviewStackCancelInput,
+  success: ReviewStackSnapshotMetadata,
+  error: Schema.Union([ReviewStackError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewStackSubscribeEventsRpc = Rpc.make(WS_METHODS.reviewStackSubscribeEvents, {
+  payload: Schema.Struct({}),
+  success: ReviewStackEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 export const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
   payload: TerminalOpenInput,
   success: TerminalSessionSnapshot,
@@ -752,6 +798,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsReviewDiscardChangesRpc,
   WsReviewStagePathsRpc,
   WsReviewUnstagePathsRpc,
+  WsReviewStackEnsureRpc,
+  WsReviewStackListSnapshotsRpc,
+  WsReviewStackGetSnapshotRpc,
+  WsReviewStackCancelRpc,
+  WsReviewStackSubscribeEventsRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalWriteRpc,

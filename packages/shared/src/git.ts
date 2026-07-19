@@ -20,6 +20,11 @@ export const WORKTREE_BRANCH_PREFIX = "t3code";
  */
 export const EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH = ".git/t3code-exact-commit-patch-v1";
 
+/** Canonical form used when comparing immutable review snapshots with Git previews. */
+export function normalizeGitDiff(value: string): string {
+  return value.replace(/\r\n?/g, "\n").trimEnd();
+}
+
 export function isExactCommitPatchLegacyGuard(filePaths: readonly string[]): boolean {
   return filePaths.length === 1 && filePaths[0] === EXACT_COMMIT_PATCH_LEGACY_GUARD_PATH;
 }

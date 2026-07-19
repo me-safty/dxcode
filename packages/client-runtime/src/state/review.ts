@@ -1,7 +1,11 @@
 import { WS_METHODS } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
-import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+import {
+  createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
+} from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 
@@ -31,6 +35,28 @@ export function createReviewEnvironmentAtoms<R, E>(
       tag: WS_METHODS.reviewUnstagePaths,
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
+    }),
+    reviewStackEnsure: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review-stack:ensure",
+      tag: WS_METHODS.reviewStackEnsure,
+    }),
+    reviewStackListSnapshots: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:review-stack:list-snapshots",
+      tag: WS_METHODS.reviewStackListSnapshots,
+      staleTimeMs: 2_000,
+    }),
+    reviewStackGetSnapshot: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:review-stack:get-snapshot",
+      tag: WS_METHODS.reviewStackGetSnapshot,
+      staleTimeMs: 60_000,
+    }),
+    reviewStackCancel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review-stack:cancel",
+      tag: WS_METHODS.reviewStackCancel,
+    }),
+    reviewStackEvents: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:review-stack:events",
+      tag: WS_METHODS.reviewStackSubscribeEvents,
     }),
   };
 }
