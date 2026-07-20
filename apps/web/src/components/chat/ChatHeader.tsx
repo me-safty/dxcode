@@ -156,12 +156,14 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {showOpenInPicker && (
-          <OpenInPicker
-            environmentId={activeThreadEnvironmentId}
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
+          <div className="hidden md:block">
+            <OpenInPicker
+              environmentId={activeThreadEnvironmentId}
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              openInCwd={openInCwd}
+            />
+          </div>
         )}
         <ThreadDiffControl
           threadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
