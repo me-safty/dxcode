@@ -215,7 +215,8 @@ export default function DiffPanel({
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
-  const [innerTab, setInnerTab] = useState<"diff" | "review-stack">("diff");
+  const innerTab = useDiffPanelStore((state) => state.selectedTab);
+  const setInnerTab = useDiffPanelStore((state) => state.selectTab);
   const [baseRefQuery, setBaseRefQuery] = useState("");
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } = useCopyToClipboard({

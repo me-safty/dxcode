@@ -7,7 +7,19 @@ import { selectThreadDiffPanelSelection, useDiffPanelStore } from "./diffPanelSt
 const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-1"));
 
 describe("diffPanelStore", () => {
-  beforeEach(() => useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} }));
+  beforeEach(() =>
+    useDiffPanelStore.setState({
+      byThreadKey: {},
+      branchBaseRefByThreadKey: {},
+      selectedTab: "diff",
+    }),
+  );
+
+  it("remembers the selected review tab", () => {
+    useDiffPanelStore.getState().selectTab("review-stack");
+
+    expect(useDiffPanelStore.getState().selectedTab).toBe("review-stack");
+  });
 
   it("defaults each thread to branch changes when the working tree is clean", () => {
     expect(

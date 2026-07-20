@@ -14,12 +14,16 @@ export type DiffPanelSelection =
     }
   | { kind: "turn"; turnId: TurnId; filePath: string | null; revealRequestId: number };
 
+export type DiffPanelTab = "diff" | "review-stack";
+
 const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
 const DEFAULT_WORKING_TREE_SELECTION: DiffPanelSelection = { kind: "working-tree", file: null };
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
   branchBaseRefByThreadKey: Record<string, string | null>;
+  selectedTab: DiffPanelTab;
+  selectTab: (tab: DiffPanelTab) => void;
   selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;
   selectWorkingTreeFile: (ref: ScopedThreadRef, area: "staged" | "unstaged", path: string) => void;
   selectWorkingTreeAll: (ref: ScopedThreadRef) => void;
@@ -47,6 +51,8 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
     (set) => ({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
+      selectedTab: "diff",
+      selectTab: (selectedTab) => set({ selectedTab }),
       selectGitScope: (ref, scope) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -239,6 +245,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
       partialize: (state) => ({
         byThreadKey: state.byThreadKey,
         branchBaseRefByThreadKey: state.branchBaseRefByThreadKey,
+        selectedTab: state.selectedTab,
       }),
     },
   ),
