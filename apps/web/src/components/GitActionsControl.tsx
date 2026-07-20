@@ -44,6 +44,7 @@ import {
   type DefaultBranchConfirmableAction,
   requiresDefaultBranchConfirmation,
   resolveDefaultBranchActionDialogCopy,
+  resolveCombinedCommitMenuItem,
   resolveLiveThreadBranchUpdate,
   resolveThreadBranchMetadataPatch,
   resolveQuickAction,
@@ -1248,6 +1249,10 @@ export default function GitActionsControl({
       resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote),
     [gitStatusForActions, hasPrimaryRemote, isDefaultRef, isGitActionRunning],
   );
+  const combinedCommitMenuItem = useMemo(
+    () => resolveCombinedCommitMenuItem(quickAction),
+    [quickAction],
+  );
   const quickActionDisabledReason = quickAction.disabled
     ? (quickAction.hint ?? "This action is currently unavailable.")
     : null;
@@ -1668,6 +1673,10 @@ export default function GitActionsControl({
 
   const openDialogForMenuItem = (item: GitActionMenuItem) => {
     if (item.disabled) return;
+    if (item.kind === "run_action" && item.action) {
+      void runGitActionWithToast({ action: item.action });
+      return;
+    }
     if (item.kind === "open_pr") {
       void openExistingPr();
       return;
@@ -1857,6 +1866,15 @@ export default function GitActionsControl({
                 </MenuItem>
               )}
               <MenuSeparator />
+              {combinedCommitMenuItem ? (
+                <MenuItem onClick={() => openDialogForMenuItem(combinedCommitMenuItem)}>
+                  <GitActionItemIcon
+                    icon={combinedCommitMenuItem.icon}
+                    SourceControlIcon={SourceControlIcon}
+                  />
+                  {combinedCommitMenuItem.label}
+                </MenuItem>
+              ) : null}
               {gitActionMenuItems.map((item) => {
                 const disabledReason = getMenuActionDisabledReason({
                   item,

@@ -1,5 +1,6 @@
 import {
   ArchiveIcon,
+  AppWindowIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
   CloudIcon,
@@ -111,6 +112,7 @@ import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
+import { useThreadPreviewState } from "../previewStateStore";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { projectEnvironment } from "../state/projects";
@@ -387,6 +389,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const previewState = useThreadPreviewState(threadRef);
+  const hasOpenBrowserTab = Object.keys(previewState.sessions).length > 0;
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -744,6 +748,23 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {hasOpenBrowserTab && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    role="img"
+                    aria-label="Browser tab open"
+                    className="inline-flex items-center justify-center text-muted-foreground"
+                    data-testid={`thread-browser-indicator-${thread.id}`}
+                  />
+                }
+              >
+                <AppWindowIcon className="size-3" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">Browser tab open</TooltipPopup>
+            </Tooltip>
+          )}
           {discoveredPorts.length > 0 && (
             <Tooltip>
               <TooltipTrigger

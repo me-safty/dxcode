@@ -19,7 +19,6 @@ import { ProjectFavicon } from "../components/ProjectFavicon";
 import { resolveThreadStatusPill } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
 import { ButtonGroup } from "../components/ui/group";
-import { Input } from "../components/ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Textarea } from "../components/ui/textarea";
@@ -235,14 +234,14 @@ function ProjectDashboardRoute() {
                   <TaskEditor
                     task={task}
                     onCancel={() => setEditingTaskId(null)}
-                    onSave={async (nextTitle, nextDescription) => {
+                    onSave={async (text) => {
                       const ok = await runTaskCommand(() =>
                         updateTask({
                           environmentId,
                           input: {
                             taskId: task.id,
-                            title: nextTitle,
-                            description: nextDescription,
+                            title: text,
+                            description: "",
                           },
                         }),
                       );
@@ -258,7 +257,7 @@ function ProjectDashboardRoute() {
                     >
                       <h3
                         className={cn(
-                          "break-words text-sm font-medium",
+                          "whitespace-pre-wrap break-words text-sm font-medium",
                           status === "done" && "text-muted-foreground line-through",
                         )}
                       >
@@ -542,34 +541,23 @@ function TaskEditor({
 }: {
   task: ProjectTask;
   onCancel: () => void;
-  onSave: (title: string, description: string) => Promise<void>;
+  onSave: (text: string) => Promise<void>;
 }) {
-  const [title, setTitle] = useState(task.title);
-  const [description, setDescription] = useState(task.description);
+  const [text, setText] = useState(() => taskThreadDraft(task));
   return (
     <div>
-      <Input
-        autoFocus
-        value={title}
-        onChange={(event) => setTitle(event.target.value)}
-        aria-label="Task title"
-      />
       <Textarea
-        className="mt-2"
+        autoFocus
         size="sm"
-        value={description}
-        onChange={(event) => setDescription(event.target.value)}
-        aria-label="Task description"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        aria-label="Task"
       />
       <div className="mt-2 flex justify-end gap-2">
         <Button size="xs" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button
-          size="xs"
-          disabled={!title.trim()}
-          onClick={() => void onSave(title.trim(), description)}
-        >
+        <Button size="xs" disabled={!text.trim()} onClick={() => void onSave(text.trim())}>
           Save
         </Button>
       </div>

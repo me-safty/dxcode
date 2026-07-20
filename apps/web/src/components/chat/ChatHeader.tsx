@@ -1,14 +1,18 @@
 import {
   type EnvironmentId,
   type EditorId,
+  type ProjectId,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { Link } from "@tanstack/react-router";
+import { LayoutDashboardIcon } from "lucide-react";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
@@ -25,6 +29,7 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   draftId?: DraftId;
   activeThreadTitle: string;
+  activeProjectId: ProjectId | undefined;
   activeProjectName: string | undefined;
   openInCwd: string | null;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
@@ -64,6 +69,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   draftId,
   activeThreadTitle,
+  activeProjectId,
   activeProjectName,
   openInCwd,
   activeProjectScripts,
@@ -112,6 +118,32 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        {activeProjectId && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  className="md:hidden"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Open project dashboard"
+                  render={
+                    <Link
+                      to="/project/$environmentId/$projectId"
+                      params={{
+                        environmentId: activeThreadEnvironmentId,
+                        projectId: activeProjectId,
+                      }}
+                    />
+                  }
+                />
+              }
+            >
+              <LayoutDashboardIcon />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">Project dashboard</TooltipPopup>
+          </Tooltip>
+        )}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
@@ -124,12 +156,14 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {showOpenInPicker && (
-          <OpenInPicker
-            environmentId={activeThreadEnvironmentId}
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
+          <div className="hidden md:block">
+            <OpenInPicker
+              environmentId={activeThreadEnvironmentId}
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              openInCwd={openInCwd}
+            />
+          </div>
         )}
         <ThreadDiffControl
           threadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}

@@ -30,7 +30,11 @@ import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { cn } from "~/lib/utils";
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
+import {
+  selectThreadDiffPanelSelection,
+  selectThreadDiffPanelTab,
+  useDiffPanelStore,
+} from "../diffPanelStore";
 import { useTheme } from "../hooks/useTheme";
 import {
   buildFileDiffRenderKey,
@@ -215,7 +219,6 @@ export default function DiffPanel({
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
-  const [innerTab, setInnerTab] = useState<"diff" | "review-stack">("diff");
   const [baseRefQuery, setBaseRefQuery] = useState("");
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } = useCopyToClipboard({
@@ -281,6 +284,12 @@ export default function DiffPanel({
       initialGitScope === "unstaged",
     ),
   );
+  const innerTab = useDiffPanelStore((state) =>
+    selectThreadDiffPanelTab(state.selectedTabsByThreadKey, routeThreadRef, diffSelection),
+  );
+  const setInnerTab = (tab: "diff" | "review-stack") => {
+    if (routeThreadRef) useDiffPanelStore.getState().selectTab(routeThreadRef, diffSelection, tab);
+  };
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const draftHeadRef = draftThread
     ? (draftThread.branch ?? gitStatusQuery.data?.refName ?? null)

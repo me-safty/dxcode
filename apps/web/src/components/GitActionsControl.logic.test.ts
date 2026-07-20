@@ -8,6 +8,7 @@ import {
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
   resolveQuickAction,
+  resolveCombinedCommitMenuItem,
   resolveRemainingThreadPatch,
   resolveThreadCommitFilePaths,
   shouldLoadThreadCommitDiff,
@@ -559,6 +560,45 @@ describe("when: ref has diverged from upstream", () => {
 });
 
 describe("when: working tree has local changes", () => {
+  it("exposes available combined commit actions in the menu", () => {
+    assert.deepEqual(
+      resolveCombinedCommitMenuItem(
+        resolveQuickAction(status({ hasWorkingTreeChanges: true }), false),
+      ),
+      {
+        id: "commit_push_pr",
+        label: "Commit, push & PR",
+        disabled: false,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit_push_pr",
+      },
+    );
+
+    assert.deepEqual(
+      resolveCombinedCommitMenuItem(
+        resolveQuickAction(status({ refName: "main", hasWorkingTreeChanges: true }), false, true),
+      ),
+      {
+        id: "commit_push",
+        label: "Commit & push",
+        disabled: false,
+        icon: "commit",
+        kind: "run_action",
+        action: "commit_push",
+      },
+    );
+  });
+
+  it("omits unavailable or non-combined actions from the menu", () => {
+    assert.isNull(resolveCombinedCommitMenuItem(resolveQuickAction(status(), false)));
+    assert.isNull(
+      resolveCombinedCommitMenuItem(
+        resolveQuickAction(status({ hasWorkingTreeChanges: true }), true),
+      ),
+    );
+  });
+
   it("resolveQuickAction returns commit, push, and create PR", () => {
     const quick = resolveQuickAction(status({ hasWorkingTreeChanges: true }), false);
     assert.deepInclude(quick, {
