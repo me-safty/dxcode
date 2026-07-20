@@ -557,11 +557,7 @@ function TaskEditor({
         <Button size="xs" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button
-          size="xs"
-          disabled={!text.trim()}
-          onClick={() => void onSave(text.trim())}
-        >
+        <Button size="xs" disabled={!text.trim()} onClick={() => void onSave(text.trim())}>
           Save
         </Button>
       </div>

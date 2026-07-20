@@ -5,6 +5,10 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Plus,
   SquareSplitHorizontal,
   SquareSplitVertical,
@@ -285,6 +289,34 @@ interface TerminalViewportProps {
   keybindings: ResolvedKeybindingsConfig;
 }
 
+interface MobileTerminalArrowButtonProps {
+  label: string;
+  className?: string;
+  onClick: () => void;
+  children: ReactNode;
+}
+
+function MobileTerminalArrowButton({
+  label,
+  className,
+  onClick,
+  children,
+}: MobileTerminalArrowButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className={cn(
+        "inline-flex size-9 items-center justify-center rounded-md border border-border/80 bg-background/90 text-foreground shadow-sm backdrop-blur-sm transition-colors active:bg-accent",
+        className,
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
 interface TerminalLaunchLocation {
   readonly cwd: string;
   readonly worktreePath?: string | null;
@@ -333,6 +365,7 @@ export function TerminalViewport({
   const selectionActionOpenRef = useRef(false);
   const selectionActionTimerRef = useRef<number | null>(null);
   const keybindingsRef = useRef(keybindings);
+  const sendTerminalInputRef = useRef<(data: string, fallbackError: string) => void>(() => {});
   const runtimeEnvKey = useMemo(() => runtimeEnvSignature(runtimeEnv), [runtimeEnv]);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
@@ -494,6 +527,9 @@ export function TerminalViewport({
         const error = squashAtomCommandFailure(result);
         writeSystemMessage(activeTerminal, error instanceof Error ? error.message : fallbackError);
       }
+    };
+    sendTerminalInputRef.current = (data: string, fallbackError: string) => {
+      void sendTerminalInput(data, fallbackError);
     };
 
     terminal.attachCustomKeyEventHandler((event) => {
@@ -698,6 +734,7 @@ export function TerminalViewport({
       window.removeEventListener("mouseup", handleMouseUp);
       mount.removeEventListener("pointerdown", handlePointerDown);
       themeObserver.disconnect();
+      sendTerminalInputRef.current = () => {};
       terminalRef.current = null;
       fitAddonRef.current = null;
       terminal.dispose();
@@ -794,11 +831,46 @@ export function TerminalViewport({
       window.cancelAnimationFrame(frame);
     };
   }, [drawerHeight, environmentId, resizeEpoch, terminalId, threadId]);
+
+  const sendMobileArrowInput = useCallback((data: string, fallbackError: string) => {
+    terminalRef.current?.focus();
+    sendTerminalInputRef.current(data, fallbackError);
+  }, []);
+
   return (
-    <div
-      ref={containerRef}
-      className="relative h-full w-full overflow-hidden rounded-[4px] bg-background"
-    />
+    <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-background">
+      <div ref={containerRef} className="h-full w-full" />
+      <div className="pointer-events-none absolute bottom-2 right-2 z-20 sm:hidden">
+        <div className="pointer-events-auto grid grid-cols-3 gap-1.5">
+          <div />
+          <MobileTerminalArrowButton
+            label="Move terminal cursor up"
+            onClick={() => sendMobileArrowInput("\u001b[A", "Failed to move cursor up")}
+          >
+            <ArrowUp className="size-4" />
+          </MobileTerminalArrowButton>
+          <div />
+          <MobileTerminalArrowButton
+            label="Move terminal cursor left"
+            onClick={() => sendMobileArrowInput("\u001b[D", "Failed to move cursor left")}
+          >
+            <ArrowLeft className="size-4" />
+          </MobileTerminalArrowButton>
+          <MobileTerminalArrowButton
+            label="Move terminal cursor down"
+            onClick={() => sendMobileArrowInput("\u001b[B", "Failed to move cursor down")}
+          >
+            <ArrowDown className="size-4" />
+          </MobileTerminalArrowButton>
+          <MobileTerminalArrowButton
+            label="Move terminal cursor right"
+            onClick={() => sendMobileArrowInput("\u001b[C", "Failed to move cursor right")}
+          >
+            <ArrowRight className="size-4" />
+          </MobileTerminalArrowButton>
+        </div>
+      </div>
+    </div>
   );
 }
 
