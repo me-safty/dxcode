@@ -16,12 +16,13 @@ export type GitActionIconName = "commit" | "push" | "pr";
 export type GitDialogAction = "commit" | "push" | "create_pr";
 
 export interface GitActionMenuItem {
-  id: "commit" | "push" | "pr";
+  id: "commit" | "push" | "pr" | "commit_push" | "commit_push_pr";
   label: string;
   disabled: boolean;
   icon: GitActionIconName;
-  kind: "open_dialog" | "open_pr";
+  kind: "open_dialog" | "open_pr" | "run_action";
   dialogAction?: GitDialogAction;
+  action?: GitStackedAction;
 }
 
 export interface GitQuickAction {
@@ -30,6 +31,27 @@ export interface GitQuickAction {
   kind: "run_action" | "run_pull" | "open_pr" | "open_publish" | "show_hint";
   action?: GitStackedAction;
   hint?: string;
+}
+
+export function resolveCombinedCommitMenuItem(
+  quickAction: GitQuickAction,
+): GitActionMenuItem | null {
+  if (
+    quickAction.disabled ||
+    quickAction.kind !== "run_action" ||
+    (quickAction.action !== "commit_push" && quickAction.action !== "commit_push_pr")
+  ) {
+    return null;
+  }
+
+  return {
+    id: quickAction.action,
+    label: quickAction.label,
+    disabled: false,
+    icon: "commit",
+    kind: "run_action",
+    action: quickAction.action,
+  };
 }
 
 export interface DefaultBranchActionDialogCopy {
