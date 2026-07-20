@@ -257,7 +257,7 @@ function ProjectDashboardRoute() {
                     >
                       <h3
                         className={cn(
-                          "break-words text-sm font-medium",
+                          "whitespace-pre-wrap break-words text-sm font-medium",
                           status === "done" && "text-muted-foreground line-through",
                         )}
                       >
