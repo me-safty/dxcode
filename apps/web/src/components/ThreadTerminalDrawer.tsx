@@ -289,27 +289,20 @@ interface TerminalViewportProps {
   keybindings: ResolvedKeybindingsConfig;
 }
 
-interface MobileTerminalArrowButtonProps {
-  label: string;
-  className?: string;
-  onClick: () => void;
-  children: ReactNode;
-}
-
 function MobileTerminalArrowButton({
   label,
-  className,
   onClick,
   children,
-}: MobileTerminalArrowButtonProps) {
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"
       aria-label={label}
-      className={cn(
-        "inline-flex size-9 items-center justify-center rounded-md border border-border/80 bg-background/90 text-foreground shadow-sm backdrop-blur-sm transition-colors active:bg-accent",
-        className,
-      )}
+      className="p-1 text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
       onClick={onClick}
     >
       {children}
@@ -840,33 +833,34 @@ export function TerminalViewport({
   return (
     <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-background">
       <div ref={containerRef} className="h-full w-full" />
-      <div className="pointer-events-none absolute bottom-2 right-2 z-20 sm:hidden">
-        <div className="pointer-events-auto grid grid-cols-3 gap-1.5">
-          <div />
-          <MobileTerminalArrowButton
-            label="Move terminal cursor up"
-            onClick={() => sendMobileArrowInput("\u001b[A", "Failed to move cursor up")}
-          >
-            <ArrowUp className="size-4" />
-          </MobileTerminalArrowButton>
-          <div />
+      <div className="pointer-events-none absolute right-1 top-7 z-20 sm:hidden">
+        <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
           <MobileTerminalArrowButton
             label="Move terminal cursor left"
             onClick={() => sendMobileArrowInput("\u001b[D", "Failed to move cursor left")}
           >
-            <ArrowLeft className="size-4" />
+            <ArrowLeft className="size-3.25" />
           </MobileTerminalArrowButton>
+          <div className="h-4 w-px bg-border/80" />
+          <MobileTerminalArrowButton
+            label="Move terminal cursor up"
+            onClick={() => sendMobileArrowInput("\u001b[A", "Failed to move cursor up")}
+          >
+            <ArrowUp className="size-3.25" />
+          </MobileTerminalArrowButton>
+          <div className="h-4 w-px bg-border/80" />
           <MobileTerminalArrowButton
             label="Move terminal cursor down"
             onClick={() => sendMobileArrowInput("\u001b[B", "Failed to move cursor down")}
           >
-            <ArrowDown className="size-4" />
+            <ArrowDown className="size-3.25" />
           </MobileTerminalArrowButton>
+          <div className="h-4 w-px bg-border/80" />
           <MobileTerminalArrowButton
             label="Move terminal cursor right"
             onClick={() => sendMobileArrowInput("\u001b[C", "Failed to move cursor right")}
           >
-            <ArrowRight className="size-4" />
+            <ArrowRight className="size-3.25" />
           </MobileTerminalArrowButton>
         </div>
       </div>
