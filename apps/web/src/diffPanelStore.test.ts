@@ -2,23 +2,33 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, TurnId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "./diffPanelStore";
+import {
+  selectThreadDiffPanelSelection,
+  selectThreadDiffPanelTab,
+  useDiffPanelStore,
+} from "./diffPanelStore";
 
 const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-1"));
+const OTHER_THREAD_REF = scopeThreadRef(
+  EnvironmentId.make("environment-1"),
+  ThreadId.make("thread-2"),
+);
 
 describe("diffPanelStore", () => {
   beforeEach(() =>
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
-      selectedTab: "diff",
+      selectedTabByThreadKey: {},
     }),
   );
 
-  it("remembers the selected review tab", () => {
-    useDiffPanelStore.getState().selectTab("review-stack");
+  it("remembers the selected review tab per thread", () => {
+    useDiffPanelStore.getState().selectTab(THREAD_REF, "review-stack");
 
-    expect(useDiffPanelStore.getState().selectedTab).toBe("review-stack");
+    const selectedTabs = useDiffPanelStore.getState().selectedTabByThreadKey;
+    expect(selectThreadDiffPanelTab(selectedTabs, THREAD_REF)).toBe("review-stack");
+    expect(selectThreadDiffPanelTab(selectedTabs, OTHER_THREAD_REF)).toBe("diff");
   });
 
   it("defaults each thread to branch changes when the working tree is clean", () => {

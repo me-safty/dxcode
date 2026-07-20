@@ -30,7 +30,11 @@ import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { cn } from "~/lib/utils";
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
+import {
+  selectThreadDiffPanelSelection,
+  selectThreadDiffPanelTab,
+  useDiffPanelStore,
+} from "../diffPanelStore";
 import { useTheme } from "../hooks/useTheme";
 import {
   buildFileDiffRenderKey,
@@ -215,8 +219,6 @@ export default function DiffPanel({
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
-  const innerTab = useDiffPanelStore((state) => state.selectedTab);
-  const setInnerTab = useDiffPanelStore((state) => state.selectTab);
   const [baseRefQuery, setBaseRefQuery] = useState("");
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const { copyToClipboard: copyCommitHash, isCopied: isCommitHashCopied } = useCopyToClipboard({
@@ -239,6 +241,12 @@ export default function DiffPanel({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
   });
+  const innerTab = useDiffPanelStore((state) =>
+    selectThreadDiffPanelTab(state.selectedTabByThreadKey, routeThreadRef),
+  );
+  const setInnerTab = (tab: "diff" | "review-stack") => {
+    if (routeThreadRef) useDiffPanelStore.getState().selectTab(routeThreadRef, tab);
+  };
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const serverThread = useThread(routeThreadRef);
   const draftThread = useComposerDraftStore((store) => store.getDraftThread(composerDraftTarget));

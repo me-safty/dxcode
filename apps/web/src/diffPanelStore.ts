@@ -22,8 +22,8 @@ const DEFAULT_WORKING_TREE_SELECTION: DiffPanelSelection = { kind: "working-tree
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
   branchBaseRefByThreadKey: Record<string, string | null>;
-  selectedTab: DiffPanelTab;
-  selectTab: (tab: DiffPanelTab) => void;
+  selectedTabByThreadKey: Record<string, DiffPanelTab>;
+  selectTab: (ref: ScopedThreadRef, tab: DiffPanelTab) => void;
   selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;
   selectWorkingTreeFile: (ref: ScopedThreadRef, area: "staged" | "unstaged", path: string) => void;
   selectWorkingTreeAll: (ref: ScopedThreadRef) => void;
@@ -51,8 +51,14 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
     (set) => ({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
-      selectedTab: "diff",
-      selectTab: (selectedTab) => set({ selectedTab }),
+      selectedTabByThreadKey: {},
+      selectTab: (ref, tab) =>
+        set((state) => ({
+          selectedTabByThreadKey: {
+            ...state.selectedTabByThreadKey,
+            [scopedThreadKey(ref)]: tab,
+          },
+        })),
       selectGitScope: (ref, scope) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -206,13 +212,19 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
       removeThread: (ref) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
-          if (!(threadKey in state.byThreadKey) && !(threadKey in state.branchBaseRefByThreadKey)) {
+          if (
+            !(threadKey in state.byThreadKey) &&
+            !(threadKey in state.branchBaseRefByThreadKey) &&
+            !(threadKey in state.selectedTabByThreadKey)
+          ) {
             return state;
           }
           const { [threadKey]: _removed, ...byThreadKey } = state.byThreadKey;
           const { [threadKey]: _removedBaseRef, ...branchBaseRefByThreadKey } =
             state.branchBaseRefByThreadKey;
-          return { byThreadKey, branchBaseRefByThreadKey };
+          const { [threadKey]: _removedSelectedTab, ...selectedTabByThreadKey } =
+            state.selectedTabByThreadKey;
+          return { byThreadKey, branchBaseRefByThreadKey, selectedTabByThreadKey };
         }),
     }),
     {
@@ -245,7 +257,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
       partialize: (state) => ({
         byThreadKey: state.byThreadKey,
         branchBaseRefByThreadKey: state.branchBaseRefByThreadKey,
-        selectedTab: state.selectedTab,
+        selectedTabByThreadKey: state.selectedTabByThreadKey,
       }),
     },
   ),
@@ -261,4 +273,11 @@ export function selectThreadDiffPanelSelection(
     byThreadKey[scopedThreadKey(ref)] ??
     (hasWorkingTreeChanges ? DEFAULT_WORKING_TREE_SELECTION : DEFAULT_SELECTION)
   );
+}
+
+export function selectThreadDiffPanelTab(
+  selectedTabByThreadKey: Record<string, DiffPanelTab>,
+  ref: ScopedThreadRef | null | undefined,
+): DiffPanelTab {
+  return ref ? (selectedTabByThreadKey[scopedThreadKey(ref)] ?? "diff") : "diff";
 }
