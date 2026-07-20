@@ -19,16 +19,21 @@ describe("diffPanelStore", () => {
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
-      selectedTabByThreadKey: {},
+      selectedTabsByThreadKey: {},
     }),
   );
 
-  it("remembers the selected review tab per thread", () => {
-    useDiffPanelStore.getState().selectTab(THREAD_REF, "review-stack");
+  it("remembers the selected review tab per thread and view", () => {
+    const branchSelection = { kind: "branch", baseRef: null } as const;
+    const commitSelection = { kind: "commit", sha: "abc123" } as const;
+    useDiffPanelStore.getState().selectTab(THREAD_REF, commitSelection, "review-stack");
 
-    const selectedTabs = useDiffPanelStore.getState().selectedTabByThreadKey;
-    expect(selectThreadDiffPanelTab(selectedTabs, THREAD_REF)).toBe("review-stack");
-    expect(selectThreadDiffPanelTab(selectedTabs, OTHER_THREAD_REF)).toBe("diff");
+    const selectedTabs = useDiffPanelStore.getState().selectedTabsByThreadKey;
+    expect(selectThreadDiffPanelTab(selectedTabs, THREAD_REF, commitSelection)).toBe(
+      "review-stack",
+    );
+    expect(selectThreadDiffPanelTab(selectedTabs, THREAD_REF, branchSelection)).toBe("diff");
+    expect(selectThreadDiffPanelTab(selectedTabs, OTHER_THREAD_REF, commitSelection)).toBe("diff");
   });
 
   it("defaults each thread to branch changes when the working tree is clean", () => {

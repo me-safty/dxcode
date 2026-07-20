@@ -241,12 +241,6 @@ export default function DiffPanel({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
   });
-  const innerTab = useDiffPanelStore((state) =>
-    selectThreadDiffPanelTab(state.selectedTabByThreadKey, routeThreadRef),
-  );
-  const setInnerTab = (tab: "diff" | "review-stack") => {
-    if (routeThreadRef) useDiffPanelStore.getState().selectTab(routeThreadRef, tab);
-  };
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const serverThread = useThread(routeThreadRef);
   const draftThread = useComposerDraftStore((store) => store.getDraftThread(composerDraftTarget));
@@ -290,6 +284,12 @@ export default function DiffPanel({
       initialGitScope === "unstaged",
     ),
   );
+  const innerTab = useDiffPanelStore((state) =>
+    selectThreadDiffPanelTab(state.selectedTabsByThreadKey, routeThreadRef, diffSelection),
+  );
+  const setInnerTab = (tab: "diff" | "review-stack") => {
+    if (routeThreadRef) useDiffPanelStore.getState().selectTab(routeThreadRef, diffSelection, tab);
+  };
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const draftHeadRef = draftThread
     ? (draftThread.branch ?? gitStatusQuery.data?.refName ?? null)
